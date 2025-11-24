@@ -1,0 +1,60 @@
+"""Configuration for AI agent services.
+
+Reads environment variables for API access and runtime tuning.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """Runtime configuration loaded from environment."""
+
+    OPENROUTER_BASE_URL: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="Base URL for OpenRouter-compatible endpoints.",
+    )
+    OPENROUTER_API_KEY: SecretStr = Field(
+        default=SecretStr(""), description="API key for OpenRouter/Grok 4.1 fast access."
+    )
+    AI_MODEL: str = Field(
+        default="x-ai/grok-4.1-fast", description="Identifier of the model used for reasoning."
+    )
+    DEFAULT_SESSION_ID: str = Field(
+        default="local-dev", description="Fallback session id for local runs."
+    )
+
+    TELEGRAM_BOT_TOKEN: SecretStr = Field(
+        default=SecretStr(""), description="Bot token issued by BotFather."
+    )
+    TELEGRAM_WEBHOOK_PATH: str = Field(
+        default="/webhooks/telegram", description="Path for Telegram webhook handler."
+    )
+    PUBLIC_BASE_URL: str = Field(
+        default="http://localhost:8000",
+        description="Publicly reachable base URL used for webhook registration.",
+    )
+
+    MANYCHAT_VERIFY_TOKEN: str = Field(
+        default="", description="Shared token to validate ManyChat webhook calls."
+    )
+    MANYCHAT_PAGE_ID: str = Field(
+        default="", description="Optional page/app identifier for routing incoming ManyChat events."
+    )
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return a cached settings instance."""
+
+    return Settings()  # type: ignore[arg-type]
+
+
+settings = get_settings()

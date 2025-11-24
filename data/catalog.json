@@ -1,0 +1,52 @@
+[
+  {
+    "product_id": 1001,
+    "sku": "DRS-122-GRL-RED-01",
+    "name": "Сукня святкова для дівчинки",
+    "category": "dress",
+    "size": "122",
+    "color": "червоний",
+    "price": 1890.00,
+    "photo_url": "https://cdn.example.com/products/dress-122-red.jpg"
+  },
+  {
+    "product_id": 1002,
+    "sku": "TSH-140-BYS-BLU-02",
+    "name": "Футболка базова для хлопчика",
+    "category": "t-shirt",
+    "size": "140",
+    "color": "синій",
+    "price": 690.00,
+    "photo_url": "https://cdn.example.com/products/tshirt-140-blue.jpg"
+  },
+  {
+    "product_id": 1003,
+    "sku": "JNS-158-UNX-DRK-03",
+    "name": "Джинси прямі унісекс",
+    "category": "jeans",
+    "size": "158",
+    "color": "темно-синій",
+    "price": 2190.00,
+    "photo_url": "https://cdn.example.com/products/jeans-158-dark.jpg"
+  },
+  {
+    "product_id": 1004,
+    "sku": "SHO-37-GRL-WHT-04",
+    "name": "Кеди шкіряні жіночі",
+    "category": "shoes",
+    "size": "37",
+    "color": "білий",
+    "price": 2690.00,
+    "photo_url": "https://cdn.example.com/products/sneakers-37-white.jpg"
+  },
+  {
+    "product_id": 1005,
+    "sku": "JKT-46-MNS-BLK-05",
+    "name": "Куртка демісезонна чоловіча",
+    "category": "jacket",
+    "size": "46",
+    "color": "чорний",
+    "price": 3290.00,
+    "photo_url": "https://cdn.example.com/products/jacket-46-black.jpg"
+  }
+]
