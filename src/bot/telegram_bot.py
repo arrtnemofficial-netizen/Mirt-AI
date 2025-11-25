@@ -9,7 +9,7 @@ from aiogram.types import Message
 
 from src.conf.config import settings
 from src.core.models import AgentResponse
-from src.services.graph import app as graph_app
+from src.agents.graph import app as graph_app
 from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore
 

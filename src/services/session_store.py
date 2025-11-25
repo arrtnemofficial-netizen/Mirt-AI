@@ -4,7 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Dict
 
-from src.services.graph import AgentState
+from src.agents.graph import AgentState
 
 
 class InMemorySessionStore:

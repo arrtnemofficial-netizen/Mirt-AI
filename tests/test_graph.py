@@ -2,7 +2,7 @@ import asyncio
 import pytest
 
 from src.core.models import AgentResponse, Metadata, Message, Product
-from src.services.graph import build_graph
+from src.agents.graph import build_graph
 
 
 def test_graph_updates_state_and_messages():

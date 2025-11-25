@@ -6,8 +6,8 @@
 - **System Prompt**: повний YAML із персонажем, guardrails, state machine та контрактом відповіді (`data/system_prompt_full.yaml`).
 - **Каталог**: окремий JSON-файл, що підключається через тулзу `catalog_tool` (`data/catalog.json`).
 - **Типи**: Pydantic-схеми `AgentResponse`, `Product`, `Message`, `Metadata`, `Escalation`, `DebugInfo` (`src/core/models.py`).
-- **Агент**: Pydantic AI над Grok 4.1 fast через OpenRouter з reasoning, інструментом каталогу та завантаженням промпту (`src/services/agent.py`).
-- **Оркестрація**: мінімальний LangGraph, який зберігає історію, передає `current_state` у метадані й записує JSON-відповідь у стрічку (`src/services/graph.py`).
+- **Агент**: Pydantic AI над Grok 4.1 fast через OpenRouter з reasoning, інструментом каталогу та завантаженням промпту (`src/agents/pydantic_agent.py`).
+- **Оркестрація**: мінімальний LangGraph, який зберігає історію, передає `current_state` у метадані й записує JSON-відповідь у стрічку (`src/agents/graph.py`).
 - **Конфігурація**: `pydantic-settings` для ключів API та моделі (`src/conf/config.py`).
 - **Модерація**: вбудований фільтр PII/небезпечного вмісту з редагуванням та коротким-circuit escalation (`src/services/moderation.py`).
 - **Тестування**: unit-тести для каталогу, модерації, раннера агента і LangGraph-вузла, що працюють без зовнішнього LLM (`tests/`).

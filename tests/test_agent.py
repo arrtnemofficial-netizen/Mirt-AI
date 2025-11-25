@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from src.core.models import AgentResponse, Metadata, Message, Product
-from src.services.agent import AgentRunner, DummyAgent
+from src.agents.pydantic_agent import AgentRunner, DummyAgent
 from src.services.catalog import CatalogService
 from src.services.metadata import apply_metadata_defaults
 

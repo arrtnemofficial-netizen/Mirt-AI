@@ -23,7 +23,7 @@
    ```
 4. Запустіть демо-виклик (асинхронний):
    ```python
-   from src.services.graph import app
+   from src.agents.graph import app
 
    state = {
        "messages": [{"role": "user", "content": "Привіт! Потрібна червона сукня 122 см."}],
@@ -49,8 +49,8 @@
 - `data/catalog.json` — приклад каталогу.
 - `src/core/models.py` — Pydantic-схеми відповіді.
 - `src/services/catalog.py` — завантаження та пошук у каталозі для тулзи.
-- `src/services/agent.py` — Pydantic AI агент з тулзою каталогу (ліниве створення клієнта).
-- `src/services/graph.py` — LangGraph-оркестратор з модерацією, підміною раннера для тестів.
+- `src/agents/pydantic_agent.py` — Pydantic AI агент з тулзою каталогу (ліниве створення клієнта).
+- `src/agents/graph.py` — LangGraph-оркестратор з модерацією, підміною раннера для тестів.
 - `src/services/moderation.py` — легка модерація (PII, заборонені терміни) з редагуванням вмісту.
 - `src/services/metadata.py` — заповнення метаданих за замовчуванням для контракту.
 - `src/conf/config.py` — конфігурація через `pydantic-settings`.

@@ -1,8 +1,8 @@
 """Pydantic AI agent configured with Grok 4.1 fast and catalog tool.
 
-This module avoids network-heavy initialisation at import time. The agent is
-constructed lazily so unit tests can supply a stub implementation without
-requiring OpenRouter credentials.
+This module lives under the ``agents`` package to keep the model, prompt,
+operations, and LangGraph orchestration co-located. It mirrors the previous
+service-layer implementation while keeping import side-effects minimal.
 """
 from __future__ import annotations
 
@@ -152,4 +152,3 @@ class DummyAgent:
     async def run(self, *args, **kwargs):  # noqa: ANN001, D401
         self._capture.append(SimpleNamespace(args=args, kwargs=kwargs))
         return SimpleNamespace(data=self._response)
-

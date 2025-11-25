@@ -1,12 +1,9 @@
-"""LangGraph orchestrator that wraps the Pydantic AI agent."""
+"""LangGraph nodes for the shopping assistant."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, TypedDict
 
-from langgraph.graph import END, StateGraph
-
 from src.core.models import AgentResponse, DebugInfo, Escalation, Message, Metadata
-from src.services.agent import run_agent
 from src.services.metadata import apply_metadata_defaults
 from src.services.moderation import ModerationResult, moderate_user_message
 
@@ -17,7 +14,7 @@ class AgentState(TypedDict):
     metadata: Dict[str, Any]
 
 
-async def agent_node(state: AgentState, runner=run_agent) -> AgentState:
+async def agent_node(state: AgentState, runner) -> AgentState:
     """Single LangGraph node that calls the agent and updates state."""
 
     state.setdefault("metadata", {})
@@ -46,17 +43,6 @@ async def agent_node(state: AgentState, runner=run_agent) -> AgentState:
     state["metadata"] = response.metadata.model_dump()
     state["messages"].append({"role": "assistant", "content": response.model_dump_json()})
     return state
-
-
-def build_graph(runner=run_agent) -> StateGraph:
-    graph = StateGraph(AgentState)
-    graph.add_node("agent", lambda state: agent_node(state, runner))
-    graph.set_entry_point("agent")
-    graph.add_edge("agent", END)
-    return graph.compile()
-
-
-app = build_graph()
 
 
 def _latest_user_content(messages: List[Dict[str, Any]]) -> Optional[str]:
