@@ -53,6 +53,18 @@ class Settings(BaseSettings):
     SUPABASE_TABLE: str = Field(
         default="agent_sessions", description="Table name storing chat session state JSON."
     )
+    SUPABASE_MESSAGES_TABLE: str = Field(
+        default="messages", description="Table storing raw chat messages (session-scoped).",
+    )
+    SUPABASE_USERS_TABLE: str = Field(
+        default="users", description="Table storing user profiles and summaries.",
+    )
+    SUPABASE_CATALOG_TABLE: str = Field(
+        default="products", description="Table name with product catalog rows for RAG search.",
+    )
+    SUMMARY_RETENTION_DAYS: int = Field(
+        default=3, description="Days after which conversations are summarized and pruned.",
+    )
 
     class Config:
         env_file = ".env"

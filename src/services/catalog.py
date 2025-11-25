@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import List, Sequence
 
 from src.core.models import Product
+from src.services.supabase_catalog import get_supabase_catalog
+from src.conf.config import settings
 
 CATALOG_PATH = Path("data/catalog.json")
 
@@ -59,6 +61,8 @@ class CatalogService:
 @lru_cache(maxsize=1)
 def get_catalog() -> CatalogService:
     """Cached catalog instance for runtime use."""
-
+    supabase_catalog = get_supabase_catalog(settings.SUPABASE_CATALOG_TABLE)
+    if supabase_catalog:
+        return supabase_catalog  # type: ignore[return-value]
     return CatalogService()
 

@@ -12,6 +12,8 @@ from src.conf.config import settings
 from src.integrations.manychat.webhook import ManychatPayloadError, ManychatWebhook
 from src.services.session_store import InMemorySessionStore, SessionStore
 from src.services.supabase_store import create_supabase_store
+from src.services.message_store import create_message_store
+from src.services.summarization import run_retention
 
 app = FastAPI(title="MIRT AI Webhooks")
 
@@ -23,9 +25,10 @@ def _select_store() -> SessionStore:
 
 
 store = _select_store()
+message_store = create_message_store()
 bot = build_bot()
-dp = build_dispatcher(store)
-manychat_handler = ManychatWebhook(store)
+dp = build_dispatcher(store, message_store)
+manychat_handler = ManychatWebhook(store, message_store=message_store)
 
 
 @app.get("/health")
@@ -53,6 +56,15 @@ async def manychat_webhook(
         return await manychat_handler.handle(payload)
     except ManychatPayloadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/automation/mirt-summarize-prod-v1")
+async def run_summarization(payload: Dict[str, Any]) -> Dict[str, Any]:
+    session_id = payload.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    summary = run_retention(session_id, message_store)
+    return {"session_id": session_id, "summary": summary, "status": "ok"}
 
 
 @app.on_event("startup")

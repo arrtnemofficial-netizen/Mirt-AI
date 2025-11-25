@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from supabase import Client, create_client
+from supabase import Client
 
 from src.agents.graph import AgentState
 from src.conf.config import settings
 from src.services.session_store import SessionStore
+from src.services.supabase_client import get_supabase_client
 
 
 class SupabaseSessionStore(SessionStore):
@@ -49,21 +50,10 @@ class SupabaseSessionStore(SessionStore):
         )
 
 
-def build_supabase_client() -> Optional[Client]:
-    """Return a Supabase client if URL/key are configured."""
-
-    if not settings.SUPABASE_URL or not settings.SUPABASE_API_KEY.get_secret_value():
-        return None
-    return create_client(
-        settings.SUPABASE_URL,
-        settings.SUPABASE_API_KEY.get_secret_value(),
-    )
-
-
 def create_supabase_store() -> Optional[SupabaseSessionStore]:
     """Factory that builds a SupabaseSessionStore or None when disabled."""
 
-    client = build_supabase_client()
+    client = get_supabase_client()
     if not client:
         return None
     return SupabaseSessionStore(client, table=settings.SUPABASE_TABLE)

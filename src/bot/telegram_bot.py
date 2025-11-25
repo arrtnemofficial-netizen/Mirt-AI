@@ -12,12 +12,14 @@ from src.core.models import AgentResponse
 from src.agents.graph import app as graph_app
 from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore, SessionStore
+from src.services.message_store import MessageStore, StoredMessage, create_message_store
 
 
-def build_dispatcher(store: SessionStore, runner=graph_app) -> Dispatcher:
+def build_dispatcher(store: SessionStore, message_store: MessageStore | None = None, runner=graph_app) -> Dispatcher:
     """Create a Dispatcher with handlers bound to the shared store."""
 
     dp = Dispatcher()
+    msg_store = message_store or create_message_store()
 
     @dp.message(CommandStart())
     async def handle_start(message: Message) -> None:
@@ -27,13 +29,13 @@ def build_dispatcher(store: SessionStore, runner=graph_app) -> Dispatcher:
 
     @dp.message(F.text)
     async def handle_text(message: Message) -> None:
-        await _process_incoming(message, store, runner)
+        await _process_incoming(message, store, msg_store, runner)
 
     @dp.message(F.photo)
     async def handle_photo(message: Message) -> None:
         caption = message.caption or ""
         description = caption if caption else "Фото отримано. Опишіть, що шукаєте."
-        await _process_incoming(message, store, runner, override_text=description)
+        await _process_incoming(message, store, msg_store, runner, override_text=description)
 
     return dp
 
@@ -47,6 +49,7 @@ def build_bot() -> Bot:
 async def _process_incoming(
     message: Message,
     store: SessionStore,
+    message_store: MessageStore,
     runner,
     override_text: str | None = None,
 ) -> None:
@@ -58,12 +61,23 @@ async def _process_incoming(
     state = store.get(session_id)
     state["messages"].append({"role": "user", "content": text})
     state["metadata"].setdefault("session_id", session_id)
+    message_store.append(StoredMessage(session_id=session_id, role="user", content=text))
 
     result_state = await runner.ainvoke(state)
     store.save(session_id, result_state)
 
     agent_json = result_state["messages"][-1]["content"]
     agent_response = AgentResponse.model_validate_json(agent_json)
+    # Persist assistant payload and escalation tag for summarisation policies
+    tags = ["humanNeeded-wd"] if agent_response.escalation else []
+    message_store.append(
+        StoredMessage(
+            session_id=session_id,
+            role="assistant",
+            content=agent_response.model_dump_json(),
+            tags=tags,
+        )
+    )
     await _dispatch_to_telegram(message, agent_response)
 
 
@@ -86,8 +100,9 @@ def run_polling(store: SessionStore | None = None) -> None:
     """Convenience entry point for local polling runs."""
 
     session_store = store or InMemorySessionStore()
+    message_store = create_message_store()
     bot = build_bot()
-    dp = build_dispatcher(session_store)
+    dp = build_dispatcher(session_store, message_store)
     asyncio.run(dp.start_polling(bot))
 
 
