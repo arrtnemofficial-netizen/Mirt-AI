@@ -5,6 +5,7 @@
 ## Архітектура
 - **System Prompt**: повний YAML із персоналією Ольги, guardrails, state machine `STATE0_INIT ... STATE9_OOD` та `OUTPUT_CONTRACT`. Каталог не вбудований у промт.
 - **Каталог**: `data/catalog.json`, доступний через тулзу `catalog_tool` у Pydantic AI.
+- **Catalog CSV з ембеддингами**: `data/catalog.csv`, генерується скриптом `python scripts/catalog_to_csv.py` (з OpenAI, якщо є `OPENAI_API_KEY`; офлайн використовується детермінований хеш-ембеддинг для повторюваності).
 - **Pydantic AI + Grok 4.1 fast**: моделювання reasoning та сувора схема `AgentResponse`.
 - **LangGraph**: зберігає історію, поточний стан, виконує модерацію користувацьких меседжів і викликає агента.
 
@@ -70,6 +71,7 @@
 ## Файли
 - `data/system_prompt_full.yaml` — повна інструкція для моделі.
 - `data/catalog.json` — приклад каталогу.
+- `data/catalog.csv` — каталожний CSV із вектором ембеддингу для кожної позиції (згенерований скриптом `scripts/catalog_to_csv.py`).
 - `src/core/models.py` — Pydantic-схеми відповіді.
 - `src/services/catalog.py` — завантаження та пошук у каталозі для тулзи.
 - `src/agents/pydantic_agent.py` — Pydantic AI агент з тулзою каталогу (ліниве створення клієнта).
