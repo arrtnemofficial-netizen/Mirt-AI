@@ -26,7 +26,9 @@ class SupabaseCatalogService:
             self.client.table(self.table)
             .select("*")
             .or_(
-                f"name.ilike.%{normalized}%,category.ilike.%{normalized}%",
+                "name.ilike.%{0}%,category.ilike.%{0}%,color.ilike.%{0}%,sku.ilike.%{0}%".format(
+                    normalized
+                )
             )
             .limit(limit)
             .execute()

@@ -29,6 +29,11 @@ def test_catalog_loads_and_searches(tmp_path: Path):
     assert len(tee_matches) == 1
     assert tee_matches[0].product_id == 2
 
+    # Search by color
+    color_matches = catalog.search("білий")
+    assert len(color_matches) == 1
+    assert color_matches[0].product_id == 2
+
 
 def test_catalog_missing_file_raises(tmp_path: Path):
     missing = tmp_path / "absent.json"

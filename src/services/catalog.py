@@ -34,19 +34,23 @@ class CatalogService:
         return products
 
     def search(self, query: str, limit: int = 10) -> List[Product]:
-        """Return products that match the query by name or category."""
+        """Return products that match the query by name, category, color or SKU."""
 
         normalized = query.lower().strip()
         if not normalized:
             return []
 
-        matches: List[Product] = [
-            product
-            for product in self._products
-            if normalized in product.name.lower()
-            or (product.category or "").lower().find(normalized) != -1
-        ]
-        return matches[:limit]
+        def matches(product: Product) -> bool:
+            haystacks = [
+                product.name.lower(),
+                (product.category or "").lower(),
+                product.color.lower(),
+                (product.sku or "").lower(),
+            ]
+            return any(normalized in hay for hay in haystacks)
+
+        filtered = [product for product in self._products if matches(product)]
+        return filtered[:limit]
 
     def search_dicts(self, query: str, limit: int = 10) -> List[dict]:
         """Convenience wrapper for agent tools (returns plain dicts)."""

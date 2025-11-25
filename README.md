@@ -50,7 +50,7 @@
 ## Збереження сесій, повідомлень і каталогу у Supabase
 - Сесії: таблиця `SUPABASE_TABLE` із полями `session_id` (PK, text) і `state` (jsonb). Автоматичне перемикання на Supabase при наявності env.
 - Повідомлення: таблиця `SUPABASE_MESSAGES_TABLE` з полями `session_id`, `role`, `content`, `created_at` (timestamptz), `tags` (array/text[]). Усі вхідні та вихідні повідомлення записуються туди; тег `humanNeeded-wd` ставиться на відповіді з ескалацією.
-- Каталог (RAG): таблиця `SUPABASE_CATALOG_TABLE` з полями товарів (`product_id`, `name`, `size`, `color`, `price`, `photo_url`, `category`). Агент використовує Supabase-пошук по name/category; за відсутності env падає на локальний `data/catalog.json`.
+- Каталог (RAG): таблиця `SUPABASE_CATALOG_TABLE` з полями товарів (`product_id`, `name`, `size`, `color`, `price`, `photo_url`, `category`, `sku`). У репозиторії є реальний датасет 170 SKU (`data/catalog.json`) сформований із наданого YAML-блоку; його можна імпортувати у Supabase через `csv`/UI. Агент використовує Supabase-пошук по name/category/color/sku; за відсутності env падає на локальний файл.
 
 ## ManyChat / Instagram webhook
 - Ендпоінт: `POST /webhooks/manychat` приймає ManyChat payload (`subscriber.id`, `message.text`).
