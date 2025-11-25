@@ -1,10 +1,20 @@
-"""In-memory session store for chat platforms."""
+"""Session store primitives for chat platforms."""
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict
+from typing import Dict, Protocol
 
 from src.agents.graph import AgentState
+
+
+class SessionStore(Protocol):
+    """Contract for session storage implementations."""
+
+    def get(self, session_id: str) -> AgentState:
+        """Return stored state or a fresh empty state."""
+
+    def save(self, session_id: str, state: AgentState) -> None:
+        """Persist the current state for the session."""
 
 
 class InMemorySessionStore:

@@ -44,6 +44,16 @@ class Settings(BaseSettings):
         default="", description="Optional page/app identifier for routing incoming ManyChat events."
     )
 
+    SUPABASE_URL: str = Field(
+        default="", description="Supabase project URL for session persistence."
+    )
+    SUPABASE_API_KEY: SecretStr = Field(
+        default=SecretStr(""), description="Service or anon key for Supabase client."
+    )
+    SUPABASE_TABLE: str = Field(
+        default="agent_sessions", description="Table name storing chat session state JSON."
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -7,7 +7,7 @@ from typing import Any, Dict
 from src.core.models import AgentResponse
 from src.agents.graph import app as graph_app
 from src.services.renderer import render_agent_response_text
-from src.services.session_store import InMemorySessionStore
+from src.services.session_store import SessionStore
 
 
 class ManychatPayloadError(Exception):
@@ -17,7 +17,7 @@ class ManychatPayloadError(Exception):
 class ManychatWebhook:
     """Processes ManyChat webhook payloads and returns response envelopes."""
 
-    def __init__(self, store: InMemorySessionStore, runner=graph_app) -> None:
+    def __init__(self, store: SessionStore, runner=graph_app) -> None:
         self.store = store
         self.runner = runner
 

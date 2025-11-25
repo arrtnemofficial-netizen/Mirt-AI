@@ -11,10 +11,10 @@ from src.conf.config import settings
 from src.core.models import AgentResponse
 from src.agents.graph import app as graph_app
 from src.services.renderer import render_agent_response_text
-from src.services.session_store import InMemorySessionStore
+from src.services.session_store import InMemorySessionStore, SessionStore
 
 
-def build_dispatcher(store: InMemorySessionStore, runner=graph_app) -> Dispatcher:
+def build_dispatcher(store: SessionStore, runner=graph_app) -> Dispatcher:
     """Create a Dispatcher with handlers bound to the shared store."""
 
     dp = Dispatcher()
@@ -46,7 +46,7 @@ def build_bot() -> Bot:
 
 async def _process_incoming(
     message: Message,
-    store: InMemorySessionStore,
+    store: SessionStore,
     runner,
     override_text: str | None = None,
 ) -> None:
@@ -82,7 +82,7 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
             )
 
 
-def run_polling(store: InMemorySessionStore | None = None) -> None:
+def run_polling(store: SessionStore | None = None) -> None:
     """Convenience entry point for local polling runs."""
 
     session_store = store or InMemorySessionStore()

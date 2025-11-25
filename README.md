@@ -20,6 +20,9 @@
    PUBLIC_BASE_URL=https://your-domain.example
    TELEGRAM_WEBHOOK_PATH=/webhooks/telegram
    MANYCHAT_VERIFY_TOKEN=shared-manychat-token
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_API_KEY=service-or-anon-key
+   SUPABASE_TABLE=agent_sessions
    ```
 4. Запустіть демо-виклик (асинхронний):
    ```python
@@ -38,6 +41,11 @@
 ## Телеграм бот
 - **Локально (polling)**: `python -m src.bot.telegram_bot` або виклик `run_polling()` у коді. Достатньо вставити свій `TELEGRAM_BOT_TOKEN` у `.env`.
 - **Webhook**: підніміть FastAPI `uvicorn src.server.main:app --host 0.0.0.0 --port 8000`, задайте `PUBLIC_BASE_URL` (публічна адреса reverse-proxy/NGROK) — вебхук реєструється автоматично на старті.
+
+## Збереження сесій у Supabase
+- Додайте `SUPABASE_URL`, `SUPABASE_API_KEY` (service/anon key) та, за потреби, `SUPABASE_TABLE`.
+- Таблиця має мати поля `session_id` (PK, text) і `state` (jsonb). Якщо у вас вже є таблиця — вкажіть її назву в `SUPABASE_TABLE`.
+- При наявності змінних середовища сервер автоматично перемикається з in-memory на Supabase store без змін коду ботів.
 
 ## ManyChat / Instagram webhook
 - Ендпоінт: `POST /webhooks/manychat` приймає ManyChat payload (`subscriber.id`, `message.text`).

@@ -10,11 +10,19 @@ from fastapi.responses import JSONResponse
 from src.bot.telegram_bot import build_bot, build_dispatcher
 from src.conf.config import settings
 from src.integrations.manychat.webhook import ManychatPayloadError, ManychatWebhook
-from src.services.session_store import InMemorySessionStore
+from src.services.session_store import InMemorySessionStore, SessionStore
+from src.services.supabase_store import create_supabase_store
 
 app = FastAPI(title="MIRT AI Webhooks")
 
-store = InMemorySessionStore()
+def _select_store() -> SessionStore:
+    supabase_store = create_supabase_store()
+    if supabase_store:
+        return supabase_store
+    return InMemorySessionStore()
+
+
+store = _select_store()
 bot = build_bot()
 dp = build_dispatcher(store)
 manychat_handler = ManychatWebhook(store)
