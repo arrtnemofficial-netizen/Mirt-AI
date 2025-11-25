@@ -14,6 +14,7 @@ from src.services.session_store import InMemorySessionStore, SessionStore
 from src.services.supabase_store import create_supabase_store
 from src.services.message_store import create_message_store
 from src.services.summarization import run_retention
+from src.services.followups import run_followups
 
 app = FastAPI(title="MIRT AI Webhooks")
 
@@ -65,6 +66,26 @@ async def run_summarization(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="session_id is required")
     summary = run_retention(session_id, message_store)
     return {"session_id": session_id, "summary": summary, "status": "ok"}
+
+
+@app.post("/automation/mirt-followups-prod-v1")
+async def trigger_followups(payload: Dict[str, Any]) -> Dict[str, Any]:
+    session_id = payload.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    schedule_hours = payload.get("schedule_hours")
+    if schedule_hours is not None and not isinstance(schedule_hours, list):
+        raise HTTPException(status_code=400, detail="schedule_hours must be a list of integers")
+
+    followup = run_followups(session_id, message_store, schedule_hours=schedule_hours)
+    return {
+        "session_id": session_id,
+        "followup_created": bool(followup),
+        "content": followup.content if followup else None,
+        "tags": followup.tags if followup else [],
+        "status": "ok",
+    }
 
 
 @app.on_event("startup")

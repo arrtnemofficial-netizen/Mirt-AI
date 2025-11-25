@@ -27,6 +27,7 @@
    SUPABASE_USERS_TABLE=users
    SUPABASE_CATALOG_TABLE=products
    SUMMARY_RETENTION_DAYS=3
+   FOLLOWUP_DELAYS_HOURS=24,72
    ```
 4. Запустіть демо-виклик (асинхронний):
    ```python
@@ -60,6 +61,11 @@
 - Ендпоінт: `POST /automation/mirt-summarize-prod-v1` з тілом `{ "session_id": "..." }`.
 - Логіка: якщо від останнього повідомлення минуло `SUMMARY_RETENTION_DAYS` днів (за замовчуванням 3), усі повідомлення по `session_id` перетворюються у саммарі, записуються у поле `summary` таблиці `SUPABASE_USERS_TABLE`, старі повідомлення видаляються з `SUPABASE_MESSAGES_TABLE`.
 - При переупаковці тег `humanNeeded-wd` автоматично знімається, щоб закрити SLA ескалації.
+
+### Автоматизація фолоуапів
+- Ендпоінт: `POST /automation/mirt-followups-prod-v1` з тілом `{ "session_id": "...", "schedule_hours": [24, 72] }`.
+- Якщо `schedule_hours` не заданий, використовується `FOLLOWUP_DELAYS_HOURS` з `.env` (кома-сепарований список годин). Система перевіряє дату останньої активності та кількість уже відправлених фолоуапів (теги `followup-sent-*` у таблиці повідомлень) і, якщо настав час, записує нове повідомлення з нагадуванням у `SUPABASE_MESSAGES_TABLE`.
+- Відправку повідомлень на канали (Telegram, ManyChat) можна реалізувати власним шедулером: достатньо викликати цей ендпоінт і надіслати сформований текст на потрібний канал.
 
 ## Файли
 - `data/system_prompt_full.yaml` — повна інструкція для моделі.

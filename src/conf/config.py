@@ -65,6 +65,28 @@ class Settings(BaseSettings):
     SUMMARY_RETENTION_DAYS: int = Field(
         default=3, description="Days after which conversations are summarized and pruned.",
     )
+    FOLLOWUP_DELAYS_HOURS: str = Field(
+        default="24,72",
+        description=(
+            "Comma-separated list of hour offsets for proactive follow-ups "
+            "(e.g. '24,72' sends after 24h and 72h of inactivity)."
+        ),
+    )
+
+    @property
+    def followup_schedule_hours(self) -> list[int]:
+        """Return parsed follow-up delays as a list of hour integers."""
+
+        raw = [segment.strip() for segment in self.FOLLOWUP_DELAYS_HOURS.split(",")]
+        hours: list[int] = []
+        for segment in raw:
+            if not segment:
+                continue
+            try:
+                hours.append(int(segment))
+            except ValueError:
+                continue
+        return [h for h in hours if h > 0]
 
     class Config:
         env_file = ".env"

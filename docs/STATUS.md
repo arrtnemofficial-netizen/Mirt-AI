@@ -13,6 +13,7 @@
 - **Тестування**: unit-тести для каталогу, модерації, раннера агента і LangGraph-вузла, що працюють без зовнішнього LLM (`tests/`).
 - **Збереження сесій і повідомлень**: in-memory / Supabase-провайдери для jsonb state та сирих повідомлень (`src/services/session_store.py`, `src/services/supabase_store.py`, `src/services/message_store.py`).
 - **Переупаковка**: автоматизований ендпоінт `/automation/mirt-summarize-prod-v1`, що після `SUMMARY_RETENTION_DAYS` (3) днів робить саммарі, очищує історію та прибирає тег `humanNeeded-wd` (`src/services/summarization.py`, `src/server/main.py`).
+- **Фолоуапи**: конфігурований графік нагадувань через `FOLLOWUP_DELAYS_HOURS` або payload ендпоінта `/automation/mirt-followups-prod-v1`, із записом фолоуапів у сховище повідомлень (`src/services/followups.py`).
 
 ## Відомі прогалини (потребують доробки)
 - **Модерація та PII**: базова реалізація додана, але немає інтеграції з зовнішніми модераційними сервісами.
