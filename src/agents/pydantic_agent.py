@@ -1,4 +1,4 @@
-"""Pydantic AI agent configured with Grok 4.1 fast and catalog tool.
+"""Pydantic AI agent configured with Grok 4.1 fast and Supabase tools.
 
 This module lives under the ``agents`` package to keep the model, prompt,
 operations, and LangGraph orchestration co-located. It mirrors the previous
@@ -19,8 +19,8 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
 from src.core.models import AgentResponse
-from src.services.catalog import CatalogService, get_catalog
 from src.services.metadata import apply_metadata_defaults
+from src.services.supabase_tools import SupabaseProductTools, get_supabase_tools
 
 SYSTEM_PROMPT_PATH = Path("data/system_prompt_full.yaml")
 
@@ -50,17 +50,31 @@ class AgentRunner:
     """Wrapper around the pydantic-ai Agent to simplify testing and DI."""
 
     agent: Agent
-    catalog: CatalogService
+    tools: SupabaseProductTools
 
     def __post_init__(self) -> None:
-        @self.agent.tool  # type: ignore[misc]
-        async def catalog_tool(query: str) -> List[Dict[str, Any]]:
-            """Пошук товарів у каталозі MIRT за вільним описом."""
+        @self.agent.tool(name="T_SUPABASE_SEARCH_BY_QUERY")  # type: ignore[misc]
+        async def supabase_search_by_query(user_query: str, match_count: int = 5) -> List[Dict[str, Any]]:
+            """Семантичний пошук моделей у Supabase за текстовим описом."""
 
-            return self.catalog.search_dicts(query)
+            return await self.tools.search_by_query(user_query, match_count=match_count)
 
-        # Avoid linter warnings about unused inner function
-        self._catalog_tool = catalog_tool
+        @self.agent.tool(name="T_SUPABASE_GET_BY_ID")  # type: ignore[misc]
+        async def supabase_get_by_id(product_id: str) -> List[Dict[str, Any]]:
+            """Отримати конкретну модель за product_id."""
+
+            return await self.tools.get_by_id(product_id)
+
+        @self.agent.tool(name="T_SUPABASE_GET_BY_PHOTO_URL")  # type: ignore[misc]
+        async def supabase_get_by_photo_url(photo_url: str) -> List[Dict[str, Any]]:
+            """Знайти модель за канонічним фото каталогу."""
+
+            return await self.tools.get_by_photo_url(photo_url)
+
+        # Avoid linter warnings about unused inner functions
+        self._supabase_search_by_query = supabase_search_by_query
+        self._supabase_get_by_id = supabase_get_by_id
+        self._supabase_get_by_photo_url = supabase_get_by_photo_url
 
     async def run(self, history: List[Dict[str, Any]], metadata: Optional[Dict[str, Any]] = None) -> AgentResponse:
         """Invoke the configured agent with message history and metadata."""
@@ -96,14 +110,16 @@ class AgentRunner:
 
 def build_agent_runner(
     *,
-    catalog: Optional[CatalogService] = None,
+    tools: Optional[SupabaseProductTools] = None,
     system_prompt: Optional[str] = None,
     model: Optional[OpenAIModel] = None,
     retries: int = 2,
 ) -> AgentRunner:
     """Factory for the runtime AgentRunner."""
 
-    catalog_instance = catalog or get_catalog()
+    tools_instance = tools or get_supabase_tools()
+    if tools_instance is None:
+        raise RuntimeError("Supabase client is not configured; cannot build agent tools")
     prompt = system_prompt or load_system_prompt()
     llm_model = model or build_model()
 
@@ -113,7 +129,7 @@ def build_agent_runner(
         retries=retries,
     )
 
-    return AgentRunner(agent=pydantic_agent, catalog=catalog_instance)
+    return AgentRunner(agent=pydantic_agent, tools=tools_instance)
 
 
 # Lazily-instantiated default runner to avoid network calls on import

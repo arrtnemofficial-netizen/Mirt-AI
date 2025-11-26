@@ -1,12 +1,12 @@
 # Mirt-AI
 
-Референсний проєкт AI-стиліста для бренду MIRT, що використовує Grok 4.1 fast (через OpenRouter), Pydantic AI та LangGraph. Система реалізує state machine у system prompt, працює з окремим каталогом `data/catalog.json` і повертає строго типізований JSON-відповідь.
+Референсний проєкт AI-стиліста для бренду MIRT, що використовує Grok 4.1 fast (через OpenRouter), Pydantic AI та LangGraph. Система реалізує state machine у system prompt (v6.0-final), працює ВИКЛЮЧНО через Supabase tools і повертає строго типізований JSON-відповідь.
 
 ## Архітектура
-- **System Prompt**: повний YAML із персоналією Ольги, guardrails, state machine `STATE0_INIT ... STATE9_OOD` та `OUTPUT_CONTRACT`. Каталог не вбудований у промт.
-- **Каталог**: `data/catalog.json`, доступний через тулзу `catalog_tool` у Pydantic AI.
-- **Catalog CSV з ембеддингами**: `data/catalog.csv`, генерується скриптом `python scripts/catalog_to_csv.py` (з OpenAI, якщо є `OPENAI_API_KEY`; офлайн використовується детермінований хеш-ембеддинг для повторюваності).
-- **Pydantic AI + Grok 4.1 fast**: моделювання reasoning та сувора схема `AgentResponse`.
+- **System Prompt**: повний YAML v6.0-final із персоналією Ольги, guardrails, state machine `STATE_0_INIT ... STATE_9_OOD` та `OUTPUT_CONTRACT`. Каталог не вбудований у промт.
+- **Каталог**: `data/catalog.json` як еталон для імпорту в Supabase, а також `data/catalog.csv` з ембеддингами для таблиці `mirt_product_embeddings`.
+- **Supabase tools**: `T_SUPABASE_SEARCH_BY_QUERY`, `T_SUPABASE_GET_BY_ID`, `T_SUPABASE_GET_BY_PHOTO_URL` — єдине джерело правди для товарів. Локальний JSON використовується лише для імпорту або офлайн-генерації CSV.
+- **Pydantic AI + Grok 4.1 fast**: моделювання reasoning та сувора схема `AgentResponse` з metadata.session_id, intent, current_state.
 - **LangGraph**: зберігає історію, поточний стан, виконує модерацію користувацьких меседжів і викликає агента.
 
 ## Швидкий старт
@@ -26,7 +26,10 @@
    SUPABASE_TABLE=agent_sessions
    SUPABASE_MESSAGES_TABLE=messages
    SUPABASE_USERS_TABLE=users
-   SUPABASE_CATALOG_TABLE=products
+   SUPABASE_CATALOG_TABLE=mirt_products
+   SUPABASE_EMBEDDINGS_TABLE=mirt_product_embeddings
+   SUPABASE_MATCH_RPC=match_mirt_products
+   OPENAI_API_KEY=sk-openai-...  # для ембеддингів (опційно, інакше детермінований хеш)
    SUMMARY_RETENTION_DAYS=3
    FOLLOWUP_DELAYS_HOURS=24,72
    ```
@@ -51,7 +54,7 @@
 ## Збереження сесій, повідомлень і каталогу у Supabase
 - Сесії: таблиця `SUPABASE_TABLE` із полями `session_id` (PK, text) і `state` (jsonb). Автоматичне перемикання на Supabase при наявності env.
 - Повідомлення: таблиця `SUPABASE_MESSAGES_TABLE` з полями `session_id`, `role`, `content`, `created_at` (timestamptz), `tags` (array/text[]). Усі вхідні та вихідні повідомлення записуються туди; тег `humanNeeded-wd` ставиться на відповіді з ескалацією.
-- Каталог (RAG): таблиця `SUPABASE_CATALOG_TABLE` з полями товарів (`product_id`, `name`, `size`, `color`, `price`, `photo_url`, `category`, `sku`). У репозиторії є реальний датасет 170 SKU (`data/catalog.json`) сформований із наданого YAML-блоку; його можна імпортувати у Supabase через `csv`/UI. Агент використовує Supabase-пошук по name/category/color/sku; за відсутності env падає на локальний файл.
+- Каталог (RAG): таблиця `mirt_products` з полями з system prompt (category/subcategory/sizes/material/price_uniform/price_by_size/colors). Ембеддинги — таблиця `mirt_product_embeddings` (vector(1536)), RPC `match_mirt_products` повертає top-N. `data/catalog.json` та `data/catalog.csv` слугують єдиним джерелом для імпорту.
 
 ## ManyChat / Instagram webhook
 - Ендпоінт: `POST /webhooks/manychat` приймає ManyChat payload (`subscriber.id`, `message.text`).
@@ -73,8 +76,9 @@
 - `data/catalog.json` — приклад каталогу.
 - `data/catalog.csv` — каталожний CSV із вектором ембеддингу для кожної позиції (згенерований скриптом `scripts/catalog_to_csv.py`).
 - `src/core/models.py` — Pydantic-схеми відповіді.
-- `src/services/catalog.py` — завантаження та пошук у каталозі для тулзи.
-- `src/agents/pydantic_agent.py` — Pydantic AI агент з тулзою каталогу (ліниве створення клієнта).
+- `src/services/catalog.py` — локальний JSON-каталог (для імпорту/офлайн сценаріїв).
+- `src/services/supabase_tools.py` — єдиний набір тулзів `T_SUPABASE_*` для моделі.
+- `src/agents/pydantic_agent.py` — Pydantic AI агент з Supabase-тулзами (лише при наявності клієнта Supabase).
 - `src/agents/graph.py` — LangGraph-оркестратор з модерацією, підміною раннера для тестів.
 - `src/services/moderation.py` — легка модерація (PII, заборонені терміни) з редагуванням вмісту.
 - `src/services/metadata.py` — заповнення метаданих за замовчуванням для контракту.

@@ -3,10 +3,10 @@
 Оцінка відповідності референсним вимогам (станом на 22 листопада 2025 року).
 
 ## Що вже є у репозиторії
-- **System Prompt**: повний YAML із персонажем, guardrails, state machine та контрактом відповіді (`data/system_prompt_full.yaml`).
-- **Каталог**: окремий JSON-файл або Supabase-таблиця, що підключається через тулзу `catalog_tool` (`data/catalog.json` або `SUPABASE_CATALOG_TABLE`).
+- **System Prompt**: повний YAML v6.0-final із персонажем, guardrails, state machine та контрактом відповіді (`data/system_prompt_full.yaml`).
+- **Каталог**: окремий JSON-файл для імпорту (`data/catalog.json` + `data/catalog.csv`) і Supabase-таблиця `mirt_products`/`mirt_product_embeddings`, що підключається через тулзи `T_SUPABASE_*`.
 - **Типи**: Pydantic-схеми `AgentResponse`, `Product`, `Message`, `Metadata`, `Escalation`, `DebugInfo` (`src/core/models.py`).
-- **Агент**: Pydantic AI над Grok 4.1 fast через OpenRouter з reasoning, інструментом каталогу та завантаженням промпту (`src/agents/pydantic_agent.py`).
+- **Агент**: Pydantic AI над Grok 4.1 fast через OpenRouter з reasoning, Supabase-тулзами та завантаженням промпту (`src/agents/pydantic_agent.py`).
 - **Оркестрація**: мінімальний LangGraph, який зберігає історію, передає `current_state` у метадані й записує JSON-відповідь у стрічку (`src/agents/graph.py`).
 - **Конфігурація**: `pydantic-settings` для ключів API та моделі (`src/conf/config.py`).
 - **Модерація**: вбудований фільтр PII/небезпечного вмісту з редагуванням та коротким-circuit escalation (`src/services/moderation.py`).
@@ -21,7 +21,7 @@
 - **Контрактні тести JSON**: поки що немає автоперевірки відповідності схемі `AgentResponse` на реальних викликах моделі.
 - **Моніторинг та логування**: немає структурованих логів, трасування чи аналітики викликів.
 - **Розгортання**: немає інфраструктурних маніфестів (Docker/Helm) та CI/CD пайплайнів.
-- **Каталог**: базовий Supabase RAG (ilike по name/category); розширений пошук (вектори, фільтри) ще потрібно додати.
+- **Каталог**: потрібні DDL міграції (таблиці `mirt_products`, `mirt_product_embeddings`, RPC `match_mirt_products`) та RLS/індекси; локально лише код і датасет.
 - **UX-бот**: реалізовано Telegram-бот (polling + webhook) і вебхук ManyChat для Instagram.
 
 ## Висновок

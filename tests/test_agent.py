@@ -4,7 +4,6 @@ import pytest
 
 from src.core.models import AgentResponse, Metadata, Message, Product
 from src.agents.pydantic_agent import AgentRunner, DummyAgent
-from src.services.catalog import CatalogService
 from src.services.metadata import apply_metadata_defaults
 
 
@@ -27,26 +26,24 @@ def build_dummy_response(state: str = "STATE4_OFFER") -> AgentResponse:
     )
 
 
-@pytest.fixture()
-def catalog(tmp_path):
-    sample = tmp_path / "catalog.json"
-    sample.write_text(
-        """
-[
-  {"product_id": 1, "name": "Сукня святкова", "size": "122", "color": "червоний", "price": 100, "photo_url": "x", "category": "dress"}
-]
-""",
-        encoding="utf-8",
-    )
-    return CatalogService(path=sample)
+
+class DummyTools:
+    async def search_by_query(self, *args, **kwargs):
+        return []
+
+    async def get_by_id(self, *args, **kwargs):
+        return []
+
+    async def get_by_photo_url(self, *args, **kwargs):
+        return []
 
 
-def test_agent_runner_forwards_metadata_and_returns_response(catalog):
+def test_agent_runner_forwards_metadata_and_returns_response():
     async def _run():
         response = build_dummy_response()
         captures = []
         dummy = DummyAgent(response, capture=captures)
-        runner = AgentRunner(agent=dummy, catalog=catalog)
+        runner = AgentRunner(agent=dummy, tools=DummyTools())
 
         history = [{"role": "user", "content": "Шукаю сукню"}]
         metadata = {"session_id": "abc", "current_state": "STATE1_DISCOVERY"}

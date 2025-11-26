@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     AI_MODEL: str = Field(
         default="x-ai/grok-4.1-fast", description="Identifier of the model used for reasoning."
     )
+    OPENAI_API_KEY: SecretStr = Field(
+        default=SecretStr(""), description="API key for embedding generation."
+    )
+    EMBEDDING_MODEL: str = Field(
+        default="text-embedding-3-large",
+        description="Embedding model used for catalog semantic search.",
+    )
+    EMBEDDING_DIM: int = Field(
+        default=1536,
+        description="Expected embedding dimensionality for Supabase vector columns.",
+    )
     DEFAULT_SESSION_ID: str = Field(
         default="local-dev", description="Fallback session id for local runs."
     )
@@ -60,7 +71,14 @@ class Settings(BaseSettings):
         default="users", description="Table storing user profiles and summaries.",
     )
     SUPABASE_CATALOG_TABLE: str = Field(
-        default="products", description="Table name with product catalog rows for RAG search.",
+        default="mirt_products", description="Table name with product catalog rows for RAG search.",
+    )
+    SUPABASE_EMBEDDINGS_TABLE: str = Field(
+        default="mirt_product_embeddings",
+        description="Table storing product embeddings for vector search.",
+    )
+    SUPABASE_MATCH_RPC: str = Field(
+        default="match_mirt_products", description="RPC name for vector similarity search on products.",
     )
     SUMMARY_RETENTION_DAYS: int = Field(
         default=3, description="Days after which conversations are summarized and pruned.",
