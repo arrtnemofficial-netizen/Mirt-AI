@@ -34,7 +34,7 @@ class Settings(BaseSettings):
         description="Expected embedding dimensionality for Supabase vector columns.",
     )
     DEFAULT_SESSION_ID: str = Field(
-        default="local-dev", description="Fallback session id for local runs."
+        default="", description="Fallback session id when none is provided in input metadata."
     )
 
     TELEGRAM_BOT_TOKEN: SecretStr = Field(
