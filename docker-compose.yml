@@ -1,0 +1,133 @@
+# =============================================================================
+# MIRT AI - Docker Compose Configuration
+# =============================================================================
+# Usage:
+#   Development: docker-compose up -d
+#   Production:  docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Main Application
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: mirt-ai-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # OpenRouter / AI Model
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - AI_MODEL=${AI_MODEL:-x-ai/grok-4.1-fast}
+      
+      # OpenAI (for embeddings)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      
+      # Telegram
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_WEBHOOK_PATH=${TELEGRAM_WEBHOOK_PATH:-/webhooks/telegram}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:8000}
+      
+      # ManyChat
+      - MANYCHAT_VERIFY_TOKEN=${MANYCHAT_VERIFY_TOKEN:-}
+      
+      # Supabase
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_API_KEY=${SUPABASE_API_KEY}
+      - SUPABASE_TABLE=${SUPABASE_TABLE:-agent_sessions}
+      - SUPABASE_MESSAGES_TABLE=${SUPABASE_MESSAGES_TABLE:-messages}
+      - SUPABASE_USERS_TABLE=${SUPABASE_USERS_TABLE:-users}
+      - SUPABASE_CATALOG_TABLE=${SUPABASE_CATALOG_TABLE:-mirt_products}
+      - SUPABASE_EMBEDDINGS_TABLE=${SUPABASE_EMBEDDINGS_TABLE:-mirt_product_embeddings}
+      - SUPABASE_MATCH_RPC=${SUPABASE_MATCH_RPC:-match_mirt_products}
+      
+      # Automation
+      - SUMMARY_RETENTION_DAYS=${SUMMARY_RETENTION_DAYS:-3}
+      - FOLLOWUP_DELAYS_HOURS=${FOLLOWUP_DELAYS_HOURS:-24,72}
+    volumes:
+      # Mount data directory for catalog files
+      - ./data:/app/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - mirt-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Development: Bot in polling mode (no webhook needed)
+  # ---------------------------------------------------------------------------
+  bot-polling:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: mirt-ai-bot-polling
+    profiles:
+      - polling
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - AI_MODEL=${AI_MODEL:-x-ai/grok-4.1-fast}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_API_KEY=${SUPABASE_API_KEY}
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data:ro
+    command: ["python", "-m", "src.bot.telegram_bot"]
+    networks:
+      - mirt-network
+
+  # ---------------------------------------------------------------------------
+  # Tests
+  # ---------------------------------------------------------------------------
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: mirt-ai-tests
+    profiles:
+      - test
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./data:/app/data:ro
+      - ./pytest.ini:/app/pytest.ini:ro
+    command: ["pytest", "-v", "--tb=short"]
+    networks:
+      - mirt-network
+
+networks:
+  mirt-network:
+    driver: bridge
+
+# =============================================================================
+# Environment file template (.env.example)
+# =============================================================================
+# Copy to .env and fill in your values:
+#
+# OPENROUTER_API_KEY=sk-or-...
+# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+# AI_MODEL=x-ai/grok-4.1-fast
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+# PUBLIC_BASE_URL=https://your-domain.example
+# SUPABASE_URL=https://your-project.supabase.co
+# SUPABASE_API_KEY=your-service-key
+# OPENAI_API_KEY=sk-...  # Optional, for embeddings
+# =============================================================================
