@@ -1,12 +1,12 @@
 # Mirt-AI
 
-AI-стиліст для бренду дитячого одягу MIRT. Використовує Grok 4.1 fast (OpenRouter), Pydantic AI, LangGraph та Supabase.
+AI-стиліст для бренду дитячого одягу MIRT. Використовує Grok 4.1 fast / GPT-5.1 / Gemini 3 Pro, Pydantic AI, LangGraph v2 та Supabase.
 
-[![CI](https://github.com/mirt/mirt-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/mirt/mirt-ai/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-50%20passed-brightgreen.svg)]()
 
-## Архітектура
+## 🏗 Архітектура v2
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -15,49 +15,61 @@ AI-стиліст для бренду дитячого одягу MIRT. Вико
 │  │  Telegram   │  │  ManyChat   │  │     Automation API      │  │
 │  │  Webhook    │  │  Webhook    │  │  (summarize, followups) │  │
 │  └──────┬──────┘  └──────┬──────┘  └────────────┬────────────┘  │
-│         │                │                      │                │
 │         └────────────────┼──────────────────────┘                │
 │                          ▼                                       │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │              ConversationHandler (centralized)             │  │
-│  │    - Error handling with graceful fallbacks                │  │
-│  │    - Message persistence                                   │  │
-│  │    - Session state management                              │  │
-│  └─────────────────────────┬─────────────────────────────────┘  │
+│  │                 LangGraph v2 (5 nodes)                     │  │
+│  │                                                             │  │
+│  │  ┌──────────┐   ┌──────────┐   ┌──────────┐               │  │
+│  │  │moderation│ → │tool_plan │ → │  agent   │               │  │
+│  │  └──────────┘   └──────────┘   └──────────┘               │  │
+│  │                                      │                      │  │
+│  │  ┌──────────────────┐   ┌───────────┴────────┐            │  │
+│  │  │ state_transition │ ← │    validation      │            │  │
+│  │  └──────────────────┘   └────────────────────┘            │  │
+│  └───────────────────────────────────────────────────────────┘  │
 │                            ▼                                     │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                    LangGraph Orchestrator                  │  │
-│  │    - State machine (STATE0_INIT → STATE9_OOD)             │  │
-│  │    - Moderation layer                                      │  │
-│  │    - Agent invocation                                      │  │
-│  └─────────────────────────┬─────────────────────────────────┘  │
-│                            ▼                                     │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │              Pydantic AI Agent (Grok 4.1 fast)            │  │
+│  │              Pydantic AI Agent (Grok/GPT/Gemini)          │  │
 │  │    - Supabase tools (search, get_by_id, get_by_photo)     │  │
+│  │    - LLM-specific prompts (data/prompts/)                 │  │
 │  │    - Typed AgentResponse output                           │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### 🎯 Key Design Decisions
+
+| Decision | Implementation |
+|----------|----------------|
+| **FSM Source of Truth** | Code (`src/core/state_machine.py`), NOT prompt |
+| **Tool Planning** | Pre-execution in code BEFORE LLM call |
+| **Post-Validation** | Without LLM (price > 0, photo_url https://) |
+| **Observability** | Structured logs with state/intent/latency tags |
+| **LLM Switching** | Config-based (`LLM_PROVIDER=openrouter\|openai\|google`) |
+
 ### Ключові компоненти
 
 | Модуль | Призначення |
 |--------|-------------|
-| `src/core/constants.py` | Type-safe Enums (AgentState, MessageTag, EscalationLevel) |
-| `src/core/validation.py` | Input validation, SQL injection protection |
-| `src/core/logging.py` | Structured JSON logging для production |
-| `src/services/conversation.py` | Централізований ConversationHandler з error handling |
-| `src/server/middleware.py` | Rate limiting (60 req/min) + request logging |
-| `src/server/dependencies.py` | FastAPI Dependency Injection |
-| `src/services/moderation.py` | PII detection, leetspeak normalization |
+| `src/core/state_machine.py` | **FSM** — State/Intent enums, transitions, keyboards |
+| `src/core/models.py` | Pydantic schemas з enum validators |
+| `src/core/tool_planner.py` | Pre-LLM tool execution planning |
+| `src/core/product_adapter.py` | Product validation (price > 0, https://) |
+| `src/core/prompt_loader.py` | LLM-specific prompt loading |
+| `src/agents/graph_v2.py` | **5-node LangGraph** orchestration |
+| `src/services/observability.py` | Metrics + structured logging |
+| `src/services/moderation.py` | PII detection, content filtering |
 
-### Clean Code принципи
-- **No magic strings** — всі стани та теги через Enums
-- **Dependency Injection** — FastAPI Depends() замість глобальних синглтонів
-- **Centralized error handling** — graceful fallbacks у ConversationHandler
-- **Input validation** — захист від SQL injection та pattern injection
-- **Structured logging** — JSON формат для production, pretty для dev
+### ⚡ Feature Flags
+
+```env
+USE_GRAPH_V2=true           # 5-node LangGraph (default: true)
+USE_TOOL_PLANNER=true       # Pre-execute tools before LLM
+USE_PRODUCT_VALIDATION=true # Validate products before send
+USE_INPUT_VALIDATION=true   # Validate metadata enums
+ENABLE_OBSERVABILITY=true   # Structured logs with tags
+```
 
 ## Швидкий старт
 
@@ -137,57 +149,70 @@ print(result)
 
 ```
 src/
-├── core/                    # Domain models та utilities
-│   ├── constants.py         # Enums: AgentState, MessageTag, EscalationLevel
-│   ├── models.py            # Pydantic: AgentResponse, Product, Message
-│   ├── validation.py        # Input validation, SQL injection protection
-│   └── logging.py           # Structured JSON/Pretty logging
+├── core/                      # Domain models та utilities
+│   ├── state_machine.py       # ⭐ FSM: State, Intent, Transitions
+│   ├── models.py              # Pydantic: AgentResponse, Metadata (enum validators)
+│   ├── tool_planner.py        # Pre-LLM tool execution
+│   ├── product_adapter.py     # Product validation
+│   ├── input_validator.py     # Metadata validation
+│   ├── prompt_loader.py       # LLM-specific prompt loading
+│   └── constants.py           # Legacy enums (backward compat)
 │
-├── agents/                  # AI Agent layer
-│   ├── graph.py             # LangGraph orchestrator
-│   ├── nodes.py             # Graph nodes (agent_node)
-│   └── pydantic_agent.py    # Pydantic AI agent + Supabase tools
+├── agents/                    # AI Agent layer
+│   ├── graph_v2.py            # ⭐ 5-node LangGraph v2
+│   ├── graph.py               # Legacy v1 graph
+│   ├── nodes.py               # Graph nodes
+│   └── pydantic_agent.py      # Pydantic AI agent + Supabase tools
 │
-├── server/                  # FastAPI layer
-│   ├── main.py              # ASGI app, endpoints, lifespan
-│   ├── dependencies.py      # DI providers (Depends)
-│   └── middleware.py        # Rate limiting, request logging
+├── services/                  # Business logic
+│   ├── observability.py       # ⭐ MetricsCollector, structured logs
+│   ├── moderation.py          # PII detection, content filtering
+│   ├── supabase_tools.py      # Supabase vector search
+│   └── ...
 │
-├── services/                # Business logic
-│   ├── conversation.py      # ConversationHandler (centralized)
-│   ├── moderation.py        # PII detection, content filtering
-│   ├── supabase_tools.py    # Supabase vector search + validation
-│   ├── session_store.py     # Session persistence (memory/Supabase)
-│   ├── message_store.py     # Message persistence
-│   ├── followups.py         # Follow-up automation
-│   └── summarization.py     # Message retention & summarization
-│
-├── bot/                     # Telegram integration
-│   └── telegram_bot.py      # Aiogram handlers
-│
-└── integrations/            # External platforms
-    └── manychat/webhook.py  # ManyChat/Instagram DM
+├── server/                    # FastAPI layer
+├── bot/                       # Telegram integration
+└── integrations/              # ManyChat, CRM
 
 data/
-├── system_prompt_full.yaml  # AI personality & state machine
-├── catalog.json             # Product catalog (JSON)
-└── catalog.csv              # Catalog with embeddings (for Supabase import)
+├── prompts/                   # ⭐ LLM-specific prompts
+│   ├── base.yaml              # Base template
+│   ├── grok.yaml              # Grok 4.1 config
+│   ├── gpt.yaml               # GPT-5.1 config
+│   └── gemini.yaml            # Gemini 3 Pro config
+├── system_prompt_full.yaml    # Full prompt (legacy)
+├── domain/                    # Business dictionaries
+│   ├── states.yaml
+│   └── intents.yaml
+└── catalog.json               # Product catalog
+
+tests/
+├── test_state_machine.py      # 21 FSM tests
+├── test_product_adapter.py    # 13 validation tests
+├── test_graph_v2.py           # 16 graph v2 tests
+└── eval/                      # Golden dataset evaluation
 ```
 
 ## Тести
 
 ```bash
-# Запуск всіх тестів
+# Запуск всіх тестів (50 passed)
 pytest
+
+# Тільки v2 архітектура
+pytest tests/test_state_machine.py tests/test_product_adapter.py tests/test_graph_v2.py -v
 
 # З coverage
 pytest --cov=src --cov-report=html
-
-# Docker
-docker-compose --profile test up tests
 ```
 
-Тести не викликають зовнішній LLM — використовується `DummyAgent` заглушка.
+| Test Suite | Tests | Coverage |
+|------------|-------|----------|
+| `test_state_machine.py` | 21 | FSM transitions, enums |
+| `test_product_adapter.py` | 13 | Validation, price/url checks |
+| `test_graph_v2.py` | 16 | 5-node graph, mocked LLM |
+
+Тести не викликають зовнішній LLM — використовується `AsyncMock` заглушка.
 
 ## CI/CD
 
