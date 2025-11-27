@@ -1,4 +1,4 @@
-"""Pydantic AI agent configured with Grok 4.1 fast and Supabase tools.
+"""Pydantic AI agent configured with Grok 4.1 fast; Supabase tools вимкнені.
 
 This module lives under the ``agents`` package to keep the model, prompt,
 operations, and LangGraph orchestration co-located. It mirrors the previous
@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -21,22 +20,28 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from src.conf.config import settings
 from src.core.models import AgentResponse
 from src.services.metadata import apply_metadata_defaults
-from src.services.supabase_tools import SupabaseProductTools, get_supabase_tools
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT_PATH = Path("data/system_prompt_full.yaml")
 
 # Таймаут на LLM виклик (захист від зависання OpenRouter)
 LLM_TIMEOUT_SECONDS = 30
 
 
-def load_system_prompt(path: Path = SYSTEM_PROMPT_PATH) -> str:
-    """Load system prompt text from disk with a clear error if missing."""
-
-    if not path.exists():
-        raise FileNotFoundError(f"System prompt file not found: {path}")
-    return path.read_text(encoding="utf-8")
+def load_system_prompt(model_key: str = "grok") -> str:
+    """
+    Load system prompt text for the specified LLM model.
+    
+    Uses the new prompt_loader which merges base.yaml + model-specific config
+    and generates an optimized system prompt.
+    
+    Args:
+        model_key: One of "grok", "gpt", "gemini"
+    
+    Returns:
+        Formatted system prompt string
+    """
+    from src.core.prompt_loader import get_system_prompt_text
+    return get_system_prompt_text(model_key)
 
 
 def build_model() -> OpenAIModel:
@@ -56,31 +61,11 @@ class AgentRunner:
     """Wrapper around the pydantic-ai Agent to simplify testing and DI."""
 
     agent: Agent
-    tools: SupabaseProductTools
+    tools: Optional[Any] = None  # Supabase tools вимкнені
 
     def __post_init__(self) -> None:
-        @self.agent.tool(name="T_SUPABASE_SEARCH_BY_QUERY")  # type: ignore[misc]
-        async def supabase_search_by_query(user_query: str, match_count: int = 5) -> List[Dict[str, Any]]:
-            """Семантичний пошук моделей у Supabase за текстовим описом."""
-
-            return await self.tools.search_by_query(user_query, match_count=match_count)
-
-        @self.agent.tool(name="T_SUPABASE_GET_BY_ID")  # type: ignore[misc]
-        async def supabase_get_by_id(product_id: str) -> List[Dict[str, Any]]:
-            """Отримати конкретну модель за product_id."""
-
-            return await self.tools.get_by_id(product_id)
-
-        @self.agent.tool(name="T_SUPABASE_GET_BY_PHOTO_URL")  # type: ignore[misc]
-        async def supabase_get_by_photo_url(photo_url: str) -> List[Dict[str, Any]]:
-            """Знайти модель за канонічним фото каталогу."""
-
-            return await self.tools.get_by_photo_url(photo_url)
-
-        # Avoid linter warnings about unused inner functions
-        self._supabase_search_by_query = supabase_search_by_query
-        self._supabase_get_by_id = supabase_get_by_id
-        self._supabase_get_by_photo_url = supabase_get_by_photo_url
+        # Tools не реєструємо: працюємо без Supabase (Embedded Catalog).
+        pass
 
     async def run(self, history: List[Dict[str, Any]], metadata: Optional[Dict[str, Any]] = None) -> AgentResponse:
         """Invoke the configured agent with message history and metadata."""
@@ -146,19 +131,35 @@ class AgentRunner:
             return loop.run_until_complete(self.run(history, metadata))
 
 
+def _get_model_key_from_settings() -> str:
+    """
+    Determine model key based on current LLM provider settings.
+    
+    Returns:
+        Model key: "grok", "gpt", or "gemini"
+    """
+    provider = getattr(settings, "LLM_PROVIDER", "openrouter").lower()
+    provider_to_key = {
+        "openrouter": "grok",
+        "openai": "gpt",
+        "google": "gemini",
+    }
+    return provider_to_key.get(provider, "grok")
+
+
 def build_agent_runner(
     *,
-    tools: Optional[SupabaseProductTools] = None,
+    tools: Optional[Any] = None,
     system_prompt: Optional[str] = None,
     model: Optional[OpenAIModel] = None,
     retries: int = 2,
 ) -> AgentRunner:
-    """Factory for the runtime AgentRunner."""
+    """Factory for the runtime AgentRunner (Supabase tools відключені)."""
 
-    tools_instance = tools or get_supabase_tools()
-    if tools_instance is None:
-        raise RuntimeError("Supabase client is not configured; cannot build agent tools")
-    prompt = system_prompt or load_system_prompt()
+    tools_instance = tools  # kept for API compatibility; не використовується
+    # Визначити model_key з settings
+    model_key = _get_model_key_from_settings()
+    prompt = system_prompt or load_system_prompt(model_key)
     llm_model = model or build_model()
 
     pydantic_agent = Agent[None, AgentResponse](

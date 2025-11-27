@@ -64,6 +64,13 @@ class ModerationFlag(str, Enum):
     PII = "pii"
 
 
+class DBTable:
+    """Database table names constants."""
+    USERS = "mirt_users"
+    MESSAGES = "mirt_messages"
+    SESSIONS = "agent_sessions"
+
+
 # =============================================================================
 # DEFAULT VALUES
 # =============================================================================

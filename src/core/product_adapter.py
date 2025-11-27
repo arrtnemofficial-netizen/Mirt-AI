@@ -1,29 +1,29 @@
 """
-Product Adapter - унифікація схем продукту.
-==========================================
-Вирішує проблему id vs product_id:
-- Внутрішньо використовуємо `id` (як у OUTPUT_CONTRACT)
-- Адаптер конвертує з різних форматів
+Product Adapter - unification of product schemas.
+================================================
+Resolves id vs product_id issue:
+- Internally uses `id` (as in OUTPUT_CONTRACT)
+- Adapter converts from different formats
 
-Використання:
+Usage:
     from src.core.product_adapter import ProductAdapter, ValidatedProduct
     
-    # З Supabase result
-    product = ProductAdapter.from_supabase(row)
+    # From Embedded Catalog or dict
+    product = ProductAdapter.from_dict(row)
     
-    # Для OUTPUT_CONTRACT
+    # For OUTPUT_CONTRACT
     output_dict = product.to_output_contract()
     
-    # Валідація перед відправкою
+    # Validate before sending
     validated = ProductAdapter.validate_for_send(product)
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,8 @@ class ValidatedProduct(BaseModel):
     color: str = Field(default="")
     price: float = Field(..., gt=0, description="Price must be positive")
     photo_url: str = Field(..., min_length=1)
-    sku: Optional[str] = None
-    category: Optional[str] = None
+    sku: str | None = None
+    category: str | None = None
     
     @field_validator("photo_url")
     @classmethod
@@ -64,7 +64,7 @@ class ValidatedProduct(BaseModel):
             raise ValueError(f"price must be positive, got: {v}")
         return v
     
-    def to_output_contract(self) -> Dict[str, Any]:
+    def to_output_contract(self) -> dict[str, Any]:
         """Convert to OUTPUT_CONTRACT format (uses `id`)."""
         return {
             "id": self.id,
@@ -77,7 +77,7 @@ class ValidatedProduct(BaseModel):
             "category": self.category,
         }
     
-    def to_legacy_format(self) -> Dict[str, Any]:
+    def to_legacy_format(self) -> dict[str, Any]:
         """Convert to legacy format (uses `product_id`)."""
         return {
             "product_id": self.id,
@@ -118,83 +118,91 @@ class ProductAdapter:
     )
     
     @classmethod
-    def from_supabase(cls, row: Dict[str, Any], color: str = "", size: str = "") -> Optional[ValidatedProduct]:
-        """
-        Convert Supabase row to ValidatedProduct.
-        Handles both `id` and `product_id` in source data.
-        """
+    def from_catalog_row(cls, row: dict[str, Any], color: str = "", size: str = "") -> ValidatedProduct | None:
+        """Convert catalog row to ValidatedProduct."""
         if not row:
             return None
-        
-        # Extract ID (try both field names)
-        product_id = row.get("id") or row.get("product_id")
-        if not product_id:
-            logger.warning("Product row missing id/product_id: %s", row.keys())
-            return None
-        
-        # Extract price
+
+        # Strategy: try extraction helpers first (complex schema)
         price = cls._extract_price(row, size)
-        if price is None or price <= 0:
-            logger.warning("Product %s has invalid price: %s", product_id, price)
-            return None
-        
-        # Extract photo_url
         photo_url = cls._extract_photo_url(row, color)
-        if not photo_url:
-            logger.warning("Product %s has no photo_url", product_id)
-            return None
+        sku = cls._extract_sku(row, color)
         
-        try:
-            return ValidatedProduct(
-                id=int(product_id),
-                name=row.get("name", ""),
-                size=size or cls._get_first_size(row),
-                color=color or cls._get_first_color(row),
-                price=float(price),
-                photo_url=photo_url,
-                sku=cls._extract_sku(row, color),
-                category=row.get("category"),
-            )
-        except Exception as e:
-            logger.error("Failed to create ValidatedProduct from row: %s", e)
-            return None
-    
+        # If extraction failed, fallback to direct keys (simple schema)
+        if price is None:
+            price = float(row.get("price", 0))
+        if not photo_url:
+            photo_url = row.get("photo_url", "")
+            
+        # Prepare data for common validation
+        data = {
+            "id": row.get("id") or row.get("product_id"),
+            "name": row.get("name", ""),
+            "size": size or cls._get_first_size(row) or row.get("size", ""),
+            "color": color or cls._get_first_color(row) or row.get("color", ""),
+            "price": price,
+            "photo_url": photo_url,
+            "sku": sku or row.get("sku"),
+            "category": row.get("category"),
+        }
+        
+        return cls._create_validated_product(data, source="catalog_row")
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Optional[ValidatedProduct]:
-        """
-        Convert any dict to ValidatedProduct.
-        Handles both `id` and `product_id`.
-        """
+    def from_dict(cls, data: dict[str, Any]) -> ValidatedProduct | None:
+        """Convert any simple dict to ValidatedProduct."""
         if not data:
             return None
+            
+        # Normalize keys
+        normalized = {
+            "id": data.get("id") or data.get("product_id"),
+            "name": data.get("name", ""),
+            "size": data.get("size", ""),
+            "color": data.get("color", ""),
+            "price": float(data.get("price", 0)),
+            "photo_url": data.get("photo_url", ""),
+            "sku": data.get("sku"),
+            "category": data.get("category"),
+        }
         
-        # Normalize ID field
-        product_id = data.get("id") or data.get("product_id")
+        return cls._create_validated_product(normalized, source="dict")
+
+    @classmethod
+    def _create_validated_product(cls, data: dict[str, Any], source: str) -> ValidatedProduct | None:
+        """Internal helper to create and validate product from normalized dict."""
+        product_id = data.get("id")
         if not product_id:
             return None
-        
+            
         try:
             return ValidatedProduct(
                 id=int(product_id),
-                name=data.get("name", ""),
-                size=data.get("size", ""),
-                color=data.get("color", ""),
-                price=float(data.get("price", 0)),
-                photo_url=data.get("photo_url", ""),
-                sku=data.get("sku"),
-                category=data.get("category"),
+                name=data["name"],
+                size=data["size"],
+                color=data["color"],
+                price=data["price"],
+                photo_url=data["photo_url"],
+                sku=data["sku"],
+                category=data["category"],
             )
         except Exception as e:
-            logger.debug("Failed to create ValidatedProduct from dict: %s", e)
+            # Only log warnings for critical data missing, debug for minor issues
+            if data["price"] <= 0:
+                logger.warning("Invalid price for product %s: %s", product_id, data["price"])
+            elif not data["photo_url"]:
+                logger.warning("Missing photo_url for product %s", product_id)
+            else:
+                logger.debug("Failed to create ValidatedProduct from %s: %s", source, e)
             return None
     
     @classmethod
-    def validate_for_send(cls, product: Union[ValidatedProduct, Dict[str, Any]]) -> tuple[bool, List[ProductValidationError]]:
+    def validate_for_send(cls, product: Union[ValidatedProduct, dict[str, Any]]) -> tuple[bool, list[ProductValidationError]]:
         """
         Validate product before sending to channel.
         Returns (is_valid, list_of_errors).
         """
-        errors: List[ProductValidationError] = []
+        errors: list[ProductValidationError] = []
         
         if isinstance(product, dict):
             product_obj = cls.from_dict(product)
@@ -234,13 +242,13 @@ class ProductAdapter:
         return len(errors) == 0, errors
     
     @classmethod
-    def batch_validate(cls, products: List[Union[ValidatedProduct, Dict[str, Any]]]) -> tuple[List[ValidatedProduct], List[ProductValidationError]]:
+    def batch_validate(cls, products: list[Union[ValidatedProduct, dict[str, Any]]]) -> tuple[list[ValidatedProduct], list[ProductValidationError]]:
         """
         Validate and filter a batch of products.
         Returns (valid_products, all_errors).
         """
-        valid_products: List[ValidatedProduct] = []
-        all_errors: List[ProductValidationError] = []
+        valid_products: list[ValidatedProduct] = []
+        all_errors: list[ProductValidationError] = []
         
         for i, p in enumerate(products):
             is_valid, errors = cls.validate_for_send(p)
@@ -263,8 +271,8 @@ class ProductAdapter:
     # -------------------------------------------------------------------------
     
     @classmethod
-    def _extract_price(cls, row: Dict[str, Any], size: str = "") -> Optional[float]:
-        """Extract price from Supabase row."""
+    def _extract_price(cls, row: dict[str, Any], size: str = "") -> float | None:
+        """Extract price from catalog row."""
         # Check price_uniform
         if row.get("price_uniform") and row.get("price_all_sizes"):
             return float(row["price_all_sizes"])
@@ -285,8 +293,8 @@ class ProductAdapter:
         return None
     
     @classmethod
-    def _extract_photo_url(cls, row: Dict[str, Any], color: str = "") -> Optional[str]:
-        """Extract photo_url from Supabase row."""
+    def _extract_photo_url(cls, row: dict[str, Any], color: str = "") -> str | None:
+        """Extract photo_url from catalog row."""
         # Direct photo_url field
         if row.get("photo_url"):
             return row["photo_url"]
@@ -306,8 +314,8 @@ class ProductAdapter:
         return None
     
     @classmethod
-    def _extract_sku(cls, row: Dict[str, Any], color: str = "") -> Optional[str]:
-        """Extract SKU from Supabase row."""
+    def _extract_sku(cls, row: dict[str, Any], color: str = "") -> str | None:
+        """Extract SKU from catalog row."""
         colors = row.get("colors")
         if colors and isinstance(colors, dict):
             if color and color in colors:
@@ -321,7 +329,7 @@ class ProductAdapter:
         return row.get("sku")
     
     @classmethod
-    def _get_first_size(cls, row: Dict[str, Any]) -> str:
+    def _get_first_size(cls, row: dict[str, Any]) -> str:
         """Get first available size from row."""
         sizes = row.get("sizes")
         if sizes and isinstance(sizes, list) and len(sizes) > 0:
@@ -329,7 +337,7 @@ class ProductAdapter:
         return ""
     
     @classmethod
-    def _get_first_color(cls, row: Dict[str, Any]) -> str:
+    def _get_first_color(cls, row: dict[str, Any]) -> str:
         """Get first available color from row."""
         colors = row.get("colors")
         if colors and isinstance(colors, dict):

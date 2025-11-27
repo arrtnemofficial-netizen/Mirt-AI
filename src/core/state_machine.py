@@ -293,14 +293,18 @@ def get_keyboard_for_state(state: State, escalation_level: EscalationLevel = Esc
 
 
 # =============================================================================
-# TOOL NAMES
+# TOOL NAMES (DEPRECATED - Embedded Catalog Mode)
 # =============================================================================
 
 class ToolName(str, Enum):
-    """Supabase tool identifiers matching system_prompt_full.yaml."""
-    SEARCH_BY_QUERY = "T_SUPABASE_SEARCH_BY_QUERY"
-    GET_BY_ID = "T_SUPABASE_GET_BY_ID"
-    GET_BY_PHOTO_URL = "T_SUPABASE_GET_BY_PHOTO_URL"
+    """
+    Tool identifiers - DEPRECATED.
+    RAG tools disabled, using Embedded Catalog in prompt.
+    Kept for backward compatibility only.
+    """
+    SEARCH_BY_QUERY = "T_CATALOG_SEARCH"  # renamed, no longer calls Supabase
+    GET_BY_ID = "T_CATALOG_GET_BY_ID"
+    GET_BY_PHOTO_URL = "T_CATALOG_GET_BY_PHOTO_URL"
 
 
 # =============================================================================

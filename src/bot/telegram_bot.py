@@ -21,7 +21,7 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 
-from src.agents.graph import app as graph_app
+from src.agents.graph_v2 import get_active_graph
 from src.conf.config import settings
 from src.core.models import AgentResponse
 from src.services.conversation import ConversationHandler, create_conversation_handler
@@ -77,17 +77,20 @@ def build_keyboard(current_state: str, escalation_level: str = "NONE") -> Option
 def build_dispatcher(
     store: SessionStore,
     message_store: MessageStore | None = None,
-    runner=graph_app,
+    runner=None,
 ) -> Dispatcher:
     """Create a Dispatcher with handlers bound to the shared store."""
     dp = Dispatcher()
     msg_store = message_store or create_message_store()
+    
+    # Use active graph based on USE_GRAPH_V2 feature flag
+    active_runner = runner or get_active_graph()
 
     # Create centralized conversation handler
     conversation_handler = create_conversation_handler(
         session_store=store,
         message_store=msg_store,
-        runner=runner,
+        runner=active_runner,
     )
 
     @dp.message(CommandStart())

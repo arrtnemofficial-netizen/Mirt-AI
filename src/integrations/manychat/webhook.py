@@ -14,7 +14,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from src.agents.graph import app as graph_app
+from src.agents.graph_v2 import get_active_graph
 from src.core.models import AgentResponse
 from src.services.client_data_parser import parse_client_data, ClientData
 from src.services.conversation import ConversationHandler, create_conversation_handler
@@ -56,16 +56,17 @@ class ManychatWebhook:
     def __init__(
         self,
         store: SessionStore,
-        runner=graph_app,
+        runner=None,
         message_store: MessageStore | None = None,
     ) -> None:
         self.store = store
-        self.runner = runner
+        # Use active graph based on USE_GRAPH_V2 feature flag
+        self.runner = runner or get_active_graph()
         self.message_store = message_store or create_message_store()
         self._handler = create_conversation_handler(
             session_store=store,
             message_store=self.message_store,
-            runner=runner,
+            runner=self.runner,
         )
 
     async def handle(self, payload: Dict[str, Any]) -> Dict[str, Any]:

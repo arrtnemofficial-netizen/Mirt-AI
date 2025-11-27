@@ -1,11 +1,9 @@
 """Catalog loading and search helpers (JSON fallback for tests/offline).
 
-The catalog is kept outside of the prompt and exposed as a tool for the agent.
-This module centralises validation and lightweight search logic so both the
-agent and tests share identical behaviour.
+The catalog is embedded in the system prompt (system_prompt_full.yaml).
+This module provides JSON-based catalog access for tests and offline scenarios.
 
-NOTE: In production, use `supabase_tools.py` with vector embeddings for 
-semantic search. This module is only for offline/test scenarios.
+NOTE: Production uses Embedded Catalog in prompt. RAG/Supabase tools removed.
 """
 from __future__ import annotations
 

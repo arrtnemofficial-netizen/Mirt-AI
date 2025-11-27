@@ -66,7 +66,7 @@ class TestValidatedProduct:
 class TestProductAdapter:
     """Tests for ProductAdapter."""
     
-    def test_from_supabase_with_id(self):
+    def test_from_catalog_row_with_id(self):
         row = {
             "id": 1,
             "name": "Сукня Анна",
@@ -77,12 +77,12 @@ class TestProductAdapter:
                 "рожевий": {"photo_url": "https://cdn.sitniks.com/pink.jpg"}
             },
         }
-        product = ProductAdapter.from_supabase(row)
+        product = ProductAdapter.from_catalog_row(row)
         assert product is not None
         assert product.id == 1
         assert product.price == 1200.0
     
-    def test_from_supabase_with_product_id(self):
+    def test_from_catalog_row_with_product_id(self):
         """Test legacy format with product_id."""
         row = {
             "product_id": 2,
@@ -93,7 +93,7 @@ class TestProductAdapter:
                 "білий": {"photo_url": "https://cdn.sitniks.com/white.jpg"}
             },
         }
-        product = ProductAdapter.from_supabase(row)
+        product = ProductAdapter.from_catalog_row(row)
         assert product is not None
         assert product.id == 2
     

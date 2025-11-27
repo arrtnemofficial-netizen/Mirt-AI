@@ -1,6 +1,6 @@
 # Mirt-AI
 
-AI-стиліст для бренду дитячого одягу MIRT. Використовує Grok 4.1 fast / GPT-5.1 / Gemini 3 Pro, Pydantic AI, LangGraph v2 та Supabase.
+AI-стиліст для бренду дитячого одягу MIRT. Використовує Grok 4.1 fast / GPT-5.1 / Gemini 3 Pro, Pydantic AI, LangGraph v2.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -31,9 +31,16 @@ AI-стиліст для бренду дитячого одягу MIRT. Вико
 │                            ▼                                     │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │              Pydantic AI Agent (Grok/GPT/Gemini)          │  │
-│  │    - Supabase tools (search, get_by_id, get_by_photo)     │  │
+│  │    - Embedded Catalog (100 products in prompt)            │  │
 │  │    - LLM-specific prompts (data/prompts/)                 │  │
 │  │    - Typed AgentResponse output                           │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                            ▼                                     │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                    Supabase (CRM)                          │  │
+│  │    - mirt_users (user profiles, summaries)                │  │
+│  │    - mirt_messages (chat history)                         │  │
+│  │    - agent_sessions (conversation state)                  │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -54,12 +61,14 @@ AI-стиліст для бренду дитячого одягу MIRT. Вико
 |--------|-------------|
 | `src/core/state_machine.py` | **FSM** — State/Intent enums, transitions, keyboards |
 | `src/core/models.py` | Pydantic schemas з enum validators |
-| `src/core/tool_planner.py` | Pre-LLM tool execution planning |
+| `src/core/tool_planner.py` | Tool planning (disabled, uses Embedded Catalog) |
 | `src/core/product_adapter.py` | Product validation (price > 0, https://) |
 | `src/core/prompt_loader.py` | LLM-specific prompt loading |
 | `src/agents/graph_v2.py` | **5-node LangGraph** orchestration |
-| `src/services/observability.py` | Metrics + structured logging |
-| `src/services/moderation.py` | PII detection, content filtering |
+| `src/services/message_store.py` | **mirt_messages** — chat history persistence |
+| `src/services/summarization.py` | 3-day summary + cleanup |
+| `src/services/followups.py` | Follow-up reminders |
+| `data/system_prompt_full.yaml` | **Embedded Catalog** — all products in prompt |
 
 ### ⚡ Feature Flags
 
@@ -125,25 +134,64 @@ print(result)
 - **Локально (polling)**: `python -m src.bot.telegram_bot` або виклик `run_polling()` у коді. Достатньо вставити свій `TELEGRAM_BOT_TOKEN` у `.env`.
 - **Webhook**: підніміть FastAPI `uvicorn src.server.main:app --host 0.0.0.0 --port 8000`, задайте `PUBLIC_BASE_URL` (публічна адреса reverse-proxy/NGROK) — вебхук реєструється автоматично на старті.
 
-## Збереження сесій, повідомлень і каталогу у Supabase
-- Сесії: таблиця `SUPABASE_TABLE` із полями `session_id` (PK, text) і `state` (jsonb). Автоматичне перемикання на Supabase при наявності env.
-- Повідомлення: таблиця `SUPABASE_MESSAGES_TABLE` з полями `session_id`, `role`, `content`, `created_at` (timestamptz), `tags` (array/text[]). Усі вхідні та вихідні повідомлення записуються туди; тег `humanNeeded-wd` ставиться на відповіді з ескалацією.
-- Каталог (RAG): таблиця `mirt_products` з полями з system prompt (category/subcategory/sizes/material/price_uniform/price_by_size/colors). Ембеддинги — таблиця `mirt_product_embeddings` (vector(1536)), RPC `match_mirt_products` повертає top-N. `data/catalog.json` та `data/catalog.csv` слугують єдиним джерелом для імпорту.
+## Збереження даних у Supabase
+
+### Таблиці
+
+| Таблиця | Призначення |
+|---------|-------------|
+| `mirt_users` | Профілі користувачів (user_id, username, phone, summary, tags, last_interaction_at) |
+| `mirt_messages` | Історія повідомлень (user_id, session_id, role, content, content_type) |
+| `agent_sessions` | Стан розмови (session_id, state jsonb) |
+
+### Як працює
+
+1. **Клієнт пише** → повідомлення зберігається в `mirt_messages` з `user_id`
+2. **Бот відповідає** → відповідь зберігається в `mirt_messages`
+3. **При кожному повідомленні** → оновлюється `last_interaction_at` в `mirt_users`
+4. **Через 3 дні** → ManyChat викликає `/automation/mirt-summarize-prod-v1` → summary зберігається в `mirt_users.summary`, старі повідомлення видаляються
+
+### Каталог товарів
+
+**Embedded Catalog** — всі товари (~100) вбудовані прямо в системний промпт (`data/system_prompt_full.yaml`).
+- Без RAG, без векторного пошуку
+- LLM шукає товари прямо в промпті
+- Швидше та дешевше для малого каталогу
 
 ## ManyChat / Instagram webhook
 - Ендпоінт: `POST /webhooks/manychat` приймає ManyChat payload (`subscriber.id`, `message.text`).
 - Авторизація: заголовок `X-Manychat-Token` має збігатися з `MANYCHAT_VERIFY_TOKEN` у `.env`.
 - Відповідь: `{version:"v2", messages:[{type:"text",text:"..."},...], metadata:{current_state,...}}` — сумісно з ManyChat reply API.
 
-### Автоматизація переупаковки
-- Ендпоінт: `POST /automation/mirt-summarize-prod-v1` з тілом `{ "session_id": "..." }`.
-- Логіка: якщо від останнього повідомлення минуло `SUMMARY_RETENTION_DAYS` днів (за замовчуванням 3), усі повідомлення по `session_id` перетворюються у саммарі, записуються у поле `summary` таблиці `SUPABASE_USERS_TABLE`, старі повідомлення видаляються з `SUPABASE_MESSAGES_TABLE`.
-- При переупаковці тег `humanNeeded-wd` автоматично знімається, щоб закрити SLA ескалації.
+### Автоматизація переупаковки (3 дні)
 
-### Автоматизація фолоуапів
-- Ендпоінт: `POST /automation/mirt-followups-prod-v1` з тілом `{ "session_id": "...", "schedule_hours": [24, 72] }`.
-- Якщо `schedule_hours` не заданий, використовується `FOLLOWUP_DELAYS_HOURS` з `.env` (кома-сепарований список годин). Система перевіряє дату останньої активності та кількість уже відправлених фолоуапів (теги `followup-sent-*` у таблиці повідомлень) і, якщо настав час, записує нове повідомлення з нагадуванням у `SUPABASE_MESSAGES_TABLE`.
-- Відправку повідомлень на канали (Telegram, ManyChat) можна реалізувати власним шедулером: достатньо викликати цей ендпоінт і надіслати сформований текст на потрібний канал.
+```
+ManyChat Smart Delay (3 дні) → POST /automation/mirt-summarize-prod-v1
+                                    ↓
+                              { "user_id": 12345, "session_id": "12345", "action": "summarize" }
+                                    ↓
+                              1. Беремо всі повідомлення з mirt_messages
+                              2. Генеруємо summary
+                              3. Зберігаємо в mirt_users.summary
+                              4. Видаляємо старі повідомлення
+                              5. Повертаємо { "action": "remove_tags" }
+                                    ↓
+                              ManyChat знімає тег humanNeeded-wd
+```
+
+### Автоматизація фолоуапів (4 години)
+
+```
+ManyChat Smart Delay (4 год) → POST /webhooks/manychat/followup
+                                    ↓
+                              { "subscriber": {"id": "12345"}, "custom_fields": {"ai_state": "STATE_4_OFFER"} }
+                                    ↓
+                              Бот генерує follow-up текст на основі стану
+                                    ↓
+                              { "needs_followup": true, "followup_text": "Ще раздумуєте над замовленням?" }
+                                    ↓
+                              ManyChat відправляє текст клієнту
+```
 
 ## Структура проекту
 
@@ -151,45 +199,52 @@ print(result)
 src/
 ├── core/                      # Domain models та utilities
 │   ├── state_machine.py       # ⭐ FSM: State, Intent, Transitions
-│   ├── models.py              # Pydantic: AgentResponse, Metadata (enum validators)
-│   ├── tool_planner.py        # Pre-LLM tool execution
+│   ├── models.py              # Pydantic: AgentResponse, Metadata
+│   ├── tool_planner.py        # Tool planning (disabled)
 │   ├── product_adapter.py     # Product validation
 │   ├── input_validator.py     # Metadata validation
 │   ├── prompt_loader.py       # LLM-specific prompt loading
-│   └── constants.py           # Legacy enums (backward compat)
+│   └── validation.py          # Input sanitization
 │
 ├── agents/                    # AI Agent layer
 │   ├── graph_v2.py            # ⭐ 5-node LangGraph v2
 │   ├── graph.py               # Legacy v1 graph
 │   ├── nodes.py               # Graph nodes
-│   └── pydantic_agent.py      # Pydantic AI agent + Supabase tools
+│   └── pydantic_agent.py      # Pydantic AI agent
 │
 ├── services/                  # Business logic
-│   ├── observability.py       # ⭐ MetricsCollector, structured logs
-│   ├── moderation.py          # PII detection, content filtering
-│   ├── supabase_tools.py      # Supabase vector search
-│   └── ...
+│   ├── message_store.py       # ⭐ mirt_messages persistence
+│   ├── summarization.py       # 3-day summary + cleanup
+│   ├── followups.py           # Follow-up reminders
+│   ├── supabase_client.py     # Supabase connection
+│   ├── supabase_store.py      # Session persistence
+│   └── moderation.py          # PII detection
 │
 ├── server/                    # FastAPI layer
+│   ├── main.py                # ⭐ All endpoints
+│   ├── dependencies.py        # DI
+│   └── middleware.py          # Rate limiting
+│
 ├── bot/                       # Telegram integration
 └── integrations/              # ManyChat, CRM
 
 data/
-├── prompts/                   # ⭐ LLM-specific prompts
-│   ├── base.yaml              # Base template
-│   ├── grok.yaml              # Grok 4.1 config
-│   ├── gpt.yaml               # GPT-5.1 config
-│   └── gemini.yaml            # Gemini 3 Pro config
-├── system_prompt_full.yaml    # Full prompt (legacy)
-├── domain/                    # Business dictionaries
+├── system_prompt_full.yaml    # ⭐ EMBEDDED CATALOG (all products)
+├── prompts/                   # LLM-specific prompts
+│   ├── base.yaml
+│   ├── grok.yaml
+│   ├── gpt.yaml
+│   └── gemini.yaml
+├── domain/
 │   ├── states.yaml
 │   └── intents.yaml
-└── catalog.json               # Product catalog
+└── catalog.json               # Product catalog (for tests)
 
 tests/
-├── test_state_machine.py      # 21 FSM tests
-├── test_product_adapter.py    # 13 validation tests
-├── test_graph_v2.py           # 16 graph v2 tests
+├── test_state_machine.py
+├── test_product_adapter.py
+├── test_graph_v2.py
+├── test_manychat_followup.py
 └── eval/                      # Golden dataset evaluation
 ```
 
@@ -241,8 +296,10 @@ GitHub Actions workflow (`.github/workflows/ci.yml`):
 | GET | `/health` | Health check |
 | POST | `/webhooks/telegram` | Telegram webhook |
 | POST | `/webhooks/manychat` | ManyChat webhook |
-| POST | `/automation/mirt-summarize-prod-v1` | Summarize old messages |
-| POST | `/automation/mirt-followups-prod-v1` | Send follow-up reminders |
+| POST | `/webhooks/manychat/followup` | ManyChat follow-up (4 год) |
+| POST | `/webhooks/manychat/create-order` | CRM order creation |
+| POST | `/automation/mirt-summarize-prod-v1` | Summarize + cleanup (3 дні) |
+| POST | `/automation/mirt-followups-prod-v1` | Follow-up reminders |
 
 ## Ліцензія
 

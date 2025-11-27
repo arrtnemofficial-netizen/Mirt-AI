@@ -140,13 +140,36 @@ async def run_summarization(
     payload: Dict[str, Any],
     message_store: MessageStoreDep,
 ) -> Dict[str, Any]:
-    """Summarize and prune old messages for a session."""
+    """Summarize and prune old messages for a session.
+    
+    Called by ManyChat after 3 days of inactivity.
+    Saves summary to mirt_users.summary and deletes messages from mirt_messages.
+    
+    Payload:
+    {
+        "user_id": 12345,
+        "session_id": "12345",
+        "action": "summarize"
+    }
+    """
     session_id = payload.get("session_id")
+    user_id = payload.get("user_id")
+    
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
 
-    summary = run_retention(session_id, message_store)
-    return {"session_id": session_id, "summary": summary, "status": "ok"}
+    # Convert user_id to int if provided
+    user_id_int = int(user_id) if user_id else None
+    
+    summary = run_retention(session_id, message_store, user_id=user_id_int)
+    
+    return {
+        "session_id": session_id,
+        "user_id": user_id,
+        "summary": summary,
+        "action": "remove_tags",  # Signal to ManyChat to remove humanNeeded-wd tag
+        "status": "ok",
+    }
 
 
 @app.post("/automation/mirt-followups-prod-v1")

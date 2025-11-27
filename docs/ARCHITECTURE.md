@@ -5,15 +5,16 @@
 MIRT AI — це AI-консультант для магазину дитячого одягу, побудований на:
 - **LangGraph v2** — 5-вузлова оркестрація (moderation → tool_plan → agent → validation → state_transition)
 - **Pydantic AI** — типізований агент
-- **Supabase** — база даних та семантичний пошук
+- **Embedded Catalog** — всі товари (~100) вбудовані в системний промпт
+- **Supabase** — CRM (mirt_users, mirt_messages, agent_sessions)
 - **Grok 4.1 Fast / GPT-5.1** — LLM провайдери
 
 ### Key Architecture Decisions
 
 1. **FSM Source of Truth**: Код (`src/core/state_machine.py`), НЕ промпт
-2. **Tool Planning**: Виконується в коді (`tool_planner.py`) ПЕРЕД викликом LLM
+2. **Embedded Catalog**: Товари в промпті, без RAG/векторного пошуку
 3. **Post-Validation**: Без LLM — code-based перевірка price > 0, photo_url https://
-4. **Observability**: Структуровані логи з тегами (state/intent/latency)
+4. **CRM Integration**: mirt_users + mirt_messages для follow-ups та summarization
 
 ## Directory Structure
 
@@ -32,9 +33,11 @@ src/
 │   ├── product_adapter.py # Унифікація id vs product_id
 │   └── tool_planner.py    # Логіка вибору інструментів
 ├── services/
-│   ├── supabase_tools.py  # Supabase інструменти
-│   ├── observability.py   # Метрики та логування
-│   └── ...
+│   ├── message_store.py   # mirt_messages persistence
+│   ├── summarization.py   # 3-day summary + cleanup
+│   ├── followups.py       # Follow-up reminders
+│   ├── supabase_client.py # Supabase connection
+│   └── supabase_store.py  # Session persistence
 ├── integrations/
 │   ├── crm/
 │   │   ├── order_mapper.py  # CRM контракт
@@ -44,15 +47,16 @@ src/
     └── config.py      # Settings з feature flags
 
 data/
-├── system_prompt_full.yaml  # Головний промпт (legacy)
+├── system_prompt_full.yaml  # ⭐ EMBEDDED CATALOG (all products)
 ├── prompts/                 # LLM-specific prompts
 │   ├── base.yaml           # Базовий шаблон
 │   ├── grok.yaml           # Grok 4.1 Fast config
 │   ├── gpt.yaml            # GPT-5.1 config
 │   └── gemini.yaml         # Gemini 3 Pro config
-└── domain/
-    ├── states.yaml    # Стани FSM
-    └── intents.yaml   # Інтенти
+├── domain/
+│   ├── states.yaml    # Стани FSM
+│   └── intents.yaml   # Інтенти
+└── catalog.json       # Product catalog (for tests)
 ```
 
 ## State Machine
@@ -101,12 +105,32 @@ data/
 | USE_INPUT_VALIDATION | True | Валідація вхідних metadata |
 | ENABLE_OBSERVABILITY | True | Структуроване логування |
 
-## Embeddings
+## Embedded Catalog
 
-Семантичний пошук використовує:
-- **Модель**: `text-embedding-3-large` (1536 dimensions)
-- **Fallback**: SHA256 hash-based embedding (для тестів без OpenAI)
-- **RPC**: `match_mirt_products(query_embedding, match_count)`
+Замість RAG/векторного пошуку, всі товари (~100) вбудовані прямо в системний промпт:
+
+```yaml
+# data/system_prompt_full.yaml
+catalog:
+  category_001:
+    name: "Сукні"
+    products:
+      "3443041":
+        id: 3443041
+        name: "Сукня Анна"
+        sizes: ["110-116", "122-128", ...]
+        price_all_sizes: 1850
+        colors:
+          "голубий":
+            photo_url: "https://cdn.sitniks.com/..."
+```
+
+### Переваги
+
+- ✅ Швидше (без API calls для пошуку)
+- ✅ Дешевше (без embeddings)
+- ✅ Простіше (без векторної БД)
+- ✅ Надійніше (немає залежності від Supabase RAG)
 
 ### Дозволені домени для фото
 
@@ -164,6 +188,26 @@ text = get_system_prompt_text("gpt")
 Структура промптів:
 - `base.yaml` — спільна частина для всіх LLM
 - `{grok,gpt,gemini}.yaml` — LLM-specific overlays (extends base.yaml)
+
+## Supabase Tables (CRM)
+
+| Таблиця | Призначення |
+|---------|-------------|
+| `mirt_users` | user_id, username, phone, summary, tags, last_interaction_at |
+| `mirt_messages` | user_id, session_id, role, content, content_type |
+| `agent_sessions` | session_id, state (jsonb) |
+
+### Flow
+
+```
+Клієнт пише → mirt_messages.insert() → mirt_users.last_interaction_at = now()
+     ↓
+Бот відповідає → mirt_messages.insert()
+     ↓
+3 дні без активності → ManyChat → /automation/mirt-summarize-prod-v1
+     ↓
+summary → mirt_users.summary, delete mirt_messages
+```
 
 ## Rollout Process
 

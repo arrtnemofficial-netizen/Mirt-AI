@@ -453,3 +453,20 @@ def get_graph_v2(runner=None) -> "CompiledGraph":
         from src.agents.pydantic_agent import run_agent
         _compiled_graph_v2 = build_graph_v2(runner or run_agent)
     return _compiled_graph_v2
+
+
+def get_active_graph():
+    """
+    Get the active graph based on USE_GRAPH_V2 feature flag.
+    
+    Returns v2 graph if USE_GRAPH_V2=True (default), otherwise v1.
+    """
+    from src.conf.config import settings
+    
+    if settings.USE_GRAPH_V2:
+        logger.info("Using LangGraph v2 (5-node architecture)")
+        return get_graph_v2()
+    else:
+        logger.info("Using LangGraph v1 (legacy)")
+        from src.agents.graph import app as graph_v1
+        return graph_v1

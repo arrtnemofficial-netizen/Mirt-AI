@@ -26,14 +26,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: SecretStr = Field(
         default=SecretStr(""), description="API key for embedding generation."
     )
-    EMBEDDING_MODEL: str = Field(
-        default="text-embedding-3-large",
-        description="Embedding model used for catalog semantic search.",
-    )
-    EMBEDDING_DIM: int = Field(
-        default=1536,
-        description="Expected embedding dimensionality for Supabase vector columns.",
-    )
+    # EMBEDDING_MODEL and EMBEDDING_DIM removed - RAG disabled, using Embedded Catalog
     DEFAULT_SESSION_ID: str = Field(
         default="", description="Fallback session id when none is provided in input metadata."
     )
@@ -66,21 +59,13 @@ class Settings(BaseSettings):
         default="agent_sessions", description="Table name storing chat session state JSON."
     )
     SUPABASE_MESSAGES_TABLE: str = Field(
-        default="messages", description="Table storing raw chat messages (session-scoped).",
+        default="mirt_messages", description="Table storing raw chat messages (session-scoped).",
     )
     SUPABASE_USERS_TABLE: str = Field(
-        default="users", description="Table storing user profiles and summaries.",
+        default="mirt_users", description="Table storing user profiles and summaries.",
     )
-    SUPABASE_CATALOG_TABLE: str = Field(
-        default="mirt_products", description="Table name with product catalog rows for RAG search.",
-    )
-    SUPABASE_EMBEDDINGS_TABLE: str = Field(
-        default="mirt_product_embeddings",
-        description="Table storing product embeddings for vector search.",
-    )
-    SUPABASE_MATCH_RPC: str = Field(
-        default="match_mirt_products", description="RPC name for vector similarity search on products.",
-    )
+    # RAG tables removed - using Embedded Catalog in prompt
+    # SUPABASE_CATALOG_TABLE, SUPABASE_EMBEDDINGS_TABLE, SUPABASE_MATCH_RPC - DELETED
     SUMMARY_RETENTION_DAYS: int = Field(
         default=3, description="Days after which conversations are summarized and pruned.",
     )

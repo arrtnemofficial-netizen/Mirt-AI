@@ -33,12 +33,10 @@ ALLOWED_URL_SCHEMES = {"http", "https"}
 
 # Allowed image domains (can be extended via config)
 ALLOWED_IMAGE_DOMAINS = {
-    "supabase.co",
-    "supabase.in",
-    "storage.googleapis.com",
-    "cloudinary.com",
-    "res.cloudinary.com",
-    "images.unsplash.com",
+    "cdn.sitniks.com",
+    "sitniks.com",
+    "mirt.store",
+    "cdn.mirt.store",
     "mirt.ua",
     "cdn.mirt.ua",
 }
