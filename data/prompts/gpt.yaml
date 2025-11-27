@@ -1,0 +1,46 @@
+# =============================================================================
+# MIRT AI Agent - GPT-5.1 Specific Configuration
+# =============================================================================
+# Model: gpt-5.1 via OpenAI API
+# Reasoning: standard
+# =============================================================================
+
+extends: "base.yaml"
+
+META:
+  target_model: "gpt-5.1"
+  reasoning_mode: "standard"
+  provider: "openai"
+
+MODEL_SPECIFIC:
+  # GPT-specific optimizations
+  temperature: 0.3
+  max_tokens: 2048
+  
+  # GPT handles Ukrainian, but explicit hint helps
+  language_hint: "Завжди відповідай українською мовою."
+  
+  # GPT can be verbose - constrain it
+  verbosity: "moderate"
+  
+  # Native OpenAI tool calling
+  tool_format: "openai_native"
+
+REASONING_HINTS:
+  # GPT-specific reasoning instructions
+  - "Аналізуй intent перед відповіддю."
+  - "Не повторюй запит клієнта у відповіді."
+  - "Якщо tool_result пустий - не вигадуй товари."
+  - "Тримай відповідь до 900 символів."
+
+RESPONSE_STYLE:
+  # GPT tends to be helpful/verbose - moderate it
+  greeting_style: "warm_professional"
+  explanation_depth: "moderate"
+  emoji_usage: "minimal"
+
+# GPT-specific guardrails
+GUARDRAILS:
+  # GPT sometimes adds markdown - prevent it
+  - "НЕ використовуй **bold** або ##headers у тексті."
+  - "НЕ використовуй ем-даш '—', тільки дефіс '-'."

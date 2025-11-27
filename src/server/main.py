@@ -78,9 +78,32 @@ setup_middleware(app, enable_rate_limit=True, enable_logging=True)
 
 
 @app.get("/health")
-async def health() -> Dict[str, str]:
-    """Health check endpoint."""
-    return {"status": "ok"}
+async def health() -> Dict[str, Any]:
+    """Health check endpoint with dependency status."""
+    from src.services.supabase_client import get_supabase_client
+
+    status = "ok"
+    checks: Dict[str, str] = {}
+
+    # Перевірка Supabase
+    try:
+        client = get_supabase_client()
+        if client:
+            # Простий ping запит
+            client.table(settings.SUPABASE_TABLE).select("session_id").limit(1).execute()
+            checks["supabase"] = "ok"
+        else:
+            checks["supabase"] = "disabled"
+    except Exception as e:
+        checks["supabase"] = f"error: {type(e).__name__}"
+        status = "degraded"
+        logger.warning("Health check: Supabase unavailable: %s", e)
+
+    return {
+        "status": status,
+        "checks": checks,
+        "version": "1.0.0",
+    }
 
 
 @app.post(settings.TELEGRAM_WEBHOOK_PATH)
@@ -148,3 +171,223 @@ async def trigger_followups(
         "tags": followup.tags if followup else [],
         "status": "ok",
     }
+
+
+# ---------------------------------------------------------------------------
+# ManyChat Follow-up Endpoint
+# ---------------------------------------------------------------------------
+@app.post("/webhooks/manychat/followup")
+async def manychat_followup(
+    payload: Dict[str, Any],
+    x_manychat_token: str | None = Header(default=None),
+    message_store: MessageStoreDep = None,
+) -> Dict[str, Any]:
+    """ManyChat follow-up endpoint called after Smart Delay.
+    
+    This endpoint checks if the user has responded since the last AI message.
+    If not, it generates a follow-up message.
+    
+    ManyChat Conditions can check:
+    - needs_followup: true/false
+    - followup_text: message to send
+    - current_state: AI conversation state
+    
+    Payload expected:
+    {
+        "subscriber": {"id": "12345"},
+        "custom_fields": {
+            "ai_state": "STATE_4_OFFER",
+            "last_product": "Сукня Анна"
+        }
+    }
+    """
+    # Verify token
+    verify_token = settings.MANYCHAT_VERIFY_TOKEN
+    if verify_token and verify_token != x_manychat_token:
+        raise HTTPException(status_code=401, detail="Invalid ManyChat token")
+
+    # Extract subscriber ID
+    subscriber = payload.get("subscriber") or payload.get("user") or {}
+    user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+    
+    if user_id == "unknown":
+        return {
+            "needs_followup": False,
+            "reason": "unknown_user",
+        }
+
+    # Get custom fields from ManyChat
+    custom_fields = payload.get("custom_fields") or {}
+    current_state = custom_fields.get("ai_state", "STATE_0_INIT")
+    last_product = custom_fields.get("last_product", "")
+
+    # Generate follow-up based on state
+    followup_text = _generate_followup_text(current_state, last_product)
+    needs_followup = followup_text is not None
+
+    # Build response for ManyChat Conditions
+    return {
+        "needs_followup": needs_followup,
+        "followup_text": followup_text or "",
+        "current_state": current_state,
+        "set_field_values": [
+            {"field_name": "followup_sent", "field_value": "true" if needs_followup else "false"},
+        ],
+        "add_tag": ["followup_sent"] if needs_followup else [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# CRM Order Creation Endpoint
+# ---------------------------------------------------------------------------
+@app.post("/webhooks/manychat/create-order")
+async def manychat_create_order(
+    payload: Dict[str, Any],
+    x_manychat_token: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    """Create order in CRM from ManyChat data.
+    
+    This endpoint is called when all customer data is collected
+    and order should be created in Snitkix CRM.
+    
+    Payload expected:
+    {
+        "subscriber": {"id": "12345"},
+        "custom_fields": {
+            "client_name": "Іванов Іван",
+            "client_phone": "+380501234567",
+            "client_city": "Київ",
+            "client_nova_poshta": "25",
+            "last_product": "Сукня Анна",
+            "order_sum": "1200"
+        }
+    }
+    """
+    from src.services.order_model import (
+        Order, OrderItem, CustomerInfo, PaymentMethod,
+        validate_order_data, build_missing_data_prompt,
+    )
+    from src.integrations.crm.snitkix import get_snitkix_client
+    
+    # Verify token
+    verify_token = settings.MANYCHAT_VERIFY_TOKEN
+    if verify_token and verify_token != x_manychat_token:
+        raise HTTPException(status_code=401, detail="Invalid ManyChat token")
+
+    # Extract data
+    subscriber = payload.get("subscriber") or payload.get("user") or {}
+    user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+    custom_fields = payload.get("custom_fields") or {}
+    
+    # Parse fields
+    full_name = custom_fields.get("client_name")
+    phone = custom_fields.get("client_phone")
+    city = custom_fields.get("client_city")
+    nova_poshta = custom_fields.get("client_nova_poshta")
+    product_name = custom_fields.get("last_product", "Товар")
+    order_sum = custom_fields.get("order_sum", "0")
+    
+    try:
+        price = float(order_sum)
+    except (ValueError, TypeError):
+        price = 0.0
+    
+    # Validate data
+    products = [{"product_id": 1, "name": product_name, "price": price}] if product_name else []
+    validation = validate_order_data(full_name, phone, city, nova_poshta, products)
+    
+    if not validation.can_submit_to_crm:
+        # Return prompt asking for missing data
+        prompt = build_missing_data_prompt(validation)
+        return {
+            "success": False,
+            "needs_data": True,
+            "missing_fields": validation.missing_fields,
+            "prompt": prompt,
+            "set_field_values": [
+                {"field_name": "order_status", "field_value": "needs_data"},
+            ],
+        }
+    
+    # Create order
+    try:
+        order = Order(
+            external_id=f"mc_{user_id}",
+            customer=CustomerInfo(
+                full_name=full_name,
+                phone=phone,
+                city=city,
+                nova_poshta_branch=nova_poshta,
+                manychat_id=user_id,
+            ),
+            items=[
+                OrderItem(
+                    product_id=1,
+                    product_name=product_name,
+                    size="",
+                    color="",
+                    price=price,
+                ),
+            ],
+            source="manychat",
+            source_id=user_id,
+        )
+        
+        # Send to CRM
+        crm = get_snitkix_client()
+        response = await crm.create_order(order)
+        
+        if response.success:
+            return {
+                "success": True,
+                "order_id": response.order_id,
+                "message": "Замовлення створено! 🎉",
+                "set_field_values": [
+                    {"field_name": "order_status", "field_value": "created"},
+                    {"field_name": "crm_order_id", "field_value": response.order_id or ""},
+                ],
+                "add_tag": ["order_created"],
+            }
+        else:
+            logger.error("CRM order creation failed: %s", response.error)
+            return {
+                "success": False,
+                "error": response.error,
+                "set_field_values": [
+                    {"field_name": "order_status", "field_value": "crm_error"},
+                ],
+            }
+            
+    except Exception as e:
+        logger.exception("Order creation error: %s", e)
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+def _generate_followup_text(current_state: str, last_product: str = "") -> str | None:
+    """Generate follow-up message based on conversation state.
+    
+    Returns None if no follow-up needed (e.g., order completed).
+    """
+    followup_templates = {
+        "STATE_1_DISCOVERY": "Привіт! 🤍 Можливо, підказати щось з одягу для дитини?",
+        "STATE_2_VISION": f"Чи сподобалась модель? Можу показати інші кольори або розміри 🤍",
+        "STATE_3_SIZE_COLOR": "Підказати з розміром? Напишіть зріст дитини — підберу найкращий варіант 📏",
+        "STATE_4_OFFER": f"Ще раздумуєте над {last_product if last_product else 'замовленням'}? Можу щось уточнити? 🤍",
+        "STATE_5_PAYMENT_DELIVERY": "Чекаю на дані для доставки: ПІБ, телефон, місто та відділення Нової Пошти 📦",
+    }
+    
+    # No follow-up for these states
+    no_followup_states = {
+        "STATE_0_INIT",      # Not started yet
+        "STATE_6_UPSELL",    # Already upselling
+        "STATE_7_END",       # Order completed
+        "STATE_8_COMPLAINT", # Complaint handling
+    }
+    
+    if current_state in no_followup_states:
+        return None
+    
+    return followup_templates.get(current_state, "Чим можу допомогти? 🤍")

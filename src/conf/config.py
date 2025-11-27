@@ -5,6 +5,7 @@ Reads environment variables for API access and runtime tuning.
 from __future__ import annotations
 
 from functools import lru_cache
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
@@ -90,6 +91,85 @@ class Settings(BaseSettings):
             "(e.g. '24,72' sends after 24h and 72h of inactivity)."
         ),
     )
+
+    # Snitkix CRM integration
+    SNITKIX_API_URL: str = Field(
+        default="", description="Snitkix CRM API base URL."
+    )
+    SNITKIX_API_KEY: SecretStr = Field(
+        default=SecretStr(""), description="Snitkix CRM API key."
+    )
+
+    # =========================================================================
+    # LLM CONFIGURATION (Parameterized)
+    # =========================================================================
+    LLM_PROVIDER: str = Field(
+        default="openrouter",
+        description="LLM provider: openrouter, openai, google",
+    )
+    LLM_MODEL_GROK: str = Field(
+        default="x-ai/grok-4.1-fast",
+        description="Grok model identifier for OpenRouter",
+    )
+    LLM_MODEL_GPT: str = Field(
+        default="gpt-5.1",
+        description="OpenAI GPT model identifier",
+    )
+    LLM_MODEL_GEMINI: str = Field(
+        default="gemini-3-pro",
+        description="Google Gemini model identifier",
+    )
+    LLM_TEMPERATURE: float = Field(
+        default=0.3,
+        description="LLM temperature (0.0-1.0)",
+    )
+    LLM_MAX_TOKENS: int = Field(
+        default=2048,
+        description="Max tokens for LLM response",
+    )
+    PROMPT_TEMPLATE: str = Field(
+        default="default",
+        description="Prompt template to use: default, grok, gpt, gemini",
+    )
+
+    # =========================================================================
+    # FEATURE FLAGS (for safe rollout)
+    # =========================================================================
+    USE_GRAPH_V2: bool = Field(
+        default=True,
+        description="Use multi-node LangGraph v2 (moderation → tools → agent → validation → state_transition)",
+    )
+    USE_TOOL_PLANNER: bool = Field(
+        default=True,
+        description="Pre-execute tools in code before calling LLM",
+    )
+    USE_PRODUCT_VALIDATION: bool = Field(
+        default=True,
+        description="Validate products (price > 0, photo_url) before sending",
+    )
+    USE_INPUT_VALIDATION: bool = Field(
+        default=True,
+        description="Validate and clamp input metadata to enums",
+    )
+    ENABLE_OBSERVABILITY: bool = Field(
+        default=True,
+        description="Enable detailed logging with tags (state/intent/tool)",
+    )
+
+    @property
+    def snitkix_enabled(self) -> bool:
+        """Check if Snitkix CRM is configured."""
+        return bool(self.SNITKIX_API_URL and self.SNITKIX_API_KEY.get_secret_value())
+
+    @property
+    def active_llm_model(self) -> str:
+        """Return the active LLM model based on provider."""
+        if self.LLM_PROVIDER == "openai":
+            return self.LLM_MODEL_GPT
+        elif self.LLM_PROVIDER == "google":
+            return self.LLM_MODEL_GEMINI
+        else:
+            return self.LLM_MODEL_GROK
 
     @property
     def followup_schedule_hours(self) -> list[int]:

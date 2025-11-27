@@ -7,6 +7,7 @@ service-layer implementation while keeping import side-effects minimal.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +23,12 @@ from src.core.models import AgentResponse
 from src.services.metadata import apply_metadata_defaults
 from src.services.supabase_tools import SupabaseProductTools, get_supabase_tools
 
+logger = logging.getLogger(__name__)
+
 SYSTEM_PROMPT_PATH = Path("data/system_prompt_full.yaml")
+
+# Таймаут на LLM виклик (захист від зависання OpenRouter)
+LLM_TIMEOUT_SECONDS = 30
 
 
 def load_system_prompt(path: Path = SYSTEM_PROMPT_PATH) -> str:
@@ -84,18 +90,50 @@ class AgentRunner:
 
         current_state = metadata.get("current_state") if metadata else "STATE0_INIT"
         prepared_metadata = apply_metadata_defaults(metadata, current_state)
+        session_id = metadata.get("session_id", "") if metadata else ""
 
         user_msg = history[-1]["content"]
-        result = await self.agent.run(
-            user_msg,
-            model_settings={
-                "extra_body": {
-                    "reasoning": {"enabled": True, "effort": "medium"},
-                    "metadata": prepared_metadata,
-                }
-            },
+        
+        try:
+            # Таймаут захищає від зависання при проблемах з OpenRouter
+            result = await asyncio.wait_for(
+                self.agent.run(
+                    user_msg,
+                    model_settings={
+                        "extra_body": {
+                            "reasoning": {"enabled": True, "effort": "medium"},
+                            "metadata": prepared_metadata,
+                        }
+                    },
+                ),
+                timeout=LLM_TIMEOUT_SECONDS,
+            )
+            return result.data  # type: ignore[return-value]
+        except asyncio.TimeoutError:
+            logger.error("LLM timeout after %d seconds for session %s", LLM_TIMEOUT_SECONDS, session_id)
+            return self._build_timeout_response(session_id, current_state)
+
+    def _build_timeout_response(self, session_id: str, current_state: str) -> AgentResponse:
+        """Build graceful fallback response when LLM times out."""
+        from src.core.models import Escalation, Message, Metadata
+
+        return AgentResponse(
+            event="escalation",
+            messages=[
+                Message(
+                    type="text",
+                    content="Вибачте, система тимчасово перевантажена. Спробуйте ще раз через хвилину або напишіть менеджеру 🤍",
+                )
+            ],
+            products=[],
+            metadata=Metadata(
+                session_id=session_id,
+                current_state=current_state,
+                intent="UNKNOWN_OR_EMPTY",
+                escalation_level="L1",
+            ),
+            escalation=Escalation(reason="LLM_TIMEOUT", target="admin"),
         )
-        return result.data  # type: ignore[return-value]
 
     def run_sync(self, history: List[Dict[str, Any]], metadata: Optional[Dict[str, Any]] = None) -> AgentResponse:
         """Synchronous convenience wrapper used by quick-start snippets."""
@@ -162,8 +200,13 @@ class DummyAgent:
         self._response = response
         self._capture = capture if capture is not None else []
 
-    def tool(self, func):  # noqa: ANN001
-        return func
+    def tool(self, func=None, *, name: Optional[str] = None):  # noqa: ANN001
+        """Mock tool decorator that accepts optional name kwarg like real Agent."""
+        def decorator(f):
+            return f
+        if func is not None:
+            return decorator(func)
+        return decorator
 
     async def run(self, *args, **kwargs):  # noqa: ANN001, D401
         self._capture.append(SimpleNamespace(args=args, kwargs=kwargs))

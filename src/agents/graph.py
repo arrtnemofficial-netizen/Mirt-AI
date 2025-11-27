@@ -14,8 +14,13 @@ if TYPE_CHECKING:
 
 def build_graph(runner=run_agent) -> "CompiledGraph":
     """Build the LangGraph state machine with the given agent runner."""
+
+    async def _agent_wrapper(state: ConversationState) -> ConversationState:
+        """Async wrapper to properly await agent_node."""
+        return await agent_node(state, runner)
+
     graph = StateGraph(ConversationState)
-    graph.add_node("agent", lambda state: agent_node(state, runner))
+    graph.add_node("agent", _agent_wrapper)
     graph.set_entry_point("agent")
     graph.add_edge("agent", END)
     return graph.compile()

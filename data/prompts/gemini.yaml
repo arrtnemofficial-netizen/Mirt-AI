@@ -1,0 +1,57 @@
+# =============================================================================
+# MIRT AI Agent - Gemini 3 Pro Specific Configuration
+# =============================================================================
+# Model: gemini-3-pro via Google AI
+# Reasoning: standard
+# =============================================================================
+
+extends: "base.yaml"
+
+META:
+  target_model: "gemini-3-pro"
+  reasoning_mode: "standard"
+  provider: "google"
+
+MODEL_SPECIFIC:
+  # Gemini-specific optimizations
+  temperature: 0.3
+  max_tokens: 2048
+  
+  # Gemini needs explicit Ukrainian instruction
+  language_hint: "ВАЖЛИВО: Відповідай ТІЛЬКИ українською мовою, не англійською."
+  
+  # Gemini can be very detailed
+  verbosity: "concise"
+  
+  # Google's function calling format
+  tool_format: "google_native"
+
+REASONING_HINTS:
+  # Gemini-specific reasoning instructions
+  - "Класифікуй intent точно за INTENT_LABELS."
+  - "Відповідай тільки на основі tool_result."
+  - "Якщо немає даних - ескалюй, не вигадуй."
+  - "Тримай messages[] коротким (1-3 повідомлення)."
+
+RESPONSE_STYLE:
+  # Gemini tends to be analytical - make it warmer
+  greeting_style: "warm_casual"
+  explanation_depth: "minimal"
+  emoji_usage: "moderate"
+
+# Gemini-specific guardrails
+GUARDRAILS:
+  # Gemini sometimes switches to English
+  - "НІКОЛИ не переходь на англійську мову."
+  - "Не використовуй технічний жаргон."
+  - "Будь людяним, не роботизованим."
+
+# Vision capabilities (Gemini has strong vision)
+VISION:
+  enabled: true
+  photo_analysis_prompt: >
+    Проаналізуй фото одягу. Визнач:
+    1. Тип одягу (сукня/костюм/тренч)
+    2. Колір
+    3. Стиль (школа/свято/щодень)
+    Опиши для пошуку в каталозі MIRT.

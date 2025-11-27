@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from src.services.followups import FOLLOWUP_TAG_PREFIX, next_followup_due_at, run_followups
+from src.core.constants import MessageTag
+from src.services.followups import next_followup_due_at, run_followups
 from src.services.message_store import InMemoryMessageStore, StoredMessage
 
 
@@ -19,7 +20,7 @@ def test_followups_created_using_custom_schedule():
         "s1", store, now=base_time + timedelta(hours=1, minutes=5), schedule_hours=[1, 2]
     )
     assert followup is not None
-    assert followup.tags == [f"{FOLLOWUP_TAG_PREFIX}1"]
+    assert followup.tags == [MessageTag.followup_tag(1)]
     assert store.list("s1")[-1].content == followup.content
 
     # second follow-up only after 2 more hours from last activity (follow-up message)
@@ -32,4 +33,4 @@ def test_followups_created_using_custom_schedule():
         "s1", store, now=base_time + timedelta(hours=3, minutes=5), schedule_hours=[1, 2]
     )
     assert followup3 is not None
-    assert followup3.tags == [f"{FOLLOWUP_TAG_PREFIX}2"]
+    assert followup3.tags == [MessageTag.followup_tag(2)]

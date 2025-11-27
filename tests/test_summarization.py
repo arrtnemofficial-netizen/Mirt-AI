@@ -5,6 +5,9 @@ from src.services.summarization import run_retention
 
 
 def test_run_retention_summarises_and_prunes(monkeypatch):
+    # Mock update_user_summary to avoid real Supabase calls
+    monkeypatch.setattr("src.services.summarization.update_user_summary", lambda *args, **kwargs: None)
+    
     store = InMemoryMessageStore()
     now = datetime(2024, 1, 10, tzinfo=timezone.utc)
     old_time = now - timedelta(days=5)

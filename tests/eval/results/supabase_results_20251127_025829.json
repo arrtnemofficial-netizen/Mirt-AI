@@ -1,0 +1,137 @@
+{
+  "run_id": "supabase-20251127_025829",
+  "timestamp": "2025-11-27T02:58:29.727297",
+  "summary": {
+    "total": 12,
+    "passed": 5,
+    "failed": 7,
+    "pass_rate": "41.7%"
+  },
+  "results": [
+    {
+      "test_id": "SB-001",
+      "type": "semantic_search",
+      "description": "Семантичний пошук — сукня святкова",
+      "pass": false,
+      "error": "{'message': 'column \"key\" does not exist', 'code': '42703', 'hint': None, 'details': None}"
+    },
+    {
+      "test_id": "SB-002",
+      "type": "semantic_search",
+      "description": "Семантичний пошук — костюм зі штанами",
+      "pass": false,
+      "error": "{'message': 'column \"key\" does not exist', 'code': '42703', 'hint': None, 'details': None}"
+    },
+    {
+      "test_id": "SB-003",
+      "type": "get_by_id",
+      "description": "Пошук за ID продукту",
+      "pass": true,
+      "data": {
+        "id": 3443041,
+        "name": "Сукня Анна",
+        "variant_name": null,
+        "color_variant": null,
+        "category": "сукні",
+        "subcategory": "школа та святкове",
+        "sizes": [
+          "110-116",
+          "122-128",
+          "134-140",
+          "146-152",
+          "158-164"
+        ],
+        "material": "поплін, підкладка саржа",
+        "care": null,
+        "price_uniform": true,
+        "price_all_sizes": 1850,
+        "price_by_size": null,
+        "colors": {
+          "малина": {
+            "sku": "3443041-RASPBERRY",
+            "photo_url": "https://cdn.sitniks.com/cmp-2065/products/2024-08-17/9bd8a4/3786b5-1723912841187.jpeg",
+            "description": "Глибокий малиновий, більш святковий настрій."
+          },
+          "чорний": {
+            "sku": "3443041-BLACK",
+            "photo_url": "https://cdn.sitniks.com/cmp-2065/products/2024-08-17/37ed45/27d210e-1723912860590.jpeg",
+            "description": "Класичний чорний, універсальний варіант."
+          },
+          "голубий": {
+            "sku": "3443041-BLUE",
+            "photo_url": "https://cdn.sitniks.com/cmp-2065/products/2024-08-17/1d23e6/bfd5d1-1723912755763.jpeg",
+            "description": "Ніжно голубий, акуратний силует, зручно для школи."
+          }
+        },
+        "created_at": "2025-11-26T22:02:23.540296+00:00"
+      }
+    },
+    {
+      "test_id": "SB-004",
+      "type": "get_by_id",
+      "description": "Пошук неіснуючого ID",
+      "pass": true,
+      "reason": "Correctly returned empty"
+    },
+    {
+      "test_id": "SB-005",
+      "type": "rpc_call",
+      "description": "RPC match_mirt_products працює",
+      "pass": false,
+      "error": "{'message': 'column \"key\" does not exist', 'code': '42703', 'hint': None, 'details': None}"
+    },
+    {
+      "test_id": "SB-006",
+      "type": "session_crud",
+      "description": "Сесія — створення та читання",
+      "pass": false,
+      "reason": "Unknown test type: session_crud"
+    },
+    {
+      "test_id": "SB-007",
+      "type": "embedding_check",
+      "description": "Embeddings — перевірка розмірності вектора",
+      "pass": true,
+      "checks": [
+        "All checks passed"
+      ],
+      "chunk_text_preview": "Сукня Анна сукні школа та святкове поплін, підкладка саржа Ніжно голубий, акуратний силует, зручно д"
+    },
+    {
+      "test_id": "SB-008",
+      "type": "semantic_search",
+      "description": "Пошук з порожнім запитом",
+      "pass": true,
+      "result": [],
+      "reason": "Empty query handled correctly"
+    },
+    {
+      "test_id": "SB-009",
+      "type": "semantic_search",
+      "description": "Пошук з SQL injection спробою",
+      "pass": false,
+      "error": "{'message': 'column \"key\" does not exist', 'code': '42703', 'hint': None, 'details': None}"
+    },
+    {
+      "test_id": "SB-010",
+      "type": "check_photo_extraction",
+      "description": "Перевірка photo_url в colors",
+      "pass": false,
+      "reason": "Unknown test type: check_photo_extraction"
+    },
+    {
+      "test_id": "SB-011",
+      "type": "semantic_search",
+      "description": "Пошук тренча",
+      "pass": false,
+      "error": "{'message': 'column \"key\" does not exist', 'code': '42703', 'hint': None, 'details': None}"
+    },
+    {
+      "test_id": "SB-012",
+      "type": "schema_validation",
+      "description": "Перевірка всіх обов'язкових полів продукту",
+      "pass": true,
+      "reason": "Table accessible"
+    }
+  ]
+}

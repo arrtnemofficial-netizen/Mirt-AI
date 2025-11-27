@@ -1,0 +1,62 @@
+# =============================================================================
+# MIRT AI - State Machine Definition
+# =============================================================================
+# Єдине джерело правди для станів та переходів.
+# Код завантажує цей файл і використовує для валідації.
+
+version: "1.0"
+project: "MIRT AI"
+
+states:
+  STATE_0_INIT:
+    display_name: "Початок"
+    description: "Перший контакт. Рішення на основі останнього повідомлення."
+    escalation_level: null
+
+  STATE_1_DISCOVERY:
+    display_name: "Пошук"
+    description: "Збір базового контексту: зріст, вік, тип речі, подія."
+    escalation_level: null
+
+  STATE_2_VISION:
+    display_name: "Фото"
+    description: "Робота з фото, пошук моделі через Vision."
+    escalation_level: null
+
+  STATE_3_SIZE_COLOR:
+    display_name: "Розмір/Колір"
+    description: "Підбір розміру та кольору, прив'язка до product_id."
+    escalation_level: null
+
+  STATE_4_OFFER:
+    display_name: "Пропозиція"
+    description: "Формування конкретної пропозиції з ціною та фото."
+    escalation_level: null
+
+  STATE_5_PAYMENT_DELIVERY:
+    display_name: "Оплата/Доставка"
+    description: "Збір і підтвердження даних для відправки замовлення."
+    escalation_level: null
+
+  STATE_6_UPSELL:
+    display_name: "Допродаж"
+    description: "Допродаж 1-2 релевантних позицій."
+    escalation_level: null
+
+  STATE_7_END:
+    display_name: "Завершення"
+    description: "Завершення діалогу."
+    escalation_level: null
+
+  STATE_8_COMPLAINT:
+    display_name: "Скарга"
+    description: "Скарга або сильний негатив."
+    escalation_level: "L2"
+
+  STATE_9_OOD:
+    display_name: "Поза доменом"
+    description: "Запит поза доменом дитячого одягу MIRT."
+    escalation_level: "L1"
+
+# Стан за замовчуванням
+default_state: "STATE_0_INIT"

@@ -1,12 +1,25 @@
-"""Aiogram-based Telegram bot that wraps the LangGraph app."""
+"""Aiogram-based Telegram bot that wraps the LangGraph app.
+
+Features:
+- Text and photo message handling
+- Quick Reply keyboard based on conversation state
+- Product photo sending
+- Centralized error handling
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
+from typing import List, Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import (
+    Message,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
+)
 
 from src.agents.graph import app as graph_app
 from src.conf.config import settings
@@ -17,6 +30,48 @@ from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore, SessionStore
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Quick Reply Keyboards по станах (використовує state_machine)
+# ---------------------------------------------------------------------------
+from src.core.state_machine import State, EscalationLevel, get_keyboard_for_state, normalize_state
+
+
+def build_keyboard(current_state: str, escalation_level: str = "NONE") -> Optional[ReplyKeyboardMarkup]:
+    """Build Reply Keyboard based on conversation state using centralized state_machine."""
+    
+    # Normalize state and escalation
+    state = normalize_state(current_state)
+    esc_level = EscalationLevel.NONE
+    try:
+        esc_level = EscalationLevel(escalation_level.upper())
+    except ValueError:
+        pass
+    
+    # Get keyboard config from state_machine
+    keyboard_config = get_keyboard_for_state(state, esc_level)
+    
+    if keyboard_config is None:
+        return None
+    
+    # Handle keyboard removal for end states
+    if state in (State.STATE_7_END,):
+        return ReplyKeyboardRemove()
+    
+    # Build Telegram keyboard from config
+    buttons: List[List[KeyboardButton]] = []
+    for row in keyboard_config.buttons:
+        buttons.append([KeyboardButton(text=btn) for btn in row])
+    
+    if not buttons:
+        return None
+    
+    return ReplyKeyboardMarkup(
+        keyboard=buttons,
+        resize_keyboard=True,
+        one_time_keyboard=keyboard_config.one_time,
+    )
 
 
 def build_dispatcher(
@@ -82,17 +137,32 @@ async def _process_incoming(
 
 
 async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse) -> None:
-    """Send formatted agent response back to the chat."""
+    """Send formatted agent response back to the chat with keyboard."""
+
+    # Build keyboard based on state
+    keyboard = build_keyboard(
+        current_state=agent_response.metadata.current_state,
+        escalation_level=agent_response.metadata.escalation_level,
+    )
 
     text_chunks = render_agent_response_text(agent_response)
-    for chunk in text_chunks:
-        await message.answer(chunk)
+    
+    # Send text messages (last one with keyboard)
+    for i, chunk in enumerate(text_chunks):
+        is_last_text = (i == len(text_chunks) - 1) and not agent_response.products
+        await message.answer(
+            chunk,
+            reply_markup=keyboard if is_last_text else None,
+        )
 
-    for product in agent_response.products:
+    # Send product photos (last one with keyboard)
+    for i, product in enumerate(agent_response.products):
         if product.photo_url:
+            is_last = (i == len(agent_response.products) - 1)
             await message.answer_photo(
                 photo=product.photo_url,
-                caption=product.name,
+                caption=f"{product.name} - {product.price} грн",
+                reply_markup=keyboard if is_last else None,
             )
 
 

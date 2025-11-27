@@ -1,0 +1,39 @@
+# =============================================================================
+# MIRT AI Agent - Grok 4.1 Fast Specific Configuration
+# =============================================================================
+# Model: x-ai/grok-4.1-fast via OpenRouter
+# Reasoning: low (fast responses)
+# =============================================================================
+
+extends: "base.yaml"
+
+META:
+  target_model: "x-ai/grok-4.1-fast"
+  reasoning_mode: "low"
+  provider: "openrouter"
+
+MODEL_SPECIFIC:
+  # Grok-specific optimizations
+  temperature: 0.3
+  max_tokens: 2048
+  
+  # Grok handles Ukrainian well, no special instructions needed
+  language_hint: null
+  
+  # Grok tends to be concise - good for chat
+  verbosity: "concise"
+  
+  # Tool calling format for OpenRouter/Grok
+  tool_format: "openai_compatible"
+
+REASONING_HINTS:
+  # Grok-specific reasoning instructions
+  - "Думай покроково, але відповідай коротко."
+  - "Якщо не впевнений у товарі - запитай, не вигадуй."
+  - "Використовуй tool_result як єдине джерело даних."
+
+RESPONSE_STYLE:
+  # Grok tends to be direct - lean into that
+  greeting_style: "friendly_brief"
+  explanation_depth: "minimal"
+  emoji_usage: "moderate"

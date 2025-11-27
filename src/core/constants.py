@@ -1,64 +1,40 @@
 """Centralized constants and enumerations for the MIRT AI system.
 
-This module eliminates magic strings scattered across the codebase,
-providing type-safe enums and constants for state machine, tags, and events.
+This module provides backward compatibility aliases to the new state_machine module.
+For new code, import directly from src.core.state_machine.
+
+Migration guide:
+    OLD: from src.core.constants import AgentState
+    NEW: from src.core.state_machine import State
 """
 from __future__ import annotations
 
 from enum import Enum
 
+# =============================================================================
+# IMPORT FROM NEW STATE MACHINE (Single Source of Truth)
+# =============================================================================
+from src.core.state_machine import (
+    State,
+    Intent,
+    EventType,
+    EscalationLevel,
+    ToolName,
+    normalize_state,
+    get_next_state,
+    get_keyboard_for_state,
+)
 
-class AgentState(str, Enum):
-    """State machine states as defined in system_prompt_full.yaml v6.0-final."""
+# =============================================================================
+# BACKWARD COMPATIBILITY ALIASES
+# =============================================================================
 
-    STATE0_INIT = "STATE0_INIT"
-    STATE1_DISCOVERY = "STATE1_DISCOVERY"
-    STATE2_VISION = "STATE2_VISION"
-    STATE3_CLARIFY = "STATE3_CLARIFY"
-    STATE4_OFFER = "STATE4_OFFER"
-    STATE5_COMPARISON = "STATE5_COMPARISON"
-    STATE6_SIZING = "STATE6_SIZING"
-    STATE7_OBJECTION = "STATE7_OBJECTION"
-    STATE8_CHECKOUT = "STATE8_CHECKOUT"
-    STATE9_OOD = "STATE9_OOD"
-
-    @classmethod
-    def default(cls) -> "AgentState":
-        """Return the initial state for new conversations."""
-        return cls.STATE0_INIT
-
-    @classmethod
-    def from_string(cls, value: str) -> "AgentState":
-        """Safely parse state string, falling back to INIT if invalid."""
-        try:
-            return cls(value)
-        except ValueError:
-            return cls.STATE0_INIT
-
-
-class EventType(str, Enum):
-    """Agent response event types from OUTPUT_CONTRACT."""
-
-    SIMPLE_ANSWER = "simple_answer"
-    OFFER = "offer"
-    CLARIFY = "clarify"
-    ESCALATION = "escalation"
-    CHECKOUT = "checkout"
-    OUT_OF_DOMAIN = "out_of_domain"
-
-
-class EscalationLevel(str, Enum):
-    """Escalation severity levels."""
-
-    NONE = "NONE"
-    L1 = "L1"  # Basic human handoff
-    L2 = "L2"  # Supervisor required
-    L3 = "L3"  # Critical / security issue
+# AgentState is now State - alias for backward compatibility
+AgentState = State
 
 
 class MessageRole(str, Enum):
     """Standard message roles in conversation history."""
-
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -66,7 +42,6 @@ class MessageRole(str, Enum):
 
 class MessageTag(str, Enum):
     """Tags applied to stored messages for filtering and automation."""
-
     HUMAN_NEEDED = "humanNeeded-wd"
     FOLLOWUP_PREFIX = "followup-sent-"
 
@@ -83,23 +58,15 @@ class MessageTag(str, Enum):
 
 class ModerationFlag(str, Enum):
     """Flags set by content moderation."""
-
     SAFETY = "safety"
     EMAIL = "email"
     PHONE = "phone"
     PII = "pii"
 
 
-# Tool names as used in system prompt
-class ToolName(str, Enum):
-    """Supabase tool identifiers matching system_prompt_full.yaml."""
-
-    SEARCH_BY_QUERY = "T_SUPABASE_SEARCH_BY_QUERY"
-    GET_BY_ID = "T_SUPABASE_GET_BY_ID"
-    GET_BY_PHOTO_URL = "T_SUPABASE_GET_BY_PHOTO_URL"
-
-
-# Default values
+# =============================================================================
+# DEFAULT VALUES
+# =============================================================================
 DEFAULT_MATCH_COUNT = 5
 DEFAULT_RETRY_ATTEMPTS = 3
 DEFAULT_RETRY_BASE_DELAY = 0.35

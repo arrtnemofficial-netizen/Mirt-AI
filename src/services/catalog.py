@@ -1,8 +1,11 @@
-"""Catalog loading and search helpers.
+"""Catalog loading and search helpers (JSON fallback for tests/offline).
 
 The catalog is kept outside of the prompt and exposed as a tool for the agent.
 This module centralises validation and lightweight search logic so both the
 agent and tests share identical behaviour.
+
+NOTE: In production, use `supabase_tools.py` with vector embeddings for 
+semantic search. This module is only for offline/test scenarios.
 """
 from __future__ import annotations
 
@@ -12,8 +15,6 @@ from pathlib import Path
 from typing import List, Sequence
 
 from src.core.models import Product
-from src.services.supabase_catalog import get_supabase_catalog
-from src.conf.config import settings
 
 CATALOG_PATH = Path("data/catalog.json")
 
@@ -64,9 +65,6 @@ class CatalogService:
 
 @lru_cache(maxsize=1)
 def get_catalog() -> CatalogService:
-    """Cached catalog instance for runtime use."""
-    supabase_catalog = get_supabase_catalog(settings.SUPABASE_CATALOG_TABLE)
-    if supabase_catalog:
-        return supabase_catalog  # type: ignore[return-value]
+    """Cached catalog instance for runtime use (JSON-based, for tests/offline)."""
     return CatalogService()
 
