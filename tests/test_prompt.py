@@ -6,9 +6,11 @@ These tests verify:
 3. State machine is complete
 4. Intent labels are defined
 """
+
+from pathlib import Path
+
 import pytest
 import yaml
-from pathlib import Path
 
 
 PROMPT_PATH = Path(__file__).parent.parent / "data" / "system_prompt_full.yaml"
@@ -88,7 +90,11 @@ class TestPromptStructure:
 
     def test_has_off_topic_handling(self, prompt_content):
         """Prompt should handle off-topic messages."""
-        assert "ОФТОПІК" in prompt_content.upper() or "OFF_TOPIC" in prompt_content.upper() or "CONVERSATION_RECOVERY" in prompt_content
+        assert (
+            "ОФТОПІК" in prompt_content.upper()
+            or "OFF_TOPIC" in prompt_content.upper()
+            or "CONVERSATION_RECOVERY" in prompt_content
+        )
 
 
 class TestPromptContent:
@@ -114,7 +120,8 @@ class TestPromptContent:
         """Prompt should not have hardcoded prices (should come from catalog)."""
         # Allow some price examples but not too many
         import re
-        price_pattern = r'\d{3,4}\s*грн'
+
+        price_pattern = r"\d{3,4}\s*грн"
         matches = re.findall(price_pattern, prompt_content)
         assert len(matches) < 20, f"Too many hardcoded prices: {len(matches)}"
 

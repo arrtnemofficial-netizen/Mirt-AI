@@ -1,21 +1,27 @@
 """Configurable follow-up scheduling utilities."""
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Iterable, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from src.conf.config import settings
 from src.core.constants import MessageTag
 from src.services.message_store import MessageStore, StoredMessage
 
 
-def _parse_schedule(schedule: Optional[Iterable[int]]) -> List[int]:
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
+def _parse_schedule(schedule: Iterable[float | int] | None) -> list[float]:
+    """Parse schedule hours, supporting both int and float values."""
     if schedule is None:
-        return settings.followup_schedule_hours
-    hours: List[int] = []
+        return [float(h) for h in settings.followup_schedule_hours]
+    hours: list[float] = []
     for value in schedule:
-        if isinstance(value, int) and value > 0:
-            hours.append(value)
+        if isinstance(value, (int, float)) and value > 0:
+            hours.append(float(value))
     return hours
 
 
@@ -27,7 +33,7 @@ def _followups_sent(messages: list[StoredMessage]) -> int:
     return count
 
 
-def _last_activity(messages: list[StoredMessage]) -> Optional[datetime]:
+def _last_activity(messages: list[StoredMessage]) -> datetime | None:
     if not messages:
         return None
     return messages[-1].created_at
@@ -35,8 +41,8 @@ def _last_activity(messages: list[StoredMessage]) -> Optional[datetime]:
 
 def next_followup_due_at(
     messages: list[StoredMessage],
-    schedule_hours: Optional[Iterable[int]] = None,
-) -> Optional[datetime]:
+    schedule_hours: Iterable[float | int] | None = None,
+) -> datetime | None:
     """Return when the next follow-up should occur based on activity and sent count."""
 
     schedule = _parse_schedule(schedule_hours)
@@ -54,8 +60,10 @@ def next_followup_due_at(
     return last + timedelta(hours=schedule[sent])
 
 
-def build_followup_message(session_id: str, index: int, now: Optional[datetime] = None) -> StoredMessage:
-    created_at = now or datetime.now(timezone.utc)
+def build_followup_message(
+    session_id: str, index: int, now: datetime | None = None
+) -> StoredMessage:
+    created_at = now or datetime.now(UTC)
     content = (
         "Привіт! Нагадуємо про підбір луку від MIRT. Готові повернутися до замовлення?"
         if index == 1
@@ -73,9 +81,9 @@ def build_followup_message(session_id: str, index: int, now: Optional[datetime] 
 def run_followups(
     session_id: str,
     message_store: MessageStore,
-    now: Optional[datetime] = None,
-    schedule_hours: Optional[Iterable[int]] = None,
-) -> Optional[StoredMessage]:
+    now: datetime | None = None,
+    schedule_hours: Iterable[float | int] | None = None,
+) -> StoredMessage | None:
     """Create and persist a follow-up message if the schedule is due.
 
     Returns the StoredMessage when a follow-up is created, otherwise None.
@@ -83,7 +91,7 @@ def run_followups(
 
     messages = message_store.list(session_id)
     due_at = next_followup_due_at(messages, schedule_hours=schedule_hours)
-    current_time = now or datetime.now(timezone.utc)
+    current_time = now or datetime.now(UTC)
 
     if not due_at or current_time < due_at:
         return None

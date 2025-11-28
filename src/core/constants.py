@@ -7,6 +7,7 @@ Migration guide:
     OLD: from src.core.constants import AgentState
     NEW: from src.core.state_machine import State
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -16,14 +17,8 @@ from enum import Enum
 # =============================================================================
 from src.core.state_machine import (
     State,
-    Intent,
-    EventType,
-    EscalationLevel,
-    ToolName,
-    normalize_state,
-    get_next_state,
-    get_keyboard_for_state,
 )
+
 
 # =============================================================================
 # BACKWARD COMPATIBILITY ALIASES
@@ -35,6 +30,7 @@ AgentState = State
 
 class MessageRole(str, Enum):
     """Standard message roles in conversation history."""
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -42,6 +38,7 @@ class MessageRole(str, Enum):
 
 class MessageTag(str, Enum):
     """Tags applied to stored messages for filtering and automation."""
+
     HUMAN_NEEDED = "humanNeeded-wd"
     FOLLOWUP_PREFIX = "followup-sent-"
 
@@ -58,6 +55,7 @@ class MessageTag(str, Enum):
 
 class ModerationFlag(str, Enum):
     """Flags set by content moderation."""
+
     SAFETY = "safety"
     EMAIL = "email"
     PHONE = "phone"
@@ -66,6 +64,7 @@ class ModerationFlag(str, Enum):
 
 class DBTable:
     """Database table names constants."""
+
     USERS = "mirt_users"
     MESSAGES = "mirt_messages"
     SESSIONS = "agent_sessions"

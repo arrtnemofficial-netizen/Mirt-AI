@@ -1,9 +1,7 @@
 import asyncio
 
-import pytest
-
-from src.core.models import AgentResponse, Metadata, Message, Product
 from src.agents.pydantic_agent import AgentRunner, DummyAgent
+from src.core.models import AgentResponse, Message, Metadata, Product
 from src.services.metadata import apply_metadata_defaults
 
 
@@ -24,7 +22,6 @@ def build_dummy_response(state: str = "STATE4_OFFER") -> AgentResponse:
         ],
         metadata=Metadata(current_state=state),
     )
-
 
 
 class DummyTools:

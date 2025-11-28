@@ -5,31 +5,64 @@ This module provides text normalization and pattern matching for:
 - PII detection and redaction (emails, phones, card numbers)
 - Leetspeak and evasion detection
 """
+
 from __future__ import annotations
 
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import List, Set
 
 from src.core.constants import ModerationFlag
 
+
 # Base forbidden terms
-FORBIDDEN_TERMS: Set[str] = {
-    "бомба", "терорист", "суїцид", "пістолет", "вибух",
-    "вбити", "смерть", "зброя", "наркотик", "героїн",
+FORBIDDEN_TERMS: set[str] = {
+    "бомба",
+    "терорист",
+    "суїцид",
+    "пістолет",
+    "вибух",
+    "вбити",
+    "смерть",
+    "зброя",
+    "наркотик",
+    "героїн",
 }
 
 # Leetspeak and Cyrillic substitution map for normalization
 SUBSTITUTION_MAP = {
     # Cyrillic look-alikes
-    "а": "a", "е": "e", "і": "i", "о": "o", "р": "p",
-    "с": "c", "у": "y", "х": "x", "А": "a", "В": "b",
-    "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
-    "Р": "p", "С": "c", "Т": "t", "У": "y", "Х": "x",
+    "а": "a",
+    "е": "e",
+    "і": "i",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "у": "y",
+    "х": "x",
+    "А": "a",
+    "В": "b",
+    "Е": "e",
+    "К": "k",
+    "М": "m",
+    "Н": "h",
+    "О": "o",
+    "Р": "p",
+    "С": "c",
+    "Т": "t",
+    "У": "y",
+    "Х": "x",
     # Common leetspeak
-    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s",
-    "7": "t", "8": "b", "@": "a", "$": "s", "!": "i",
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "8": "b",
+    "@": "a",
+    "$": "s",
+    "!": "i",
 }
 
 # Regex patterns
@@ -57,7 +90,7 @@ class ModerationResult:
 
     allowed: bool
     redacted_text: str
-    flags: List[str]
+    flags: list[str]
     reason: str | None = None
 
 
@@ -77,10 +110,7 @@ def normalize_text(text: str) -> str:
     result = unicodedata.normalize("NFD", result)
 
     # Remove diacritics (combining characters)
-    result = "".join(
-        char for char in result
-        if unicodedata.category(char) != "Mn"
-    )
+    result = "".join(char for char in result if unicodedata.category(char) != "Mn")
 
     # Apply substitutions
     normalized = []
@@ -97,7 +127,7 @@ def normalize_text(text: str) -> str:
     return result
 
 
-def detect_forbidden_terms(text: str) -> List[str]:
+def detect_forbidden_terms(text: str) -> list[str]:
     """Detect forbidden terms with normalization for evasion attempts."""
     normalized = normalize_text(text)
     found = []
@@ -111,9 +141,9 @@ def detect_forbidden_terms(text: str) -> List[str]:
     return found
 
 
-def detect_pii(text: str) -> List[str]:
+def detect_pii(text: str) -> list[str]:
     """Detect personally identifiable information in text."""
-    flags: List[str] = []
+    flags: list[str] = []
 
     if EMAIL_REGEX.search(text):
         flags.append(ModerationFlag.EMAIL)
@@ -158,7 +188,7 @@ def moderate_user_message(text: str) -> ModerationResult:
             reason=None,
         )
 
-    flags: List[str] = []
+    flags: list[str] = []
 
     # Check for forbidden terms
     banned_hits = detect_forbidden_terms(text)
@@ -166,7 +196,7 @@ def moderate_user_message(text: str) -> ModerationResult:
         return ModerationResult(
             allowed=False,
             redacted_text="[вилучено через політику безпеки]",
-            flags=[ModerationFlag.SAFETY] + banned_hits,
+            flags=[ModerationFlag.SAFETY, *banned_hits],
             reason="Небезпечний вміст у повідомленні користувача.",
         )
 

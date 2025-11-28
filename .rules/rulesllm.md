@@ -20,6 +20,52 @@
 
 ---
 
+## 🚨 КРИТИЧНО: ПРАВИЛА ІМПОРТІВ
+
+### Заборонені імпорти (ЦІ МОДУЛІ НЕ ІСНУЮТЬ!)
+
+```python
+# ❌ ЗАБОРОНЕНО - ЦІ ФАЙЛИ ВИДАЛЕНО:
+from src.agents.nodes import ...      # НЕ ІСНУЄ!
+from src.agents.graph import ...      # НЕ ІСНУЄ!
+from .nodes import ...                # НЕ ІСНУЄ!
+from .graph import ...                # НЕ ІСНУЄ!
+```
+
+### Правильні імпорти
+
+```python
+# ✅ ПРАВИЛЬНО - імпортуй з src.agents:
+from src.agents import ConversationState
+from src.agents import build_graph, get_graph, get_active_graph
+from src.agents import AgentRunner, run_agent, run_agent_sync
+
+# ✅ ПРАВИЛЬНО - для graph_v2 напряму:
+from src.agents.graph_v2 import ConversationStateV2, build_graph_v2, get_graph_v2
+```
+
+### Структура модуля src.agents
+
+```
+src/agents/
+├── __init__.py          # Експортує все публічне API
+├── graph_v2.py          # LangGraph v2 (ЄДИНА версія!)
+└── pydantic_agent.py    # AgentRunner та run_agent
+
+⚠️ Файли graph.py та nodes.py ВИДАЛЕНО! Вони НЕ існують!
+```
+
+### Чек-ліст перед імпортом
+
+| Питання | Відповідь |
+|---------|-----------|
+| Імпортую з `src.agents.nodes`? | ❌ Заміни на `src.agents` |
+| Імпортую з `src.agents.graph`? | ❌ Заміни на `src.agents` |
+| Потрібен `ConversationState`? | ✅ `from src.agents import ConversationState` |
+| Потрібен граф? | ✅ `from src.agents import get_active_graph` |
+
+---
+
 ## 1. Фундаментальні Архітектурні Принципи
 
 ### 1.1. Єдине Джерело Правди (Single Source of Truth - SSOT)
@@ -71,20 +117,6 @@ data/
 
 ## 2. Стандарти Коду та Обробка Помилок
 
-### 2.1. Жорстке табу на мовчазні помилки
-Найгірший гріх розробника — приховати помилку.
-*   ❌ **CRITICAL ERROR:**
-    ```python
-    try:
-        db.insert(...)
-    except Exception:
-        pass  # 🤬 НІКОЛИ ТАК НЕ РОБИ!
-    ```
-*   ✅ **CORRECT:**
-    ```python
-    try:
-        db.insert(...)
-    except Exception as e:
         logger.error("Failed to insert data: %s", e)
         raise  # Або поверни fallback-значення, якщо це допустимо
     ```

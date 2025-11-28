@@ -6,14 +6,12 @@ This package contains the fundamental building blocks:
 - validation: Input validation utilities
 - logging: Structured logging configuration
 """
+
 from src.core.constants import (
     AgentState,
-    EscalationLevel,
-    EventType,
     MessageRole,
     MessageTag,
     ModerationFlag,
-    ToolName,
 )
 from src.core.models import (
     AgentResponse,
@@ -23,8 +21,17 @@ from src.core.models import (
     Metadata,
     Product,
 )
+from src.core.state_machine import EscalationLevel, EventType, ToolName
+
 
 __all__ = [
+    # Models
+    "AgentResponse",
+    "DebugInfo",
+    "Escalation",
+    "Message",
+    "Metadata",
+    "Product",
     # Constants
     "AgentState",
     "EscalationLevel",
@@ -33,11 +40,4 @@ __all__ = [
     "MessageTag",
     "ModerationFlag",
     "ToolName",
-    # Models
-    "AgentResponse",
-    "DebugInfo",
-    "Escalation",
-    "Message",
-    "Metadata",
-    "Product",
 ]

@@ -26,18 +26,18 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       - AI_MODEL=${AI_MODEL:-x-ai/grok-4.1-fast}
-      
+
       # OpenAI (for embeddings)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      
+
       # Telegram
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_WEBHOOK_PATH=${TELEGRAM_WEBHOOK_PATH:-/webhooks/telegram}
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:8000}
-      
+
       # ManyChat
       - MANYCHAT_VERIFY_TOKEN=${MANYCHAT_VERIFY_TOKEN:-}
-      
+
       # Supabase
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_API_KEY=${SUPABASE_API_KEY}
@@ -47,7 +47,7 @@ services:
       - SUPABASE_CATALOG_TABLE=${SUPABASE_CATALOG_TABLE:-mirt_products}
       - SUPABASE_EMBEDDINGS_TABLE=${SUPABASE_EMBEDDINGS_TABLE:-mirt_product_embeddings}
       - SUPABASE_MATCH_RPC=${SUPABASE_MATCH_RPC:-match_mirt_products}
-      
+
       # Automation
       - SUMMARY_RETENTION_DAYS=${SUMMARY_RETENTION_DAYS:-3}
       - FOLLOWUP_DELAYS_HOURS=${FOLLOWUP_DELAYS_HOURS:-24,72}
@@ -113,10 +113,124 @@ services:
     networks:
       - mirt-network
 
+  # ---------------------------------------------------------------------------
+  # Redis (Celery broker)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: mirt-ai-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - mirt-network
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker
+  # ---------------------------------------------------------------------------
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: mirt-ai-celery-worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_ENABLED=true
+      - CELERY_CONCURRENCY=4
+      - CELERY_MAX_TASKS_PER_CHILD=100
+      # Copy all app env vars
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_API_KEY=${SUPABASE_API_KEY}
+      - SUPABASE_MESSAGES_TABLE=${SUPABASE_MESSAGES_TABLE:-mirt_messages}
+      - SUPABASE_USERS_TABLE=${SUPABASE_USERS_TABLE:-mirt_users}
+      - SNITKIX_API_URL=${SNITKIX_API_URL:-}
+      - SNITKIX_API_KEY=${SNITKIX_API_KEY:-}
+    volumes:
+      - ./data:/app/data:ro
+    command: >
+      celery -A src.workers.celery_app worker
+      --loglevel=INFO
+      --queues=default,summarization,followups,crm,webhooks,llm
+      --concurrency=4
+      --max-tasks-per-child=100
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1"
+    networks:
+      - mirt-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Celery Beat (Scheduler)
+  # ---------------------------------------------------------------------------
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: mirt-ai-celery-beat
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_ENABLED=true
+    command: celery -A src.workers.celery_app beat --loglevel=INFO
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    networks:
+      - mirt-network
+
+  # ---------------------------------------------------------------------------
+  # Flower (Celery monitoring) - Optional
+  # ---------------------------------------------------------------------------
+  flower:
+    image: mher/flower:2.0
+    container_name: mirt-ai-flower
+    profiles:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=${FLOWER_AUTH:-admin:admin}
+    networks:
+      - mirt-network
+
 networks:
   mirt-network:
     driver: bridge
 
+volumes:
+  redis-data:
 # =============================================================================
 # Environment file template (.env.example)
 # =============================================================================

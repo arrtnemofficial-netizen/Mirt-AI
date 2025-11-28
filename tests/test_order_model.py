@@ -1,17 +1,15 @@
 """Tests for Order model and validation."""
+
 import pytest
-from datetime import datetime
 
 from src.services.order_model import (
+    CustomerInfo,
     Order,
     OrderItem,
-    CustomerInfo,
     OrderStatus,
-    PaymentMethod,
-    DeliveryMethod,
     OrderValidationResult,
-    validate_order_data,
     build_missing_data_prompt,
+    validate_order_data,
 )
 
 
@@ -157,7 +155,7 @@ class TestOrder:
             source_id="mc_12345",
         )
         payload = order.to_crm_payload()
-        
+
         assert payload["external_id"] == "session_123"
         assert payload["customer"]["name"] == "Іванов Іван"
         assert payload["customer"]["phone"] == "+380501234567"

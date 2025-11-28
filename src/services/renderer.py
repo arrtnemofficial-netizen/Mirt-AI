@@ -1,15 +1,21 @@
 """Helpers to render AgentResponse objects for chat platforms."""
+
 from __future__ import annotations
 
-from typing import List
+from typing import TYPE_CHECKING
 
-from src.core.models import AgentResponse, Message, Product
+
+if TYPE_CHECKING:
+    from src.core.models import AgentResponse, Message, Product
 
 
 def format_product(product: Product) -> str:
     """Human-friendly single-line product description."""
 
-    parts = [f"{product.name} ({product.size}, {product.color})", f"₴{product.price:,.2f}".replace(",", " ")]
+    parts = [
+        f"{product.name} ({product.size}, {product.color})",
+        f"₴{product.price:,.2f}".replace(",", " "),
+    ]
     if product.sku:
         parts.append(f"SKU {product.sku}")
     if product.photo_url:
@@ -17,17 +23,17 @@ def format_product(product: Product) -> str:
     return " — ".join(parts)
 
 
-def render_messages_text(messages: List[Message]) -> List[str]:
+def render_messages_text(messages: list[Message]) -> list[str]:
     """Flatten text messages for text-only channels (e.g., Telegram)."""
 
-    output: List[str] = []
+    output: list[str] = []
     for message in messages:
         if message.type == "text":
             output.append(message.content)
     return output
 
 
-def render_agent_response_text(response: AgentResponse) -> List[str]:
+def render_agent_response_text(response: AgentResponse) -> list[str]:
     """Prepare a list of textual chunks including product suggestions."""
 
     chunks = render_messages_text(response.messages)

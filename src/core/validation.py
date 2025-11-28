@@ -3,15 +3,16 @@
 This module provides validators for common input types to prevent
 SQL injection, XSS, and other security issues.
 """
+
 from __future__ import annotations
 
 import re
-from typing import Optional
 from urllib.parse import urlparse
 
 
 class ValidationError(ValueError):
     """Raised when input validation fails."""
+
     pass
 
 
@@ -117,7 +118,7 @@ def validate_url(url: str, *, allow_any_domain: bool = False) -> str:
     try:
         parsed = urlparse(cleaned)
     except Exception as e:
-        raise ValidationError(f"Invalid URL format: {e}")
+        raise ValidationError(f"Invalid URL format: {e}") from e
 
     # Check scheme
     if parsed.scheme not in ALLOWED_URL_SCHEMES:
@@ -131,7 +132,9 @@ def validate_url(url: str, *, allow_any_domain: bool = False) -> str:
     if not allow_any_domain:
         host = parsed.netloc.lower()
         # Check if host ends with any allowed domain
-        if not any(host == domain or host.endswith(f".{domain}") for domain in ALLOWED_IMAGE_DOMAINS):
+        if not any(
+            host == domain or host.endswith(f".{domain}") for domain in ALLOWED_IMAGE_DOMAINS
+        ):
             raise ValidationError(f"URL domain not allowed: {host}")
 
     return cleaned

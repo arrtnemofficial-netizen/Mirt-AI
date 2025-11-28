@@ -1,13 +1,12 @@
 import asyncio
-import pytest
 
-from src.core.models import AgentResponse, Metadata, Message, Product
-from src.agents.graph import build_graph
+from src.agents import build_graph
+from src.core.models import AgentResponse, Message, Metadata, Product
 
 
 def test_graph_updates_state_and_messages():
     async def _run():
-        async def fake_runner(messages, metadata):  # noqa: ANN001
+        async def fake_runner(messages, metadata):
             return AgentResponse(
                 event="offer",
                 messages=[Message(content="Привіт!")],
@@ -44,7 +43,7 @@ def test_graph_short_circuits_on_moderation_block():
     async def _run():
         runner_called = False
 
-        async def fake_runner(messages, metadata):  # noqa: ANN001
+        async def fake_runner(messages, metadata):
             nonlocal runner_called
             runner_called = True
             return AgentResponse(

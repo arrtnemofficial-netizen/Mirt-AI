@@ -1,14 +1,16 @@
 """Shared metadata helpers for agent orchestration."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from src.conf.config import settings
-from src.core.constants import AgentState as StateEnum, EscalationLevel
+from src.core.constants import AgentState as StateEnum
+from src.core.state_machine import EscalationLevel
 
 
-def apply_metadata_defaults(metadata: Optional[Dict[str, Any]], current_state: str) -> Dict[str, Any]:
+def apply_metadata_defaults(metadata: dict[str, Any] | None, current_state: str) -> dict[str, Any]:
     """Populate mandatory metadata fields with safe defaults.
 
     The LLM prompt expects these keys to always be present. This helper keeps
@@ -18,7 +20,7 @@ def apply_metadata_defaults(metadata: Optional[Dict[str, Any]], current_state: s
 
     base = {
         "session_id": settings.DEFAULT_SESSION_ID,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "current_state": current_state or StateEnum.default(),
         "event_trigger": "",
         "escalation_level": EscalationLevel.NONE,

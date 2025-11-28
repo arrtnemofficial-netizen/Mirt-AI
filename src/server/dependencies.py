@@ -3,15 +3,15 @@
 This module provides lazy-initialized dependencies for the FastAPI application,
 replacing global singletons with proper DI pattern.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated, Optional
+from typing import Annotated
 
 from aiogram import Bot, Dispatcher
 from fastapi import Depends
 
-from src.agents.graph import app as graph_app
 from src.bot.telegram_bot import build_bot, build_dispatcher
 from src.conf.config import Settings, get_settings
 from src.integrations.manychat.webhook import ManychatWebhook
@@ -62,8 +62,8 @@ def get_manychat_handler(
 
 
 # Cached instances for reuse across requests
-_dispatcher_instance: Optional[Dispatcher] = None
-_manychat_instance: Optional[ManychatWebhook] = None
+_dispatcher_instance: Dispatcher | None = None
+_manychat_instance: ManychatWebhook | None = None
 
 
 def get_cached_dispatcher() -> Dispatcher:

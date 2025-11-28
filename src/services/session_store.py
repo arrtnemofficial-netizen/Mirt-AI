@@ -1,10 +1,11 @@
 """Session store primitives for chat platforms."""
+
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict, Protocol
+from typing import Protocol
 
-from src.agents.nodes import ConversationState
+from src.agents import ConversationState
 from src.core.constants import AgentState as StateEnum
 
 
@@ -25,7 +26,7 @@ class InMemorySessionStore:
     """
 
     def __init__(self) -> None:
-        self._store: Dict[str, ConversationState] = {}
+        self._store: dict[str, ConversationState] = {}
 
     def get(self, session_id: str) -> ConversationState:
         """Return stored state or a fresh empty state."""

@@ -3,17 +3,23 @@
 This module eliminates code duplication between Telegram and ManyChat handlers
 by providing a single ConversationHandler that manages the full message lifecycle.
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from src.agents.nodes import ConversationState
-from src.core.constants import AgentState as StateEnum, MessageTag
+from src.agents import ConversationState
+from src.core.constants import AgentState as StateEnum
+from src.core.constants import MessageTag
 from src.core.models import AgentResponse, Escalation, Message, Metadata
 from src.services.message_store import MessageStore, StoredMessage
-from src.services.session_store import SessionStore
+
+
+if TYPE_CHECKING:
+    from src.services.session_store import SessionStore
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +35,20 @@ class ConversationError(Exception):
 
 class AgentInvocationError(ConversationError):
     """Raised when the AI agent fails to process a message."""
+
     pass
 
 
 class ResponseParsingError(ConversationError):
     """Raised when the agent response cannot be parsed."""
+
     pass
 
 
 class GraphRunner(Protocol):
     """Protocol for LangGraph runner compatibility."""
 
-    async def ainvoke(self, state: ConversationState) -> ConversationState:
-        ...
+    async def ainvoke(self, state: ConversationState) -> ConversationState: ...
 
 
 @dataclass
@@ -50,7 +57,7 @@ class ConversationResult:
 
     response: AgentResponse
     state: ConversationState
-    error: Optional[str] = None
+    error: str | None = None
     is_fallback: bool = False
 
 
@@ -77,7 +84,7 @@ class ConversationHandler:
         session_id: str,
         text: str,
         *,
-        extra_metadata: Optional[dict[str, Any]] = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> ConversationResult:
         """Process a user message through the full conversation pipeline.
 
@@ -92,7 +99,7 @@ class ConversationHandler:
         This method never raises exceptions to the caller - all errors are
         caught and converted to graceful fallback responses.
         """
-        state: Optional[ConversationState] = None
+        state: ConversationState | None = None
 
         try:
             # Load or create session state
@@ -148,9 +155,7 @@ class ConversationHandler:
                 session_id=state.get("metadata", {}).get("session_id", "unknown"),
             ) from e
 
-    def _parse_response(
-        self, result_state: ConversationState, session_id: str
-    ) -> AgentResponse:
+    def _parse_response(self, result_state: ConversationState, session_id: str) -> AgentResponse:
         """Parse the agent response from the result state."""
         messages = result_state.get("messages", [])
 
@@ -190,9 +195,7 @@ class ConversationHandler:
                 e,
             )
 
-    def _persist_assistant_message(
-        self, session_id: str, response: AgentResponse
-    ) -> None:
+    def _persist_assistant_message(self, session_id: str, response: AgentResponse) -> None:
         """Store the assistant response with appropriate tags."""
         try:
             tags = [MessageTag.HUMAN_NEEDED] if response.escalation else []
@@ -214,7 +217,7 @@ class ConversationHandler:
     def _build_fallback_result(
         self,
         session_id: str,
-        state: Optional[ConversationState],
+        state: ConversationState | None,
         error_message: str,
     ) -> ConversationResult:
         """Build a graceful fallback response when processing fails."""
@@ -261,7 +264,7 @@ def create_conversation_handler(
     session_store: SessionStore,
     message_store: MessageStore,
     runner: GraphRunner,
-    fallback_message: Optional[str] = None,
+    fallback_message: str | None = None,
 ) -> ConversationHandler:
     """Factory function to create a ConversationHandler with dependencies."""
     kwargs: dict[str, Any] = {

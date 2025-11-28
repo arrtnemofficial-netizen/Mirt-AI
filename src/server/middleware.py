@@ -3,18 +3,25 @@
 This module provides a simple in-memory rate limiter suitable for single-instance
 deployments. For distributed deployments, replace with Redis-based implementation.
 """
+
 from __future__ import annotations
 
 import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional
+from typing import TYPE_CHECKING
 
-from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from fastapi import Request, Response
+    from starlette.types import ASGIApp
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +55,7 @@ class InMemoryRateLimiter:
 
     def __init__(self, config: RateLimitConfig):
         self.config = config
-        self._clients: Dict[str, ClientState] = defaultdict(ClientState)
+        self._clients: dict[str, ClientState] = defaultdict(ClientState)
 
     def _get_client_key(self, request: Request) -> str:
         """Extract client identifier from request."""
@@ -80,7 +87,7 @@ class InMemoryRateLimiter:
             state.hour_requests = 0
             state.hour_start = now
 
-    def check_rate_limit(self, request: Request) -> tuple[bool, Optional[str], Optional[int]]:
+    def check_rate_limit(self, request: Request) -> tuple[bool, str | None, int | None]:
         """Check if request is within rate limits.
 
         Returns:
@@ -153,7 +160,7 @@ class InMemoryRateLimiter:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """FastAPI middleware that applies rate limiting to incoming requests."""
 
-    def __init__(self, app: ASGIApp, config: Optional[RateLimitConfig] = None):
+    def __init__(self, app: ASGIApp, config: RateLimitConfig | None = None):
         super().__init__(app)
         self.config = config or RateLimitConfig()
         self.limiter = InMemoryRateLimiter(self.config)

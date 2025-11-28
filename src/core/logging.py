@@ -3,13 +3,14 @@
 This module provides JSON-formatted logging suitable for production environments
 and log aggregation systems (ELK, CloudWatch, etc.).
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import sys
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 
 class JSONFormatter(logging.Formatter):
@@ -22,7 +23,7 @@ class JSONFormatter(logging.Formatter):
         include_level: bool = True,
         include_logger: bool = True,
         include_path: bool = False,
-        extra_fields: Optional[Dict[str, Any]] = None,
+        extra_fields: dict[str, Any] | None = None,
     ):
         super().__init__()
         self.include_timestamp = include_timestamp
@@ -33,11 +34,11 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as a JSON string."""
-        log_data: Dict[str, Any] = {}
+        log_data: dict[str, Any] = {}
 
         # Standard fields
         if self.include_timestamp:
-            log_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+            log_data["timestamp"] = datetime.now(UTC).isoformat()
 
         if self.include_level:
             log_data["level"] = record.levelname
@@ -72,10 +73,10 @@ class PrettyFormatter(logging.Formatter):
     """Human-readable formatter for development/debugging."""
 
     COLORS = {
-        "DEBUG": "\033[36m",     # Cyan
-        "INFO": "\033[32m",      # Green
-        "WARNING": "\033[33m",   # Yellow
-        "ERROR": "\033[31m",     # Red
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
         "CRITICAL": "\033[35m",  # Magenta
     }
     RESET = "\033[0m"
@@ -85,7 +86,7 @@ class PrettyFormatter(logging.Formatter):
         color = self.COLORS.get(record.levelname, "")
         reset = self.RESET
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         level = f"{color}{record.levelname:8}{reset}"
         logger_name = record.name[:20].ljust(20)
         message = record.getMessage()
@@ -169,7 +170,7 @@ class LogContext:
         self.context = kwargs
         self._old_factory = None
 
-    def __enter__(self) -> "LogContext":
+    def __enter__(self) -> LogContext:
         self._old_factory = logging.getLogRecordFactory()
 
         context = self.context

@@ -1,15 +1,18 @@
 """Supabase-backed session store for persisting chat state."""
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
-from supabase import Client
-
-from src.agents.nodes import ConversationState
+from src.agents import ConversationState
 from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
 from src.services.session_store import SessionStore
 from src.services.supabase_client import get_supabase_client
+
+
+if TYPE_CHECKING:
+    from supabase import Client
 
 
 class SupabaseSessionStore(SessionStore):
@@ -32,7 +35,7 @@ class SupabaseSessionStore(SessionStore):
             .limit(1)
             .execute()
         )
-        data: Optional[list[Dict[str, Any]]] = getattr(response, "data", None)  # type: ignore[attr-defined]
+        data: list[dict[str, Any]] | None = getattr(response, "data", None)  # type: ignore[attr-defined]
         if data and data[0].get("state"):
             state_data = data[0]["state"]
             # Defensive defaulting in case metadata is missing
@@ -44,14 +47,10 @@ class SupabaseSessionStore(SessionStore):
 
     def save(self, session_id: str, state: ConversationState) -> None:
         payload = {"session_id": session_id, "state": state}
-        (
-            self.client.table(self.table)
-            .upsert(payload)
-            .execute()
-        )
+        (self.client.table(self.table).upsert(payload).execute())
 
 
-def create_supabase_store() -> Optional[SupabaseSessionStore]:
+def create_supabase_store() -> SupabaseSessionStore | None:
     """Factory that builds a SupabaseSessionStore or None when disabled."""
 
     client = get_supabase_client()

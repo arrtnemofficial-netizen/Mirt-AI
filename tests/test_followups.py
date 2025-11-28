@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.core.constants import MessageTag
 from src.services.followups import next_followup_due_at, run_followups
@@ -11,7 +11,7 @@ def test_next_followup_due_when_no_messages():
 
 def test_followups_created_using_custom_schedule():
     store = InMemoryMessageStore()
-    base_time = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    base_time = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     first_user = StoredMessage(session_id="s1", role="user", content="hi", created_at=base_time)
     store.append(first_user)
 

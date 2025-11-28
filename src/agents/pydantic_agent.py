@@ -4,13 +4,14 @@ This module lives under the ``agents`` package to keep the model, prompt,
 operations, and LangGraph orchestration co-located. It mirrors the previous
 service-layer implementation while keeping import side-effects minimal.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent
@@ -21,6 +22,7 @@ from src.conf.config import settings
 from src.core.models import AgentResponse
 from src.services.metadata import apply_metadata_defaults
 
+
 logger = logging.getLogger(__name__)
 
 # Таймаут на LLM виклик (захист від зависання OpenRouter)
@@ -30,17 +32,18 @@ LLM_TIMEOUT_SECONDS = 30
 def load_system_prompt(model_key: str = "grok") -> str:
     """
     Load system prompt text for the specified LLM model.
-    
+
     Uses the new prompt_loader which merges base.yaml + model-specific config
     and generates an optimized system prompt.
-    
+
     Args:
         model_key: One of "grok", "gpt", "gemini"
-    
+
     Returns:
         Formatted system prompt string
     """
     from src.core.prompt_loader import get_system_prompt_text
+
     return get_system_prompt_text(model_key)
 
 
@@ -61,13 +64,15 @@ class AgentRunner:
     """Wrapper around the pydantic-ai Agent to simplify testing and DI."""
 
     agent: Agent
-    tools: Optional[Any] = None  # Supabase tools вимкнені
+    tools: Any | None = None  # Supabase tools вимкнені
 
     def __post_init__(self) -> None:
         # Tools не реєструємо: працюємо без Supabase (Embedded Catalog).
         pass
 
-    async def run(self, history: List[Dict[str, Any]], metadata: Optional[Dict[str, Any]] = None) -> AgentResponse:
+    async def run(
+        self, history: list[dict[str, Any]], metadata: dict[str, Any] | None = None
+    ) -> AgentResponse:
         """Invoke the configured agent with message history and metadata."""
 
         if not history:
@@ -78,7 +83,7 @@ class AgentRunner:
         session_id = metadata.get("session_id", "") if metadata else ""
 
         user_msg = history[-1]["content"]
-        
+
         try:
             # Таймаут захищає від зависання при проблемах з OpenRouter
             result = await asyncio.wait_for(
@@ -93,9 +98,37 @@ class AgentRunner:
                 ),
                 timeout=LLM_TIMEOUT_SECONDS,
             )
-            return result.data  # type: ignore[return-value]
-        except asyncio.TimeoutError:
-            logger.error("LLM timeout after %d seconds for session %s", LLM_TIMEOUT_SECONDS, session_id)
+            # pydantic-ai 1.0+ uses .output instead of .data
+            output = result.output
+
+            # If LLM returned raw JSON string, parse it
+            if isinstance(output, str):
+                import json
+
+                try:
+                    data = json.loads(output)
+                    return AgentResponse.model_validate(data)
+                except (json.JSONDecodeError, Exception) as parse_err:
+                    logger.warning("Failed to parse LLM output as JSON: %s", parse_err)
+                    # Return as text message
+                    from src.core.models import Message, Metadata
+
+                    return AgentResponse(
+                        event="simple_answer",
+                        messages=[Message(type="text", content=output)],
+                        products=[],
+                        metadata=Metadata(
+                            session_id=session_id,
+                            current_state=current_state,
+                            intent="UNKNOWN_OR_EMPTY",
+                        ),
+                    )
+
+            return output  # type: ignore[return-value]
+        except TimeoutError:
+            logger.error(
+                "LLM timeout after %d seconds for session %s", LLM_TIMEOUT_SECONDS, session_id
+            )
             return self._build_timeout_response(session_id, current_state)
 
     def _build_timeout_response(self, session_id: str, current_state: str) -> AgentResponse:
@@ -117,10 +150,12 @@ class AgentRunner:
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L1",
             ),
-            escalation=Escalation(reason="LLM_TIMEOUT", target="admin"),
+            escalation=Escalation(level="L1", reason="LLM_TIMEOUT", target="admin"),
         )
 
-    def run_sync(self, history: List[Dict[str, Any]], metadata: Optional[Dict[str, Any]] = None) -> AgentResponse:
+    def run_sync(
+        self, history: list[dict[str, Any]], metadata: dict[str, Any] | None = None
+    ) -> AgentResponse:
         """Synchronous convenience wrapper used by quick-start snippets."""
 
         try:
@@ -134,7 +169,7 @@ class AgentRunner:
 def _get_model_key_from_settings() -> str:
     """
     Determine model key based on current LLM provider settings.
-    
+
     Returns:
         Model key: "grok", "gpt", or "gemini"
     """
@@ -149,9 +184,9 @@ def _get_model_key_from_settings() -> str:
 
 def build_agent_runner(
     *,
-    tools: Optional[Any] = None,
-    system_prompt: Optional[str] = None,
-    model: Optional[OpenAIModel] = None,
+    tools: Any | None = None,
+    system_prompt: str | None = None,
+    model: OpenAIModel | None = None,
     retries: int = 2,
 ) -> AgentRunner:
     """Factory for the runtime AgentRunner (Supabase tools відключені)."""
@@ -172,7 +207,7 @@ def build_agent_runner(
 
 
 # Lazily-instantiated default runner to avoid network calls on import
-_default_runner: Optional[AgentRunner] = None
+_default_runner: AgentRunner | None = None
 
 
 def get_default_runner() -> AgentRunner:
@@ -182,14 +217,18 @@ def get_default_runner() -> AgentRunner:
     return _default_runner
 
 
-async def run_agent(history: List[Dict[str, Any]], metadata: Optional[Dict[str, Any]] = None) -> AgentResponse:
+async def run_agent(
+    history: list[dict[str, Any]], metadata: dict[str, Any] | None = None
+) -> AgentResponse:
     """Runtime-friendly helper using the cached runner."""
 
     runner = get_default_runner()
     return await runner.run(history, metadata or {})
 
 
-def run_agent_sync(history: List[Dict[str, Any]], metadata: Optional[Dict[str, Any]] = None) -> AgentResponse:
+def run_agent_sync(
+    history: list[dict[str, Any]], metadata: dict[str, Any] | None = None
+) -> AgentResponse:
     runner = get_default_runner()
     return runner.run_sync(history, metadata or {})
 
@@ -197,18 +236,20 @@ def run_agent_sync(history: List[Dict[str, Any]], metadata: Optional[Dict[str, A
 class DummyAgent:
     """Minimal stub used exclusively in tests."""
 
-    def __init__(self, response: AgentResponse, capture: Optional[List[SimpleNamespace]] = None):
+    def __init__(self, response: AgentResponse, capture: list[SimpleNamespace] | None = None):
         self._response = response
         self._capture = capture if capture is not None else []
 
-    def tool(self, func=None, *, name: Optional[str] = None):  # noqa: ANN001
+    def tool(self, func=None, *, name: str | None = None):
         """Mock tool decorator that accepts optional name kwarg like real Agent."""
+
         def decorator(f):
             return f
+
         if func is not None:
             return decorator(func)
         return decorator
 
-    async def run(self, *args, **kwargs):  # noqa: ANN001, D401
+    async def run(self, *args, **kwargs):
         self._capture.append(SimpleNamespace(args=args, kwargs=kwargs))
         return SimpleNamespace(data=self._response)

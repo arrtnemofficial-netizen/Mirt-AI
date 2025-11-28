@@ -2,12 +2,12 @@ import pytest
 
 from src.core.models import AgentResponse, Message, Metadata, Product
 from src.integrations.manychat.webhook import (
-    ManychatWebhook,
-    FIELD_AI_STATE,
     FIELD_AI_INTENT,
+    FIELD_AI_STATE,
     FIELD_LAST_PRODUCT,
     TAG_AI_RESPONDED,
     TAG_NEEDS_HUMAN,
+    ManychatWebhook,
 )
 from src.services.session_store import InMemorySessionStore
 
@@ -17,7 +17,9 @@ class DummyRunner:
         self.agent_response = agent_response
 
     async def ainvoke(self, state):
-        state["messages"].append({"role": "assistant", "content": self.agent_response.model_dump_json()})
+        state["messages"].append(
+            {"role": "assistant", "content": self.agent_response.model_dump_json()}
+        )
         state["metadata"] = self.agent_response.metadata.model_dump()
         state["current_state"] = self.agent_response.metadata.current_state
         return state
@@ -44,12 +46,12 @@ async def test_manychat_handle_returns_messages():
     assert output["version"] == "v2"
     assert "content" in output
     assert "messages" in output["content"]
-    
+
     # Check messages
     messages = output["content"]["messages"]
     assert messages[0]["text"].startswith("Привіт")
     assert messages[1]["text"].startswith("Як можу")
-    
+
     # Check debug metadata
     assert output["_debug"]["current_state"] == "STATE_1_DISCOVERY"
     assert output["_debug"]["intent"] == "GREETING_ONLY"
@@ -61,7 +63,16 @@ async def test_manychat_custom_fields():
     response = AgentResponse(
         event="simple_answer",
         messages=[Message(content="Ось сукня")],
-        products=[Product(product_id=123, name="Сукня Анна", price=1200, size="122-128", color="синій", photo_url="https://example.com/photo.jpg")],
+        products=[
+            Product(
+                product_id=123,
+                name="Сукня Анна",
+                price=1200,
+                size="122-128",
+                color="синій",
+                photo_url="https://example.com/photo.jpg",
+            )
+        ],
         metadata=Metadata(current_state="STATE_4_OFFER", intent="DISCOVERY_OR_QUESTION"),
     )
     runner = DummyRunner(response)
@@ -74,7 +85,7 @@ async def test_manychat_custom_fields():
     # Check set_field_values
     field_values = output["set_field_values"]
     field_dict = {f["field_name"]: f["field_value"] for f in field_values}
-    
+
     assert field_dict[FIELD_AI_STATE] == "STATE_4_OFFER"
     assert field_dict[FIELD_AI_INTENT] == "DISCOVERY_OR_QUESTION"
     assert field_dict[FIELD_LAST_PRODUCT] == "Сукня Анна"
@@ -87,7 +98,9 @@ async def test_manychat_tags():
         event="escalation",
         messages=[Message(content="Передаю менеджеру")],
         products=[],
-        metadata=Metadata(current_state="STATE_8_COMPLAINT", intent="COMPLAINT", escalation_level="L2"),
+        metadata=Metadata(
+            current_state="STATE_8_COMPLAINT", intent="COMPLAINT", escalation_level="L2"
+        ),
     )
     runner = DummyRunner(response)
     store = InMemorySessionStore()
@@ -120,7 +133,7 @@ async def test_manychat_quick_replies():
     # Check quick replies for discovery state
     quick_replies = output["content"]["quick_replies"]
     captions = [r["caption"] for r in quick_replies]
-    
+
     assert "👗 Сукні" in captions
     assert "👔 Костюми" in captions
     assert "🧥 Тренчі" in captions

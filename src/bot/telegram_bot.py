@@ -6,28 +6,29 @@ Features:
 - Product photo sending
 - Centralized error handling
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import List, Optional
+from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import (
+    KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
-    KeyboardButton,
     ReplyKeyboardRemove,
 )
 
 from src.agents.graph_v2 import get_active_graph
 from src.conf.config import settings
-from src.core.models import AgentResponse
 from src.services.conversation import ConversationHandler, create_conversation_handler
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore, SessionStore
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,38 +36,44 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Quick Reply Keyboards по станах (використовує state_machine)
 # ---------------------------------------------------------------------------
-from src.core.state_machine import State, EscalationLevel, get_keyboard_for_state, normalize_state
+import contextlib
+
+from src.core.state_machine import EscalationLevel, State, get_keyboard_for_state, normalize_state
 
 
-def build_keyboard(current_state: str, escalation_level: str = "NONE") -> Optional[ReplyKeyboardMarkup]:
+if TYPE_CHECKING:
+    from src.core.models import AgentResponse
+
+
+def build_keyboard(
+    current_state: str, escalation_level: str = "NONE"
+) -> ReplyKeyboardMarkup | None:
     """Build Reply Keyboard based on conversation state using centralized state_machine."""
-    
+
     # Normalize state and escalation
     state = normalize_state(current_state)
     esc_level = EscalationLevel.NONE
-    try:
+    with contextlib.suppress(ValueError):
         esc_level = EscalationLevel(escalation_level.upper())
-    except ValueError:
-        pass
-    
+
     # Get keyboard config from state_machine
     keyboard_config = get_keyboard_for_state(state, esc_level)
-    
+
     if keyboard_config is None:
         return None
-    
+
     # Handle keyboard removal for end states
     if state in (State.STATE_7_END,):
         return ReplyKeyboardRemove()
-    
+
     # Build Telegram keyboard from config
-    buttons: List[List[KeyboardButton]] = []
+    buttons: list[list[KeyboardButton]] = []
     for row in keyboard_config.buttons:
         buttons.append([KeyboardButton(text=btn) for btn in row])
-    
+
     if not buttons:
         return None
-    
+
     return ReplyKeyboardMarkup(
         keyboard=buttons,
         resize_keyboard=True,
@@ -82,7 +89,7 @@ def build_dispatcher(
     """Create a Dispatcher with handlers bound to the shared store."""
     dp = Dispatcher()
     msg_store = message_store or create_message_store()
-    
+
     # Use active graph based on USE_GRAPH_V2 feature flag
     active_runner = runner or get_active_graph()
 
@@ -95,9 +102,7 @@ def build_dispatcher(
 
     @dp.message(CommandStart())
     async def handle_start(message: Message) -> None:
-        await message.answer(
-            "Привіт! Я стиліст MIRT. Напиши, що шукаєш, і підберу варіанти."
-        )
+        await message.answer("Привіт! Я стиліст MIRT. Напиши, що шукаєш, і підберу варіанти.")
 
     @dp.message(F.text)
     async def handle_text(message: Message) -> None:
@@ -149,7 +154,7 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
     )
 
     text_chunks = render_agent_response_text(agent_response)
-    
+
     # Send text messages (last one with keyboard)
     for i, chunk in enumerate(text_chunks):
         is_last_text = (i == len(text_chunks) - 1) and not agent_response.products
@@ -161,7 +166,7 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
     # Send product photos (last one with keyboard)
     for i, product in enumerate(agent_response.products):
         if product.photo_url:
-            is_last = (i == len(agent_response.products) - 1)
+            is_last = i == len(agent_response.products) - 1
             await message.answer_photo(
                 photo=product.photo_url,
                 caption=f"{product.name} - {product.price} грн",

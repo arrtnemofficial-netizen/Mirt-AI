@@ -1,13 +1,14 @@
+import builtins
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import List, Protocol
+from datetime import UTC, datetime
+from typing import Any, Protocol
 
 from supabase import Client
 
-from src.services.supabase_client import get_supabase_client
-from src.conf.config import settings
 from src.core.constants import DBTable
+from src.services.supabase_client import get_supabase_client
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,19 +20,16 @@ class StoredMessage:
     content: str
     user_id: int | None = None
     content_type: str = "text"
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     tags: list[str] = field(default_factory=list)
 
 
 class MessageStore(Protocol):
-    def append(self, message: StoredMessage) -> None:
-        ...
+    def append(self, message: StoredMessage) -> None: ...
 
-    def list(self, session_id: str) -> List[StoredMessage]:
-        ...
+    def list(self, session_id: str) -> list[StoredMessage]: ...
 
-    def delete(self, session_id: str) -> None:
-        ...
+    def delete(self, session_id: str) -> None: ...
 
 
 class InMemoryMessageStore:
@@ -41,7 +39,7 @@ class InMemoryMessageStore:
     def append(self, message: StoredMessage) -> None:
         self._messages.setdefault(message.session_id, []).append(message)
 
-    def list(self, session_id: str) -> List[StoredMessage]:
+    def list(self, session_id: str) -> list[StoredMessage]:
         return list(self._messages.get(session_id, []))
 
     def delete(self, session_id: str) -> None:
@@ -50,7 +48,7 @@ class InMemoryMessageStore:
 
 class SupabaseMessageStore:
     """Message store using mirt_messages table schema."""
-    
+
     def __init__(self, client: Client, table: str = DBTable.MESSAGES) -> None:
         self.client = client
         self.table = table
@@ -64,11 +62,11 @@ class SupabaseMessageStore:
             "content_type": message.content_type,
             "created_at": message.created_at.isoformat(),
         }
-        
+
         if message.user_id:
             payload["user_id"] = message.user_id
             self._update_user_interaction(message.user_id)
-        
+
         try:
             self.client.table(self.table).insert(payload).execute()
         except Exception as e:
@@ -78,15 +76,17 @@ class SupabaseMessageStore:
     def _update_user_interaction(self, user_id: int) -> None:
         """Update last_interaction_at for user."""
         try:
-            self.client.table(DBTable.USERS).upsert({
-                "user_id": user_id,
-                "last_interaction_at": datetime.now(timezone.utc).isoformat(),
-            }).execute()
+            self.client.table(DBTable.USERS).upsert(
+                {
+                    "user_id": user_id,
+                    "last_interaction_at": datetime.now(UTC).isoformat(),
+                }
+            ).execute()
         except Exception as e:
             # Log warning but don't fail the main message insert flow
             logger.warning("Failed to update last_interaction_at for user %s: %s", user_id, e)
 
-    def list(self, session_id: str) -> List[StoredMessage]:
+    def list(self, session_id: str) -> list[StoredMessage]:
         """Get all messages for a session."""
         try:
             response = (
@@ -102,7 +102,7 @@ class SupabaseMessageStore:
 
         return self._parse_response(response)
 
-    def list_by_user(self, user_id: int) -> List[StoredMessage]:
+    def list_by_user(self, user_id: int) -> builtins.list[StoredMessage]:
         """Get all messages for a user."""
         try:
             response = (
@@ -118,20 +118,20 @@ class SupabaseMessageStore:
 
         return self._parse_response(response)
 
-    def _parse_response(self, response: Any) -> List[StoredMessage]:
+    def _parse_response(self, response: Any) -> builtins.list[StoredMessage]:
         """Helper to parse Supabase response."""
         data = getattr(response, "data", None)
         if not data:
             return []
-            
+
         messages: list[StoredMessage] = []
         for row in data:
             created_at = row.get("created_at")
             try:
                 dt = datetime.fromisoformat(created_at)
             except (ValueError, TypeError):
-                dt = datetime.now(timezone.utc)
-                
+                dt = datetime.now(UTC)
+
             messages.append(
                 StoredMessage(
                     session_id=row.get("session_id", ""),
@@ -157,4 +157,3 @@ def create_message_store() -> MessageStore:
     if client:
         return SupabaseMessageStore(client)
     return InMemoryMessageStore()
-

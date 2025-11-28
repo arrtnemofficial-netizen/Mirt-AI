@@ -2,6 +2,7 @@
 
 Reads environment variables for API access and runtime tuning.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -59,15 +60,18 @@ class Settings(BaseSettings):
         default="agent_sessions", description="Table name storing chat session state JSON."
     )
     SUPABASE_MESSAGES_TABLE: str = Field(
-        default="mirt_messages", description="Table storing raw chat messages (session-scoped).",
+        default="mirt_messages",
+        description="Table storing raw chat messages (session-scoped).",
     )
     SUPABASE_USERS_TABLE: str = Field(
-        default="mirt_users", description="Table storing user profiles and summaries.",
+        default="mirt_users",
+        description="Table storing user profiles and summaries.",
     )
     # RAG tables removed - using Embedded Catalog in prompt
     # SUPABASE_CATALOG_TABLE, SUPABASE_EMBEDDINGS_TABLE, SUPABASE_MATCH_RPC - DELETED
     SUMMARY_RETENTION_DAYS: int = Field(
-        default=3, description="Days after which conversations are summarized and pruned.",
+        default=3,
+        description="Days after which conversations are summarized and pruned.",
     )
     FOLLOWUP_DELAYS_HOURS: str = Field(
         default="24,72",
@@ -78,11 +82,49 @@ class Settings(BaseSettings):
     )
 
     # Snitkix CRM integration
-    SNITKIX_API_URL: str = Field(
-        default="", description="Snitkix CRM API base URL."
+    SNITKIX_API_URL: str = Field(default="", description="Snitkix CRM API base URL.")
+    SNITKIX_API_KEY: SecretStr = Field(default=SecretStr(""), description="Snitkix CRM API key.")
+
+    # Celery / Redis configuration
+    REDIS_URL: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis URL for Celery broker and result backend.",
     )
-    SNITKIX_API_KEY: SecretStr = Field(
-        default=SecretStr(""), description="Snitkix CRM API key."
+    CELERY_ENABLED: bool = Field(
+        default=False,
+        description="Enable Celery background tasks (requires Redis).",
+    )
+    CELERY_RESULT_TIMEOUT: int = Field(
+        default=25,
+        description="Seconds to wait for worker result when synchronous response is required.",
+    )
+    CELERY_EAGER: bool = Field(
+        default=False,
+        description="Run Celery tasks synchronously (for testing). Set via CELERY_EAGER env var.",
+    )
+    CELERY_CONCURRENCY: int = Field(
+        default=4,
+        description="Number of concurrent worker processes.",
+    )
+    CELERY_MAX_TASKS_PER_CHILD: int = Field(
+        default=100,
+        description="Max tasks per worker before restart (prevents memory leaks).",
+    )
+
+    # =========================================================================
+    # MONITORING
+    # =========================================================================
+    SENTRY_DSN: str = Field(
+        default="",
+        description="Sentry DSN for error tracking. Leave empty to disable.",
+    )
+    SENTRY_ENVIRONMENT: str = Field(
+        default="development",
+        description="Sentry environment (development, staging, production).",
+    )
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(
+        default=0.1,
+        description="Sentry traces sample rate (0.0-1.0).",
     )
 
     # =========================================================================

@@ -1,9 +1,11 @@
 """Tests for ManyChat follow-up endpoint."""
-import pytest
+
 from unittest.mock import patch
 
-from src.server.main import app, _generate_followup_text
+import pytest
 from fastapi.testclient import TestClient
+
+from src.server.main import _generate_followup_text, app
 
 
 # Mock settings to disable token verification in tests
