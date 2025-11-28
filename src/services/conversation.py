@@ -14,6 +14,8 @@ from src.agents import ConversationState
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.models import AgentResponse, Escalation, Message, Metadata
+from src.core.output_parser import parse_llm_output
+from src.core.state_validator import validate_state_transition
 from src.services.message_store import MessageStore, StoredMessage
 
 
@@ -78,6 +80,8 @@ class ConversationHandler:
     fallback_message: str = field(
         default="Вибачте, сталася технічна помилка. Спробуйте ще раз або зверніться до підтримки."
     )
+    max_retries: int = field(default=2)
+    retry_delay: float = field(default=1.0)
 
     async def process_message(
         self,
@@ -146,41 +150,86 @@ class ConversationHandler:
             return self._build_fallback_result(session_id, state, str(e))
 
     async def _invoke_agent(self, state: ConversationState) -> ConversationState:
-        """Invoke the LangGraph agent with error handling."""
-        try:
-            return await self.runner.ainvoke(state)
-        except Exception as e:
-            raise AgentInvocationError(
-                f"Agent invocation failed: {e}",
-                session_id=state.get("metadata", {}).get("session_id", "unknown"),
-            ) from e
+        """Invoke the LangGraph agent with retry logic."""
+        import asyncio
+
+        session_id = state.get("metadata", {}).get("session_id", "unknown")
+        last_error: Exception | None = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                result = await self.runner.ainvoke(state)
+                if attempt > 0:
+                    logger.info("Agent succeeded on retry %d for session %s", attempt, session_id)
+                return result
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "Agent attempt %d failed for session %s: %s. Retrying...",
+                        attempt + 1,
+                        session_id,
+                        str(e)[:100],
+                    )
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+                else:
+                    logger.error(
+                        "Agent failed after %d attempts for session %s",
+                        self.max_retries + 1,
+                        session_id,
+                    )
+
+        raise AgentInvocationError(
+            f"Agent invocation failed after {self.max_retries + 1} attempts: {last_error}",
+            session_id=session_id,
+        ) from last_error
 
     def _parse_response(self, result_state: ConversationState, session_id: str) -> AgentResponse:
-        """Parse the agent response from the result state."""
+        """Parse the agent response from the result state with robust fallbacks."""
         messages = result_state.get("messages", [])
+        current_state = result_state.get("current_state", "STATE_0_INIT")
 
         if not messages:
-            raise ResponseParsingError(
-                "No messages in result state",
+            logger.warning("No messages in result state for session %s", session_id)
+            return parse_llm_output(
+                "",
                 session_id=session_id,
+                current_state=current_state,
             )
 
         last_message = messages[-1]
         content = last_message.get("content", "")
 
-        if not content:
-            raise ResponseParsingError(
-                "Empty content in last message",
+        # Use robust parser with multiple fallback strategies
+        response = parse_llm_output(
+            content,
+            session_id=session_id,
+            current_state=current_state,
+        )
+
+        # Validate and correct state transition
+        if response.metadata:
+            proposed_state = response.metadata.current_state
+            intent = response.metadata.intent
+
+            transition = validate_state_transition(
                 session_id=session_id,
+                current_state=current_state,
+                proposed_state=proposed_state,
+                intent=intent,
             )
 
-        try:
-            return AgentResponse.model_validate_json(content)
-        except Exception as e:
-            raise ResponseParsingError(
-                f"Failed to parse agent response: {e}",
-                session_id=session_id,
-            ) from e
+            if transition.was_corrected:
+                logger.info(
+                    "State corrected for session %s: %s -> %s (reason: %s)",
+                    session_id,
+                    proposed_state,
+                    transition.new_state,
+                    transition.reason,
+                )
+                response.metadata.current_state = transition.new_state
+
+        return response
 
     def _persist_user_message(self, session_id: str, text: str) -> None:
         """Store the user message in the message store."""

@@ -90,10 +90,12 @@ class AgentRunner:
                 self.agent.run(
                     user_msg,
                     model_settings={
+                        # Force JSON output format for reliability
+                        "response_format": {"type": "json_object"},
                         "extra_body": {
                             "reasoning": {"enabled": True, "effort": "medium"},
                             "metadata": prepared_metadata,
-                        }
+                        },
                     },
                 ),
                 timeout=LLM_TIMEOUT_SECONDS,
