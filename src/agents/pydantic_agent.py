@@ -101,30 +101,14 @@ class AgentRunner:
             # pydantic-ai 1.0+ uses .output instead of .data
             output = result.output
 
-            # If LLM returned raw JSON string, parse it
-            if isinstance(output, str):
-                import json
+            # Use robust parser with multiple fallback strategies
+            from src.core.output_parser import parse_llm_output
 
-                try:
-                    data = json.loads(output)
-                    return AgentResponse.model_validate(data)
-                except (json.JSONDecodeError, Exception) as parse_err:
-                    logger.warning("Failed to parse LLM output as JSON: %s", parse_err)
-                    # Return as text message
-                    from src.core.models import Message, Metadata
-
-                    return AgentResponse(
-                        event="simple_answer",
-                        messages=[Message(type="text", content=output)],
-                        products=[],
-                        metadata=Metadata(
-                            session_id=session_id,
-                            current_state=current_state,
-                            intent="UNKNOWN_OR_EMPTY",
-                        ),
-                    )
-
-            return output  # type: ignore[return-value]
+            return parse_llm_output(
+                raw_output=output,
+                session_id=session_id,
+                current_state=current_state,
+            )
         except TimeoutError:
             logger.error(
                 "LLM timeout after %d seconds for session %s", LLM_TIMEOUT_SECONDS, session_id
