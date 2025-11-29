@@ -57,9 +57,8 @@ ENV PYTHONUNBUFFERED=1 \
     PUBLIC_BASE_URL=http://localhost:8000 \
     TELEGRAM_WEBHOOK_PATH=/webhooks/telegram
 
-# Copy start script
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+# Copy run script
+COPY src/run.py /app/src/run.py
 
 # Expose port (Railway provides $PORT, default 8000)
 EXPOSE 8000
@@ -71,8 +70,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Switch to non-root user
 USER mirt
 
-# Run the application - Railway sets $PORT automatically
-CMD ["/app/start.sh"]
+# Run the application using Python directly
+CMD ["python", "src/run.py"]
 
 # -----------------------------------------------------------------------------
 # Stage 3: Development (optional, for local development)
