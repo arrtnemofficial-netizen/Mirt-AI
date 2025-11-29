@@ -1,0 +1,23 @@
+# =============================================================================
+# MIRT AI - Nixpacks Configuration (Railway auto-builder)
+# =============================================================================
+# Used when Railway builds without Dockerfile
+# Docs: https://nixpacks.com/docs/configuration/file
+# =============================================================================
+
+[phases.setup]
+nixPkgs = ["python311", "gcc"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[phases.build]
+cmds = ["echo 'Build complete'"]
+
+[start]
+cmd = "uvicorn src.server.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+
+[variables]
+PYTHONUNBUFFERED = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+PYTHONPATH = "/app"

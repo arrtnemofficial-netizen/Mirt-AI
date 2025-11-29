@@ -322,3 +322,58 @@ def dispatch_message(
                 "trace_id": trace_id,
                 "error": str(e),
             }
+
+
+def dispatch_llm_usage(
+    user_id: int | None,
+    model: str,
+    tokens_input: int,
+    tokens_output: int,
+    session_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict:
+    """Dispatch LLM usage recording.
+
+    Args:
+        user_id: User ID (optional)
+        model: Model name
+        tokens_input: Input token count
+        tokens_output: Output token count
+        session_id: Optional session ID
+        metadata: Optional metadata
+
+    Returns:
+        Task result or async task info
+    """
+    if settings.CELERY_ENABLED:
+        from src.workers.tasks.llm_usage import record_usage
+
+        task = record_usage.delay(
+            user_id=user_id,
+            model=model,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            session_id=session_id,
+            metadata=metadata,
+        )
+        logger.info("[DISPATCH] Queued LLM usage task %s", task.id)
+        return {"queued": True, "task_id": task.id}
+    else:
+        # Sync execution - just log it
+        from src.workers.tasks.llm_usage import calculate_cost
+
+        cost = calculate_cost(model, tokens_input, tokens_output)
+        logger.info(
+            "[DISPATCH] LLM usage (sync): model=%s in=%d out=%d cost=$%.6f",
+            model,
+            tokens_input,
+            tokens_output,
+            cost,
+        )
+        return {
+            "queued": False,
+            "model": model,
+            "tokens_input": tokens_input,
+            "tokens_output": tokens_output,
+            "cost_usd": float(cost),
+        }

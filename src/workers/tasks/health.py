@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-import os
 import platform
 from datetime import UTC, datetime
 
 from celery import shared_task
+
+from src.core.constants import DBTable
 
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def worker_health_check(self) -> dict:
         client = get_supabase_client()
         if client:
             # Simple query to verify connection
-            client.table("mirt_messages").select("id").limit(1).execute()
+            client.table(DBTable.MESSAGES).select("id").limit(1).execute()
             health["checks"]["supabase"] = {"status": "ok"}
         else:
             health["checks"]["supabase"] = {"status": "not_configured"}

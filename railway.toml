@@ -1,0 +1,26 @@
+# =============================================================================
+# MIRT AI - Railway Configuration
+# =============================================================================
+# https://railway.app/
+# Docs: https://docs.railway.app/reference/config-as-code
+# =============================================================================
+
+[build]
+# Use Dockerfile for building
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Start command - $PORT is provided by Railway
+startCommand = "uvicorn src.server.main:app --host 0.0.0.0 --port $PORT"
+
+# Health check
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+
+# Restart policy
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Number of replicas (1 for free tier)
+numReplicas = 1

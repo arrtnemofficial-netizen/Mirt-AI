@@ -219,9 +219,9 @@ def schedule_followup(
 
 def _send_telegram_followup(chat_id: str, text: str) -> None:
     """Send follow-up message via Telegram bot."""
-    import asyncio
-
     from aiogram import Bot
+
+    from src.workers.sync_utils import run_sync
 
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
     if not token:
@@ -235,7 +235,7 @@ def _send_telegram_followup(chat_id: str, text: str) -> None:
         finally:
             await bot.session.close()
 
-    asyncio.run(_send())
+    run_sync(_send())
 
 
 def _send_manychat_followup(subscriber_id: str, text: str) -> None:

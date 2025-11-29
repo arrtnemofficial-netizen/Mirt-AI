@@ -11,6 +11,7 @@ Environment variables required:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -18,6 +19,16 @@ import httpx
 from src.conf.config import settings
 from src.integrations.crm.base import BaseCRMClient, CRMErrorType, CRMResponse
 from src.services.order_model import Order, OrderStatus
+
+
+@dataclass
+class OrderStatusResult:
+    """Result of order status query."""
+
+    order_id: str
+    status: str
+    snitkix_status: str
+    updated_at: str | None = None
 
 
 logger = logging.getLogger(__name__)
@@ -183,6 +194,30 @@ class SnitkixCRMClient(BaseCRMClient):
         except Exception as e:
             logger.exception("Snitkix get order error: %s", e)
             return CRMResponse.fail(str(e), CRMErrorType.UNKNOWN)
+
+    async def get_order_status(self, order_id: str) -> OrderStatusResult | None:
+        """Get order status from Snitkix CRM.
+
+        Args:
+            order_id: CRM order ID
+
+        Returns:
+            OrderStatusResult with status info, or None if not found
+        """
+        response = await self.get_order(order_id)
+
+        if not response.success or not response.data:
+            return None
+
+        snitkix_status = response.data.get("status", "unknown")
+        our_status = REVERSE_STATUS_MAPPING.get(snitkix_status, OrderStatus.NEW)
+
+        return OrderStatusResult(
+            order_id=order_id,
+            status=our_status.value,
+            snitkix_status=snitkix_status,
+            updated_at=response.data.get("updated_at"),
+        )
 
     async def search_orders(
         self,

@@ -82,6 +82,7 @@ celery_app = Celery(
         "src.workers.tasks.crm",
         "src.workers.tasks.health",
         "src.workers.tasks.messages",  # THE MAIN TASK!
+        "src.workers.tasks.llm_usage",  # Token usage tracking
     ],
 )
 
@@ -143,23 +144,6 @@ celery_app.conf.update(
     task_always_eager=CELERY_EAGER,  # Run tasks synchronously in tests
     task_eager_propagates=CELERY_EAGER,  # Propagate exceptions in eager mode
     # -------------------------------------------------------------------------
-    # Beat schedule
-    # -------------------------------------------------------------------------
-    beat_schedule={
-        "check-summarization-hourly": {
-            "task": "src.workers.tasks.summarization.check_all_sessions_for_summarization",
-            "schedule": 3600.0,
-        },
-        "check-followups-30min": {
-            "task": "src.workers.tasks.followups.check_all_sessions_for_followups",
-            "schedule": 1800.0,
-        },
-        "health-check-5min": {
-            "task": "src.workers.tasks.health.worker_health_check",
-            "schedule": 300.0,
-        },
-    },
-    # -------------------------------------------------------------------------
     # Broker options
     # -------------------------------------------------------------------------
     broker_transport_options=broker_options,
@@ -178,6 +162,7 @@ celery_app.conf.task_routes = {
     "src.workers.tasks.messages.process_and_respond": {"queue": "llm"},
     "src.workers.tasks.messages.send_response": {"queue": "webhooks"},
     "src.workers.tasks.health.*": {"queue": "default"},
+    "src.workers.tasks.llm_usage.*": {"queue": "default"},
 }
 
 # =============================================================================
@@ -202,6 +187,18 @@ celery_app.conf.beat_schedule = {
         "task": "src.workers.tasks.summarization.check_all_sessions_for_summarization",
         "schedule": 3600.0,  # 1 hour
         "options": {"queue": "summarization"},
+    },
+    # Check pending orders every 30 minutes
+    "crm-orders-check-30min": {
+        "task": "src.workers.tasks.crm.check_pending_orders",
+        "schedule": 1800.0,  # 30 minutes
+        "options": {"queue": "crm"},
+    },
+    # Aggregate LLM usage daily at midnight
+    "llm-usage-daily": {
+        "task": "src.workers.tasks.llm_usage.aggregate_daily_usage",
+        "schedule": 86400.0,  # 24 hours
+        "options": {"queue": "default"},
     },
 }
 

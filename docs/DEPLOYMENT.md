@@ -1,5 +1,76 @@
 # Deployment Guide
 
+## 🚂 Railway (Рекомендовано)
+
+### Quick Deploy
+
+```bash
+# 1. Railway Dashboard
+# New Project → Deploy from GitHub → Select repo
+
+# 2. Railway автоматично знайде:
+# - railway.json (конфігурація)
+# - Dockerfile (білд)
+
+# 3. Додай Variables (скопіюй з .env.railway)
+```
+
+### Конфігураційні файли
+
+| Файл            | Призначення                  |
+| --------------- | ---------------------------- |
+| `railway.json`  | Основна конфігурація         |
+| `railway.toml`  | Альтернативна (TOML)         |
+| `nixpacks.toml` | Для авто-білда без Docker    |
+| `.env.railway`  | Готові змінні для копіювання |
+
+### Railway Variables
+
+```env
+# 🔴 КРИТИЧНІ
+OPENROUTER_API_KEY=sk-or-v1-xxx
+TELEGRAM_BOT_TOKEN=123:ABC
+PUBLIC_BASE_URL=https://your-app.up.railway.app
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_API_KEY=eyJxxx
+
+# 🟡 РЕКОМЕНДОВАНІ
+OPENAI_API_KEY=sk-xxx
+MANYCHAT_VERIFY_TOKEN=your-token
+SENTRY_ENVIRONMENT=production
+
+# 🟢 FEATURE FLAGS
+USE_GRAPH_V2=true
+USE_TOOL_PLANNER=true
+USE_PRODUCT_VALIDATION=true
+ENABLE_OBSERVABILITY=true
+
+# 🔵 OPTIONAL (для Celery)
+# CELERY_ENABLED=true
+# REDIS_URL (Railway Redis add-on)
+```
+
+### Після деплою
+
+1. **Отримай URL**: `https://xxx.up.railway.app`
+2. **Онови PUBLIC_BASE_URL** в Railway Variables
+3. **Перевір health**: `GET https://xxx.up.railway.app/health`
+4. **Telegram webhook** зареєструється автоматично
+
+### Railway + Redis (для Workers)
+
+```bash
+# 1. Railway Dashboard → Add Service → Redis
+# 2. Railway автоматично встановить REDIS_URL
+# 3. Додай в Variables:
+CELERY_ENABLED=true
+
+# 4. Додай другий сервіс для Worker:
+# Start Command: celery -A src.workers.celery_app worker --loglevel=info
+```
+
+---
+
 ## Production Stack
 
 ```

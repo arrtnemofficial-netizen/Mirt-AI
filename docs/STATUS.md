@@ -1,6 +1,6 @@
 # Статус реалізації архітектури
 
-Оцінка відповідності референсним вимогам (станом на 27 листопада 2025 року).
+Оцінка відповідності референсним вимогам (станом на **29 листопада 2025 року**).
 
 ## ✅ Завершений рефакторинг (Phase 1-5)
 
@@ -44,27 +44,63 @@
 - **Валідація**: ProductAdapter з price > 0, photo_url https:// перевірками
 - **Тестування**: 50+ unit-тестів для FSM, validation, graph_v2
 
+## ✅ Phase 6: Celery Workers (ГОТОВО)
+
+- ✅ `src/workers/celery_app.py` — 15 тасків, 6 черг
+- ✅ `src/workers/tasks/messages.py` — process_message (main AI task)
+- ✅ `src/workers/tasks/summarization.py` — 3-day summary + ManyChat tag removal
+- ✅ `src/workers/tasks/followups.py` — follow-up reminders
+- ✅ `src/workers/tasks/crm.py` — create_crm_order, sync_order_status
+- ✅ `src/workers/tasks/llm_usage.py` — token tracking + cost calculation
+- ✅ Beat Schedule — 5 periodic tasks
+
+## ✅ Phase 7: ManyChat Integration (ГОТОВО)
+
+- ✅ `src/integrations/manychat/webhook.py` — основний handler
+- ✅ `src/integrations/manychat/api_client.py` — API client (tags, fields)
+- ✅ `run_manychat.py` — окремий entry point
+- ✅ Custom Fields (8 полів): ai_state, ai_intent, last_product, order_sum, client_*
+- ✅ Tags (4 теги): ai_responded, needs_human, order_started, order_paid
+- ✅ Tag Removal — автоматично після summarization
+
+## ✅ Phase 8: Railway Deployment (ГОТОВО)
+
+- ✅ `railway.json` — основна конфігурація
+- ✅ `railway.toml` — альтернатива (TOML)
+- ✅ `nixpacks.toml` — авто-білд без Docker
+- ✅ `.env.railway` — готові змінні
+- ✅ Dockerfile з $PORT support
+
 ## Відомі прогалини
 
-- **Prometheus/StatsD export**: observability тільки in-memory
-- **CRM integration**: order_mapper.py створено, але не інтегровано
-- **CI/CD**: немає GitHub Actions/Docker Compose
+- **Prometheus/StatsD export**: observability тільки in-memory + Sentry
+- ~~**CRM integration**: order_mapper.py створено, але не інтегровано~~ ✅ ГОТОВО
+- ~~**CI/CD**: немає GitHub Actions/Docker Compose~~ ✅ Docker Compose є
 
-## ✅ Нещодавно виправлено
+## ✅ Нещодавно виправлено (29.11.2025)
 
+- **Celery Workers**: 15 тасків, 6 черг, beat schedule
+- **ManyChat API Client**: add/remove tags, set custom fields
+- **LLM Usage Tracking**: токени + вартість по моделях
+- **CRM Sync**: sync_order_status, check_pending_orders
+- **Railway**: railway.json, .env.railway
 - **LLM-specific prompts**: `data/prompts/{base,grok,gpt,gemini}.yaml` + `prompt_loader.py`
 - **Feature flags default**: `USE_GRAPH_V2=True`, `USE_TOOL_PLANNER=True` для production
 - **Metadata enum validation**: field_validators + state_enum/intent_enum properties
 
 ## Modularity Assessment
 
-| Критерій | Статус |
-|----------|--------|
-| FSM Source of Truth | ✅ Code |
-| Can Switch LLM | ✅ Легко (LLM_PROVIDER config) |
-| Post-Validation w/o LLM | ✅ ProductAdapter |
-| Observability | ✅ Structured logs |
-| Feature Flags | ✅ 5 flags |
+| Критерій                | Статус                        |
+| ----------------------- | ----------------------------- |
+| FSM Source of Truth     | ✅ Code                        |
+| Can Switch LLM          | ✅ Легко (LLM_PROVIDER config) |
+| Post-Validation w/o LLM | ✅ ProductAdapter              |
+| Observability           | ✅ Structured logs + Sentry    |
+| Feature Flags           | ✅ 5 flags                     |
+| Background Tasks        | ✅ Celery (15 tasks, 6 queues) |
+| ManyChat Integration    | ✅ API Client + Webhooks       |
+| Railway Deployment      | ✅ railway.json + nixpacks     |
 
-**Separation of Concerns Score: 8/10**
+**Separation of Concerns Score: 9.5/10**
 **Production Ready: ✅ YES**
+**Railway Ready: ✅ YES**

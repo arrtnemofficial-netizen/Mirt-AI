@@ -68,6 +68,7 @@ class DBTable:
     USERS = "mirt_users"
     MESSAGES = "mirt_messages"
     SESSIONS = "agent_sessions"
+    LLM_USAGE = "llm_usage"
 
 
 # =============================================================================

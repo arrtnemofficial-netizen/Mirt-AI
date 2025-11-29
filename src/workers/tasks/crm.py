@@ -149,33 +149,143 @@ def create_crm_order(
 
 @shared_task(
     bind=True,
+    autoretry_for=(RetryableError,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
     name="src.workers.tasks.crm.sync_order_status",
+    soft_time_limit=25,
+    time_limit=30,
 )
 def sync_order_status(
     self,
     order_id: str,
     session_id: str,
+    new_status: str | None = None,
 ) -> dict:
     """Sync order status from CRM back to session.
 
-    This can be used to update conversation state
-    when order status changes in CRM.
+    This task updates conversation state when order status changes in CRM.
+    Can be triggered by CRM webhooks or polled periodically.
 
     Args:
         order_id: CRM order ID
         session_id: Session ID to update
+        new_status: New order status (if known from webhook)
 
     Returns:
         dict with sync result
     """
+    from src.integrations.crm.snitkix import get_snitkix_client
+    from src.services.supabase_client import get_supabase_client
+
     logger.info(
-        "[WORKER:CRM] Syncing order status order_id=%s session=%s",
+        "[WORKER:CRM] Syncing order status order_id=%s session=%s new_status=%s",
         order_id,
         session_id,
+        new_status,
     )
 
-    # TODO: Implement when CRM status webhook is available
-    return {
-        "status": "not_implemented",
-        "order_id": order_id,
-    }
+    if not settings.snitkix_enabled:
+        logger.warning("[WORKER:CRM] Snitkix CRM not configured")
+        return {"status": "skipped", "reason": "crm_not_configured"}
+
+    try:
+        # If status not provided, fetch from CRM
+        if not new_status:
+
+            async def _get_status():
+                crm = get_snitkix_client()
+                return await crm.get_order_status(order_id)
+
+            order_status = run_sync(_get_status())
+            new_status = order_status.status if order_status else None
+
+        if not new_status:
+            logger.warning("[WORKER:CRM] Could not fetch status for order %s", order_id)
+            return {"status": "error", "reason": "status_not_found"}
+
+        # Update session state in Supabase
+        client = get_supabase_client()
+        if client:
+            # Update agent_sessions with order status
+            client.table("agent_sessions").update(
+                {
+                    "order_status": new_status,
+                    "order_id": order_id,
+                }
+            ).eq("session_id", session_id).execute()
+
+            logger.info(
+                "[WORKER:CRM] Updated session %s with order status: %s",
+                session_id,
+                new_status,
+            )
+
+        return {
+            "status": "synced",
+            "order_id": order_id,
+            "order_status": new_status,
+            "session_id": session_id,
+        }
+
+    except Exception as e:
+        logger.exception(
+            "[WORKER:CRM] Error syncing order status %s: %s",
+            order_id,
+            e,
+        )
+        raise ExternalServiceError("snitkix_crm", str(e)) from e
+
+
+@shared_task(
+    bind=True,
+    name="src.workers.tasks.crm.check_pending_orders",
+)
+def check_pending_orders(self) -> dict:
+    """Check all pending orders for status updates.
+
+    Periodic task to sync order statuses from CRM.
+    Runs via Celery Beat.
+
+    Returns:
+        dict with check results
+    """
+    from src.services.supabase_client import get_supabase_client
+
+    logger.info("[WORKER:CRM] Checking pending orders for status updates")
+
+    if not settings.snitkix_enabled:
+        return {"status": "skipped", "reason": "crm_not_configured"}
+
+    client = get_supabase_client()
+    if not client:
+        return {"status": "skipped", "reason": "no_supabase"}
+
+    try:
+        # Get sessions with pending orders
+        response = (
+            client.table("agent_sessions")
+            .select("session_id, order_id, order_status")
+            .not_.is_("order_id", "null")
+            .in_("order_status", ["pending", "processing", "new"])
+            .execute()
+        )
+
+        if not response.data:
+            return {"status": "ok", "checked": 0}
+
+        queued = 0
+        for row in response.data:
+            # Queue status sync for each pending order
+            sync_order_status.delay(
+                order_id=row["order_id"],
+                session_id=row["session_id"],
+            )
+            queued += 1
+
+        logger.info("[WORKER:CRM] Queued %d order status checks", queued)
+        return {"status": "ok", "queued": queued}
+
+    except Exception as e:
+        logger.exception("[WORKER:CRM] Error checking pending orders: %s", e)
+        return {"status": "error", "error": str(e)}

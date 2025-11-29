@@ -285,5 +285,127 @@ class TestSyncUtils:
         assert result == 20
 
 
+class TestLLMUsageTasks:
+    """Test LLM usage tracking tasks."""
+
+    def test_calculate_cost(self):
+        """Should calculate cost correctly."""
+        from src.workers.tasks.llm_usage import calculate_cost
+
+        # GPT-4o-mini: $0.15 per 1M input, $0.60 per 1M output
+        cost = calculate_cost("gpt-4o-mini", 1000, 500)
+
+        # Expected: (1000/1M * 0.15) + (500/1M * 0.60) = 0.00015 + 0.0003 = 0.00045
+        assert cost > 0
+        assert float(cost) < 0.001  # Should be tiny for small usage
+
+    def test_calculate_cost_unknown_model(self):
+        """Should use default pricing for unknown models."""
+        from src.workers.tasks.llm_usage import calculate_cost
+
+        cost = calculate_cost("unknown-model", 1000, 500)
+        assert cost > 0  # Should still calculate something
+
+    def test_record_usage_no_supabase(self):
+        """Should skip if Supabase not configured."""
+        from src.workers.tasks.llm_usage import record_usage
+
+        with patch("src.workers.tasks.llm_usage.get_supabase_client") as mock:
+            mock.return_value = None
+
+            result = record_usage(
+                user_id=123,
+                model="gpt-4o-mini",
+                tokens_input=100,
+                tokens_output=50,
+            )
+
+            assert result["status"] == "skipped"
+
+    def test_record_usage_with_supabase(self):
+        """Should record usage to database."""
+        from src.workers.tasks.llm_usage import record_usage
+
+        with patch("src.workers.tasks.llm_usage.get_supabase_client") as mock:
+            mock_client = MagicMock()
+            mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(
+                data=[{"id": 1}]
+            )
+            mock.return_value = mock_client
+
+            result = record_usage(
+                user_id=123,
+                model="gpt-4o-mini",
+                tokens_input=100,
+                tokens_output=50,
+            )
+
+            assert result["status"] == "recorded"
+            assert result["id"] == 1
+            assert "cost_usd" in result
+
+    def test_aggregate_daily_usage_no_supabase(self):
+        """Should skip if Supabase not configured."""
+        from src.workers.tasks.llm_usage import aggregate_daily_usage
+
+        with patch("src.workers.tasks.llm_usage.get_supabase_client") as mock:
+            mock.return_value = None
+
+            result = aggregate_daily_usage()
+
+            assert result["status"] == "skipped"
+
+
+class TestCRMSyncTasks:
+    """Test CRM sync tasks."""
+
+    def test_sync_order_status_not_configured(self):
+        """Should skip if CRM not configured."""
+        from src.workers.tasks.crm import sync_order_status
+
+        with patch("src.workers.tasks.crm.settings") as mock_settings:
+            mock_settings.snitkix_enabled = False
+
+            result = sync_order_status("order123", "session456")
+
+            assert result["status"] == "skipped"
+            assert result["reason"] == "crm_not_configured"
+
+    def test_check_pending_orders_not_configured(self):
+        """Should skip if CRM not configured."""
+        from src.workers.tasks.crm import check_pending_orders
+
+        with patch("src.workers.tasks.crm.settings") as mock_settings:
+            mock_settings.snitkix_enabled = False
+
+            result = check_pending_orders()
+
+            assert result["status"] == "skipped"
+
+
+class TestSummarizationWithSupabaseFunction:
+    """Test summarization with Supabase function integration."""
+
+    def test_check_all_sessions_calls_supabase_function(self):
+        """Should call summarize_inactive_users function."""
+        from src.workers.tasks.summarization import check_all_sessions_for_summarization
+
+        with patch("src.workers.tasks.summarization.get_supabase_client") as mock_client:
+            mock_client.return_value = MagicMock()
+
+            with patch(
+                "src.workers.tasks.summarization.call_summarize_inactive_users"
+            ) as mock_call:
+                mock_call.return_value = [{"user_id": 1}]
+
+                with patch("src.workers.tasks.summarization.get_users_needing_summary") as mock_get:
+                    mock_get.return_value = []
+
+                    result = check_all_sessions_for_summarization()
+
+                    mock_call.assert_called_once()
+                    assert result["marked"] == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
