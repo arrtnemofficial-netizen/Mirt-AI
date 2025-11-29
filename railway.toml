@@ -14,9 +14,6 @@ dockerfilePath = "Dockerfile"
 # Start command - using python script to handle PORT expansion safely
 startCommand = "python src/run.py"
 
-# Health check
-healthcheckPath = "/health"
-healthcheckTimeout = 30
 
 # Restart policy
 restartPolicyType = "ON_FAILURE"
