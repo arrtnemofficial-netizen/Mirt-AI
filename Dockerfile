@@ -57,6 +57,10 @@ ENV PYTHONUNBUFFERED=1 \
     PUBLIC_BASE_URL=http://localhost:8000 \
     TELEGRAM_WEBHOOK_PATH=/webhooks/telegram
 
+# Copy start script
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 # Expose port (Railway provides $PORT, default 8000)
 EXPOSE 8000
 
@@ -68,7 +72,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 USER mirt
 
 # Run the application - Railway sets $PORT automatically
-CMD ["/bin/sh", "-c", "exec uvicorn src.server.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["/app/start.sh"]
 
 # -----------------------------------------------------------------------------
 # Stage 3: Development (optional, for local development)
