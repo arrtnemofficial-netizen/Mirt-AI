@@ -68,8 +68,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 USER mirt
 
 # Run the application - Railway sets $PORT automatically
-# Using shell form to allow $PORT expansion
-CMD uvicorn src.server.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["/bin/sh", "-c", "exec uvicorn src.server.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
 # -----------------------------------------------------------------------------
 # Stage 3: Development (optional, for local development)
