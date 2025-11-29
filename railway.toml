@@ -11,8 +11,8 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# Start command - $PORT is provided by Railway
-startCommand = "uvicorn src.server.main:app --host 0.0.0.0 --port $PORT"
+# Start command - using python script to handle PORT expansion safely
+startCommand = "python src/run.py"
 
 # Health check
 healthcheckPath = "/health"
