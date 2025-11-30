@@ -74,7 +74,7 @@ def process_message(
 
     try:
         # Import agent here to avoid circular imports
-        from src.agent.graph import create_agent_graph
+        from src.agents import get_active_graph as create_agent_graph  # Fixed typo: was src.agent
         from src.services.message_store import StoredMessage, create_message_store
 
         # Get or create message store

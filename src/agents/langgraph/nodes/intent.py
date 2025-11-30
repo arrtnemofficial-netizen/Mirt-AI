@@ -1,0 +1,176 @@
+"""
+Intent Detection Node - Smart routing.
+======================================
+Quick classification for conditional edge routing.
+Full intent analysis happens in LLM, but this enables fast routing.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from src.core.input_validator import validate_input_metadata
+
+
+logger = logging.getLogger(__name__)
+
+
+# Intent keywords for quick detection
+INTENT_PATTERNS = {
+    "PAYMENT_DELIVERY": [
+        "купую", "беру", "оплата", "реквізит", "замовл", "оформ",
+        "карта", "переказ", "оплачу", "доставк", "нова пошта",
+    ],
+    "SIZE_HELP": [
+        "зріст", "розмір", "вік", "см", "років", "рік", "міс",
+        "скільки", "який розмір", "підбери", "підійде",
+    ],
+    "COLOR_HELP": [
+        "колір", "кольор", "інший", "чорн", "біл", "рожев",
+        "синій", "червон", "зелен",
+    ],
+    "COMPLAINT": [
+        "скарга", "проблем", "повернен", "брак", "жалоба", "обман",
+        "не працює", "зламан", "погано", "відмов",
+    ],
+    "DISCOVERY_OR_QUESTION": [
+        "сукн", "костюм", "тренч", "плаття", "покаж", "є", "хочу",
+        "підбери", "порадь", "шукаю", "ціна", "скільки кошт",
+    ],
+    "GREETING_ONLY": [
+        "привіт", "вітаю", "добр", "hello", "hi", "хай",
+    ],
+}
+
+
+def detect_intent_from_text(
+    text: str,
+    has_image: bool,
+    current_state: str,
+) -> str:
+    """
+    Quick intent detection based on keywords and context.
+
+    Priority:
+    1. Payment context in payment state (no matter what)
+    2. Photo present -> PHOTO_IDENT
+    3. Keyword matching
+    4. Default to DISCOVERY_OR_QUESTION
+    """
+    text_lower = text.lower().strip()
+
+    # Special cases first
+    special = _check_special_cases(text_lower, has_image, current_state)
+    if special:
+        return special
+
+    # Keyword matching in priority order
+    return _match_keywords(text_lower, len(text))
+
+
+def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -> str | None:
+    """Check special cases before keyword matching."""
+    # Empty text with image
+    if not text_lower and has_image:
+        return "PHOTO_IDENT"
+
+    # Payment context takes priority in payment state
+    if current_state == "STATE_5_PAYMENT_DELIVERY":
+        if has_image:
+            return "PAYMENT_DELIVERY"
+        for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
+            if keyword in text_lower:
+                return "PAYMENT_DELIVERY"
+
+    # Photo identification (not in payment context)
+    if has_image:
+        return "PHOTO_IDENT"
+
+    return None
+
+
+def _match_keywords(text_lower: str, text_len: int) -> str:
+    """Match keywords in priority order."""
+    # Priority order for keyword matching
+    priority_intents = [
+        "PAYMENT_DELIVERY",
+        "COMPLAINT",
+        "SIZE_HELP",
+        "COLOR_HELP",
+    ]
+
+    for intent in priority_intents:
+        for keyword in INTENT_PATTERNS[intent]:
+            if keyword in text_lower:
+                return intent
+
+    # Greeting (only if short message)
+    if text_len < 30:
+        for keyword in INTENT_PATTERNS["GREETING_ONLY"]:
+            if keyword in text_lower:
+                return "GREETING_ONLY"
+
+    # Discovery/questions
+    for keyword in INTENT_PATTERNS["DISCOVERY_OR_QUESTION"]:
+        if keyword in text_lower:
+            return "DISCOVERY_OR_QUESTION"
+
+    return "DISCOVERY_OR_QUESTION"
+
+
+async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Detect intent from user input for smart routing.
+
+    This runs BEFORE LLM to enable conditional edges.
+    Fast and lightweight - no API calls.
+    """
+    # Skip if already escalating
+    if state.get("should_escalate"):
+        return {
+            "detected_intent": "ESCALATION",
+            "step_number": state.get("step_number", 0) + 1,
+        }
+
+    # Validate metadata
+    metadata = validate_input_metadata(state.get("metadata", {}))
+
+    # Get latest user message
+    messages = state.get("messages", [])
+    user_content = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            user_content = msg.get("content", "")
+            break
+
+    # Check for image
+    has_image = metadata.has_image or bool(metadata.image_url)
+    image_url = metadata.image_url
+
+    # Detect intent
+    detected_intent = detect_intent_from_text(
+        text=user_content,
+        has_image=has_image,
+        current_state=metadata.current_state.value,
+    )
+
+    logger.debug(
+        "Intent detected: %s (text=%s, has_image=%s, state=%s)",
+        detected_intent,
+        user_content[:50] if user_content else "",
+        has_image,
+        metadata.current_state.value,
+    )
+
+    return {
+        "detected_intent": detected_intent,
+        "has_image": has_image,
+        "image_url": image_url,
+        "metadata": {
+            **state.get("metadata", {}),
+            "has_image": has_image,
+            "image_url": image_url,
+        },
+        "step_number": state.get("step_number", 0) + 1,
+    }

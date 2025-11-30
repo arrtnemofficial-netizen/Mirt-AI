@@ -154,35 +154,52 @@ def get_prompt_for_model(provider: str | None = None) -> dict[str, Any]:
 
 def get_system_prompt_text(model_key: str = "grok") -> str:
     """
-    Generate system prompt text from configuration using Pydantic model.
+    Get system prompt text.
+
+    SIMPLIFIED: Load system_prompt_full.yaml directly instead of using PromptConfig.
+    The full prompt file contains all instructions in markdown format.
+
+    Args:
+        model_key: One of "grok", "gpt", "gemini" (currently ignored, uses full prompt)
+
+    Returns:
+        Formatted system prompt string.
+    """
+    # Load the complete prompt from YAML
+    full_prompt = load_yaml_file(LEGACY_PROMPT)
+    
+    # Convert YAML dict to formatted text
+    sections = []
+    
+    for key, value in full_prompt.items():
+        if isinstance(value, str):
+            sections.append(f"# {key}\n{value}")
+        elif isinstance(value, dict):
+            sections.append(f"# {key}")
+            for sub_key, sub_value in value.items():
+                if isinstance(sub_value, str):
+                    sections.append(f"## {sub_key}\n{sub_value}")
+                elif isinstance(sub_value, (list, dict)):
+                    sections.append(f"## {sub_key}\n{yaml.dump(sub_value, allow_unicode=True, default_flow_style=False)}")
+        elif isinstance(value, list):
+            sections.append(f"# {key}\n{yaml.dump(value, allow_unicode=True, default_flow_style=False)}")
+    
+    return "\n\n".join(sections)
+
+
+def get_prompt_config(model_key: str = "grok") -> dict[str, Any]:
+    """
+    Load prompt configuration as dict.
+
+    SIMPLIFIED: Returns raw dict instead of PromptConfig (deleted).
 
     Args:
         model_key: One of "grok", "gpt", "gemini"
 
     Returns:
-        Formatted system prompt string optimized for the target LLM.
+        Prompt configuration dict
     """
-    from src.core.prompt_config import PromptConfig
-
-    config_dict = load_prompt(model_key)
-    config = PromptConfig.from_dict(config_dict)
-    return config.to_system_prompt()
-
-
-def get_prompt_config(model_key: str = "grok") -> PromptConfig:
-    """
-    Load and validate prompt configuration as Pydantic model.
-
-    Args:
-        model_key: One of "grok", "gpt", "gemini"
-
-    Returns:
-        Validated PromptConfig instance
-    """
-    from src.core.prompt_config import PromptConfig
-
-    config_dict = load_prompt(model_key)
-    return PromptConfig.from_dict(config_dict)
+    return load_prompt(model_key)
 
 
 # Convenience functions for each model

@@ -24,8 +24,6 @@ from src.server.dependencies import (
     get_cached_manychat_handler,
 )
 from src.server.middleware import setup_middleware
-from src.services.followups import run_followups
-from src.services.summarization import run_retention
 
 
 logger = logging.getLogger(__name__)

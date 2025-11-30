@@ -160,28 +160,16 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # FEATURE FLAGS (for safe rollout)
+    # OBSERVABILITY
     # =========================================================================
-    USE_GRAPH_V2: bool = Field(
-        default=True,
-        description="Use multi-node LangGraph v2 (moderation → tools → agent → validation → state_transition)",
-    )
-    USE_TOOL_PLANNER: bool = Field(
-        default=True,
-        description="Pre-execute tools in code before calling LLM",
-    )
-    USE_PRODUCT_VALIDATION: bool = Field(
-        default=True,
-        description="Validate products (price > 0, photo_url) before sending",
-    )
-    USE_INPUT_VALIDATION: bool = Field(
-        default=True,
-        description="Validate and clamp input metadata to enums",
-    )
     ENABLE_OBSERVABILITY: bool = Field(
         default=True,
         description="Enable detailed logging with tags (state/intent/tool)",
     )
+    # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
+    # - LangGraph v2 is now the only architecture
+    # - PydanticAI handles tool planning automatically
+    # - Validation is done by LangGraph nodes
 
     @property
     def snitkix_enabled(self) -> bool:

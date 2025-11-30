@@ -283,7 +283,9 @@ def dispatch_message(
         from src.workers.sync_utils import run_sync
 
         async def _process_sync():
-            from src.agent.graph import create_agent_graph
+            from src.agents import (
+                get_active_graph as create_agent_graph,  # Fixed typo: was src.agent
+            )
             from src.services.message_store import create_message_store
 
             message_store = create_message_store()

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from src.agents.graph_v2 import get_active_graph
+from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.services.client_data_parser import ClientData, parse_client_data
 from src.services.conversation import create_conversation_handler
 from src.services.message_store import MessageStore, create_message_store
@@ -64,7 +64,6 @@ class ManychatWebhook:
         message_store: MessageStore | None = None,
     ) -> None:
         self.store = store
-        # Use active graph based on USE_GRAPH_V2 feature flag
         self.runner = runner or get_active_graph()
         self.message_store = message_store or create_message_store()
         self._handler = create_conversation_handler(

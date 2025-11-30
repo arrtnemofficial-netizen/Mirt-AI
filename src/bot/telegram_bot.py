@@ -10,6 +10,7 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -22,12 +23,17 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 
-from src.agents.graph_v2 import get_active_graph
+from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
+from src.core.state_machine import EscalationLevel, State, get_keyboard_for_state, normalize_state
 from src.services.conversation import ConversationHandler, create_conversation_handler
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore, SessionStore
+
+
+if TYPE_CHECKING:
+    from src.core.models import AgentResponse
 
 
 logger = logging.getLogger(__name__)
@@ -36,13 +42,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Quick Reply Keyboards по станах (використовує state_machine)
 # ---------------------------------------------------------------------------
-import contextlib
-
-from src.core.state_machine import EscalationLevel, State, get_keyboard_for_state, normalize_state
-
-
-if TYPE_CHECKING:
-    from src.core.models import AgentResponse
 
 
 def build_keyboard(
@@ -90,7 +89,6 @@ def build_dispatcher(
     dp = Dispatcher()
     msg_store = message_store or create_message_store()
 
-    # Use active graph based on USE_GRAPH_V2 feature flag
     active_runner = runner or get_active_graph()
 
     # Create centralized conversation handler

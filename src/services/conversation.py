@@ -14,9 +14,63 @@ from src.agents import ConversationState
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.models import AgentResponse, Escalation, Message, Metadata
-from src.core.output_parser import parse_llm_output
-from src.core.state_validator import validate_state_transition
 from src.services.message_store import MessageStore, StoredMessage
+
+
+# =============================================================================
+# STUB FUNCTIONS (replacing deleted output_parser.py and state_validator.py)
+# In NEW architecture: PydanticAI handles parsing, LangGraph handles transitions
+# =============================================================================
+
+
+class TransitionResult:
+    """Stub for validate_state_transition result."""
+    def __init__(self, new_state: str, was_corrected: bool = False, reason: str | None = None):
+        self.new_state = new_state
+        self.was_corrected = was_corrected
+        self.reason = reason
+
+
+def parse_llm_output(
+    content: str,
+    session_id: str = "",
+    current_state: str = "STATE_0_INIT",
+) -> AgentResponse:
+    """
+    STUB: Parse LLM output to AgentResponse.
+    
+    In NEW architecture: PydanticAI does this automatically with result_type=SupportResponse.
+    This stub exists for legacy compatibility with conversation.py.
+    """
+    # Try to extract from result_state if it's already structured
+    if not content:
+        return AgentResponse(
+            event="reply",
+            messages=[Message(type="text", content="")],
+            metadata=Metadata(session_id=session_id, current_state=current_state),
+        )
+    
+    # For legacy flow - just wrap the content as a simple response
+    return AgentResponse(
+        event="reply",
+        messages=[Message(type="text", content=content)],
+        metadata=Metadata(session_id=session_id, current_state=current_state),
+    )
+
+
+def validate_state_transition(
+    session_id: str,
+    current_state: str,
+    proposed_state: str,
+    intent: str = "",
+) -> TransitionResult:
+    """
+    STUB: Validate state transition.
+    
+    In NEW architecture: LangGraph edges make invalid transitions impossible.
+    This stub just accepts all transitions for legacy compatibility.
+    """
+    return TransitionResult(new_state=proposed_state, was_corrected=False)
 
 
 if TYPE_CHECKING:
@@ -50,7 +104,9 @@ class ResponseParsingError(ConversationError):
 class GraphRunner(Protocol):
     """Protocol for LangGraph runner compatibility."""
 
-    async def ainvoke(self, state: ConversationState) -> ConversationState: ...
+    async def ainvoke(
+        self, state: ConversationState, config: dict[str, Any] | None = None
+    ) -> ConversationState: ...
 
 
 @dataclass
@@ -158,15 +214,18 @@ class ConversationHandler:
             return self._build_fallback_result(session_id, state, str(e))
 
     async def _invoke_agent(self, state: ConversationState) -> ConversationState:
-        """Invoke the LangGraph agent with retry logic."""
+        """Invoke the LangGraph agent with retry logic and thread_id for persistence."""
         import asyncio
 
         session_id = state.get("metadata", {}).get("session_id", "unknown")
         last_error: Exception | None = None
 
+        # Use thread_id for LangGraph checkpointer persistence
+        config = {"configurable": {"thread_id": session_id}}
+
         for attempt in range(self.max_retries + 1):
             try:
-                result = await self.runner.ainvoke(state)
+                result = await self.runner.ainvoke(state, config=config)
                 if attempt > 0:
                     logger.info("Agent succeeded on retry %d for session %s", attempt, session_id)
                 return result

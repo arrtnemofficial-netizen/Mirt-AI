@@ -40,6 +40,19 @@ class InputMetadata(BaseModel):
     escalation_level: EscalationLevel = Field(default=EscalationLevel.NONE)
     moderation_flags: list[str] = Field(default_factory=list)
 
+    @field_validator("has_image", mode="before")
+    @classmethod
+    def auto_detect_image(cls, v: Any, info) -> bool:
+        """Auto-detect has_image from image_url if not explicitly set."""
+        if v:
+            return True
+        # Check if image_url is present in the data being validated
+        data = info.data if hasattr(info, 'data') else {}
+        image_url = data.get("image_url")
+        if image_url and isinstance(image_url, str) and image_url.strip():
+            return True
+        return bool(v)
+
     @field_validator("current_state", mode="before")
     @classmethod
     def normalize_state_value(cls, v: Any) -> State:

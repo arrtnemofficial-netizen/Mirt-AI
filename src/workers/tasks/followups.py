@@ -240,7 +240,6 @@ def _send_telegram_followup(chat_id: str, text: str) -> None:
 
 def _send_manychat_followup(subscriber_id: str, text: str) -> None:
     """Send follow-up message via ManyChat API."""
-    import httpx
 
     # ManyChat API requires API key and subscriber ID
     # This is a placeholder - actual implementation depends on ManyChat setup
