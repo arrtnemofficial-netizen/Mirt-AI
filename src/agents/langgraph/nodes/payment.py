@@ -20,6 +20,8 @@ from typing import Any, Literal
 
 from langgraph.types import Command, interrupt  # noqa: F401
 
+from src.agents.pydantic.deps import create_deps_from_state
+from src.agents.pydantic.payment_agent import run_payment
 from src.core.models import AgentResponse, Message, Metadata
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
@@ -62,7 +64,7 @@ async def payment_node(
 
 async def _prepare_payment_and_interrupt(
     state: dict[str, Any],
-    runner: Callable[..., Any] | None,
+    runner: Callable[..., Any] | None,  # IGNORED - uses run_payment directly
     session_id: str,
 ) -> Command[Literal["payment"]]:
     """Prepare payment details and trigger human approval interrupt."""
@@ -73,41 +75,35 @@ async def _prepare_payment_and_interrupt(
     total_price = sum(p.get("price", 0) for p in products)
     product_names = [p.get("name", "Товар") for p in products]
 
-    # Generate payment message via LLM
-    prepared_metadata = {
-        **state.get("metadata", {}),
-        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-        "system_instructions": (
-            "Клієнт готовий до оплати! "
-            "1. Надай реквізити для оплати (ФОП Крупка, ПриватБанк) "
-            "2. Вкажи суму до сплати "
-            "3. Попроси дані для доставки: ПІБ, телефон, місто, відділення НП "
-            "4. Будь ввічливою та підтримуючою"
-        ),
-    }
+    # Get user message (handles both dict and LangChain Message objects)
+    from .utils import extract_user_message
+    user_message = extract_user_message(state.get("messages", []))
+    if not user_message:
+        user_message = "Хочу оформити замовлення"
+
+    # Create deps with payment context
+    deps = create_deps_from_state(state)
+    deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
+    deps.selected_products = products
 
     try:
-        response = await runner(state.get("messages", []), prepared_metadata)
-        response_json = response.model_dump_json()
+        # Call payment agent DIRECTLY
+        response = await run_payment(
+            message=user_message,
+            deps=deps,
+            message_history=None,
+        )
+        response_text = response.reply_to_user
     except Exception as e:
         logger.error("Payment LLM call failed: %s", e)
         # Fallback response
-        response_json = AgentResponse(
-            event="checkout",
-            messages=[Message(content=(
-                "Чудово! Для оформлення замовлення надішліть:\n"
-                "📝 ПІБ\n"
-                "📱 Телефон\n"
-                "🏙️ Місто та відділення Нової Пошти\n\n"
-                f"Сума до сплати: {total_price} грн"
-            ))],
-            products=[],
-            metadata=Metadata(
-                session_id=session_id,
-                current_state=State.STATE_5_PAYMENT_DELIVERY.value,
-                intent="PAYMENT_DELIVERY",
-            ),
-        ).model_dump_json()
+        response_text = (
+            "Чудово! Для оформлення замовлення надішліть:\n"
+            "📝 ПІБ\n"
+            "📱 Телефон\n"
+            "🏙️ Місто та відділення Нової Пошти\n\n"
+            f"Сума до сплати: {total_price} грн"
+        )
 
     latency_ms = (time.perf_counter() - start_time) * 1000
     track_metric("payment_prepare_latency_ms", latency_ms)
@@ -144,7 +140,7 @@ async def _prepare_payment_and_interrupt(
     return Command(
         update={
             "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-            "messages": [{"role": "assistant", "content": response_json}],
+            "messages": [{"role": "assistant", "content": response_text}],
             "awaiting_human_approval": True,
             "approval_type": "payment",
             "approval_data": approval_request,

@@ -44,7 +44,7 @@ from .nodes import (
     validation_node,
     vision_node,
 )
-from .state import create_initial_state
+from .state import ConversationState, create_initial_state
 
 
 if TYPE_CHECKING:
@@ -118,8 +118,8 @@ def build_production_graph(
         """Terminal node - just returns empty update."""
         return {"step_number": state.get("step_number", 0) + 1}
 
-    # Build the graph
-    graph = StateGraph(dict)
+    # Build the graph with TYPED state (enables reducers!)
+    graph = StateGraph(ConversationState)
 
     # =========================================================================
     # ADD NODES

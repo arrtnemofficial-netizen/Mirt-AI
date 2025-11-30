@@ -114,15 +114,19 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _get_latest_assistant_response(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Extract latest assistant response as dict."""
-    for msg in reversed(messages):
-        if msg.get("role") == "assistant":
-            content = msg.get("content", "")
-            try:
-                return json.loads(content)
-            except (json.JSONDecodeError, TypeError):
-                pass
+def _get_latest_assistant_response(messages: list[Any]) -> dict[str, Any] | None:
+    """Extract latest assistant response as dict.
+    
+    Handles both dict format and LangChain Message objects.
+    """
+    from .utils import extract_assistant_message
+    
+    content = extract_assistant_message(messages)
+    if content:
+        try:
+            return json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            pass
     return None
 
 

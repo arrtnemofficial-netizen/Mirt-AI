@@ -81,6 +81,9 @@ class ConversationState(TypedDict, total=False):
     tool_plan_result: dict[str, Any] | None
     tool_errors: list[str]
 
+    # Latest structured agent response (PydanticAI output)
+    agent_response: Annotated[dict[str, Any], replace_value]
+
     # Validation & self-correction
     validation_errors: list[str]
     retry_count: int
@@ -93,9 +96,9 @@ class ConversationState(TypedDict, total=False):
     approval_data: dict[str, Any] | None
     human_approved: bool | None
 
-    # Time travel support
-    checkpoint_id: str | None
-    parent_checkpoint_id: str | None
+    # Time travel support (prefixed to avoid LangGraph reserved names)
+    saved_checkpoint_id: str | None
+    saved_parent_checkpoint_id: str | None
     step_number: int
 
 

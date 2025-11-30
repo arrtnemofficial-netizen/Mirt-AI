@@ -2,6 +2,7 @@
 Upsell Node - Additional sales opportunity.
 ==========================================
 After payment confirmation, offer complementary products.
+Uses run_support directly with upsell context.
 """
 
 from __future__ import annotations
@@ -11,6 +12,9 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from src.agents.pydantic.deps import create_deps_from_state
+from src.agents.pydantic.models import SupportResponse
+from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
 
@@ -20,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 async def upsell_node(
     state: dict[str, Any],
-    runner: Callable[..., Any] | None = None,
+    runner: Callable[..., Any] | None = None,  # Kept for signature compatibility
 ) -> dict[str, Any]:
     """
     Offer additional products after payment confirmation.
@@ -29,7 +33,7 @@ async def upsell_node(
 
     Args:
         state: Current conversation state
-        runner: LLM runner function
+        runner: IGNORED - uses run_support directly
 
     Returns:
         State update with upsell response
@@ -37,27 +41,29 @@ async def upsell_node(
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
 
+    # Get user message (handles both dict and LangChain Message objects)
+    from .utils import extract_user_message
+    user_message = extract_user_message(state.get("messages", []))
+    if not user_message:
+        user_message = "Замовлення оформлено"
+
     # Get current order for context
     ordered_products = state.get("offered_products", []) or state.get("selected_products", [])
 
-    # Prepare upsell context
-    prepared_metadata = {
-        **state.get("metadata", {}),
-        "current_state": State.STATE_6_UPSELL.value,
-        "ordered_products": ordered_products,
-        "system_instructions": (
-            "Оплата підтверджена! Замовлення оформлено. "
-            "Тепер М'ЯКО запропонуй додатковий товар:\n"
-            "1. Подякуй за замовлення\n"
-            "2. Запропонуй аксесуар або комплект (бантик, шкарпетки, пов'язка)\n"
-            "3. Якщо клієнт відмовляється - подякуй і заверши ввічливо\n"
-            "4. НЕ тисни, НЕ нав'язуй - один раз запропонував і все\n"
-            "5. Нагадай про термін доставки (2-3 дні)"
-        ),
-    }
+    # Create deps with upsell context
+    deps = create_deps_from_state(state)
+    deps.current_state = State.STATE_6_UPSELL.value
+    deps.selected_products = ordered_products
+
+    logger.info("Upsell node for session %s", session_id)
 
     try:
-        response = await runner(state.get("messages", []), prepared_metadata)
+        # Call support agent with upsell context
+        response: SupportResponse = await run_support(
+            message=user_message,
+            deps=deps,
+            message_history=None,
+        )
 
         latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -71,16 +77,20 @@ async def upsell_node(
         track_metric("upsell_node_latency_ms", latency_ms)
         track_metric("upsell_offered", 1, {"session_id": session_id})
 
+        # Build assistant message from response
+        assistant_content = "\n".join(m.content for m in response.messages)
+
         return {
             "current_state": State.STATE_6_UPSELL.value,
-            "messages": [{"role": "assistant", "content": response.model_dump_json()}],
+            "messages": [{"role": "assistant", "content": assistant_content}],
             "metadata": response.metadata.model_dump(),
+            "agent_response": response.model_dump(),
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
         }
 
     except Exception as e:
-        logger.error("Upsell node failed for session %s: %s", session_id, e)
+        logger.exception("Upsell node failed for session %s: %s", session_id, e)
 
         # Non-critical - just skip upsell on error
         return {

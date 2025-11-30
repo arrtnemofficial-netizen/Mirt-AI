@@ -136,13 +136,9 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     # Validate metadata
     metadata = validate_input_metadata(state.get("metadata", {}))
 
-    # Get latest user message
-    messages = state.get("messages", [])
-    user_content = ""
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            user_content = msg.get("content", "")
-            break
+    # Get latest user message (handles both dict and LangChain Message objects)
+    from .utils import extract_user_message
+    user_content = extract_user_message(state.get("messages", []))
 
     # Check for image
     has_image = metadata.has_image or bool(metadata.image_url)

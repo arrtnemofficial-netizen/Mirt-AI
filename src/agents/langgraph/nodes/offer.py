@@ -3,6 +3,7 @@ Offer Node - Product presentation.
 ==================================
 Presents product offer with price and details.
 This is where we close the sale.
+Uses run_support directly with offer context.
 """
 
 from __future__ import annotations
@@ -12,6 +13,9 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from src.agents.pydantic.deps import create_deps_from_state
+from src.agents.pydantic.models import SupportResponse
+from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
 
@@ -21,19 +25,19 @@ logger = logging.getLogger(__name__)
 
 async def offer_node(
     state: dict[str, Any],
-    runner: Callable[..., Any] | None = None,
+    runner: Callable[..., Any] | None = None,  # Kept for signature compatibility
 ) -> dict[str, Any]:
     """
     Present product offer with price and details.
 
     This node:
     1. Takes selected products from previous nodes
-    2. Formats compelling offer with prices
+    2. Calls run_support with offer context
     3. Asks if client wants to proceed to payment
 
     Args:
         state: Current conversation state
-        runner: LLM runner function
+        runner: IGNORED - uses run_support directly
 
     Returns:
         State update with offer response
@@ -41,34 +45,34 @@ async def offer_node(
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
 
+    # Get user message (handles both dict and LangChain Message objects)
+    from .utils import extract_user_message
+    user_message = extract_user_message(state.get("messages", []))
+
+    if not user_message:
+        user_message = "Покажи товар"
+
     # Get products to offer
     selected_products = state.get("selected_products", [])
 
-    # Build offer context
-    if selected_products:
-        products_context = _format_products_for_offer(selected_products)
-    else:
-        products_context = "Немає вибраних товарів. Допоможи клієнту обрати."
+    # Create deps with offer context
+    deps = create_deps_from_state(state)
+    deps.current_state = State.STATE_4_OFFER.value
+    deps.selected_products = selected_products
 
-    # Prepare metadata
-    prepared_metadata = {
-        **state.get("metadata", {}),
-        "current_state": State.STATE_4_OFFER.value,
-        "selected_products": selected_products,
-        "system_instructions": (
-            f"Зроби КОНКРЕТНУ пропозицію з ціною!\n\n"
-            f"ТОВАРИ:\n{products_context}\n\n"
-            "ІНСТРУКЦІЇ:\n"
-            "1. Покажи товар чітко: назва, ціна, розміри\n"
-            "2. Вкажи переваги (якість, матеріал)\n"
-            "3. Запитай: 'Оформлюємо замовлення?' або 'Беремо?'\n"
-            "4. НЕ згадуй технічні деталі (артикули, ID)\n"
-            "5. Будь ентузіастичною, але не нав'язливою"
-        ),
-    }
+    logger.info(
+        "Offer node for session %s, products=%d",
+        session_id,
+        len(selected_products),
+    )
 
     try:
-        response = await runner(state.get("messages", []), prepared_metadata)
+        # Call support agent with offer context
+        response: SupportResponse = await run_support(
+            message=user_message,
+            deps=deps,
+            message_history=None,
+        )
 
         # Store offered products for tracking
         offered_products = selected_products.copy()
@@ -85,17 +89,21 @@ async def offer_node(
         )
         track_metric("offer_node_latency_ms", latency_ms)
 
+        # Build assistant message from response
+        assistant_content = "\n".join(m.content for m in response.messages)
+
         return {
             "current_state": State.STATE_4_OFFER.value,
-            "messages": [{"role": "assistant", "content": response.model_dump_json()}],
+            "messages": [{"role": "assistant", "content": assistant_content}],
             "metadata": response.metadata.model_dump(),
             "offered_products": offered_products,
+            "agent_response": response.model_dump(),
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
         }
 
     except Exception as e:
-        logger.error("Offer node failed for session %s: %s", session_id, e)
+        logger.exception("Offer node failed for session %s: %s", session_id, e)
 
         return {
             "last_error": str(e),

@@ -51,13 +51,9 @@ async def agent_node(
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
     current_state = state.get("current_state", State.STATE_0_INIT.value)
 
-    # Get user message
-    messages = state.get("messages", [])
-    user_message = ""
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            user_message = msg.get("content", "")
-            break
+    # Get user message (handles both dict and LangChain Message objects)
+    from .utils import extract_user_message
+    user_message = extract_user_message(state.get("messages", []))
 
     if not user_message:
         return {
@@ -76,6 +72,20 @@ async def agent_node(
             message_history=None,
         )
 
+        # DETAILED LOGGING: What did the agent return?
+        first_msg = response.messages[0].content[:100] if response.messages else "None"
+        logger.info(
+            "Agent response for session %s: event=%s, state=%s->%s, intent=%s, "
+            "products=%d, msg=%s",
+            session_id,
+            response.event,
+            current_state,
+            response.metadata.current_state,
+            response.metadata.intent,
+            len(response.products),
+            first_msg,
+        )
+
         # Extract from OUTPUT_CONTRACT structure
         new_state_str = response.metadata.current_state
         intent = response.metadata.intent
@@ -85,6 +95,7 @@ async def agent_node(
         selected_products = state.get("selected_products", [])
         if response.products:
             selected_products = [p.model_dump() for p in response.products]
+            logger.info("Agent found products: %s", [p.name for p in response.products])
 
         # Build assistant message (OUTPUT_CONTRACT format)
         assistant_content = {
@@ -99,6 +110,9 @@ async def agent_node(
 
         if response.reasoning:
             assistant_content["reasoning"] = response.reasoning
+
+        # Persist structured response for downstream consumers (Telegram, ManyChat, etc.)
+        agent_response_payload = response.model_dump()
 
         latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -140,6 +154,7 @@ async def agent_node(
             "escalation_reason": response.escalation.reason if response.escalation else None,
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
+            "agent_response": agent_response_payload,
         }
 
     except Exception as e:

@@ -33,13 +33,9 @@ async def moderation_node(state: dict[str, Any]) -> dict[str, Any]:
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
 
-    # Get latest user message
-    messages = state.get("messages", [])
-    user_content = None
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            user_content = msg.get("content")
-            break
+    # Get latest user message (handles both dict and LangChain Message objects)
+    from .utils import extract_user_message
+    user_content = extract_user_message(state.get("messages", []))
 
     # No message to moderate
     if not user_content:

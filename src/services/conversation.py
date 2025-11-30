@@ -253,50 +253,100 @@ class ConversationHandler:
 
     def _parse_response(self, result_state: ConversationState, session_id: str) -> AgentResponse:
         """Parse the agent response from the result state with robust fallbacks."""
-        messages = result_state.get("messages", [])
+        agent_response_data = result_state.get("agent_response")
         current_state = result_state.get("current_state", "STATE_0_INIT")
 
+        if agent_response_data:
+            try:
+                # Convert SupportResponse format to AgentResponse format
+                # Key difference: EscalationInfo (no level) vs Escalation (has level)
+                return self._convert_support_to_agent_response(agent_response_data, session_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to parse structured agent response for session %s: %s",
+                    session_id,
+                    exc,
+                )
+
+        messages = result_state.get("messages", [])
         if not messages:
             logger.warning("No messages in result state for session %s", session_id)
-            return parse_llm_output(
-                "",
-                session_id=session_id,
-                current_state=current_state,
+            return AgentResponse(
+                event="reply",
+                messages=[Message(type="text", content="")],
+                metadata=Metadata(session_id=session_id, current_state=current_state),
             )
 
         last_message = messages[-1]
         content = last_message.get("content", "")
 
-        # Use robust parser with multiple fallback strategies
-        response = parse_llm_output(
+        return parse_llm_output(
             content,
             session_id=session_id,
             current_state=current_state,
         )
 
-        # Validate and correct state transition
-        if response.metadata:
-            proposed_state = response.metadata.current_state
-            intent = response.metadata.intent
+    def _convert_support_to_agent_response(
+        self, data: dict[str, Any], session_id: str
+    ) -> AgentResponse:
+        """Convert SupportResponse (PydanticAI) to AgentResponse (core/models).
+        
+        Handles schema differences between the two models:
+        - EscalationInfo (no level) -> Escalation (has level)
+        - ResponseMetadata -> Metadata (extra fields)
+        - ProductMatch -> Product (compatible)
+        """
+        # Extract messages
+        raw_messages = data.get("messages", [])
+        messages = [
+            Message(type=m.get("type", "text"), content=m.get("content", ""))
+            for m in raw_messages
+        ]
+        if not messages:
+            messages = [Message(type="text", content="")]
 
-            transition = validate_state_transition(
-                session_id=session_id,
-                current_state=current_state,
-                proposed_state=proposed_state,
-                intent=intent,
+        # Extract metadata
+        raw_meta = data.get("metadata", {})
+        metadata = Metadata(
+            session_id=raw_meta.get("session_id", session_id),
+            current_state=raw_meta.get("current_state", "STATE_0_INIT"),
+            intent=raw_meta.get("intent", "UNKNOWN_OR_EMPTY"),
+            escalation_level=raw_meta.get("escalation_level", "NONE"),
+        )
+
+        # Extract escalation (add level from metadata if missing)
+        escalation = None
+        raw_esc = data.get("escalation")
+        if raw_esc:
+            escalation = Escalation(
+                level=raw_esc.get("level", raw_meta.get("escalation_level", "L1")),
+                reason=raw_esc.get("reason", "Escalation requested"),
+                target=raw_esc.get("target", "human_operator"),
             )
 
-            if transition.was_corrected:
-                logger.info(
-                    "State corrected for session %s: %s -> %s (reason: %s)",
-                    session_id,
-                    proposed_state,
-                    transition.new_state,
-                    transition.reason,
-                )
-                response.metadata.current_state = transition.new_state
+        # Extract products (ProductMatch -> Product compatible)
+        from src.core.models import Product
+        products = []
+        for p in data.get("products", []):
+            try:
+                products.append(Product(
+                    id=p.get("id", 0),
+                    name=p.get("name", ""),
+                    size=p.get("size", ""),
+                    color=p.get("color", ""),
+                    price=p.get("price", 0),
+                    photo_url=p.get("photo_url", ""),
+                ))
+            except Exception:
+                pass  # Skip invalid products
 
-        return response
+        return AgentResponse(
+            event=data.get("event", "simple_answer"),
+            messages=messages,
+            products=products,
+            metadata=metadata,
+            escalation=escalation,
+        )
 
     def _persist_user_message(self, session_id: str, text: str) -> None:
         """Store the user message in the message store."""
