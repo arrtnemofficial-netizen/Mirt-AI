@@ -149,6 +149,9 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
 
     # Send text messages (last one with keyboard)
     for i, chunk in enumerate(text_chunks):
+        if not chunk or not chunk.strip():
+            continue
+
         is_last_text = (i == len(text_chunks) - 1) and not agent_response.products
         await message.answer(
             chunk,
