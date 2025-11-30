@@ -121,7 +121,6 @@ async def tool_plan_node(state: ConversationStateV2) -> ConversationStateV2:
     Reduces hallucination by providing real data.
     """
     start_time = time.perf_counter()
-    session_id = state.get("metadata", {}).get("session_id", "")
 
     # Skip if moderation blocked
     if state.get("should_escalate"):
@@ -139,7 +138,6 @@ async def tool_plan_node(state: ConversationStateV2) -> ConversationStateV2:
         image_url=image_url,
         current_state=metadata.current_state,
         intent=metadata.intent,
-                    session_id=session_id,
     )
 
     if plan.has_tools:
