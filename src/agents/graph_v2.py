@@ -168,8 +168,6 @@ async def tool_plan_node(state: ConversationStateV2) -> ConversationStateV2:
         }
 
     track_metric("tool_plan_latency_ms", (time.perf_counter() - start_time) * 1000)
-        # Preserve session_id in metadata before returning
-            state["metadata"]["session_id"] = session_id
     return state
 
 
