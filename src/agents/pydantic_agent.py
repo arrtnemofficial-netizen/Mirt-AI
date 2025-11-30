@@ -83,14 +83,13 @@ class AgentRunner:
         session_id = metadata.get("session_id", "") if metadata else ""
 
         user_msg = history[-1]["content"]
-                # Extract image_url if present in metadata
-                image_url = metadata.get("image_url") if metadata else None
-                # Format message with image context if image exists
-                if image_url:
-                                user_msg_with_image = f"{user_msg}\n\n[IMAGE_URL: {image_url}]"
-                            else:
-                                            user_msg_with_image = user_msg
-
+        # Extract image_url if present in metadata
+        image_url = metadata.get("image_url") if metadata else None
+        # Format message with image context if image exists
+        if image_url:
+            user_msg_with_image = f"{user_msg}\n\n[IMAGE_URL: {image_url}]"
+        else:
+            user_msg_with_image = user_msg
                 # Add smart context instructions to help agent provide better responses
                 prepared_metadata["system_instructions"] = (
                                 "ВАЖЛИВ: Якщо користувач надіслав фото - АНАЛІЗУЙ його! "
