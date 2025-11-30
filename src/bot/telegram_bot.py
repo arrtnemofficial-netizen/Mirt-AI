@@ -55,28 +55,22 @@ def build_keyboard(
     with contextlib.suppress(ValueError):
         esc_level = EscalationLevel(escalation_level.upper())
 
-    # Get keyboard config from state_machine
-    keyboard_config = get_keyboard_for_state(state, esc_level)
-
-    if keyboard_config is None:
+    platform_kb = get_keyboard_for_state(state, esc_level)
+    if not platform_kb:
+        # If END state, remove keyboard explicitly
+        if state == State.STATE_7_END:
+            return ReplyKeyboardRemove()
         return None
 
-    # Handle keyboard removal for end states
-    if state in (State.STATE_7_END,):
-        return ReplyKeyboardRemove()
-
-    # Build Telegram keyboard from config
-    buttons: list[list[KeyboardButton]] = []
-    for row in keyboard_config.buttons:
-        buttons.append([KeyboardButton(text=btn) for btn in row])
-
-    if not buttons:
-        return None
+    # Convert generic PlatformKeyboard to aiogram ReplyKeyboardMarkup
+    buttons = [
+        [KeyboardButton(text=btn_text) for btn_text in row] for row in platform_kb.buttons
+    ]
 
     return ReplyKeyboardMarkup(
         keyboard=buttons,
         resize_keyboard=True,
-        one_time_keyboard=keyboard_config.one_time,
+        one_time_keyboard=platform_kb.one_time,
     )
 
 
