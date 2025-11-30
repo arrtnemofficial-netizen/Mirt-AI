@@ -83,13 +83,26 @@ class AgentRunner:
         session_id = metadata.get("session_id", "") if metadata else ""
 
         user_msg = history[-1]["content"]
+                # Extract image_url if present in metadata
+                image_url = metadata.get("image_url") if metadata else None
+                # Format message with image context if image exists
+                if image_url:
+                                user_msg_with_image = f"{user_msg}\n\n[IMAGE_URL: {image_url}]"
+                            else:
+                                            user_msg_with_image = user_msg
 
+                # Add smart context instructions to help agent provide better responses
+                prepared_metadata["system_instructions"] = (
+                                "ВАЖЛИВ: Якщо користувач надіслав фото - АНАЛІЗУЙ його! "
+                                "Коли є достатньо інформації (зріст, тип товару) - ДАВАЙ ТОЧНУ ЦІНУ ОДРАЗУ! "
+                                "Не переспрашуй про те, що вже сказав користувач. "
+                                "Пропонуй конкретні товари з каталогу, а не абстрактні відповіді."
+                            )
         try:
             # Таймаут захищає від зависання при проблемах з OpenRouter
             result = await asyncio.wait_for(
                 self.agent.run(
-                    user_msg,
-                    model_settings={
+            user_msg_with_image,                    model_settings={
                         # Force JSON output format for reliability
                         "response_format": {"type": "json_object"},
                         "extra_body": {
