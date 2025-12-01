@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from langchain_core.messages import BaseMessage
+
 from src.agents import ConversationState
 from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
@@ -13,6 +15,22 @@ from src.services.supabase_client import get_supabase_client
 
 if TYPE_CHECKING:
     from supabase import Client
+
+
+def _serialize_for_json(value: Any) -> Any:
+    """Recursively serialize values, converting LangChain Message objects to dicts."""
+    if isinstance(value, BaseMessage):
+        return {
+            "type": value.type,
+            "content": value.content,
+            "additional_kwargs": getattr(value, "additional_kwargs", {}),
+        }
+    elif isinstance(value, dict):
+        return {k: _serialize_for_json(v) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [_serialize_for_json(item) for item in value]
+    else:
+        return value
 
 
 class SupabaseSessionStore(SessionStore):
@@ -46,7 +64,9 @@ class SupabaseSessionStore(SessionStore):
         return ConversationState(messages=[], metadata={}, current_state=StateEnum.default())
 
     def save(self, session_id: str, state: ConversationState) -> None:
-        payload = {"session_id": session_id, "state": state}
+        # Serialize state to handle LangChain Message objects
+        serialized_state = _serialize_for_json(dict(state))
+        payload = {"session_id": session_id, "state": serialized_state}
         (self.client.table(self.table).upsert(payload).execute())
 
 

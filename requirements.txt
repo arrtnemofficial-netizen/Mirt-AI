@@ -13,6 +13,8 @@ aiogram>=3.17.0
 
 # --- Database & External Services ---
 supabase>=2.5.0
+langgraph-checkpoint-postgres>=2.0.0
+psycopg[binary]>=3.1.0
 
 # --- Background Tasks ---
 celery>=5.4.0
