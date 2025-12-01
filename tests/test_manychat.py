@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from src.core.models import AgentResponse, Message, Metadata, Product
@@ -16,12 +18,27 @@ class DummyRunner:
     def __init__(self, agent_response: AgentResponse):
         self.agent_response = agent_response
 
-    async def ainvoke(self, state):
-        state["messages"].append(
-            {"role": "assistant", "content": self.agent_response.model_dump_json()}
-        )
-        state["metadata"] = self.agent_response.metadata.model_dump()
+    async def ainvoke(self, state, config=None):
+        # Build assistant message in OUTPUT_CONTRACT format like real nodes
+        assistant_content = {
+            "event": self.agent_response.event,
+            "messages": [m.model_dump() for m in self.agent_response.messages],
+            "products": [p.model_dump() for p in self.agent_response.products],
+            "metadata": self.agent_response.metadata.model_dump(),
+        }
+        
+        if self.agent_response.escalation:
+            assistant_content["escalation"] = self.agent_response.escalation.model_dump()
+        
+        # Use json.dumps() for proper JSON format (conversation handler expects JSON)
+        json_content = json.dumps(assistant_content)
+        state["messages"].append({"role": "assistant", "content": json_content})
         state["current_state"] = self.agent_response.metadata.current_state
+        # Set agent_response like real nodes do (line 157 in agent_node.py)
+        state["agent_response"] = self.agent_response.model_dump()
+        # Ensure escalation_level is preserved in state
+        if hasattr(self.agent_response.metadata, 'escalation_level'):
+            state["escalation_level"] = self.agent_response.metadata.escalation_level
         return state
 
 
@@ -64,14 +81,14 @@ async def test_manychat_custom_fields():
         event="simple_answer",
         messages=[Message(content="Ось сукня")],
         products=[
-            Product(
-                product_id=123,
-                name="Сукня Анна",
-                price=1200,
-                size="122-128",
-                color="синій",
-                photo_url="https://example.com/photo.jpg",
-            )
+            Product.from_legacy({
+                "product_id": 123,
+                "name": "Сукня Анна",
+                "price": 1200,
+                "size": "122-128",
+                "color": "синій",
+                "photo_url": "https://example.com/photo.jpg",
+            })
         ],
         metadata=Metadata(current_state="STATE_4_OFFER", intent="DISCOVERY_OR_QUESTION"),
     )

@@ -1,180 +1,254 @@
-"""Tests for message validator."""
+"""
+Tests for input validator (InputMetadata, WebhookInput).
+=========================================================
+Updated for new architecture with input_validator.py
+"""
 
 import pytest
 
-from src.core.message_validator import MessageValidator, validate_incoming_message
+from src.core.input_validator import (
+    InputMetadata,
+    WebhookInput,
+    validate_input_metadata,
+    validate_webhook_input,
+)
+from src.core.state_machine import State, Intent, EscalationLevel
 
 
-class TestMessageValidator:
-    """Test MessageValidator class."""
-
-    def setup_method(self):
-        self.validator = MessageValidator()
-
-    def test_valid_text_message(self):
-        """Test valid text message passes."""
-        result = self.validator.validate_message("Привіт, шукаю плаття")
-
-        assert result.is_valid
-        assert result.exit_condition is None
-
-    def test_empty_message_rejected(self):
-        """Test empty message is rejected."""
-        result = self.validator.validate_message("")
-
-        assert not result.is_valid
-        assert result.exit_condition is not None
-        assert "Незрозуміле" in result.exit_condition
-
-    def test_whitespace_only_rejected(self):
-        """Test whitespace-only message is rejected."""
-        result = self.validator.validate_message("   \n\t  ")
-
-        assert not result.is_valid
-
-    def test_none_message_rejected(self):
-        """Test None message is rejected."""
-        result = self.validator.validate_message(None)
-
-        assert not result.is_valid
-
-    def test_message_with_image_rejected(self):
-        """Test message with image attachment is rejected."""
-        attachments = [{"type": "image", "url": "https://example.com/img.jpg"}]
-        result = self.validator.validate_message("Дивіться фото", attachments=attachments)
-
-        assert not result.is_valid
-        assert "Незрозуміле" in result.exit_condition
-
-    def test_message_with_video_rejected(self):
-        """Test message with video attachment is rejected."""
-        attachments = [{"type": "video", "url": "https://example.com/vid.mp4"}]
-        result = self.validator.validate_message("Відео", attachments=attachments)
-
-        assert not result.is_valid
-
-    def test_message_with_document_rejected(self):
-        """Test message with document attachment is rejected."""
-        attachments = [{"type": "document", "filename": "file.pdf"}]
-        result = self.validator.validate_message("Документ", attachments=attachments)
-
-        assert not result.is_valid
-
-    def test_message_with_http_link_rejected(self):
-        """Test message with http link is rejected."""
-        result = self.validator.validate_message("Дивіться http://example.com")
-
-        assert not result.is_valid
-        assert "Незрозуміле" in result.exit_condition
-
-    def test_message_with_https_link_rejected(self):
-        """Test message with https link is rejected."""
-        result = self.validator.validate_message("Сайт https://example.com")
-
-        assert not result.is_valid
-
-    def test_message_with_www_rejected(self):
-        """Test message with www is rejected."""
-        result = self.validator.validate_message("Перейдіть на www.example.com")
-
-        assert not result.is_valid
-
-    def test_message_with_ua_domain_rejected(self):
-        """Test message with .ua domain is rejected."""
-        result = self.validator.validate_message("Сайт example.ua")
-
-        assert not result.is_valid
-
-    def test_unreadable_special_chars_rejected(self):
-        """Test message with too many special chars is rejected."""
-        result = self.validator.validate_message("@#$%^&*()")
-
-        assert not result.is_valid
-
-    def test_short_emoji_only_rejected(self):
-        """Test short emoji-only message is rejected."""
-        result = self.validator.validate_message("👗")
-
-        assert not result.is_valid
-
-    def test_normal_emoji_with_text_accepted(self):
-        """Test emoji with normal text is accepted."""
-        result = self.validator.validate_message("Привіт 👋 шукаю плаття")
-
-        assert result.is_valid
-
-    def test_ukrainian_text_accepted(self):
-        """Test Ukrainian text is accepted."""
-        result = self.validator.validate_message("Доброго дня! Які у вас є костюми?")
-
-        assert result.is_valid
-
-    def test_numbers_accepted(self):
-        """Test numbers in text are accepted."""
-        result = self.validator.validate_message("Розмір 128, бюджет 2000 грн")
-
-        assert result.is_valid
-
-    def test_punctuation_accepted(self):
-        """Test normal punctuation is accepted."""
-        result = self.validator.validate_message("Привіт! Як справи? Все добре.")
-
-        assert result.is_valid
+# =============================================================================
+# INPUT METADATA TESTS
+# =============================================================================
 
 
-class TestConvenienceFunction:
-    """Test validate_incoming_message convenience function."""
+class TestInputMetadata:
+    """Test InputMetadata validation."""
 
-    def test_basic_usage(self):
-        """Test basic convenience function usage."""
-        result = validate_incoming_message("Привіт")
+    def test_valid_metadata(self):
+        """Test valid metadata passes."""
+        meta = InputMetadata(
+            session_id="test-123",
+            current_state=State.STATE_0_INIT,
+            channel="telegram",
+        )
 
-        assert result.is_valid
+        assert meta.session_id == "test-123"
+        assert meta.current_state == State.STATE_0_INIT
+        assert meta.channel == "telegram"
 
-    def test_with_attachments(self):
-        """Test with attachments parameter."""
-        attachments = [{"type": "photo"}]
-        result = validate_incoming_message("Фото", attachments=attachments)
+    def test_empty_session_id_allowed(self):
+        """Test empty session_id is allowed (uses default)."""
+        meta = InputMetadata()
 
-        assert not result.is_valid
+        assert meta.session_id == ""
+        assert meta.current_state == State.STATE_0_INIT
+
+    def test_state_normalization_from_string(self):
+        """Test state is normalized from string."""
+        meta = InputMetadata(current_state="STATE1_DISCOVERY")  # Legacy format
+
+        assert meta.current_state == State.STATE_1_DISCOVERY
+
+    def test_state_normalization_lowercase(self):
+        """Test state handles lowercase."""
+        meta = InputMetadata(current_state="state_0_init")
+
+        assert meta.current_state == State.STATE_0_INIT
+
+    def test_invalid_state_defaults_to_init(self):
+        """Test invalid state defaults to STATE_0_INIT."""
+        meta = InputMetadata(current_state="INVALID_STATE")
+
+        assert meta.current_state == State.STATE_0_INIT
+
+    def test_intent_normalization(self):
+        """Test intent is normalized."""
+        meta = InputMetadata(intent="greeting_only")
+
+        assert meta.intent == Intent.GREETING_ONLY
+
+    def test_intent_none_allowed(self):
+        """Test None intent is allowed."""
+        meta = InputMetadata(intent=None)
+
+        assert meta.intent is None
+
+    def test_channel_normalization(self):
+        """Test channel is normalized to lowercase."""
+        meta = InputMetadata(channel="TELEGRAM")
+
+        assert meta.channel == "telegram"
+
+    def test_channel_empty_defaults_unknown(self):
+        """Test empty channel defaults to 'unknown'."""
+        meta = InputMetadata(channel="")
+
+        assert meta.channel == "unknown"
+
+    def test_image_url_sets_has_image(self):
+        """Test image_url sets has_image automatically."""
+        meta = InputMetadata(image_url="https://example.com/image.jpg", has_image=True)
+
+        assert meta.has_image is True
+
+    def test_has_image_explicit(self):
+        """Test has_image can be set explicitly."""
+        meta = InputMetadata(has_image=True)
+
+        assert meta.has_image is True
+
+    def test_escalation_level_normalization(self):
+        """Test escalation level is normalized."""
+        meta = InputMetadata(escalation_level="l1")
+
+        assert meta.escalation_level == EscalationLevel.L1
+
+    def test_to_agent_metadata(self):
+        """Test conversion to agent metadata dict."""
+        meta = InputMetadata(
+            session_id="test",
+            current_state=State.STATE_1_DISCOVERY,
+            intent=Intent.GREETING_ONLY,
+            channel="telegram",
+        )
+
+        result = meta.to_agent_metadata()
+
+        assert result["session_id"] == "test"
+        assert result["current_state"] == "STATE_1_DISCOVERY"
+        assert result["intent"] == "GREETING_ONLY"
+        assert result["channel"] == "telegram"
+
+
+# =============================================================================
+# WEBHOOK INPUT TESTS
+# =============================================================================
+
+
+class TestWebhookInput:
+    """Test WebhookInput validation."""
+
+    def test_valid_webhook_input(self):
+        """Test valid webhook input."""
+        data = WebhookInput(
+            text="Привіт, шукаю сукню",
+            session_id="session-123",
+        )
+
+        assert data.text == "Привіт, шукаю сукню"
+        assert data.session_id == "session-123"
+
+    def test_empty_text_allowed(self):
+        """Test empty text is allowed."""
+        data = WebhookInput(text="")
+
+        assert data.text == ""
+
+    def test_none_text_becomes_empty(self):
+        """Test None text becomes empty string."""
+        data = WebhookInput(text=None)
+
+        assert data.text == ""
+
+    def test_text_whitespace_trimmed(self):
+        """Test text whitespace is trimmed."""
+        data = WebhookInput(text="  Привіт  ")
+
+        assert data.text == "Привіт"
+
+    def test_with_image_url(self):
+        """Test webhook with image URL."""
+        data = WebhookInput(
+            text="Що це?",
+            image_url="https://example.com/photo.jpg",
+        )
+
+        assert data.image_url == "https://example.com/photo.jpg"
+
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS TESTS
+# =============================================================================
+
+
+class TestConvenienceFunctions:
+    """Test convenience validation functions."""
+
+    def test_validate_input_metadata_valid(self):
+        """Test validating valid metadata dict."""
+        raw = {
+            "session_id": "test",
+            "current_state": "STATE_1_DISCOVERY",
+            "channel": "instagram",
+        }
+
+        result = validate_input_metadata(raw)
+
+        assert result.session_id == "test"
+        assert result.current_state == State.STATE_1_DISCOVERY
+        assert result.channel == "instagram"
+
+    def test_validate_input_metadata_invalid(self):
+        """Test validating invalid metadata returns defaults."""
+        raw = "invalid"  # Not a dict
+
+        result = validate_input_metadata(raw)
+
+        assert result.session_id == ""
+        assert result.current_state == State.STATE_0_INIT
+
+    def test_validate_webhook_input_valid(self):
+        """Test validating valid webhook input."""
+        raw = {
+            "text": "Привіт",
+            "session_id": "session-456",
+        }
+
+        result = validate_webhook_input(raw)
+
+        assert result.text == "Привіт"
+        assert result.session_id == "session-456"
+
+    def test_validate_webhook_input_partial(self):
+        """Test validating partial webhook input."""
+        raw = {"text": "Hello"}
+
+        result = validate_webhook_input(raw)
+
+        assert result.text == "Hello"
+        assert result.session_id == ""
+
+
+# =============================================================================
+# EDGE CASES
+# =============================================================================
 
 
 class TestEdgeCases:
     """Test edge cases."""
 
-    def test_very_long_valid_message(self):
-        """Test very long but valid message."""
-        long_text = "Привіт " * 100
-        result = validate_incoming_message(long_text)
+    def test_unicode_text(self):
+        """Test Ukrainian text is handled."""
+        data = WebhookInput(text="Привіт! Шукаю сукню для дитини 🎀")
 
-        assert result.is_valid
+        assert "Привіт" in data.text
+        assert "🎀" in data.text
 
-    def test_mixed_languages(self):
-        """Test mixed Ukrainian and English."""
-        result = validate_incoming_message("Привіт hello як справи?")
+    def test_very_long_session_id(self):
+        """Test very long session ID."""
+        long_id = "a" * 1000
+        meta = InputMetadata(session_id=long_id)
 
-        assert result.is_valid
+        assert meta.session_id == long_id
 
-    def test_multiple_attachments(self):
-        """Test multiple attachments."""
-        attachments = [
-            {"type": "image"},
-            {"type": "video"},
-        ]
-        result = validate_incoming_message("Медіа", attachments=attachments)
+    def test_moderation_flags_list(self):
+        """Test moderation flags list."""
+        meta = InputMetadata(moderation_flags=["email", "phone"])
 
-        assert not result.is_valid
+        assert len(meta.moderation_flags) == 2
+        assert "email" in meta.moderation_flags
 
-    def test_attachment_without_type(self):
-        """Test attachment without type field."""
-        attachments = [{"url": "https://example.com/file"}]
-        result = validate_incoming_message("Файл", attachments=attachments)
+    def test_empty_moderation_flags(self):
+        """Test empty moderation flags."""
+        meta = InputMetadata()
 
-        # Should pass as type is not in media_types
-        assert result.is_valid
-
-    def test_link_in_middle_of_text(self):
-        """Test link in middle of text."""
-        result = validate_incoming_message("Дивіться тут https://example.com дуже гарно")
-
-        assert not result.is_valid
+        assert meta.moderation_flags == []

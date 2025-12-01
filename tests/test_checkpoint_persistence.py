@@ -16,16 +16,18 @@ from typing import Any
 # =============================================================================
 
 
-def create_test_state(session_id: str, message: str = "Привіт!") -> dict[str, Any]:
+def create_test_state(session_id: str, message: str = "Привіт!", include_step_number: bool = True) -> dict[str, Any]:
     """Create test state."""
-    return {
+    state = {
         "messages": [{"role": "user", "content": message}],
         "session_id": session_id,
         "thread_id": session_id,
         "metadata": {"session_id": session_id},
         "current_state": "STATE_0_INIT",
-        "step_number": 0,
     }
+    if include_step_number:
+        state["step_number"] = 0
+    return state
 
 
 # =============================================================================
@@ -72,8 +74,9 @@ async def test_state_persists_with_same_thread_id():
     step1 = result1.get("step_number", 0)
     assert step1 > 0, "Step number should increase"
     
-    # Second invocation with same thread_id - should continue
-    state2 = create_test_state(session_id, "Шукаю сукню")
+    # Second invocation with same thread_id - should continue from checkpoint
+    # Don't include step_number to allow checkpoint to restore it
+    state2 = create_test_state(session_id, "Шукаю сукню", include_step_number=False)
     result2 = await graph.ainvoke(state2, config=config)
     
     step2 = result2.get("step_number", 0)

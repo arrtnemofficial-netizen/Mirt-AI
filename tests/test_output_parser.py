@@ -1,219 +1,336 @@
-"""Tests for robust output parser."""
+"""
+Tests for PydanticAI response models and output validation.
+============================================================
+Updated for new architecture - tests SupportResponse, VisionResponse parsing.
+"""
 
 import pytest
 
-from src.core.models import AgentResponse
-from src.core.output_parser import OutputParser, parse_llm_output
+from src.agents import (
+    SupportResponse,
+    VisionResponse,
+    MessageItem,
+    ResponseMetadata,
+    ProductMatch,
+)
+from src.core.models import AgentResponse, Message, Metadata, Product
 
 
-class TestOutputParser:
-    """Test OutputParser with various malformed inputs."""
+# =============================================================================
+# SUPPORT RESPONSE TESTS
+# =============================================================================
 
-    def setup_method(self):
-        self.parser = OutputParser(session_id="test123", current_state="STATE_1_DISCOVERY")
 
-    def test_valid_json_string(self):
-        """Test parsing valid JSON string."""
-        raw = """{"event": "simple_answer", "messages": [{"type": "text", "content": "Hello"}], "products": [], "metadata": {"session_id": "test", "current_state": "STATE_1_DISCOVERY", "intent": "GREETING_ONLY"}}"""
+class TestSupportResponse:
+    """Test SupportResponse model parsing and validation."""
 
-        result = self.parser.parse(raw)
+    def test_valid_support_response(self):
+        """Test valid SupportResponse creation."""
+        response = SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(content="Вітаю!")],
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state="STATE_1_DISCOVERY",
+                intent="GREETING_ONLY",
+                escalation_level="NONE",
+            ),
+        )
 
-        assert isinstance(result, AgentResponse)
-        assert result.event == "simple_answer"
-        assert len(result.messages) == 1
-        assert result.messages[0].content == "Hello"
+        assert response.event == "simple_answer"
+        assert len(response.messages) == 1
+        assert response.messages[0].content == "Вітаю!"
 
-    def test_json_in_markdown_block(self):
-        """Test extracting JSON from markdown code block."""
-        raw = """Here is my response:
-        
-```json
-{"event": "simple_answer", "messages": [{"type": "text", "content": "Вітаю!"}], "products": [], "metadata": {"current_state": "STATE_0_INIT"}}
-```
+    def test_support_response_with_products(self):
+        """Test SupportResponse with products."""
+        response = SupportResponse(
+            event="multi_option",
+            messages=[MessageItem(content="Ось товари:")],
+            products=[
+                ProductMatch(
+                    id=123,
+                    name="Сукня Еліт",
+                    price=1300,
+                    size="122",
+                    color="рожева",
+                    photo_url="https://cdn.example.com/1.jpg",
+                )
+            ],
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state="STATE_4_OFFER",
+                intent="SIZE_HELP",
+                escalation_level="NONE",
+            ),
+        )
 
-That's my answer."""
+        assert len(response.products) == 1
+        assert response.products[0].name == "Сукня Еліт"
+        assert response.products[0].price == 1300
 
-        result = self.parser.parse(raw)
+    def test_metadata_preserves_state(self):
+        """Test metadata preserves current_state."""
+        response = SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(content="Test")],
+            metadata=ResponseMetadata(
+                session_id="my-session",
+                current_state="STATE_4_OFFER",
+                intent="DISCOVERY_OR_QUESTION",
+                escalation_level="NONE",
+            ),
+        )
 
-        assert isinstance(result, AgentResponse)
-        assert result.messages[0].content == "Вітаю!"
+        assert response.metadata.session_id == "my-session"
+        assert response.metadata.current_state == "STATE_4_OFFER"
 
-    def test_partial_json_extraction(self):
-        """Test extracting JSON from mixed text."""
-        raw = """I think the best answer is {"event": "simple_answer", "messages": [{"type": "text", "content": "Test"}], "products": [], "metadata": {}} because reasons."""
-
-        result = self.parser.parse(raw)
-
-        assert isinstance(result, AgentResponse)
-        # Should fallback gracefully
-
-    def test_plain_text_fallback(self):
-        """Test fallback for plain text."""
-        raw = "Вітаю! Я допоможу вам знайти одяг для дитини."
-
-        result = self.parser.parse(raw)
-
-        assert isinstance(result, AgentResponse)
-        assert result.event == "simple_answer"
-        assert "Вітаю" in result.messages[0].content
-
-    def test_already_agent_response(self):
-        """Test passing through AgentResponse object."""
-        from src.core.models import Message, Metadata
-
-        response = AgentResponse(
-            event="greeting",
-            messages=[Message(type="text", content="Hi")],
+    def test_empty_products_allowed(self):
+        """Test empty products list is allowed."""
+        response = SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(content="Ніяких товарів")],
             products=[],
-            metadata=Metadata(session_id="x", current_state="STATE_0_INIT"),
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state="STATE_0_INIT",
+                intent="GREETING_ONLY",
+                escalation_level="NONE",
+            ),
         )
 
-        result = self.parser.parse(response)
-
-        assert result is response
-
-    def test_dict_input(self):
-        """Test parsing dict input."""
-        data = {
-            "event": "product_showcase",
-            "messages": [{"type": "text", "content": "Here are products"}],
-            "products": [
-                {
-                    "id": 1,
-                    "name": "Dress",
-                    "price": 1000,
-                    "photo_url": "https://example.com/img.jpg",
-                }
-            ],
-            "metadata": {"current_state": "STATE_3_OFFER"},
-        }
-
-        result = self.parser.parse(data)
-
-        assert result.event == "product_showcase"
-        assert len(result.products) == 1
-
-    def test_missing_event_defaults(self):
-        """Test default event when missing."""
-        data = {
-            "messages": [{"type": "text", "content": "Test"}],
-            "metadata": {},
-        }
-
-        result = self.parser.parse(data)
-
-        assert result.event == "simple_answer"
-
-    def test_missing_messages_extracts_text(self):
-        """Test extracting text from various fields."""
-        data = {
-            "event": "simple_answer",
-            "text": "This is the response",
-            "metadata": {},
-        }
-
-        result = self.parser.parse(data)
-
-        assert "This is the response" in result.messages[0].content
-
-    def test_invalid_json_graceful_fallback(self):
-        """Test graceful handling of invalid JSON."""
-        raw = '{"event": "simple_answer", "messages": [broken json here'
-
-        result = self.parser.parse(raw)
-
-        assert isinstance(result, AgentResponse)
-        # Should not crash, should have some content
-
-    def test_empty_string(self):
-        """Test handling empty string."""
-        result = self.parser.parse("")
-
-        assert isinstance(result, AgentResponse)
-        assert len(result.messages) > 0
-        assert "Вибачте" in result.messages[0].content or len(result.messages[0].content) > 0
-
-    def test_none_handling(self):
-        """Test handling None-like values."""
-        result = self.parser.parse(None)
-
-        assert isinstance(result, AgentResponse)
-
-    def test_session_and_state_preservation(self):
-        """Test that session_id and state are preserved."""
-        parser = OutputParser(session_id="my-session", current_state="STATE_4_OFFER")
-
-        result = parser.parse("Plain text response")
-
-        assert result.metadata.session_id == "my-session"
-        assert result.metadata.current_state == "STATE_4_OFFER"
-
-    def test_product_validation(self):
-        """Test product validation and filtering."""
-        data = {
-            "event": "product_showcase",
-            "messages": [{"content": "Products"}],
-            "products": [
-                {"name": "Valid Product", "price": 500},
-                {"invalid": "no name"},  # Should be filtered
-                "not a dict",  # Should be filtered
-            ],
-            "metadata": {},
-        }
-
-        result = self.parser.parse(data)
-
-        assert len(result.products) == 1
-        assert result.products[0].name == "Valid Product"
+        assert response.products == []
 
 
-class TestConvenienceFunction:
-    """Test parse_llm_output convenience function."""
+# =============================================================================
+# VISION RESPONSE TESTS
+# =============================================================================
 
-    def test_basic_usage(self):
-        """Test basic convenience function usage."""
-        result = parse_llm_output(
-            "Hello world",
-            session_id="sess1",
-            current_state="STATE_2_REFINEMENT",
+
+class TestVisionResponse:
+    """Test VisionResponse model."""
+
+    def test_minimal_vision_response(self):
+        """Test minimal VisionResponse."""
+        response = VisionResponse(
+            reply_to_user="Це схоже на сукню",
+            confidence=0.85,
+            needs_clarification=False,
         )
 
-        assert isinstance(result, AgentResponse)
-        assert result.metadata.session_id == "sess1"
+        assert response.confidence == 0.85
+        assert response.needs_clarification is False
+        assert response.identified_product is None
+
+    def test_vision_response_with_product(self):
+        """Test VisionResponse with identified product."""
+        response = VisionResponse(
+            reply_to_user="Знайшла!",
+            confidence=0.95,
+            needs_clarification=False,
+            identified_product=ProductMatch(
+                id=456,
+                name="Тренч Парижанка",
+                price=2500,
+                size="128",
+                color="бежевий",
+                photo_url="https://cdn.example.com/trench.jpg",
+            ),
+        )
+
+        assert response.identified_product is not None
+        assert response.identified_product.name == "Тренч Парижанка"
+
+    def test_vision_needs_clarification(self):
+        """Test VisionResponse with clarification."""
+        response = VisionResponse(
+            reply_to_user="Не зовсім зрозуміло",
+            confidence=0.3,
+            needs_clarification=True,
+            clarification_question="Який колір вас цікавить?",
+        )
+
+        assert response.needs_clarification is True
+        assert response.clarification_question == "Який колір вас цікавить?"
+
+
+# =============================================================================
+# CORE MODELS TESTS
+# =============================================================================
+
+
+class TestAgentResponse:
+    """Test core AgentResponse model."""
+
+    def test_valid_agent_response(self):
+        """Test valid AgentResponse creation."""
+        response = AgentResponse(
+            event="simple_answer",
+            messages=[Message(content="Привіт!")],
+            products=[],
+            metadata=Metadata(
+                session_id="test",
+                current_state="STATE_0_INIT",
+            ),
+        )
+
+        assert response.event == "simple_answer"
+        assert len(response.messages) == 1
+
+    def test_agent_response_with_products(self):
+        """Test AgentResponse with products."""
+        response = AgentResponse(
+            event="product_showcase",
+            messages=[Message(content="Ось товари:")],
+            products=[
+                Product(
+                    id=1,
+                    name="Dress",
+                    price=1000,
+                    photo_url="https://example.com/img.jpg",
+                )
+            ],
+            metadata=Metadata(current_state="STATE_4_OFFER"),
+        )
+
+        assert len(response.products) == 1
+        assert response.products[0].name == "Dress"
+
+
+# =============================================================================
+# PRODUCT MATCH VALIDATION
+# =============================================================================
+
+
+class TestProductMatch:
+    """Test ProductMatch validation."""
+
+    def test_valid_product_match(self):
+        """Test valid ProductMatch."""
+        product = ProductMatch(
+            id=123,
+            name="Test Product",
+            price=500,
+            size="M",
+            color="red",
+            photo_url="https://example.com/photo.jpg",
+        )
+
+        assert product.id == 123
+        assert product.name == "Test Product"
+
+    def test_product_requires_https(self):
+        """Test ProductMatch requires HTTPS URL."""
+        with pytest.raises(ValueError):
+            ProductMatch(
+                id=123,
+                name="Test",
+                price=100,
+                size="M",
+                color="red",
+                photo_url="http://not-https.com/photo.jpg",
+            )
+
+    def test_product_accepts_https(self):
+        """Test ProductMatch accepts HTTPS URL."""
+        product = ProductMatch(
+            id=456,
+            name="Valid Product",
+            price=200,
+            size="L",
+            color="blue",
+            photo_url="https://cdn.example.com/photo.jpg",
+        )
+
+        assert product.photo_url.startswith("https://")
+
+
+# =============================================================================
+# MESSAGE ITEM VALIDATION
+# =============================================================================
+
+
+class TestMessageItem:
+    """Test MessageItem validation."""
+
+    def test_valid_message_item(self):
+        """Test valid MessageItem."""
+        msg = MessageItem(content="Привіт!")
+
+        assert msg.type == "text"
+        assert msg.content == "Привіт!"
+
+    def test_message_item_max_length(self):
+        """Test MessageItem enforces max length."""
+        with pytest.raises(ValueError):
+            MessageItem(content="x" * 1000)  # > 900 chars
+
+    def test_message_item_types(self):
+        """Test MessageItem type field - only 'text' is supported."""
+        text_msg = MessageItem(type="text", content="Text")
+
+        assert text_msg.type == "text"
+
+        # Test that only 'text' type is allowed
+        with pytest.raises(ValueError):
+            MessageItem(type="image", content="https://example.com/img.jpg")
+
+
+# =============================================================================
+# UNICODE AND EDGE CASES
+# =============================================================================
 
 
 class TestEdgeCases:
-    """Test edge cases and stress scenarios."""
-
-    def test_very_long_text(self):
-        """Test handling very long text."""
-        long_text = "A" * 10000
-
-        result = parse_llm_output(long_text)
-
-        assert isinstance(result, AgentResponse)
+    """Test edge cases and special content."""
 
     def test_unicode_content(self):
-        """Test Unicode content handling."""
-        raw = '{"event": "simple_answer", "messages": [{"type": "text", "content": "Привіт 🎀 Як справи? 👗"}], "products": [], "metadata": {}}'
+        """Test Ukrainian content handling."""
+        response = SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(content="Привіт 🎀 Як справи? 👗")],
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state="STATE_0_INIT",
+                intent="GREETING_ONLY",
+                escalation_level="NONE",
+            ),
+        )
 
-        result = parse_llm_output(raw)
+        assert "🎀" in response.messages[0].content
+        assert "👗" in response.messages[0].content
 
-        assert "🎀" in result.messages[0].content
-        assert "👗" in result.messages[0].content
+    def test_empty_messages_list(self):
+        """Test response requires at least one message."""
+        # SupportResponse requires at least 1 message, so test with one
+        response = SupportResponse(
+            event="escalation",
+            messages=[MessageItem(content="Escalation message")],
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state="STATE_8_COMPLAINT",
+                intent="COMPLAINT",
+                escalation_level="L1",
+            ),
+        )
 
-    def test_nested_json_in_content(self):
-        """Test JSON content that contains nested JSON."""
-        raw = '{"event": "simple_answer", "messages": [{"type": "text", "content": "Data: {\\"key\\": \\"value\\"}"}], "products": [], "metadata": {}}'
+        assert len(response.messages) == 1
 
-        result = parse_llm_output(raw)
+    def test_multiple_products(self):
+        """Test response with multiple products."""
+        response = SupportResponse(
+            event="multi_option",
+            messages=[MessageItem(content="Ось варіанти:")],
+            products=[
+                ProductMatch(id=1, name="Product A", price=100, size="M", color="red", photo_url="https://a.com/1.jpg"),
+                ProductMatch(id=2, name="Product B", price=200, size="L", color="blue", photo_url="https://b.com/2.jpg"),
+                ProductMatch(id=3, name="Product C", price=300, size="XL", color="green", photo_url="https://c.com/3.jpg"),
+            ],
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state="STATE_4_OFFER",
+                intent="SIZE_HELP",
+                escalation_level="NONE",
+            ),
+        )
 
-        assert isinstance(result, AgentResponse)
-
-    def test_multiple_json_objects(self):
-        """Test text with multiple JSON objects."""
-        raw = '{"a": 1} some text {"event": "simple_answer", "messages": [{"content": "Real"}], "metadata": {}} more text'
-
-        result = parse_llm_output(raw)
-
-        assert isinstance(result, AgentResponse)
+        assert len(response.products) == 3

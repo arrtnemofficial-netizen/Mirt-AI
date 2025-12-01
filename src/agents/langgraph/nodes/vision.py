@@ -109,14 +109,84 @@ async def vision_node(
         )
         track_metric("vision_node_latency_ms", latency_ms)
 
-        # Build assistant message
-        assistant_content = response.reply_to_user
+        # Build assistant messages (multi-bubble)
+        assistant_messages: list[dict[str, str]] = []
+
+        previous_messages = state.get("messages", [])
+        has_assistant_reply = any(m.get("role") == "assistant" for m in previous_messages)
+
+        if not has_assistant_reply:
+            assistant_messages.append(
+                {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": "Вітаю 🎀 З вами Ольга. Дякую за фото!",
+                }
+            )
+
+        # Main vision response from the agent
+        if response.reply_to_user:
+            assistant_messages.append(
+                {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": response.reply_to_user.strip(),
+                }
+            )
+
+        # Product highlight bubble
+        product = response.identified_product
+        if product:
+            color = f"{product.color}" if product.color else ""
+            color_part = f" у кольорі {color}" if color else ""
+            price_part = f" — {product.price} грн" if product.price is not None else ""
+            assistant_messages.append(
+                {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": f"Це наш {product.name}{color_part}{price_part}.",
+                }
+            )
+            if product.photo_url:
+                assistant_messages.append(
+                    {
+                        "role": "assistant",
+                        "type": "image",
+                        "content": product.photo_url,
+                    }
+                )
+
+        # Clarification or default question
         if response.clarification_question:
-            assistant_content += f"\n\n{response.clarification_question}"
+            assistant_messages.append(
+                {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": response.clarification_question.strip(),
+                }
+            )
+        elif response.needs_clarification:
+            assistant_messages.append(
+                {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": "Який розмір потрібен? Підкажіть, будь ласка, зріст дитини 🤍",
+                }
+            )
+
+        # Fallback: ensure at least one message
+        if not assistant_messages:
+            assistant_messages.append(
+                {
+                    "role": "assistant",
+                    "type": "text",
+                    "content": "Зчитала фото. Готова допомогти з розміром чи деталями 🤍",
+                }
+            )
 
         return {
             "current_state": State.STATE_2_VISION.value,
-            "messages": [{"role": "assistant", "content": assistant_content}],
+            "messages": assistant_messages,
             "selected_products": selected_products,
             "metadata": {
                 **state.get("metadata", {}),

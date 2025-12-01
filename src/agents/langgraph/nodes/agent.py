@@ -5,7 +5,7 @@ General-purpose agent for discovery, size/color questions.
 
 Uses PydanticAI agents with:
 - deps_type for proper dependency injection
-- result_type for structured output (no manual parsing!)
+- output_type for structured output (no manual parsing!)
 - @agent.system_prompt for dynamic context
 - @agent.tool for tools with DI
 """

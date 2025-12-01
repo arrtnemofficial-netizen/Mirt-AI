@@ -6,7 +6,9 @@ Handles photo identification and product matching.
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -22,6 +24,21 @@ from .models import VisionResponse
 
 
 logger = logging.getLogger(__name__)
+
+# Vision guide path
+VISION_GUIDE_PATH = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
+
+
+def _load_vision_guide() -> str:
+    """Load vision recognition guide for better photo analysis."""
+    try:
+        if VISION_GUIDE_PATH.exists():
+            with open(VISION_GUIDE_PATH, encoding="utf-8") as f:
+                guide = json.load(f)
+            return json.dumps(guide, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning("Failed to load vision guide: %s", e)
+    return ""
 
 
 # =============================================================================
@@ -43,9 +60,12 @@ def _build_model() -> OpenAIModel:
 
 
 def _get_vision_prompt() -> str:
-    """Build vision prompt with REAL catalog from system_prompt_full.yaml."""
+    """Build vision prompt with REAL catalog and recognition guide."""
     # Load full catalog from the same source as support_agent
     full_prompt = get_system_prompt_text("grok")
+
+    # Load vision recognition guide
+    vision_guide = _load_vision_guide()
 
     vision_instructions = """
 # VISION AGENT - Аналіз фото товарів
@@ -69,11 +89,13 @@ def _get_vision_prompt() -> str:
 - Пропонувати кольори/розміри яких немає
 
 Відповідай УКРАЇНСЬКОЮ, тепло як менеджер Ольга 🤍
+"""
 
----
-""" + full_prompt
-
-    return vision_instructions
+    # Build final prompt with vision guide
+    if vision_guide:
+        return f"{vision_instructions}\n---\n# VISION RECOGNITION GUIDE\n{vision_guide}\n\n---\n# CATALOG\n{full_prompt}"
+    else:
+        return f"{vision_instructions}\n---\n{full_prompt}"
 
 _vision_agent: Agent[AgentDeps, VisionResponse] | None = None
 
@@ -135,7 +157,7 @@ async def run_vision(
     try:
         result = await asyncio.wait_for(
             agent.run(message, deps=deps, message_history=message_history),
-            timeout=30,
+            timeout=120,  # Increased for slow API tiers
         )
         return result.output  # output_type param, result.output attr
 

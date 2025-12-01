@@ -129,15 +129,20 @@ class Intent(str, Enum):
 
 
 class EventType(str, Enum):
-    """Agent response event types from OUTPUT_CONTRACT."""
+    """
+    Agent response event types from OUTPUT_CONTRACT.
+    
+    NOTE: This enum is kept for reference but not actively used.
+    The actual event types are defined as Literal in:
+    - src/agents/pydantic/models.py (EventType Literal)
+    - src/core/models.py (AgentResponse.event as str)
+    """
 
     SIMPLE_ANSWER = "simple_answer"
     CLARIFYING_QUESTION = "clarifying_question"
     MULTI_OPTION = "multi_option"
-    OFFER = "offer"
     ESCALATION = "escalation"
-    CHECKOUT = "checkout"
-    OUT_OF_DOMAIN = "out_of_domain"
+    END_SMALLTALK = "end_smalltalk"
 
 
 # =============================================================================
@@ -266,6 +271,32 @@ TRANSITIONS: list[Transition] = [
         State.STATE_7_END,
         frozenset({Intent.THANKYOU_SMALLTALK}),
         "ескалація зафіксована",
+    ),
+    # From STATE_9_OOD (Out of Domain) - recovery transitions
+    Transition(
+        State.STATE_9_OOD,
+        State.STATE_0_INIT,
+        frozenset({Intent.GREETING_ONLY}),
+        "відновлення після out-of-domain",
+    ),
+    Transition(
+        State.STATE_9_OOD,
+        State.STATE_1_DISCOVERY,
+        frozenset({Intent.DISCOVERY_OR_QUESTION}),
+        "повернення до пошуку",
+    ),
+    # From STATE_7_END (End state) - restart transitions
+    Transition(
+        State.STATE_7_END,
+        State.STATE_0_INIT,
+        frozenset({Intent.GREETING_ONLY}),
+        "перезапуск розмови",
+    ),
+    Transition(
+        State.STATE_7_END,
+        State.STATE_1_DISCOVERY,
+        frozenset({Intent.DISCOVERY_OR_QUESTION}),
+        "почати новий пошук",
     ),
 ]
 

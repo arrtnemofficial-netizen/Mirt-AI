@@ -6,6 +6,7 @@ by providing a single ConversationHandler that manages the full message lifecycl
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from src.agents import ConversationState
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
-from src.core.models import AgentResponse, Escalation, Message, Metadata
+from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
 from src.services.message_store import MessageStore, StoredMessage
 
 
@@ -37,10 +38,10 @@ def parse_llm_output(
     current_state: str = "STATE_0_INIT",
 ) -> AgentResponse:
     """
-    STUB: Parse LLM output to AgentResponse.
+    Parse LLM output to AgentResponse.
     
-    In NEW architecture: PydanticAI does this automatically with result_type=SupportResponse.
-    This stub exists for legacy compatibility with conversation.py.
+    Handles structured JSON format from LangGraph nodes containing:
+    - event, messages, products, metadata fields
     """
     # Try to extract from result_state if it's already structured
     if not content:
@@ -50,12 +51,48 @@ def parse_llm_output(
             metadata=Metadata(session_id=session_id, current_state=current_state),
         )
     
-    # For legacy flow - just wrap the content as a simple response
-    return AgentResponse(
-        event="reply",
-        messages=[Message(type="text", content=content)],
-        metadata=Metadata(session_id=session_id, current_state=current_state),
-    )
+    try:
+        # Parse JSON content from LangGraph nodes
+        parsed = json.loads(content)
+        
+        # Extract messages array
+        messages_data = parsed.get("messages", [])
+        messages = []
+        for msg in messages_data:
+            if msg.get("type") == "text" and msg.get("content"):
+                messages.append(Message(type="text", content=msg["content"]))
+        
+        # Extract products array
+        products_data = parsed.get("products", [])
+        products = []
+        for prod in products_data:
+            # Convert dict to Product object
+            if isinstance(prod, dict):
+                products.append(Product(**prod))
+        
+        # Extract metadata
+        metadata_data = parsed.get("metadata", {})
+        metadata = Metadata(
+            session_id=metadata_data.get("session_id", session_id),
+            current_state=metadata_data.get("current_state", current_state),
+            intent=metadata_data.get("intent", ""),
+            escalation_level=metadata_data.get("escalation_level", "NONE"),
+        )
+        
+        return AgentResponse(
+            event=parsed.get("event", "simple_answer"),
+            messages=messages,
+            products=products,
+            metadata=metadata,
+        )
+        
+    except (json.JSONDecodeError, Exception):
+        # Fallback: treat as plain text content
+        return AgentResponse(
+            event="reply",
+            messages=[Message(type="text", content=content)],
+            metadata=Metadata(session_id=session_id, current_state=current_state),
+        )
 
 
 def validate_state_transition(

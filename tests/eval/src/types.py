@@ -1,38 +1,18 @@
 """Type definitions for Prompt Evaluation Framework.
 Matches TypeScript types from eval architecture design.
+Uses centralized state/intent definitions to avoid duplication.
 """
 
 from typing import Literal
 
 from pydantic import BaseModel
 
+# Import from centralized state machine to avoid duplication
+from src.core.state_machine import State, Intent
 
-# --- CORE TYPES ---
-
-MirtState = Literal[
-    "STATE_0_INIT",
-    "STATE_1_DISCOVERY",
-    "STATE_2_VISION",
-    "STATE_3_SIZE_COLOR",
-    "STATE_5_PAYMENT_DELIVERY",
-    "STATE_6_UPSELL",
-    "STATE_7_END",
-    "STATE_8_COMPLAINT",
-    "STATE_9_OOD",
-]
-
-MirtIntent = Literal[
-    "GREETING_ONLY",
-    "DISCOVERY_OR_QUESTION",
-    "PHOTO_IDENT",
-    "SIZE_HELP",
-    "COLOR_HELP",
-    "PAYMENT_DELIVERY",
-    "COMPLAINT",
-    "THANKYOU_SMALLTALK",
-    "OUT_OF_DOMAIN",
-    "UNKNOWN_OR_EMPTY",
-]
+# Type aliases for evaluation compatibility - unpack tuple for Literal
+MirtState = Literal[*tuple(State.__members__.keys())]
+MirtIntent = Literal[*tuple(Intent.__members__.keys())]
 
 
 class Product(BaseModel):

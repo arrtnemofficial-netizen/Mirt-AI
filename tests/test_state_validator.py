@@ -1,252 +1,273 @@
-"""Tests for state validator - ensures dialog never gets stuck."""
+"""
+Tests for state machine transitions and validation.
+====================================================
+Updated for new architecture with centralized state_machine.py
+"""
 
 import pytest
 
-from src.core.state_validator import (
-    INTENT_STATE_HINTS,
-    MAX_TURNS_IN_STATE,
-    VALID_TRANSITIONS,
-    StateValidator,
-    get_state_validator,
-    validate_state_transition,
+from src.core.state_machine import (
+    State,
+    Intent,
+    TRANSITIONS,
+    get_next_state,
+    normalize_state,
+    get_possible_transitions,
 )
 
 
-class TestStateValidator:
-    """Test StateValidator class."""
-
-    def setup_method(self):
-        self.validator = StateValidator()
-
-    def test_valid_transition_init_to_discovery(self):
-        """Test valid transition from INIT to DISCOVERY."""
-        result = self.validator.validate_transition(
-            session_id="test1",
-            current_state="STATE_0_INIT",
-            proposed_state="STATE_1_DISCOVERY",
-        )
-
-        assert result.new_state == "STATE_1_DISCOVERY"
-        assert not result.was_corrected
-
-    def test_valid_transition_stay_in_state(self):
-        """Test valid transition staying in same state."""
-        result = self.validator.validate_transition(
-            session_id="test2",
-            current_state="STATE_1_DISCOVERY",
-            proposed_state="STATE_1_DISCOVERY",
-        )
-
-        assert result.new_state == "STATE_1_DISCOVERY"
-        assert not result.was_corrected
-
-    def test_invalid_transition_gets_corrected(self):
-        """Test that invalid transitions are corrected."""
-        # STATE_0_INIT cannot jump directly to STATE_7_END
-        result = self.validator.validate_transition(
-            session_id="test3",
-            current_state="STATE_0_INIT",
-            proposed_state="STATE_7_END",
-        )
-
-        assert result.was_corrected
-        assert result.new_state in VALID_TRANSITIONS["STATE_0_INIT"]
-        assert result.reason is not None
-
-    def test_intent_based_correction(self):
-        """Test that intent hints help correct state."""
-        result = self.validator.validate_transition(
-            session_id="test4",
-            current_state="STATE_0_INIT",
-            proposed_state="STATE_8_COMPLAINT",  # Invalid from INIT
-            intent="GREETING_ONLY",
-        )
-
-        assert result.was_corrected
-        # Should stay in INIT due to greeting intent
-        assert result.new_state in VALID_TRANSITIONS["STATE_0_INIT"]
-
-    def test_stuck_prevention(self):
-        """Test that staying too long in one state triggers progression."""
-        session_id = "test_stuck"
-
-        # Simulate being stuck in STATE_1_DISCOVERY for many turns
-        max_turns = MAX_TURNS_IN_STATE.get("STATE_1_DISCOVERY", 5)
-
-        for i in range(max_turns + 1):
-            result = self.validator.validate_transition(
-                session_id=session_id,
-                current_state="STATE_1_DISCOVERY",
-                proposed_state="STATE_1_DISCOVERY",  # Keep proposing same state
-            )
-
-        # After max turns, should be forced to progress
-        # (The last transition should trigger stuck prevention)
-        stats = self.validator.get_session_stats(session_id)
-        assert stats["total_turns"] == max_turns + 1
-
-    def test_normalize_state_empty(self):
-        """Test normalizing empty state."""
-        result = self.validator._normalize_state("")
-        assert result == "STATE_0_INIT"
-
-    def test_normalize_state_valid(self):
-        """Test normalizing valid state."""
-        result = self.validator._normalize_state("STATE_4_OFFER")
-        assert result == "STATE_4_OFFER"
-
-    def test_session_stats(self):
-        """Test getting session statistics."""
-        session_id = "test_stats"
-
-        self.validator.validate_transition(session_id, "STATE_0_INIT", "STATE_1_DISCOVERY")
-        self.validator.validate_transition(session_id, "STATE_1_DISCOVERY", "STATE_2_VISION")
-        self.validator.validate_transition(session_id, "STATE_2_VISION", "STATE_4_OFFER")
-
-        stats = self.validator.get_session_stats(session_id)
-
-        assert stats["total_turns"] == 3
-        assert "STATE_1_DISCOVERY" in stats["states_visited"]
-        assert stats["current_state"] == "STATE_4_OFFER"
-
-    def test_clear_session(self):
-        """Test clearing session history."""
-        session_id = "test_clear"
-
-        self.validator.validate_transition(session_id, "STATE_0_INIT", "STATE_1_DISCOVERY")
-        self.validator.clear_session(session_id)
-
-        stats = self.validator.get_session_stats(session_id)
-        assert stats["total_turns"] == 0
+# =============================================================================
+# STATE TRANSITION TESTS
+# =============================================================================
 
 
-class TestValidTransitions:
-    """Test that transition matrix is properly configured."""
+class TestStateTransitions:
+    """Test FSM transition logic."""
+
+    def test_init_to_discovery(self):
+        """Test transition from INIT to DISCOVERY."""
+        next_state = get_next_state(State.STATE_0_INIT, Intent.GREETING_ONLY)
+        assert next_state == State.STATE_1_DISCOVERY
+
+    def test_init_to_vision(self):
+        """Test transition from INIT to VISION."""
+        next_state = get_next_state(State.STATE_0_INIT, Intent.PHOTO_IDENT)
+        assert next_state == State.STATE_2_VISION
+
+    def test_init_to_size_color(self):
+        """Test transition from INIT to SIZE_COLOR."""
+        next_state = get_next_state(State.STATE_0_INIT, Intent.SIZE_HELP)
+        assert next_state == State.STATE_3_SIZE_COLOR
+
+    def test_init_to_payment(self):
+        """Test transition from INIT to PAYMENT."""
+        next_state = get_next_state(State.STATE_0_INIT, Intent.PAYMENT_DELIVERY)
+        assert next_state == State.STATE_5_PAYMENT_DELIVERY
+
+    def test_init_to_complaint(self):
+        """Test transition from INIT to COMPLAINT."""
+        next_state = get_next_state(State.STATE_0_INIT, Intent.COMPLAINT)
+        assert next_state == State.STATE_8_COMPLAINT
+
+    def test_init_to_end(self):
+        """Test transition from INIT to END."""
+        next_state = get_next_state(State.STATE_0_INIT, Intent.THANKYOU_SMALLTALK)
+        assert next_state == State.STATE_7_END
+
+    def test_init_to_ood(self):
+        """Test transition from INIT to OOD."""
+        next_state = get_next_state(State.STATE_0_INIT, Intent.OUT_OF_DOMAIN)
+        assert next_state == State.STATE_9_OOD
+
+    def test_discovery_to_vision(self):
+        """Test transition from DISCOVERY to VISION."""
+        next_state = get_next_state(State.STATE_1_DISCOVERY, Intent.PHOTO_IDENT)
+        assert next_state == State.STATE_2_VISION
+
+    def test_vision_to_size_color(self):
+        """Test transition from VISION to SIZE_COLOR."""
+        next_state = get_next_state(State.STATE_2_VISION, Intent.SIZE_HELP)
+        assert next_state == State.STATE_3_SIZE_COLOR
+
+    def test_size_color_to_offer(self):
+        """Test transition from SIZE_COLOR to OFFER."""
+        next_state = get_next_state(State.STATE_3_SIZE_COLOR, Intent.DISCOVERY_OR_QUESTION)
+        assert next_state == State.STATE_4_OFFER
+
+    def test_offer_to_payment(self):
+        """Test transition from OFFER to PAYMENT."""
+        next_state = get_next_state(State.STATE_4_OFFER, Intent.PAYMENT_DELIVERY)
+        assert next_state == State.STATE_5_PAYMENT_DELIVERY
+
+    def test_payment_to_upsell(self):
+        """Test transition from PAYMENT to UPSELL."""
+        next_state = get_next_state(State.STATE_5_PAYMENT_DELIVERY, Intent.PAYMENT_DELIVERY)
+        assert next_state == State.STATE_6_UPSELL
+
+    def test_upsell_to_end(self):
+        """Test transition from UPSELL to END."""
+        next_state = get_next_state(State.STATE_6_UPSELL, Intent.THANKYOU_SMALLTALK)
+        assert next_state == State.STATE_7_END
+
+    def test_no_transition_stays(self):
+        """Test that invalid intent stays in current state."""
+        next_state = get_next_state(State.STATE_4_OFFER, Intent.UNKNOWN_OR_EMPTY)
+        assert next_state == State.STATE_4_OFFER
+
+
+# =============================================================================
+# TRANSITION MATRIX TESTS
+# =============================================================================
+
+
+class TestTransitionMatrix:
+    """Test the transition matrix structure."""
+
+    def test_transitions_not_empty(self):
+        """Test that TRANSITIONS is not empty."""
+        assert len(TRANSITIONS) > 0
+
+    def test_all_transitions_have_required_fields(self):
+        """Test that all transitions have required fields."""
+        for transition in TRANSITIONS:
+            assert transition.from_state is not None
+            assert transition.to_state is not None
+            assert len(transition.when_intents) > 0
+
+    def test_get_possible_transitions(self):
+        """Test getting possible transitions from a state."""
+        transitions = get_possible_transitions(State.STATE_0_INIT)
+        assert len(transitions) > 0
+
+        # All transitions should be from STATE_0_INIT
+        for t in transitions:
+            assert t.from_state == State.STATE_0_INIT
 
     def test_all_states_have_transitions(self):
-        """Test that all states have defined transitions."""
-        expected_states = [
-            "STATE_0_INIT",
-            "STATE_1_DISCOVERY",
-            "STATE_2_VISION",
-            "STATE_3_SIZE_COLOR",
-            "STATE_4_OFFER",
-            "STATE_5_PAYMENT_DELIVERY",
-            "STATE_6_UPSELL",
-            "STATE_7_END",
-            "STATE_8_COMPLAINT",
-            "STATE_9_OOD",
-        ]
+        """Test that all states have at least one transition."""
+        from_states = {t.from_state for t in TRANSITIONS}
+        expected_states = set(State)
 
         for state in expected_states:
-            assert state in VALID_TRANSITIONS, f"Missing transitions for {state}"
-            assert len(VALID_TRANSITIONS[state]) > 0, f"Empty transitions for {state}"
-
-    def test_all_states_can_stay(self):
-        """Test that all states can transition to themselves."""
-        for state, transitions in VALID_TRANSITIONS.items():
-            assert state in transitions, f"{state} cannot stay in itself"
-
-    def test_end_state_can_restart(self):
-        """Test that END state can restart conversation."""
-        end_transitions = VALID_TRANSITIONS["STATE_7_END"]
-        assert "STATE_0_INIT" in end_transitions or "STATE_1_DISCOVERY" in end_transitions
+            assert state in from_states, f"State {state} has no outgoing transitions"
 
 
-class TestIntentStateHints:
-    """Test intent to state mapping."""
-
-    def test_greeting_maps_to_init(self):
-        """Test that greeting intent maps to INIT state."""
-        assert INTENT_STATE_HINTS.get("GREETING_ONLY") == "STATE_0_INIT"
-
-    def test_product_search_maps_to_discovery(self):
-        """Test that product search maps to DISCOVERY."""
-        assert INTENT_STATE_HINTS.get("PRODUCT_SEARCH") == "STATE_1_DISCOVERY"
-
-    def test_all_intents_have_valid_states(self):
-        """Test that all intent hints point to valid states."""
-        for intent, state in INTENT_STATE_HINTS.items():
-            # State should be in valid transitions matrix
-            assert any(state in transitions for transitions in VALID_TRANSITIONS.values()), (
-                f"Intent {intent} maps to unknown state {state}"
-            )
+# =============================================================================
+# STATE NORMALIZATION TESTS
+# =============================================================================
 
 
-class TestConvenienceFunction:
-    """Test validate_state_transition convenience function."""
+class TestStateNormalization:
+    """Test state string normalization."""
 
-    def test_basic_usage(self):
-        """Test basic convenience function usage."""
-        result = validate_state_transition(
-            session_id="conv_test",
-            current_state="STATE_0_INIT",
-            proposed_state="STATE_1_DISCOVERY",
-        )
+    def test_normalize_standard_format(self):
+        """Test normalizing standard state format."""
+        state = normalize_state("STATE_0_INIT")
+        assert state == State.STATE_0_INIT
 
-        assert result.new_state == "STATE_1_DISCOVERY"
-        assert not result.was_corrected
+    def test_normalize_legacy_format(self):
+        """Test normalizing legacy format without underscore."""
+        state = normalize_state("STATE0_INIT")
+        assert state == State.STATE_0_INIT
 
-    def test_with_intent(self):
-        """Test with intent parameter."""
-        result = validate_state_transition(
-            session_id="conv_test2",
-            current_state="STATE_1_DISCOVERY",
-            proposed_state="STATE_4_OFFER",
-            intent="DISCOVERY_OR_QUESTION",
-        )
+        state = normalize_state("STATE1_DISCOVERY")
+        assert state == State.STATE_1_DISCOVERY
 
-        assert result.new_state is not None
+    def test_normalize_lowercase(self):
+        """Test normalizing lowercase."""
+        state = normalize_state("state_0_init")
+        assert state == State.STATE_0_INIT
+
+    def test_normalize_empty_string(self):
+        """Test normalizing empty string."""
+        state = normalize_state("")
+        assert state == State.STATE_0_INIT
+
+    def test_normalize_none(self):
+        """Test normalizing None."""
+        state = normalize_state(None)
+        assert state == State.STATE_0_INIT
+
+    def test_normalize_invalid_state(self):
+        """Test normalizing invalid state."""
+        state = normalize_state("INVALID_STATE")
+        assert state == State.STATE_0_INIT
 
 
-class TestGlobalValidator:
-    """Test global validator singleton."""
+# =============================================================================
+# INTENT ENUM TESTS
+# =============================================================================
 
-    def test_get_state_validator_returns_same_instance(self):
-        """Test that get_state_validator returns singleton."""
-        v1 = get_state_validator()
-        v2 = get_state_validator()
 
-        assert v1 is v2
+class TestIntentEnum:
+    """Test Intent enum functionality."""
+
+    def test_intent_from_string_valid(self):
+        """Test parsing valid intent."""
+        intent = Intent.from_string("GREETING_ONLY")
+        assert intent == Intent.GREETING_ONLY
+
+    def test_intent_from_string_lowercase(self):
+        """Test parsing lowercase intent."""
+        intent = Intent.from_string("greeting_only")
+        assert intent == Intent.GREETING_ONLY
+
+    def test_intent_from_string_invalid(self):
+        """Test parsing invalid intent."""
+        intent = Intent.from_string("INVALID_INTENT")
+        assert intent == Intent.UNKNOWN_OR_EMPTY
+
+
+# =============================================================================
+# STATE ENUM TESTS
+# =============================================================================
+
+
+class TestStateEnum:
+    """Test State enum functionality."""
+
+    def test_state_default(self):
+        """Test default state."""
+        assert State.default() == State.STATE_0_INIT
+
+    def test_state_display_names(self):
+        """Test display names for states."""
+        assert State.STATE_0_INIT.display_name == "Початок"
+        assert State.STATE_1_DISCOVERY.display_name == "Пошук"
+        assert State.STATE_2_VISION.display_name == "Фото"
+
+    def test_state_requires_escalation(self):
+        """Test escalation requirement flags."""
+        assert State.STATE_8_COMPLAINT.requires_escalation is True
+        assert State.STATE_9_OOD.requires_escalation is True
+        assert State.STATE_0_INIT.requires_escalation is False
+
+
+# =============================================================================
+# EDGE CASES
+# =============================================================================
 
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
-    def test_unknown_current_state(self):
-        """Test handling unknown current state."""
-        validator = StateValidator()
+    def test_complex_transition_path(self):
+        """Test a complete conversation path."""
+        # Start
+        current = State.STATE_0_INIT
 
-        result = validator.validate_transition(
-            session_id="edge1",
-            current_state="UNKNOWN_STATE",
-            proposed_state="STATE_1_DISCOVERY",
-        )
+        # Greeting
+        current = get_next_state(current, Intent.GREETING_ONLY)
+        assert current == State.STATE_1_DISCOVERY
 
-        # Should normalize and handle gracefully
-        assert result.new_state is not None
+        # Photo
+        current = get_next_state(current, Intent.PHOTO_IDENT)
+        assert current == State.STATE_2_VISION
 
-    def test_none_intent(self):
-        """Test handling None intent."""
-        validator = StateValidator()
+        # Size help
+        current = get_next_state(current, Intent.SIZE_HELP)
+        assert current == State.STATE_3_SIZE_COLOR
 
-        result = validator.validate_transition(
-            session_id="edge2",
-            current_state="STATE_0_INIT",
-            proposed_state="STATE_1_DISCOVERY",
-            intent=None,
-        )
+        # Discovery (ready for offer)
+        current = get_next_state(current, Intent.DISCOVERY_OR_QUESTION)
+        assert current == State.STATE_4_OFFER
 
-        assert result.new_state == "STATE_1_DISCOVERY"
+    def test_escalation_states(self):
+        """Test escalation states."""
+        escalation_states = [s for s in State if s.requires_escalation]
+        assert State.STATE_8_COMPLAINT in escalation_states
+        assert State.STATE_9_OOD in escalation_states
+        assert State.STATE_0_INIT not in escalation_states
 
-    def test_empty_session_id(self):
-        """Test handling empty session ID."""
-        validator = StateValidator()
+    def test_all_intents_mapped(self):
+        """Test that all intents are used in transitions."""
+        used_intents = set()
+        for transition in TRANSITIONS:
+            used_intents.update(transition.when_intents)
 
-        result = validator.validate_transition(
-            session_id="",
-            current_state="STATE_0_INIT",
-            proposed_state="STATE_1_DISCOVERY",
-        )
+        all_intents = set(Intent)
+        # All intents except UNKNOWN_OR_EMPTY should be used
+        usable_intents = all_intents - {Intent.UNKNOWN_OR_EMPTY}
 
-        assert result.new_state == "STATE_1_DISCOVERY"
+        for intent in usable_intents:
+            assert intent in used_intents, f"Intent {intent} is not used in any transition"

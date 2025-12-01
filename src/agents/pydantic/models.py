@@ -16,40 +16,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# Import from centralized state machine to avoid duplication
+from src.core.state_machine import State, Intent
 
-# =============================================================================
-# INTENTS (BLOCK 4: INTENT_LABELS)
-# =============================================================================
-
-IntentType = Literal[
-    "GREETING_ONLY",
-    "DISCOVERY_OR_QUESTION",
-    "PHOTO_IDENT",
-    "SIZE_HELP",
-    "COLOR_HELP",
-    "PAYMENT_DELIVERY",
-    "COMPLAINT",
-    "THANKYOU_SMALLTALK",
-    "OUT_OF_DOMAIN",
-    "UNKNOWN_OR_EMPTY",
-]
-
-# =============================================================================
-# STATES (BLOCK 5: STATE_DESCRIPTIONS)
-# =============================================================================
-
-StateType = Literal[
-    "STATE_0_INIT",
-    "STATE_1_DISCOVERY",
-    "STATE_2_VISION",
-    "STATE_3_SIZE_COLOR",
-    "STATE_4_OFFER",
-    "STATE_5_PAYMENT_DELIVERY",
-    "STATE_6_UPSELL",
-    "STATE_7_END",
-    "STATE_8_COMPLAINT",
-    "STATE_9_OOD",
-]
+# Type aliases for Pydantic compatibility - unpack tuple for Literal
+IntentType = Literal[*tuple(Intent.__members__.keys())]
+StateType = Literal[*tuple(State.__members__.keys())]
 
 # =============================================================================
 # EVENTS (BLOCK 10: OUTPUT_CONTRACT.event)
@@ -63,7 +35,7 @@ EventType = Literal[
     "end_smalltalk",
 ]
 
-EscalationLevel = Literal["NONE", "L1", "L2"]
+EscalationLevel = Literal["NONE", "L1", "L2", "L3"]
 
 
 # =============================================================================
