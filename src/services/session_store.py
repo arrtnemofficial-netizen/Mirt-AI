@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Protocol
+from typing import Any, Protocol
+
+from langchain_core.messages import BaseMessage
 
 from src.agents import ConversationState
 from src.core.constants import AgentState as StateEnum
+
+
+def _serialize_for_json(value: Any) -> Any:
+    """Recursively serialize values, converting LangChain Message objects to dicts."""
+    if isinstance(value, BaseMessage):
+        return {
+            "type": value.type,
+            "content": value.content,
+            "additional_kwargs": getattr(value, "additional_kwargs", {}),
+        }
+    elif isinstance(value, dict):
+        return {k: _serialize_for_json(v) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [_serialize_for_json(item) for item in value]
+    else:
+        return value
 
 
 class SessionStore(Protocol):
@@ -39,7 +57,9 @@ class InMemorySessionStore:
     def save(self, session_id: str, state: ConversationState) -> None:
         """Persist the current state for the session."""
 
-        self._store[session_id] = deepcopy(state)
+        # Serialize state to handle LangChain Message objects
+        serialized_state = _serialize_for_json(dict(state))
+        self._store[session_id] = deepcopy(serialized_state)
 
 
 def state_from_text(text: str, session_id: str) -> ConversationState:
