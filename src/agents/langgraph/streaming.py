@@ -16,12 +16,13 @@ This is UX 101 for AI products:
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from langgraph.graph.graph import CompiledGraph
 
 logger = logging.getLogger(__name__)

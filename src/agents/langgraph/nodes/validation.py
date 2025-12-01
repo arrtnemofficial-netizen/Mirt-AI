@@ -116,11 +116,11 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
 
 def _get_latest_assistant_response(messages: list[Any]) -> dict[str, Any] | None:
     """Extract latest assistant response as dict.
-    
+
     Handles both dict format and LangChain Message objects.
     """
     from .utils import extract_assistant_message
-    
+
     content = extract_assistant_message(messages)
     if content:
         try:
@@ -218,10 +218,7 @@ def should_retry(state: dict[str, Any]) -> bool:
         return False
 
     # Max retries hit = escalate instead
-    if retry_count >= max_retries:
-        return False
-
-    return True
+    return not retry_count >= max_retries
 
 
 def get_retry_feedback(state: dict[str, Any]) -> str:

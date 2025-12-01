@@ -131,7 +131,7 @@ class Intent(str, Enum):
 class EventType(str, Enum):
     """
     Agent response event types from OUTPUT_CONTRACT.
-    
+
     NOTE: This enum is kept for reference but not actively used.
     The actual event types are defined as Literal in:
     - src/agents/pydantic/models.py (EventType Literal)

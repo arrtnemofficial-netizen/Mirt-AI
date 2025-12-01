@@ -7,11 +7,11 @@ Updated for new architecture - tests SupportResponse, VisionResponse parsing.
 import pytest
 
 from src.agents import (
+    MessageItem,
+    ProductMatch,
+    ResponseMetadata,
     SupportResponse,
     VisionResponse,
-    MessageItem,
-    ResponseMetadata,
-    ProductMatch,
 )
 from src.core.models import AgentResponse, Message, Metadata, Product
 

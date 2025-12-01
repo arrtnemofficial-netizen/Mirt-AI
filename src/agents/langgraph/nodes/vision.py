@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.vision_agent import run_vision
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 logger = logging.getLogger(__name__)
@@ -202,7 +205,7 @@ async def vision_node(
 
         return {
             "last_error": str(e),
-            "tool_errors": state.get("tool_errors", []) + [f"Vision error: {e}"],
+            "tool_errors": [*state.get("tool_errors", []), f"Vision error: {e}"],
             "retry_count": state.get("retry_count", 0) + 1,
             "step_number": state.get("step_number", 0) + 1,
         }

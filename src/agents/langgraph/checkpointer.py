@@ -21,6 +21,7 @@ import os
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 
@@ -28,6 +29,43 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
 
 logger = logging.getLogger(__name__)
+
+
+class SerializableMemorySaver(MemorySaver):
+    """MemorySaver wrapper that handles LangChain Message serialization.
+
+    This is a fallback for when DATABASE_URL is not available.
+    Converts Message objects to dicts for JSON serialization compatibility.
+    """
+
+    def _serialize_value(self, value: Any) -> Any:
+        """Recursively serialize values, converting Message objects to dicts."""
+        if isinstance(value, BaseMessage):
+            # Convert LangChain Message to dict format
+            return {
+                "type": value.type,
+                "content": value.content,
+                "additional_kwargs": getattr(value, "additional_kwargs", {}),
+                "response_metadata": getattr(value, "response_metadata", {}),
+            }
+        elif isinstance(value, dict):
+            return {k: self._serialize_value(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._serialize_value(item) for item in value]
+        else:
+            return value
+
+    def put(self, config: dict[str, Any], checkpoint: dict[str, Any], metadata: dict[str, Any], new_versions: dict[str, str]) -> dict[str, Any]:
+        """Override put to serialize Message objects before storage."""
+        try:
+            # Serialize checkpoint data to handle Message objects
+            serialized_checkpoint = self._serialize_value(checkpoint)
+            serialized_metadata = self._serialize_value(metadata)
+            return super().put(config, serialized_checkpoint, serialized_metadata, new_versions)
+        except Exception as e:
+            logger.error(f"SerializableMemorySaver put failed: {e}")
+            # Fallback to original method
+            return super().put(config, checkpoint, metadata, new_versions)
 
 
 class CheckpointerType(str, Enum):
@@ -70,26 +108,33 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         # Try to build from Supabase settings
         from src.conf.config import settings
 
-        if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_KEY"):
+        if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_API_KEY"):
             # Supabase connection string format
             supabase_url = str(settings.SUPABASE_URL)
+            logger.info(f"DEBUG: Supabase URL found: {supabase_url[:20]}...")
+            logger.info(f"DEBUG: Supabase API key present: {bool(settings.SUPABASE_API_KEY.get_secret_value())}")
+
             if "supabase" in supabase_url:
                 # Extract project ref from URL
                 # https://xxx.supabase.co -> xxx
                 import re
                 match = re.search(r"https://([^.]+)\.supabase", supabase_url)
+                logger.info(f"DEBUG: Regex match result: {match}")
+
                 if match:
                     project_ref = match.group(1)
+                    logger.info(f"DEBUG: Extracted project_ref: {project_ref}")
                     # Build postgres connection string
                     # Default Supabase postgres port is 5432, password from service_role key
-                    database_url = f"postgresql://postgres:{settings.SUPABASE_KEY.get_secret_value()}@db.{project_ref}.supabase.co:5432/postgres"
+                    database_url = f"postgresql://postgres:{settings.SUPABASE_API_KEY.get_secret_value()}@db.{project_ref}.supabase.co:5432/postgres"
+                    logger.info(f"DEBUG: Built DATABASE_URL: postgresql://postgres:***@db.{project_ref}.supabase.co:5432/postgres")
 
     if not database_url:
         logger.warning(
             "No DATABASE_URL found. Falling back to MemorySaver. "
             "THIS IS NOT PRODUCTION-READY! Set DATABASE_URL for persistence."
         )
-        return MemorySaver()
+        return SerializableMemorySaver()
 
     try:
         # Create connection pool
@@ -110,12 +155,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             "langgraph-checkpoint-postgres not installed! "
             "Run: pip install langgraph-checkpoint-postgres"
         )
-        return MemorySaver()
+        return SerializableMemorySaver()
 
     except Exception as e:
         logger.error("Failed to create PostgreSQL checkpointer: %s", e)
         logger.warning("Falling back to MemorySaver - NOT PRODUCTION READY!")
-        return MemorySaver()
+        return SerializableMemorySaver()
 
 
 # =============================================================================
@@ -139,7 +184,7 @@ def get_redis_checkpointer() -> BaseCheckpointSaver:
 
     if not redis_url:
         logger.warning("No REDIS_URL found. Falling back to MemorySaver.")
-        return MemorySaver()
+        return SerializableMemorySaver()
 
     try:
         # Redis checkpointer might not be available yet in langgraph
@@ -149,7 +194,7 @@ def get_redis_checkpointer() -> BaseCheckpointSaver:
 
     except Exception as e:
         logger.error("Failed to create Redis checkpointer: %s", e)
-        return MemorySaver()
+        return SerializableMemorySaver()
 
 
 # =============================================================================
@@ -210,7 +255,7 @@ def get_checkpointer(
             "Using MemorySaver - state will be lost on restart! "
             "Set DATABASE_URL for production persistence."
         )
-        _checkpointer = MemorySaver()
+        _checkpointer = SerializableMemorySaver()
 
     _checkpointer_type = checkpointer_type
     return _checkpointer

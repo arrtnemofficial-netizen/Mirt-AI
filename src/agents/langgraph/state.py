@@ -7,12 +7,15 @@ Uses TypedDict with Annotated reducers for proper LangGraph integration.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from src.core.state_machine import State
+
+
+if TYPE_CHECKING:
+    from langgraph.graph.message import add_messages
 
 
 # =============================================================================

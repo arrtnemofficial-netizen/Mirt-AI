@@ -26,10 +26,10 @@ class DummyRunner:
             "products": [p.model_dump() for p in self.agent_response.products],
             "metadata": self.agent_response.metadata.model_dump(),
         }
-        
+
         if self.agent_response.escalation:
             assistant_content["escalation"] = self.agent_response.escalation.model_dump()
-        
+
         # Use json.dumps() for proper JSON format (conversation handler expects JSON)
         json_content = json.dumps(assistant_content)
         state["messages"].append({"role": "assistant", "content": json_content})

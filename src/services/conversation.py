@@ -6,6 +6,7 @@ by providing a single ConversationHandler that manages the full message lifecycl
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -39,7 +40,7 @@ def parse_llm_output(
 ) -> AgentResponse:
     """
     Parse LLM output to AgentResponse.
-    
+
     Handles structured JSON format from LangGraph nodes containing:
     - event, messages, products, metadata fields
     """
@@ -50,18 +51,18 @@ def parse_llm_output(
             messages=[Message(type="text", content="")],
             metadata=Metadata(session_id=session_id, current_state=current_state),
         )
-    
+
     try:
         # Parse JSON content from LangGraph nodes
         parsed = json.loads(content)
-        
+
         # Extract messages array
         messages_data = parsed.get("messages", [])
         messages = []
         for msg in messages_data:
             if msg.get("type") == "text" and msg.get("content"):
                 messages.append(Message(type="text", content=msg["content"]))
-        
+
         # Extract products array
         products_data = parsed.get("products", [])
         products = []
@@ -69,7 +70,7 @@ def parse_llm_output(
             # Convert dict to Product object
             if isinstance(prod, dict):
                 products.append(Product(**prod))
-        
+
         # Extract metadata
         metadata_data = parsed.get("metadata", {})
         metadata = Metadata(
@@ -78,14 +79,14 @@ def parse_llm_output(
             intent=metadata_data.get("intent", ""),
             escalation_level=metadata_data.get("escalation_level", "NONE"),
         )
-        
+
         return AgentResponse(
             event=parsed.get("event", "simple_answer"),
             messages=messages,
             products=products,
             metadata=metadata,
         )
-        
+
     except (json.JSONDecodeError, Exception):
         # Fallback: treat as plain text content
         return AgentResponse(
@@ -103,7 +104,7 @@ def validate_state_transition(
 ) -> TransitionResult:
     """
     STUB: Validate state transition.
-    
+
     In NEW architecture: LangGraph edges make invalid transitions impossible.
     This stub just accepts all transitions for legacy compatibility.
     """
@@ -201,7 +202,7 @@ class ConversationHandler:
         try:
             # Load or create session state
             state = self.session_store.get(session_id)
-                        
+
             # Ensure state has required structure
             if not state or not isinstance(state, dict):
                 state = ConversationState(messages=[], metadata={"session_id": session_id})
@@ -327,7 +328,7 @@ class ConversationHandler:
         self, data: dict[str, Any], session_id: str
     ) -> AgentResponse:
         """Convert SupportResponse (PydanticAI) to AgentResponse (core/models).
-        
+
         Handles schema differences between the two models:
         - EscalationInfo (no level) -> Escalation (has level)
         - ResponseMetadata -> Metadata (extra fields)
@@ -365,7 +366,7 @@ class ConversationHandler:
         from src.core.models import Product
         products = []
         for p in data.get("products", []):
-            try:
+            with contextlib.suppress(Exception):
                 products.append(Product(
                     id=p.get("id", 0),
                     name=p.get("name", ""),
@@ -374,8 +375,6 @@ class ConversationHandler:
                     price=p.get("price", 0),
                     photo_url=p.get("photo_url", ""),
                 ))
-            except Exception:
-                pass  # Skip invalid products
 
         return AgentResponse(
             event=data.get("event", "simple_answer"),

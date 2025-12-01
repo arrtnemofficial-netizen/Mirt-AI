@@ -4,16 +4,12 @@ Tests for LangGraph production graph.
 Updated for new architecture with build_production_graph.
 """
 
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from src.agents import (
     build_production_graph,
     create_initial_state,
-    ConversationState,
-    SupportResponse,
-    MessageItem,
-    ResponseMetadata,
 )
 from src.agents.langgraph.nodes import moderation_node
 

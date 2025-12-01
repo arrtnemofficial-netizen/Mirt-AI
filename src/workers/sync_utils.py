@@ -12,7 +12,11 @@ import asyncio
 import functools
 import logging
 import threading
-from typing import Any, Callable, Coroutine, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
 
 logger = logging.getLogger(__name__)

@@ -4,18 +4,18 @@ Tests for PydanticAI agents (run_support, run_vision).
 Updated for new architecture with PydanticAI 1.23+
 """
 
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from src.agents import (
     AgentDeps,
-    SupportResponse,
-    VisionResponse,
     MessageItem,
     ResponseMetadata,
+    SupportResponse,
+    VisionResponse,
     create_deps_from_state,
 )
-from src.core.models import Product, Message, Metadata, AgentResponse
+from src.core.models import AgentResponse, Message, Metadata, Product
 
 
 # =============================================================================

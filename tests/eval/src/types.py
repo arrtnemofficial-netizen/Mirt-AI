@@ -8,7 +8,8 @@ from typing import Literal
 from pydantic import BaseModel
 
 # Import from centralized state machine to avoid duplication
-from src.core.state_machine import State, Intent
+from src.core.state_machine import Intent, State
+
 
 # Type aliases for evaluation compatibility - unpack tuple for Literal
 MirtState = Literal[*tuple(State.__members__.keys())]

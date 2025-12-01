@@ -4,7 +4,6 @@ Tests for input validator (InputMetadata, WebhookInput).
 Updated for new architecture with input_validator.py
 """
 
-import pytest
 
 from src.core.input_validator import (
     InputMetadata,
@@ -12,7 +11,7 @@ from src.core.input_validator import (
     validate_input_metadata,
     validate_webhook_input,
 )
-from src.core.state_machine import State, Intent, EscalationLevel
+from src.core.state_machine import EscalationLevel, Intent, State
 
 
 # =============================================================================

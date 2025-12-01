@@ -10,14 +10,18 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.agents.pydantic.deps import create_deps_from_state
-from src.agents.pydantic.models import SupportResponse
 from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.agents.pydantic.models import SupportResponse
 
 
 logger = logging.getLogger(__name__)
@@ -107,7 +111,7 @@ async def offer_node(
 
         return {
             "last_error": str(e),
-            "tool_errors": state.get("tool_errors", []) + [f"Offer error: {e}"],
+            "tool_errors": [*state.get("tool_errors", []), f"Offer error: {e}"],
             "retry_count": state.get("retry_count", 0) + 1,
             "step_number": state.get("step_number", 0) + 1,
         }

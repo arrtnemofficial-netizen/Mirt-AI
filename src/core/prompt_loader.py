@@ -167,10 +167,10 @@ def get_system_prompt_text(model_key: str = "grok") -> str:
     """
     # Load the complete prompt from YAML
     full_prompt = load_yaml_file(LEGACY_PROMPT)
-    
+
     # Convert YAML dict to formatted text
     sections = []
-    
+
     for key, value in full_prompt.items():
         if isinstance(value, str):
             sections.append(f"# {key}\n{value}")
@@ -179,11 +179,11 @@ def get_system_prompt_text(model_key: str = "grok") -> str:
             for sub_key, sub_value in value.items():
                 if isinstance(sub_value, str):
                     sections.append(f"## {sub_key}\n{sub_value}")
-                elif isinstance(sub_value, (list, dict)):
+                elif isinstance(sub_value, list | dict):
                     sections.append(f"## {sub_key}\n{yaml.dump(sub_value, allow_unicode=True, default_flow_style=False)}")
         elif isinstance(value, list):
             sections.append(f"# {key}\n{yaml.dump(value, allow_unicode=True, default_flow_style=False)}")
-    
+
     return "\n\n".join(sections)
 
 

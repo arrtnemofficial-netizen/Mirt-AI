@@ -7,28 +7,24 @@ Updated to use NEW architecture:
 - src.agents.pydantic (agents, models, deps)
 """
 
-import json
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.agents import (
-    ConversationState,
-    create_initial_state,
-    AgentDeps,
-    SupportResponse,
-    ProductMatch,
     MessageItem,
+    ProductMatch,
     ResponseMetadata,
+    SupportResponse,
+    create_initial_state,
 )
 from src.agents.langgraph.graph import build_production_graph
 from src.agents.langgraph.nodes import (
+    agent_node,
     moderation_node,
     validation_node,
-    agent_node,
 )
-from src.core.state_machine import State
 
 
 # =============================================================================
@@ -230,7 +226,7 @@ class TestGraphStructure:
 
         # Check nodes exist
         node_names = list(graph.nodes.keys()) if hasattr(graph, 'nodes') else []
-        
+
         expected_nodes = ["moderation", "intent", "agent", "validation", "escalation"]
         for node in expected_nodes:
             assert node in node_names, f"Node '{node}' not found in graph"

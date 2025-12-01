@@ -70,11 +70,7 @@ def webhook_task_id(
         )
         process_message.apply_async(args=[...], task_id=task_id)
     """
-    if message_id:
-        key = f"{source}:{message_id}:{action}"
-    else:
-        # Fallback if no message_id (use user_id + action)
-        key = f"{source}:{user_id}:{action}"
+    key = f"{source}:{message_id}:{action}" if message_id else f"{source}:{user_id}:{action}"
 
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 

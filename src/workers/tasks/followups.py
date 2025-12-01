@@ -142,7 +142,7 @@ def check_all_sessions_for_followups(self) -> dict:
         now = datetime.now(UTC)
         queued = 0
 
-        for session_id, user_id in sessions.items():
+        for session_id, _user_id in sessions.items():
             # Check if followup is due
             messages = message_store.list(session_id)
             due_at = next_followup_due_at(messages)

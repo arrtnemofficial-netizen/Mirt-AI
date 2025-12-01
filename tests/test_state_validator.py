@@ -4,15 +4,14 @@ Tests for state machine transitions and validation.
 Updated for new architecture with centralized state_machine.py
 """
 
-import pytest
 
 from src.core.state_machine import (
-    State,
-    Intent,
     TRANSITIONS,
+    Intent,
+    State,
     get_next_state,
-    normalize_state,
     get_possible_transitions,
+    normalize_state,
 )
 
 

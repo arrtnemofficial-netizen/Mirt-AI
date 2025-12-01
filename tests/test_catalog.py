@@ -6,8 +6,6 @@ Updated for new architecture with embedded catalog.
 
 from pathlib import Path
 
-import pytest
-
 from src.core.product_adapter import (
     ProductAdapter,
     ValidatedProduct,
@@ -165,7 +163,7 @@ class TestCatalogLoading:
 
     def test_product_adapter_search(self):
         """Test ProductAdapter can work with product lists."""
-        adapter = ProductAdapter()
+        ProductAdapter()
 
         # Create test products
         test_products = [

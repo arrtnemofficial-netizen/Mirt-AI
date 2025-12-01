@@ -15,16 +15,18 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from langgraph.types import Command, interrupt  # noqa: F401
+from langgraph.types import Command, interrupt
 
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
-from src.core.models import AgentResponse, Message, Metadata
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 logger = logging.getLogger(__name__)

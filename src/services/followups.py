@@ -20,7 +20,7 @@ def _parse_schedule(schedule: Iterable[float | int] | None) -> list[float]:
         return [float(h) for h in settings.followup_schedule_hours]
     hours: list[float] = []
     for value in schedule:
-        if isinstance(value, (int, float)) and value > 0:
+        if isinstance(value, int | float) and value > 0:
             hours.append(float(value))
     return hours
 

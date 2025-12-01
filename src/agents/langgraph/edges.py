@@ -119,9 +119,7 @@ def should_retry(state: dict[str, Any]) -> bool:
 
     if not errors:
         return False
-    if retry_count >= max_retries:
-        return False
-    return True
+    return not retry_count >= max_retries
 
 
 def route_after_agent(state: dict[str, Any]) -> AgentRoute:

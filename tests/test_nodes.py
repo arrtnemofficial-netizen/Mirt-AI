@@ -8,10 +8,15 @@ These tests ensure that each LangGraph node:
 4. Doesn't add "garbage" keys
 """
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
-from typing import Any
 
 from src.agents.langgraph.state import ConversationState
+
+
+if TYPE_CHECKING:
+    from src.agents.pydantic.deps import AgentDeps
 
 
 # =============================================================================
@@ -75,20 +80,20 @@ ALLOWED_STATE_KEYS = set(ConversationState.__annotations__.keys())
 def validate_node_output(output: dict[str, Any], node_name: str) -> list[str]:
     """Validate node output and return list of errors."""
     errors = []
-    
+
     if not isinstance(output, dict):
         errors.append(f"{node_name}: Output is not a dict, got {type(output)}")
         return errors
-    
+
     # Check for unknown keys (potential garbage)
     unknown_keys = set(output.keys()) - ALLOWED_STATE_KEYS
     if unknown_keys:
         errors.append(f"{node_name}: Unknown keys in output: {unknown_keys}")
-    
+
     # Check step_number is updated
     if "step_number" not in output:
         errors.append(f"{node_name}: Missing 'step_number' in output")
-    
+
     # Check messages format if present
     if "messages" in output:
         messages = output["messages"]
@@ -100,7 +105,7 @@ def validate_node_output(output: dict[str, Any], node_name: str) -> list[str]:
                     errors.append(f"{node_name}: messages[{i}] is not a dict")
                 elif "role" not in msg or "content" not in msg:
                     errors.append(f"{node_name}: messages[{i}] missing role or content")
-    
+
     return errors
 
 
@@ -113,13 +118,13 @@ def validate_node_output(output: dict[str, Any], node_name: str) -> list[str]:
 async def test_moderation_node_valid_input():
     """Test moderation node with valid input."""
     from src.agents.langgraph.nodes.moderation import moderation_node
-    
+
     state = create_minimal_state()
     output = await moderation_node(state)
-    
+
     errors = validate_node_output(output, "moderation_node")
     assert not errors, f"Validation errors: {errors}"
-    
+
     # Moderation should always return moderation_result
     assert "moderation_result" in output
     assert "allowed" in output["moderation_result"]
@@ -129,13 +134,13 @@ async def test_moderation_node_valid_input():
 async def test_moderation_node_empty_message():
     """Test moderation node with empty message."""
     from src.agents.langgraph.nodes.moderation import moderation_node
-    
+
     state = create_minimal_state()
     state["messages"] = []
-    
+
     output = await moderation_node(state)
     errors = validate_node_output(output, "moderation_node")
-    
+
     assert not errors, f"Validation errors: {errors}"
     # Should still return valid result
     assert output["moderation_result"]["allowed"] is True
@@ -150,13 +155,13 @@ async def test_moderation_node_empty_message():
 async def test_intent_node_valid_input():
     """Test intent detection node with valid input."""
     from src.agents.langgraph.nodes.intent import intent_detection_node
-    
+
     state = create_minimal_state()
     output = await intent_detection_node(state)
-    
+
     errors = validate_node_output(output, "intent_detection_node")
     assert not errors, f"Validation errors: {errors}"
-    
+
     # Intent should return detected_intent
     assert "detected_intent" in output
     assert output["detected_intent"] is not None
@@ -166,13 +171,13 @@ async def test_intent_node_valid_input():
 async def test_intent_node_with_photo():
     """Test intent detection recognizes photo."""
     from src.agents.langgraph.nodes.intent import intent_detection_node
-    
+
     state = create_vision_state()
     output = await intent_detection_node(state)
-    
+
     errors = validate_node_output(output, "intent_detection_node")
     assert not errors, f"Validation errors: {errors}"
-    
+
     # Should detect photo intent
     assert output.get("has_image") is True
 
@@ -189,15 +194,15 @@ async def test_intent_node_with_photo():
 )
 async def test_vision_node_deps_have_image_url():
     """Test that vision node correctly passes image_url to deps."""
+    from unittest.mock import patch
+
     from src.agents.langgraph.nodes.vision import vision_node
-    from src.agents.pydantic.deps import AgentDeps
-    from unittest.mock import patch, AsyncMock
-    
+
     state = create_vision_state()
-    
+
     # Mock run_vision to capture deps
     captured_deps: AgentDeps | None = None
-    
+
     async def mock_run_vision(message, deps, message_history):
         nonlocal captured_deps
         captured_deps = deps
@@ -208,16 +213,16 @@ async def test_vision_node_deps_have_image_url():
             confidence=0.5,
             needs_clarification=False,
         )
-    
+
     with patch("src.agents.langgraph.nodes.vision.run_vision", mock_run_vision):
         output = await vision_node(state)
-    
+
     # CRITICAL CHECK: Did image_url reach deps?
     assert captured_deps is not None, "run_vision was not called"
     assert captured_deps.has_image is True, "has_image not set in deps"
     assert captured_deps.image_url == "https://example.com/test_image.jpg", \
         f"image_url not passed correctly: {captured_deps.image_url}"
-    
+
     errors = validate_node_output(output, "vision_node")
     assert not errors, f"Validation errors: {errors}"
 
@@ -234,15 +239,18 @@ async def test_vision_node_deps_have_image_url():
 )
 async def test_agent_node_returns_valid_state():
     """Test agent node returns valid ConversationState."""
+    from unittest.mock import patch
+
     from src.agents.langgraph.nodes.agent import agent_node
-    from unittest.mock import patch, AsyncMock
-    
+
     state = create_minimal_state()
-    
+
     # Mock run_support
     async def mock_run_support(message, deps, message_history):
         from src.agents.pydantic.models import (
-            SupportResponse, MessageItem, ResponseMetadata, EventType
+            MessageItem,
+            ResponseMetadata,
+            SupportResponse,
         )
         return SupportResponse(
             event="simple_answer",
@@ -254,13 +262,13 @@ async def test_agent_node_returns_valid_state():
                 escalation_level="NONE",
             ),
         )
-    
+
     with patch("src.agents.langgraph.nodes.agent.run_support", mock_run_support):
         output = await agent_node(state)
-    
+
     errors = validate_node_output(output, "agent_node")
     assert not errors, f"Validation errors: {errors}"
-    
+
     # Agent should return agent_response
     assert "agent_response" in output
     assert output["agent_response"]["event"] == "simple_answer"
@@ -274,16 +282,15 @@ async def test_agent_node_returns_valid_state():
 @pytest.mark.asyncio
 async def test_offer_node_with_products():
     """Test offer node with selected products."""
-    from src.agents.langgraph.nodes.offer import offer_node
     from unittest.mock import patch
-    
+
+    from src.agents.langgraph.nodes.offer import offer_node
+
     state = create_offer_state()
-    
+
     # Mock run_support
     async def mock_run_support(message, deps, message_history):
-        from src.agents.pydantic.models import (
-            SupportResponse, MessageItem, ResponseMetadata
-        )
+        from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Чудовий вибір! Сукня Еліт - 1300 грн")],
@@ -294,13 +301,13 @@ async def test_offer_node_with_products():
                 escalation_level="NONE",
             ),
         )
-    
+
     with patch("src.agents.langgraph.nodes.offer.run_support", mock_run_support):
         output = await offer_node(state)
-    
+
     errors = validate_node_output(output, "offer_node")
     assert not errors, f"Validation errors: {errors}"
-    
+
     # Should track offered products
     assert "offered_products" in output
     assert len(output["offered_products"]) == 1
@@ -314,23 +321,23 @@ async def test_offer_node_with_products():
 @pytest.mark.asyncio
 async def test_moderation_to_intent_flow():
     """Test state flows correctly from moderation to intent."""
-    from src.agents.langgraph.nodes.moderation import moderation_node
     from src.agents.langgraph.nodes.intent import intent_detection_node
-    
+    from src.agents.langgraph.nodes.moderation import moderation_node
+
     # Start with minimal state
     state = create_minimal_state()
-    
+
     # Step 1: Moderation
     mod_output = await moderation_node(state)
     assert mod_output["moderation_result"]["allowed"] is True
-    
+
     # Merge output into state (simulating LangGraph)
     state.update(mod_output)
-    
+
     # Step 2: Intent
     intent_output = await intent_detection_node(state)
     assert "detected_intent" in intent_output
-    
+
     # State should still have messages
     assert "messages" in state
     assert len(state["messages"]) > 0
@@ -344,11 +351,11 @@ async def test_moderation_to_intent_flow():
 def test_image_url_in_state_metadata():
     """Verify image_url is accessible from both state root and metadata."""
     state = create_vision_state()
-    
+
     # Both paths should work
     url_from_root = state.get("image_url")
     url_from_metadata = state.get("metadata", {}).get("image_url")
-    
+
     assert url_from_root == "https://example.com/test_image.jpg"
     assert url_from_metadata == "https://example.com/test_image.jpg"
 

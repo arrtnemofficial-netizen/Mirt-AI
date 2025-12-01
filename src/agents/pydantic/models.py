@@ -17,7 +17,8 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 # Import from centralized state machine to avoid duplication
-from src.core.state_machine import State, Intent
+from src.core.state_machine import Intent, State
+
 
 # Type aliases for Pydantic compatibility - unpack tuple for Literal
 IntentType = Literal[*tuple(Intent.__members__.keys())]
