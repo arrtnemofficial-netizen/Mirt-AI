@@ -116,7 +116,12 @@ async def vision_node(
         assistant_messages: list[dict[str, str]] = []
 
         previous_messages = state.get("messages", [])
-        has_assistant_reply = any(m.get("role") == "assistant" for m in previous_messages)
+        # Handle both dict and LangChain Message objects
+        def get_role(m: Any) -> str:
+            if isinstance(m, dict):
+                return m.get("role", "")
+            return getattr(m, "type", "")  # LangChain: HumanMessage.type = "human"
+        has_assistant_reply = any(get_role(m) in ("assistant", "ai") for m in previous_messages)
 
         if not has_assistant_reply:
             assistant_messages.append(
