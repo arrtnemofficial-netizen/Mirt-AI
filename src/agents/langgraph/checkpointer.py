@@ -138,14 +138,17 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
     try:
         # Create connection pool
-        import psycopg
+        from psycopg_pool import ConnectionPool
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        connection = psycopg.connect(database_url)
-        checkpointer = PostgresSaver(connection)
+        # Use connection pool for proper transaction handling
+        pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=5)
+        checkpointer = PostgresSaver(pool)
 
-        # Setup tables (idempotent)
-        checkpointer.setup()
+        # Setup tables (idempotent) - use pool context for proper autocommit
+        with pool.connection() as conn:
+            conn.autocommit = True
+            checkpointer.setup()
 
         logger.info("PostgreSQL checkpointer initialized successfully")
         return checkpointer

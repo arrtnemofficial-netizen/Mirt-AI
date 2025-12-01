@@ -94,7 +94,14 @@ def build_dispatcher(
 
     @dp.message(CommandStart())
     async def handle_start(message: Message) -> None:
-        await message.answer("Привіт! Я стиліст MIRT. Напиши, що шукаєш, і підберу варіанти.")
+        # Reset session state on /start
+        session_id = str(message.chat.id)
+        store.save(session_id, {
+            "messages": [],
+            "metadata": {"session_id": session_id},
+            "current_state": "STATE_0_INIT",
+        })
+        await message.answer("Можемо почати спілкування!")
 
     @dp.message(F.text)
     async def handle_text(message: Message) -> None:
@@ -103,8 +110,20 @@ def build_dispatcher(
     @dp.message(F.photo)
     async def handle_photo(message: Message) -> None:
         caption = message.caption or ""
-        description = caption if caption else "Фото отримано. Опишіть, що шукаєте."
-        await _process_incoming(message, conversation_handler, override_text=description)
+        description = caption if caption else ""
+
+        # Get photo URL from Telegram
+        photo = message.photo[-1]  # Get largest photo
+        file = await message.bot.get_file(photo.file_id)
+        image_url = f"https://api.telegram.org/file/bot{settings.TELEGRAM_BOT_TOKEN.get_secret_value()}/{file.file_path}"
+
+        await _process_incoming(
+            message,
+            conversation_handler,
+            override_text=description,
+            has_image=True,
+            image_url=image_url,
+        )
 
     return dp
 
@@ -118,13 +137,23 @@ async def _process_incoming(
     message: Message,
     handler: ConversationHandler,
     override_text: str | None = None,
+    has_image: bool = False,
+    image_url: str | None = None,
 ) -> None:
     """Process incoming Telegram message using ConversationHandler."""
     text = override_text or message.text or ""
     session_id = str(message.chat.id)
 
+    # Build extra metadata for photos
+    extra_metadata = None
+    if has_image:
+        extra_metadata = {
+            "has_image": True,
+            "image_url": image_url,
+        }
+
     # Use centralized handler - all error handling is done internally
-    result = await handler.process_message(session_id, text)
+    result = await handler.process_message(session_id, text, extra_metadata=extra_metadata)
 
     if result.is_fallback:
         logger.warning(
