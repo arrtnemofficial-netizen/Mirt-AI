@@ -1,337 +1,803 @@
-# ЗАЛІЗОБЕТОННИЙ КОДЕКС РОЗРОБКИ (CODE OF CONDUCT)
+# 🔥 ЗАЛІЗОБЕТОННИЙ КОДЕКС РОЗРОБКИ v3.0
 
 > **⚠️ КРИТИЧНА ІНСТРУКЦІЯ ДЛЯ AI AGENTS ТА РОЗРОБНИКІВ:**
 > Цей документ визначає **НЕПОРУШНІ ЗАКОНИ** архітектури проекту MIRT AI.
+> **PydanticAI + LangGraph = Production-Grade Agentic System**
 > Будь-яке відхилення від цих правил вважається **КРИТИЧНОЮ ПОМИЛКОЮ**.
-> Прочитай це перед написанням хоча б одного рядка коду.
 
 ---
 
 ## 0. Про проект (Контекст для AI)
 
 **MIRT AI** — це AI-консультант для магазину дитячого одягу MIRT.
-*   **Мова спілкування з клієнтами:** Українська.
-*   **Платформи:** Instagram (через ManyChat), Telegram.
-*   **LLM:** Grok 4.1 Fast / GPT-5.1 / Gemini 3 Pro (через OpenRouter або напряму).
-*   **База даних:** Supabase (PostgreSQL).
-*   **Каталог:** ~100 товарів, вбудованих у системний промпт (Embedded Catalog).
+- **Архітектура:** PydanticAI (мозок) + LangGraph (оркестратор) + PostgreSQL Checkpointer
+- **Мова спілкування:** Українська
+- **Платформи:** Instagram (ManyChat), Telegram
+- **LLM:** Grok/GPT/Gemini через OpenRouter
+- **База даних:** Supabase (PostgreSQL) + LangGraph Persistence
+- **Каталог:** ~100 товарів (Embedded Catalog в system_prompt)
 
-**Ключова ціль бота:** Допомогти клієнту обрати товар, уточнити розмір/колір, і довести до покупки. Бот НЕ продає напряму, а передає заявку менеджеру.
+**Ключова ціль:** Допомогти клієнту обрати товар → уточнити розмір/колір → довести до покупки.
 
 ---
 
-## 🚨 КРИТИЧНО: ПРАВИЛА ІМПОРТІВ
+## 🏗️ 1. АРХІТЕКТУРА: PydanticAI + LangGraph
 
-### Заборонені імпорти (ЦІ МОДУЛІ НЕ ІСНУЮТЬ!)
+### 1.1. Двошарова архітектура
 
-```python
-# ❌ ЗАБОРОНЕНО - ЦІ ФАЙЛИ ВИДАЛЕНО:
-from src.agents.nodes import ...      # НЕ ІСНУЄ!
-from src.agents.graph import ...      # НЕ ІСНУЄ!
-from .nodes import ...                # НЕ ІСНУЄ!
-from .graph import ...                # НЕ ІСНУЄ!
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         🎭 LANGGRAPH LAYER                              │
+│                    (The Conductor / Оркестратор)                        │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  src/agents/langgraph/                                            │  │
+│  │  ├── graph.py         # Production Graph Builder                  │  │
+│  │  ├── state.py         # ConversationState (TypedDict + Reducers)  │  │
+│  │  ├── edges.py         # Routing Logic (Smart Decisions)           │  │
+│  │  ├── checkpointer.py  # PostgreSQL/Redis Persistence              │  │
+│  │  ├── streaming.py     # Real-time Token Streaming                 │  │
+│  │  ├── time_travel.py   # State Rollback/Fork                       │  │
+│  │  └── nodes/           # 10 Production Nodes                       │  │
+│  │      ├── moderation.py   # Content Filter (Gate)                  │  │
+│  │      ├── intent.py       # Intent Detection                       │  │
+│  │      ├── agent.py        # Main LLM Processing                    │  │
+│  │      ├── vision.py       # Photo Recognition                      │  │
+│  │      ├── offer.py        # Product Offers                         │  │
+│  │      ├── payment.py      # Payment Flow (HITL)                    │  │
+│  │      ├── upsell.py       # Cross-sell                             │  │
+│  │      ├── validation.py   # Self-Correction Loop                   │  │
+│  │      └── escalation.py   # Human Handoff                          │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         🧠 PYDANTICAI LAYER                             │
+│                      (The Brain / Мозок Агентів)                        │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  src/agents/pydantic/                                             │  │
+│  │  ├── deps.py           # AgentDeps (Dependency Injection)         │  │
+│  │  ├── models.py         # OUTPUT_CONTRACT Models (Typed!)          │  │
+│  │  ├── support_agent.py  # Main Sales Agent "Ольга"                 │  │
+│  │  ├── vision_agent.py   # Photo Recognition Specialist             │  │
+│  │  ├── payment_agent.py  # Payment Flow Specialist                  │  │
+│  │  └── observability.py  # Logfire Integration                      │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Правильні імпорти
+### 1.2. Production Graph Flow
 
-```python
-# ✅ ПРАВИЛЬНО - імпортуй з src.agents:
-from src.agents import ConversationState
-from src.agents import build_graph, get_graph, get_active_graph
-from src.agents import AgentRunner, run_agent, run_agent_sync
-
-# ✅ ПРАВИЛЬНО - для graph_v2 напряму:
-from src.agents.graph_v2 import ConversationStateV2, build_graph_v2, get_graph_v2
+```
+START → moderation → intent ──┬──→ vision ───┬──→ offer → validation ──┬──→ end → END
+                              │              │                          │
+                              ├──→ agent ────┤                          │
+                              │              │                          │
+                              ├──→ offer ────┘                          │
+                              │                                         │
+                              ├──→ payment (HITL) → upsell ─────────────┤
+                              │                                         │
+                              └──→ escalation ──────────────────────────┘
+                                                         ▲
+                                              SELF-CORRECTION LOOP
+                                        (validation → retry → agent)
 ```
 
-### Структура модуля src.agents
+---
+
+## 🚨 2. КРИТИЧНО: ПРАВИЛА ІМПОРТІВ
+
+### 2.1. Правильні імпорти
+
+```python
+# ═══════════════════════════════════════════════════════════════════
+# ✅ ГОЛОВНИЙ ENTRY POINT - завжди імпортуй з src.agents
+# ═══════════════════════════════════════════════════════════════════
+
+from src.agents import (
+    # Entry Points
+    get_active_graph,           # Production LangGraph
+    setup_observability,        # Logfire setup
+    
+    # PydanticAI Agents
+    run_support,                # Main agent runner
+    run_vision,                 # Vision agent runner
+    run_payment,                # Payment agent runner
+    AgentDeps,                  # Dependency injection
+    create_deps_from_state,     # State → AgentDeps bridge
+    
+    # Output Models (OUTPUT_CONTRACT)
+    SupportResponse,            # Main response model
+    VisionResponse,             # Vision response model
+    PaymentResponse,            # Payment response model
+    ProductMatch,               # Product from catalog
+    MessageItem,                # Message item
+    ResponseMetadata,           # Metadata block
+    
+    # Type Literals
+    IntentType,                 # 10 intent types
+    StateType,                  # 10 FSM states
+    EventType,                  # 5 event types
+    
+    # LangGraph State
+    ConversationState,          # Full state TypedDict
+    create_initial_state,       # State factory
+    
+    # LangGraph Graph
+    build_production_graph,     # Graph builder
+    get_production_graph,       # Singleton getter
+    invoke_graph,               # Simple invocation
+    invoke_with_retry,          # With exponential backoff
+    
+    # Routing
+    route_after_intent,         # Intent → Node routing
+    route_after_validation,     # Validation → Retry routing
+    
+    # Streaming
+    stream_events,              # Event streaming
+    stream_tokens,              # Token streaming
+    StreamEventType,            # Event types
+    
+    # Time Travel
+    get_state_history,          # Get all checkpoints
+    rollback_to_step,           # Rollback state
+    fork_from_state,            # Fork conversation
+    
+    # Checkpointer
+    get_checkpointer,           # Auto-detect checkpointer
+    get_postgres_checkpointer,  # PostgreSQL backend
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# ✅ ПРЯМІ ІМПОРТИ (коли потрібно щось специфічне)
+# ═══════════════════════════════════════════════════════════════════
+
+# PydanticAI напряму
+from src.agents.pydantic.support_agent import get_support_agent
+from src.agents.pydantic.deps import AgentDeps, create_mock_deps
+from src.agents.pydantic.models import SupportResponse, ProductMatch
+
+# LangGraph напряму
+from src.agents.langgraph.state import ConversationState, create_initial_state
+from src.agents.langgraph.graph import build_production_graph
+from src.agents.langgraph.nodes import agent_node, vision_node
+from src.agents.langgraph.edges import route_after_intent
+```
+
+### 2.2. Заборонені імпорти
+
+```python
+# ❌ ЗАБОРОНЕНО - ЦІ ФАЙЛИ НЕ ІСНУЮТЬ:
+from src.agents.graph import ...           # НЕ ІСНУЄ!
+from src.agents.nodes import ...           # НЕ ІСНУЄ!
+from src.agents.graph_v2 import ...        # ЗАСТАРІЛО!
+from src.agents.pydantic_agent import ...  # ЗАСТАРІЛО!
+```
+
+### 2.3. Структура модуля src/agents/
 
 ```
 src/agents/
-├── __init__.py          # Експортує все публічне API
-├── graph_v2.py          # LangGraph v2 (ЄДИНА версія!)
-└── pydantic_agent.py    # AgentRunner та run_agent
-
-⚠️ Файли graph.py та nodes.py ВИДАЛЕНО! Вони НЕ існують!
+├── __init__.py                  # 🌟 Головний експорт (USE THIS!)
+│
+├── pydantic/                    # 🧠 THE BRAIN
+│   ├── __init__.py              # Експорт PydanticAI API
+│   ├── deps.py                  # AgentDeps (DI Container)
+│   ├── models.py                # OUTPUT_CONTRACT Models
+│   ├── support_agent.py         # Agent "Ольга" (main)
+│   ├── vision_agent.py          # Vision specialist
+│   ├── payment_agent.py         # Payment specialist
+│   └── observability.py         # Logfire integration
+│
+└── langgraph/                   # 🎭 THE CONDUCTOR
+    ├── __init__.py              # Експорт LangGraph API
+    ├── state.py                 # ConversationState + Reducers
+    ├── graph.py                 # Production Graph Builder
+    ├── edges.py                 # Routing Logic
+    ├── checkpointer.py          # PostgreSQL/Redis Persistence
+    ├── streaming.py             # Real-time Streaming
+    ├── time_travel.py           # Rollback/Fork
+    └── nodes/                   # 🔧 Individual Nodes
+        ├── __init__.py          # Node exports
+        ├── moderation.py        # Content filtering
+        ├── intent.py            # Intent detection
+        ├── agent.py             # Main LLM node
+        ├── vision.py            # Photo recognition
+        ├── offer.py             # Product offers
+        ├── payment.py           # Payment (HITL)
+        ├── upsell.py            # Cross-sell
+        ├── validation.py        # Self-correction
+        ├── escalation.py        # Human handoff
+        └── utils.py             # Shared utilities
 ```
-
-### Чек-ліст перед імпортом
-
-| Питання | Відповідь |
-|---------|-----------|
-| Імпортую з `src.agents.nodes`? | ❌ Заміни на `src.agents` |
-| Імпортую з `src.agents.graph`? | ❌ Заміни на `src.agents` |
-| Потрібен `ConversationState`? | ✅ `from src.agents import ConversationState` |
-| Потрібен граф? | ✅ `from src.agents import get_active_graph` |
 
 ---
 
-## 1. Фундаментальні Архітектурні Принципи
+## 🎯 3. PydanticAI ПРАВИЛА
 
-### 1.1. Єдине Джерело Правди (Single Source of Truth - SSOT)
-Хаос виникає там, де логіка дублюється. У цьому проекті діють чіткі правила:
+### 3.1. AgentDeps (Dependency Injection)
+
+```python
+# ✅ ПРАВИЛЬНО: Використовуй AgentDeps для всіх залежностей
+from src.agents import AgentDeps, create_deps_from_state
+
+# Створення з LangGraph state
+deps = create_deps_from_state(langgraph_state)
+
+# Або вручну
+deps = AgentDeps(
+    session_id="sess_123",
+    user_id="user_456",
+    current_state="STATE_1_DISCOVERY",
+    channel="instagram",
+    has_image=False,
+    selected_products=[...],
+    customer_name="Марія",
+)
+
+# Виклик агента
+response = await run_support("Привіт!", deps)
+```
+
+### 3.2. Structured Output (OUTPUT_CONTRACT)
+
+```python
+# PydanticAI ЗАВЖДИ повертає типізовану відповідь!
+from src.agents import SupportResponse
+
+response: SupportResponse = await run_support(message, deps)
+
+# Доступ до полів
+print(response.event)                    # "simple_answer" | "clarifying_question" | ...
+print(response.messages[0].content)      # Текст відповіді
+print(response.products[0].name)         # Товар з каталогу
+print(response.metadata.current_state)   # "STATE_4_OFFER"
+print(response.metadata.intent)          # "SIZE_HELP"
+print(response.escalation)               # EscalationInfo | None
+```
+
+### 3.3. OUTPUT_CONTRACT Models
+
+```python
+class SupportResponse(BaseModel):
+    """Головна модель відповіді агента."""
+    
+    event: EventType                 # simple_answer/clarifying_question/multi_option/escalation/end_smalltalk
+    messages: list[MessageItem]      # [{type: "text", content: "..."}]
+    products: list[ProductMatch]     # [{id, name, price, size, color, photo_url}]
+    metadata: ResponseMetadata       # {session_id, current_state, intent, escalation_level}
+    escalation: EscalationInfo | None
+    customer_data: CustomerDataExtracted | None
+    reasoning: str | None            # Chain-of-thought (debug)
+
+class ProductMatch(BaseModel):
+    """Товар з CATALOG - валідація вбудована!"""
+    id: int                          # Product ID (MUST exist in CATALOG)
+    name: str                        # Назва з каталогу
+    price: float = Field(gt=0)       # Ціна > 0
+    size: str                        # Розмір з CATALOG.sizes
+    color: str                       # Колір з CATALOG.colors
+    photo_url: str                   # https://cdn.sitniks.com/...
+```
+
+### 3.4. Dynamic System Prompts
+
+```python
+# PydanticAI підтримує динамічні промпти через функції
+@agent.system_prompt
+async def add_state_context(ctx: RunContext[AgentDeps]) -> str:
+    """Додає контекст сесії до промпта."""
+    deps = ctx.deps
+    return f"""
+    --- КОНТЕКСТ ---
+    Session: {deps.session_id}
+    State: {deps.current_state}
+    Products: {len(deps.selected_products)}
+    """
+
+# Реєстрація tools
+@agent.tool
+async def get_size_recommendation(ctx: RunContext[AgentDeps], height_cm: int) -> str:
+    """Рекомендація розміру за зростом."""
+    ...
+```
+
+### 3.5. Agent Creation (PydanticAI 1.23+)
+
+```python
+# ⚠️ ВАЖЛИВО: PydanticAI 1.23+ API Changes
+# - result_type → output_type (в конструкторі Agent)
+# - result.output залишається (НЕ result.response!)
+
+from pydantic_ai import Agent
+
+# ✅ ПРАВИЛЬНО (PydanticAI 1.23+)
+agent = Agent(
+    model,
+    deps_type=AgentDeps,
+    output_type=SupportResponse,  # НЕ result_type!
+    system_prompt="...",
+    retries=2,
+)
+
+# Виклик агента
+result = await agent.run(message, deps=deps)
+response = result.output  # НЕ result.response (це ModelResponse)!
+
+# ❌ ЗАСТАРІЛО (PydanticAI < 1.23)
+# result_type=SupportResponse  # Помилка: Unknown keyword arguments
+```
+
+---
+
+## 🌊 4. LangGraph ПРАВИЛА
+
+### 4.1. ConversationState (TypedDict + Reducers)
+
+```python
+from src.agents import ConversationState, create_initial_state
+
+# Створення initial state
+state = create_initial_state(
+    session_id="sess_123",
+    messages=[{"role": "user", "content": "Привіт!"}],
+    metadata={"channel": "instagram", "user_id": "user_456"},
+)
+
+# State fields з proper reducers
+class ConversationState(TypedDict, total=False):
+    # Core
+    messages: Annotated[list, add_messages]      # LangGraph message reducer
+    current_state: str                           # FSM state
+    metadata: Annotated[dict, merge_dict]        # Merging metadata
+    
+    # Session
+    session_id: str
+    thread_id: str                               # LangGraph persistence key
+    
+    # Intent & Routing
+    detected_intent: str | None
+    has_image: bool
+    image_url: str | None
+    
+    # Products
+    selected_products: list[dict]
+    offered_products: list[dict]
+    
+    # Moderation & Escalation
+    should_escalate: bool
+    escalation_reason: str | None
+    
+    # Self-Correction Loop
+    validation_errors: list[str]
+    retry_count: int
+    max_retries: int                             # Default: 3
+    
+    # Human-in-the-Loop
+    awaiting_human_approval: bool
+    approval_type: Literal["payment", "refund", "discount", None]
+    human_approved: bool | None
+    
+    # PydanticAI Output
+    agent_response: Annotated[dict, replace_value]  # Latest structured response
+    
+    # Time Travel
+    step_number: int
+```
+
+### 4.2. Graph Invocation
+
+```python
+from src.agents import get_active_graph, invoke_graph, invoke_with_retry
+
+# Простий виклик
+graph = get_active_graph()
+result = await graph.ainvoke(
+    state,
+    config={"configurable": {"thread_id": session_id}}
+)
+
+# Через helper (рекомендовано)
+result = await invoke_graph(
+    session_id=session_id,
+    messages=[{"role": "user", "content": message}],
+    metadata={"channel": "instagram"},
+)
+
+# З retry logic
+result = await invoke_with_retry(
+    state=state,
+    session_id=session_id,
+    max_attempts=3,  # Exponential backoff
+)
+```
+
+### 4.3. Human-in-the-Loop (HITL)
+
+```python
+from src.agents.langgraph.graph import resume_after_interrupt
+
+# Graph pauses before payment node (interrupt_before=["payment"])
+# Manager reviews and approves/rejects
+
+# Resume with human decision
+result = await resume_after_interrupt(
+    session_id=session_id,
+    response=True,  # Approved / False = Rejected
+)
+```
+
+### 4.4. Time Travel
+
+```python
+from src.agents import get_state_history, rollback_to_step, fork_from_state
+
+# Get all checkpoints for session
+history = await get_state_history(graph, session_id)
+for checkpoint in history:
+    print(f"Step {checkpoint.step_number}: {checkpoint.current_state}")
+
+# Rollback to specific step
+result = await rollback_to_step(graph, session_id, step_number=5)
+
+# Fork conversation (for A/B testing)
+new_session_id = await fork_from_state(graph, session_id, step_number=3)
+```
+
+### 4.5. Streaming
+
+```python
+from src.agents import stream_events, stream_tokens, StreamEventType
+
+# Stream all events
+async for event in stream_events(graph, state, session_id):
+    if event.type == StreamEventType.NODE_START:
+        print(f"Starting node: {event.node}")
+    elif event.type == StreamEventType.TOKEN:
+        print(event.token, end="", flush=True)
+
+# Stream only tokens
+async for token in stream_tokens(graph, state, session_id):
+    print(token, end="", flush=True)
+```
+
+---
+
+## 🔀 5. ROUTING LOGIC
+
+### 5.1. Intent-Based Routing
+
+```python
+# src/agents/langgraph/edges.py
+
+def route_after_intent(state: dict) -> IntentRoute:
+    """Route based on detected intent."""
+    intent = state.get("detected_intent")
+    current_state = state.get("current_state")
+    
+    # Direct mappings
+    if intent == "PHOTO_IDENT":
+        return "vision"
+    if intent == "COMPLAINT":
+        return "escalation"
+    
+    # Context-aware routing
+    if intent == "PAYMENT_DELIVERY":
+        if current_state in ["STATE_4_OFFER", "STATE_5_PAYMENT_DELIVERY"]:
+            return "payment"
+        if state.get("selected_products"):
+            return "offer"
+    
+    return "agent"  # Default
+```
+
+### 5.2. Self-Correction Loop
+
+```python
+def route_after_validation(state: dict) -> ValidationRoute:
+    """Enable self-correction loop."""
+    errors = state.get("validation_errors", [])
+    retry_count = state.get("retry_count", 0)
+    max_retries = state.get("max_retries", 3)
+    
+    if not errors:
+        return "end"           # Success!
+    
+    if retry_count >= max_retries:
+        return "escalation"    # Give up, call human
+    
+    return "agent"             # Retry with feedback
+```
+
+---
+
+## 📦 6. OUTPUT_CONTRACT (Pydantic Models)
+
+### 6.1. Event Types (5)
+
+| Event | Опис | Коли використовувати |
+|-------|------|---------------------|
+| `simple_answer` | Пряма відповідь | Звичайне питання |
+| `clarifying_question` | Уточнення | Потрібна інформація |
+| `multi_option` | Варіанти вибору | 2+ товари підходять |
+| `escalation` | Передача менеджеру | Скарга, складне питання |
+| `end_smalltalk` | Завершення | Прощання, подяка |
+
+### 6.2. Intent Types (10)
+
+| Intent | Опис | → Node |
+|--------|------|--------|
+| `GREETING_ONLY` | Просте привітання | agent |
+| `DISCOVERY_OR_QUESTION` | Пошук товару | agent |
+| `PHOTO_IDENT` | Ідентифікація фото | vision |
+| `SIZE_HELP` | Допомога з розміром | agent/offer |
+| `COLOR_HELP` | Допомога з кольором | agent/offer |
+| `PAYMENT_DELIVERY` | Оплата/доставка | payment |
+| `COMPLAINT` | Скарга | escalation |
+| `THANKYOU_SMALLTALK` | Подяка | agent |
+| `OUT_OF_DOMAIN` | Не по темі | agent |
+| `UNKNOWN_OR_EMPTY` | Незрозуміло | agent |
+
+### 6.3. State Types (10)
+
+| State | Опис | Transitions |
+|-------|------|-------------|
+| `STATE_0_INIT` | Початок розмови | → DISCOVERY |
+| `STATE_1_DISCOVERY` | Пошук товару | → VISION/SIZE_COLOR/OFFER |
+| `STATE_2_VISION` | Аналіз фото | → OFFER |
+| `STATE_3_SIZE_COLOR` | Підбір розміру | → OFFER |
+| `STATE_4_OFFER` | Конкретна пропозиція | → PAYMENT/UPSELL |
+| `STATE_5_PAYMENT_DELIVERY` | Оформлення | → END |
+| `STATE_6_UPSELL` | Cross-sell | → PAYMENT/END |
+| `STATE_7_END` | Завершення | Terminal |
+| `STATE_8_COMPLAINT` | Скарга | → ESCALATION |
+| `STATE_9_OOD` | Out of domain | → DISCOVERY |
+
+---
+
+## 🏛️ 7. SSOT (Single Source of Truth)
 
 | Що | Де визначено | ЗАБОРОНЕНО |
 |----|--------------|------------|
-| **Стани (States)** | `src/core/state_machine.py` | Вигадувати стани в промптах |
-| **Інтенти (Intents)** | `src/core/state_machine.py` | Дублювати логіку визначення інтентів |
-| **Назви таблиць БД** | `src/core/constants.py` (клас `DBTable`) | Хардкодити `"mirt_users"` |
-| **Теги повідомлень** | `src/core/constants.py` (клас `MessageTag`) | Писати `"humanNeeded-wd"` напряму |
-| **Каталог товарів** | `data/system_prompt_full.yaml` (Block 2) | Зберігати товари в інших файлах |
+| **States** | `src/core/state_machine.py` | Вигадувати стани |
+| **Intents** | `src/agents/pydantic/models.py` | Дублювати enum |
+| **Events** | `src/agents/pydantic/models.py` | Додавати без узгодження |
+| **OUTPUT_CONTRACT** | `src/agents/pydantic/models.py` | Змінювати структуру |
+| **AgentDeps** | `src/agents/pydantic/deps.py` | Дублювати DI logic |
+| **ConversationState** | `src/agents/langgraph/state.py` | Дублювати state |
+| **Routing** | `src/agents/langgraph/edges.py` | Хардкодити маршрути |
+| **Каталог** | `data/system_prompt_full.yaml` | Зберігати в коді |
 | **Конфігурація** | `src/conf/config.py` | Хардкодити API ключі |
 
-### 1.2. Явне краще, ніж неявне (Explicit > Implicit)
-*   **Типізація:** Ми використовуємо сучасний Python 3.10+.
-    *   ❌ **BAD:** `def process(data):` (незрозуміло, що таке data)
-    *   ❌ **BAD:** `def process(data: Dict[str, Any]):` (старий синтаксис)
-    *   ✅ **GOOD:** `def process(data: dict[str, Any]) -> None:` (сучасний синтаксис)
-    *   ✅ **BEST:** Використовувати Pydantic моделі (`ValidatedProduct`, `StoredMessage`).
-*   **Ніякого `Any`:** Використання `Any` дозволено тільки у виняткових випадках (наприклад, при парсингу сирого JSON), і має бути локалізоване.
-
-### 1.3. Структура проекту (Не порушувати!)
-
-```
-src/
-├── core/                 # 🧠 Мозок: FSM, моделі, валідація
-│   ├── state_machine.py  # ⭐ ГОЛОВНИЙ ФАЙЛ: State, Intent, Transitions
-│   ├── constants.py      # DBTable, MessageTag, інші константи
-│   ├── models.py         # Pydantic моделі
-│   └── product_adapter.py # Валідація товарів
-├── agents/               # 🤖 LangGraph оркестрація
-│   └── graph_v2.py       # 5-вузловий граф
-├── services/             # 🔧 Бізнес-логіка
-│   ├── message_store.py  # Збереження повідомлень
-│   ├── summarization.py  # Переупаковка (3 дні)
-│   └── followups.py      # Фолоуапи
-├── server/               # 🌐 FastAPI endpoints
-│   └── main.py           # Вебхуки
-└── conf/                 # ⚙️ Конфігурація
-    └── config.py         # Pydantic Settings
-
-data/
-├── system_prompt_full.yaml  # ⭐ ГОЛОВНИЙ ПРОМПТ + КАТАЛОГ
-└── catalog.json             # Для тестів
-```
-
 ---
 
-## 2. Стандарти Коду та Обробка Помилок
+## 🔧 8. NODES (10 Production Nodes)
 
-        logger.error("Failed to insert data: %s", e)
-        raise  # Або поверни fallback-значення, якщо це допустимо
-    ```
+### 8.1. Node Contract
 
-### 2.2. DRY (Don't Repeat Yourself)
-Якщо логіка повторюється двічі — винеси її в приватний метод.
-*   Приклад: Валідація продукту в `ProductAdapter` винесена в `_create_validated_product`. Не копіпастити логіку!
-
-### 2.3. Відсутність "Магічних Значень" (No Magic Strings)
-*   Ніколи не використовуй хардкод-рядки для статусів, тегів чи назв таблиць.
-*   ❌ `if table == "mirt_users":`
-*   ✅ `if table == DBTable.USERS:`
-
-### 2.4. Іменування
-*   **Класи:** `PascalCase` (`ValidatedProduct`, `SupabaseMessageStore`)
-*   **Функції/методи:** `snake_case` (`create_message_store`, `_parse_response`)
-*   **Константи:** `UPPER_SNAKE_CASE` (`DEFAULT_MATCH_COUNT`, `MAX_RESPONSE_CHARS`)
-*   **Приватні методи:** Починаються з `_` (`_update_user_interaction`)
-
----
-
-## 3. Робота з Базою Даних (Supabase)
-
-### 3.1. Контракт Таблиць
-Всі запити до БД мають йти **ТІЛЬКИ** через іменовані константи з `src/core/constants.py`:
-
-| Константа | Таблиця | Призначення |
-|-----------|---------|-------------|
-| `DBTable.USERS` | `mirt_users` | CRM: user_id, summary, last_interaction_at |
-| `DBTable.MESSAGES` | `mirt_messages` | Історія чату: role, content, content_type |
-| `DBTable.SESSIONS` | `agent_sessions` | Стан FSM: session_id, state (jsonb) |
-
-### 3.2. CRM Flow (Незмінний алгоритм)
-Цей порядок дій не можна порушувати:
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  ВХІДНЕ ПОВІДОМЛЕННЯ (клієнт пише)                               │
-│  ─────────────────────────────────                               │
-│  1. Зберегти в mirt_messages (user_id, role='user', content)     │
-│  2. Оновити mirt_users.last_interaction_at = now()               │
-│  3. Обробити через LangGraph → отримати відповідь                │
-└──────────────────────────────────────────────────────────────────┘
-                              ↓
-┌──────────────────────────────────────────────────────────────────┐
-│  ВІДПОВІДЬ БОТА                                                  │
-│  ─────────────                                                   │
-│  1. Зберегти в mirt_messages (user_id, role='assistant')         │
-│  2. Відправити клієнту через ManyChat/Telegram                   │
-└──────────────────────────────────────────────────────────────────┘
-                              ↓
-┌──────────────────────────────────────────────────────────────────┐
-│  ПЕРЕУПАКОВКА (через 3 дні без активності)                       │
-│  ───────────────────────────────────────                         │
-│  1. ManyChat смикає /automation/mirt-summarize-prod-v1           │
-│  2. Бот читає всі mirt_messages для user_id                      │
-│  3. Генерує текстовий summary                                    │
-│  4. Зберігає в mirt_users.summary                                │
-│  5. ВИДАЛЯЄ старі повідомлення з mirt_messages                   │
-│  6. Повертає { "action": "remove_tags" } для ManyChat            │
-└──────────────────────────────────────────────────────────────────┘
+```python
+async def node_name(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Every node MUST:
+    1. Accept state dict
+    2. Return partial state update (only changed fields)
+    3. Handle errors gracefully (return error state)
+    4. Log operations for observability
+    """
+    try:
+        # Process...
+        return {
+            "current_state": "STATE_X",
+            "step_number": state.get("step_number", 0) + 1,
+        }
+    except Exception as e:
+        logger.error("Node failed: %s", e)
+        return {
+            "last_error": str(e),
+            "retry_count": state.get("retry_count", 0) + 1,
+        }
 ```
 
----
+### 8.2. Node → PydanticAI Integration
 
-## 4. Інфраструктура та Конфігурація
+```python
+# src/agents/langgraph/nodes/agent.py
 
-### 4.1. Конфігурація
-*   Всі змінні оточення (`.env`) мають бути описані в `src/conf/config.py` (Pydantic `BaseSettings`).
-*   Секрети (ключі API) мають бути типу `SecretStr`, щоб випадково не потрапити в логи.
-*   Feature Flags для поступового rollout (`USE_GRAPH_V2`, `ENABLE_OBSERVABILITY`).
-
-### 4.2. Embedded Catalog Mode
-Проект працює в режимі **Embedded Catalog**.
-*   **ЗАБОРОНЕНО** відновлювати код для Supabase Vector Store / RAG.
-*   Весь пошук здійснюється LLM-моделлю на основі контексту з `system_prompt_full.yaml`.
-*   Якщо товарів стане > 200, переглянути архітектуру (але не раніше!).
-
----
-
-## 5. Якість Промптів (Prompt Engineering)
-
-### 5.1. Структура системного промпту (`data/system_prompt_full.yaml`)
-
-Промпт MIRT AI складається з логічних блоків. **Порядок блоків критичний!**
-
-| Block | Назва | Зміст | Можна змінювати? |
-|-------|-------|-------|------------------|
-| 0 | **Identity** | Хто ти (AI-стиліст MIRT) | ❌ Тільки з дозволу |
-| 1 | **Rules** | Жорсткі правила поведінки | ❌ Тільки з дозволу |
-| 2 | **Catalog** | Товари (Embedded) | ✅ При оновленні асортименту |
-| 3 | **FSM States** | Опис станів і переходів | ❌ Синхронізувати з кодом |
-| 4 | **Output Contract** | Формат відповіді (JSON) | ❌ Критичний для парсингу |
-| 5 | **Examples** | Few-shot приклади | ✅ Можна покращувати |
-
-### 5.2. Правила написання промптів
-
-1.  **Мова:** Промпт пишеться українською (бот спілкується українською).
-2.  **Чіткість:** Кожна інструкція — окремий пункт. Ніяких "простирадел" тексту.
-3.  **Пріоритети:** Використовуй `КРИТИЧНО:`, `ВАЖЛИВО:`, `ЗАБОРОНЕНО:` для акцентів.
-4.  **Приклади:** Few-shot приклади ОБОВ'ЯЗКОВІ для складної логіки.
-5.  **Тестування:** Після зміни промпту — запусти `tests/eval/run_eval.py`.
-
-### 5.3. Формат відповіді (OUTPUT_CONTRACT)
-
-Бот ЗАВЖДИ повертає JSON такої структури:
-
-```json
-{
-  "reply_text": "Текст відповіді клієнту",
-  "current_state": "STATE_4_OFFER",
-  "detected_intent": "SIZE_HELP",
-  "products": [
-    {
-      "id": 3443041,
-      "name": "Сукня Анна",
-      "size": "122-128",
-      "color": "голубий",
-      "price": 1850,
-      "photo_url": "https://cdn.sitniks.com/..."
+async def agent_node(state: dict, runner=None) -> dict:
+    """Main agent node using PydanticAI."""
+    
+    # 1. Create deps from state (DI bridge)
+    deps = create_deps_from_state(state)
+    
+    # 2. Extract user message
+    user_message = extract_user_message(state.get("messages", []))
+    
+    # 3. Call PydanticAI agent
+    response: SupportResponse = await run_support(
+        message=user_message,
+        deps=deps,
+    )
+    
+    # 4. Return structured state update
+    return {
+        "current_state": response.metadata.current_state,
+        "detected_intent": response.metadata.intent,
+        "messages": [{"role": "assistant", "content": str(response)}],
+        "agent_response": response.model_dump(),  # Full structured output
+        "selected_products": [p.model_dump() for p in response.products],
+        "should_escalate": response.event == "escalation",
     }
-  ],
-  "needs_human": false,
-  "confidence": 0.95
-}
 ```
 
-**КРИТИЧНІ ПОЛЯ:**
-*   `reply_text` — обов'язковий, не може бути порожнім.
-*   `current_state` — має відповідати enum `State` з `state_machine.py`.
-*   `products` — якщо є товари, валідувати через `ProductAdapter`.
+---
 
-### 5.4. Заборонені патерни в промптах
+## 🗄️ 9. PERSISTENCE & CHECKPOINTING
 
-*   ❌ `Ти можеш робити все` — надто широко, LLM піде не туди.
-*   ❌ `Будь корисним` — неконкретно.
-*   ❌ Суперечливі інструкції (типу "будь коротким, але детальним").
-*   ❌ Довгі абзаци без структури.
-*   ❌ Зайва "ввічливість" (`Будь ласка, якщо не важко...`).
+### 9.1. PostgreSQL Checkpointer
 
-### 5.5. Рекомендовані патерни
+```python
+from src.agents import get_checkpointer, get_postgres_checkpointer
 
-*   ✅ `ЗАБОРОНЕНО: обговорювати ціни конкурентів.`
-*   ✅ `Якщо клієнт питає про [X], відповідай [Y].`
-*   ✅ `Приклад: Клієнт: "..." → Бот: "..."`
-*   ✅ Чіткі if/then правила.
-*   ✅ Numbered lists для послідовних дій.
+# Auto-detect (uses POSTGRES_URI from env)
+checkpointer = get_checkpointer()
+
+# Explicit PostgreSQL
+checkpointer = get_postgres_checkpointer(
+    uri=settings.POSTGRES_URI,
+)
+
+# Build graph with checkpointer
+graph = build_production_graph(
+    runner=default_runner,
+    checkpointer=checkpointer,
+)
+```
+
+### 9.2. What's Persisted?
+
+| Що | Де | Навіщо |
+|----|-----|--------|
+| ConversationState | PostgreSQL `checkpoints` | Відновлення після рестарту |
+| Message History | `messages` field + `mirt_messages` | Контекст розмови |
+| Selected Products | `selected_products` field | Кошик |
+| Customer Data | `metadata.customer_*` | CRM |
 
 ---
 
-## 6. Тестування
+## 📊 10. OBSERVABILITY (Logfire)
 
-### 6.1. Правила тестів
-*   **Ніяких зовнішніх викликів:** Тести НЕ смикають Supabase, LLM, ManyChat.
-*   **Моки:** Використовуй `AsyncMock` для LLM, `InMemoryMessageStore` для БД.
-*   **Фікстури:** Каталог для тестів — `data/catalog.json`.
-*   **Golden Dataset:** Еталонні відповіді в `tests/eval/datasets/`.
+```python
+from src.agents import setup_observability
 
-### 6.2. Що тестувати
-*   ✅ FSM transitions (`test_state_machine.py`)
-*   ✅ Product validation (`test_product_adapter.py`)
-*   ✅ ManyChat webhook parsing (`test_manychat.py`)
-*   ✅ Summarization logic (`test_summarization.py`)
+# Setup at app start
+setup_observability(
+    service_name="mirt-ai",
+    environment="production",
+)
 
----
+# PydanticAI автоматично логує:
+# - Agent calls with deps
+# - Tool usage
+# - Response validation
+# - Retries
 
-## 7. ManyChat / Telegram Інтеграція
-
-### 7.1. Endpoints
-
-| Endpoint | Метод | Призначення |
-|----------|-------|-------------|
-| `/webhooks/manychat` | POST | Основний чат |
-| `/webhooks/manychat/followup` | POST | Фолоуапи (4 год) |
-| `/webhooks/manychat/create-order` | POST | Створення замовлення в CRM |
-| `/automation/mirt-summarize-prod-v1` | POST | Переупаковка (3 дні) |
-| `/webhooks/telegram` | POST | Telegram бот |
-
-### 7.2. Авторизація
-*   Header `X-Manychat-Token` = `MANYCHAT_VERIFY_TOKEN` з `.env`.
-*   Якщо токен невірний — повертай 401.
+# LangGraph логує:
+# - Node execution
+# - State transitions
+# - Checkpointing
+```
 
 ---
 
-## 8. Чек-ліст перед комітом (для AI)
+## ✅ 11. ЧЕКЛІСТ ПЕРЕД КОМІТОМ
 
-Кожен раз, коли ти змінюєш код, перевір себе:
-
-| # | Перевірка | Що робити, якщо ні |
-|---|-----------|-------------------|
-| 1 | Чи не додав я "магічних строк"? | Винеси в `constants.py` |
-| 2 | Чи не зламав я типізацію? | Запусти `mypy src` |
-| 3 | Чи оброблені помилки? | Додай `logger.error()` |
-| 4 | Чи є тест на нову логіку? | Напиши тест |
-| 5 | Чи синхронізований промпт з кодом? | Перевір States/Intents |
-| 6 | Чи пройшли тести? | Запусти `pytest` |
+| # | Перевірка | Що робити |
+|---|-----------|-----------|
+| 1 | Імпортую з `src.agents`? | ✅ Так, використовуй головний entry point |
+| 2 | Використовую `AgentDeps`? | ✅ Ніяких глобальних змінних |
+| 3 | Повертаю типізовану відповідь? | ✅ SupportResponse/VisionResponse |
+| 4 | Node повертає partial update? | ✅ Тільки змінені поля |
+| 5 | Обробляю помилки? | ✅ try/except + logger.error |
+| 6 | Є тест? | ✅ pytest з моками |
+| 7 | Промпт синхронізований? | ✅ States/Intents в моделях |
 
 ---
 
-## 9. Заборонені дії (Hard Rules)
+## 🚫 12. ЗАБОРОНЕНІ ДІЇ
 
 | # | ЗАБОРОНЕНО | Чому |
 |---|------------|------|
-| 1 | Видаляти або коментувати тести | Маскує баги |
-| 2 | Відновлювати RAG/Vector Search | Архітектурне рішення |
-| 3 | Хардкодити секрети | Безпека |
-| 4 | Писати `except: pass` | Ховає помилки |
-| 5 | Дублювати визначення States/Intents | SSOT violation |
-| 6 | Змінювати OUTPUT_CONTRACT без узгодження | Зламає парсинг |
-| 7 | Видаляти логування | Неможливо дебажити |
+| 1 | Імпортувати з `src.agents.graph` | Не існує |
+| 2 | Викликати LLM напряму | Використовуй PydanticAI agents |
+| 3 | Створювати state вручну | Використовуй `create_initial_state` |
+| 4 | Модифікувати state мутабельно | LangGraph reducers! |
+| 5 | Ігнорувати `retry_count` | Self-correction loop |
+| 6 | Хардкодити routing | Використовуй edges.py |
+| 7 | Пропускати `thread_id` | Ламає persistence |
+| 8 | `except: pass` | Ховає помилки |
+| 9 | Змінювати OUTPUT_CONTRACT | Зламає парсинг |
+| 10 | Видаляти тести | Маскує баги |
 
 ---
 
-> **ФІНАЛЬНЕ СЛОВО:**
-> Пиши код так, ніби його буде підтримувати маніяк, який знає, де твій сервер.
-> Роби надійно. Роби явно. Роби професійно.
+## 🔄 13. ТИПОВІ PATTERNS
+
+### 13.1. Webhook Handler
+
+```python
+@router.post("/webhooks/manychat")
+async def manychat_webhook(request: ManyChatRequest):
+    # 1. Create state
+    state = create_initial_state(
+        session_id=request.subscriber_id,
+        messages=[{"role": "user", "content": request.message}],
+        metadata={
+            "channel": "instagram",
+            "user_id": request.subscriber_id,
+        },
+    )
+    
+    # 2. Invoke graph
+    result = await invoke_graph(state=state, session_id=request.subscriber_id)
+    
+    # 3. Extract response from agent_response
+    agent_response = result.get("agent_response", {})
+    reply_text = agent_response.get("messages", [{}])[0].get("content", "")
+    
+    return {"reply": reply_text}
+```
+
+### 13.2. Testing Pattern
+
+```python
+@pytest.fixture
+def mock_deps():
+    return create_mock_deps(session_id="test_session")
+
+@pytest.mark.asyncio
+async def test_support_agent(mock_deps, mock_llm):
+    with patch("src.agents.pydantic.support_agent._get_model", return_value=mock_llm):
+        response = await run_support("Привіт!", mock_deps)
+        
+        assert response.event in ["simple_answer", "clarifying_question"]
+        assert len(response.messages) > 0
+        assert response.metadata.session_id == "test_session"
+```
+
+---
+
+## 🎯 14. QUICK REFERENCE
+
+```python
+# === ENTRY POINTS ===
+from src.agents import get_active_graph, run_support, run_vision
+
+# === MODELS ===
+from src.agents import SupportResponse, ProductMatch, AgentDeps
+
+# === STATE ===
+from src.agents import ConversationState, create_initial_state
+
+# === INVOCATION ===
+result = await invoke_graph(session_id="...", messages=[...])
+
+# === STREAMING ===
+async for token in stream_tokens(graph, state, session_id):
+    print(token, end="")
+
+# === TIME TRAVEL ===
+await rollback_to_step(graph, session_id, step_number=5)
+```
+
+---
+
+> **🔥 ФІНАЛЬНЕ СЛОВО:**
+> 
+> Ця архітектура — **Production-Grade Agentic System**.
+> PydanticAI дає нам type-safe agents з DI.
+> LangGraph дає нам persistence, routing, HITL.
+> Разом вони — непереможна комбінація.
+> 
+> **Пиши код так, ніби його буде підтримувати маніяк з доступом до твого production.**
 > 
 > **Якщо сумніваєшся — запитай. Якщо не знаєш — не вигадуй.**

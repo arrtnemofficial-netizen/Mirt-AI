@@ -170,7 +170,7 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
         _payment_agent = Agent(  # type: ignore[call-overload]
             _build_model(),
             deps_type=AgentDeps,
-            result_type=PaymentResponse,
+            output_type=PaymentResponse,  # Changed from result_type (PydanticAI 1.23+)
             system_prompt=_payment_prompt,
             retries=2,
         )
@@ -214,7 +214,7 @@ async def run_payment(
             agent.run(message, deps=deps, message_history=message_history),
             timeout=30,
         )
-        return result.output
+        return result.output  # output_type param, result.output attr
 
     except Exception as e:
         logger.exception("Payment agent error: %s", e)

@@ -92,7 +92,7 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
         _vision_agent = Agent(  # type: ignore[call-overload]
             _build_model(),
             deps_type=AgentDeps,
-            result_type=VisionResponse,
+            output_type=VisionResponse,  # Changed from result_type (PydanticAI 1.23+)
             system_prompt=_get_vision_prompt(),  # Use REAL catalog!
             retries=2,
         )
@@ -137,7 +137,7 @@ async def run_vision(
             agent.run(message, deps=deps, message_history=message_history),
             timeout=30,
         )
-        return result.output
+        return result.output  # output_type param, result.output attr
 
     except Exception as e:
         logger.exception("Vision agent error: %s", e)

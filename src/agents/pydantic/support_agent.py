@@ -298,7 +298,7 @@ def get_support_agent() -> Agent[AgentDeps, SupportResponse]:
         _agent = Agent(  # type: ignore[call-overload]
             _get_model(),
             deps_type=AgentDeps,
-            result_type=SupportResponse,
+            output_type=SupportResponse,  # Changed from result_type (PydanticAI 1.23+)
             system_prompt=_get_base_prompt(),
             retries=2,
         )
@@ -342,10 +342,11 @@ async def run_support(
                 deps=deps,
                 message_history=message_history,
             ),
-            timeout=30,
+            timeout=120,  # Increased for slow API tiers
         )
 
-        # result.output is already validated SupportResponse!
+        # result.output is the typed output (SupportResponse)
+        # Note: output_type param (not result_type) but result.output (not result.response)
         return result.output
 
     except TimeoutError:

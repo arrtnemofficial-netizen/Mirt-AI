@@ -1,0 +1,512 @@
+[
+  {
+    "name": "Greeting - Simple Hello",
+    "description": "Basic Ukrainian greeting",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 31468.65
+  },
+  {
+    "name": "Greeting - With Question",
+    "description": "Greeting with immediate question",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected DISCOVERY_OR_QUESTION, got UNKNOWN_OR_EMPTY",
+      "Expected products but got none"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_0_INIT",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30022.34
+  },
+  {
+    "name": "Product Search - Specific Item",
+    "description": "Search for specific dress model",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected DISCOVERY_OR_QUESTION, got UNKNOWN_OR_EMPTY",
+      "Expected products but got none"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_1_DISCOVERY",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30181.98
+  },
+  {
+    "name": "Product Search - Size Query",
+    "description": "Search with height for size recommendation",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected SIZE_HELP, got UNKNOWN_OR_EMPTY",
+      "Expected products but got none"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_1_DISCOVERY",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30006.82
+  },
+  {
+    "name": "Product Search - Color Question",
+    "description": "Ask about available colors",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected COLOR_HELP, got UNKNOWN_OR_EMPTY",
+      "Expected products but got none"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_1_DISCOVERY",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30372.79
+  },
+  {
+    "name": "Product Search - Multiple Criteria",
+    "description": "Complex search with multiple requirements",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected SIZE_HELP, got UNKNOWN_OR_EMPTY",
+      "Expected products but got none"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_1_DISCOVERY",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30008.65
+  },
+  {
+    "name": "Size - Border Height 120cm",
+    "description": "Height at border - should recommend BIGGER size",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 26785.3
+  },
+  {
+    "name": "Size - Very Small Child",
+    "description": "Child below catalog range",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected SIZE_HELP, got UNKNOWN_OR_EMPTY"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_3_SIZE_COLOR",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30052.83
+  },
+  {
+    "name": "Size - Very Tall Child",
+    "description": "Child above catalog range",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected SIZE_HELP, got UNKNOWN_OR_EMPTY"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_3_SIZE_COLOR",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30018.98
+  },
+  {
+    "name": "Payment - Initial Request",
+    "description": "Customer ready to order",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected PAYMENT_DELIVERY, got UNKNOWN_OR_EMPTY"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_4_OFFER",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30053.4
+  },
+  {
+    "name": "Payment - With Delivery Data",
+    "description": "Customer provides all delivery info",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected PAYMENT_DELIVERY, got UNKNOWN_OR_EMPTY"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_5_PAYMENT_DELIVERY",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30036.75
+  },
+  {
+    "name": "Payment - Partial Data",
+    "description": "Customer provides only some data",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 23417.86
+  },
+  {
+    "name": "Complaint - Product Quality",
+    "description": "Customer complaint about product",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 22004.46
+  },
+  {
+    "name": "Complaint - Wrong Item",
+    "description": "Customer received wrong item",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 28909.69
+  },
+  {
+    "name": "Escalation - Request Human",
+    "description": "Customer explicitly asks for human",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 25460.2
+  },
+  {
+    "name": "Identity - Bot Question",
+    "description": "Customer asks if talking to bot",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected OUT_OF_DOMAIN, got UNKNOWN_OR_EMPTY",
+      "Event mismatch: expected simple_answer, got escalation"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_0_INIT",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30133.9
+  },
+  {
+    "name": "Off-Topic - Weather",
+    "description": "Customer asks about weather",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected OUT_OF_DOMAIN, got UNKNOWN_OR_EMPTY",
+      "Event mismatch: expected simple_answer, got escalation"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_0_INIT",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30001.99
+  },
+  {
+    "name": "Off-Topic - Joke Request",
+    "description": "Customer asks for a joke",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 29561.16
+  },
+  {
+    "name": "Edge - Empty Message",
+    "description": "Empty message handling",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 12047.28
+  },
+  {
+    "name": "Edge - Special Characters",
+    "description": "Message with only special chars",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 17316.05
+  },
+  {
+    "name": "Edge - Very Long Message",
+    "description": "Extremely long message",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 28098.08
+  },
+  {
+    "name": "Edge - Multiple Questions",
+    "description": "Multiple questions in one message",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected DISCOVERY_OR_QUESTION, got UNKNOWN_OR_EMPTY"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_0_INIT",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30010.46
+  },
+  {
+    "name": "Multi-turn - Size Clarification",
+    "description": "Follow-up on size after initial answer",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected SIZE_HELP, got UNKNOWN_OR_EMPTY"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_3_SIZE_COLOR",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30483.44
+  },
+  {
+    "name": "Multi-turn - Color Change",
+    "description": "Customer changes color preference",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected COLOR_HELP, got UNKNOWN_OR_EMPTY",
+      "Expected products but got none"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_4_OFFER",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30021.27
+  },
+  {
+    "name": "Hallucination - Non-existent Product",
+    "description": "Ask about product not in catalog",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 29634.92
+  },
+  {
+    "name": "Hallucination - Wrong Price",
+    "description": "Customer challenges price",
+    "passed": true,
+    "errors": [],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_0_INIT",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 31514.72
+  },
+  {
+    "name": "Ukrainian - Slang",
+    "description": "Customer uses informal Ukrainian",
+    "passed": false,
+    "errors": [
+      "Exception: 'ModelResponse' object has no attribute 'event'"
+    ],
+    "response": null,
+    "latency_ms": 28815.72
+  },
+  {
+    "name": "Ukrainian - Surzhyk",
+    "description": "Mixed Ukrainian-Russian",
+    "passed": false,
+    "errors": [
+      "Intent mismatch: expected DISCOVERY_OR_QUESTION, got UNKNOWN_OR_EMPTY"
+    ],
+    "response": {
+      "event": "escalation",
+      "messages": [
+        "Вибачте, система перевантажена. Спробуйте ще раз 🤍"
+      ],
+      "products_count": 0,
+      "products": [],
+      "metadata": {
+        "current_state": "STATE_0_INIT",
+        "intent": "UNKNOWN_OR_EMPTY",
+        "escalation_level": "L1"
+      },
+      "escalation": "LLM_TIMEOUT",
+      "customer_data": null
+    },
+    "latency_ms": 30456.19
+  }
+]
