@@ -30,10 +30,25 @@ logger = logging.getLogger(__name__)
 
 def _build_model() -> OpenAIModel:
     """Build OpenAI model."""
-    api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-    client = AsyncOpenAI(base_url=settings.OPENROUTER_BASE_URL, api_key=api_key)
+    if settings.LLM_PROVIDER == "openai":
+        api_key = settings.OPENAI_API_KEY.get_secret_value()
+        base_url = "https://api.openai.com/v1"
+        model_name = settings.LLM_MODEL_GPT
+    else:
+        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+        base_url = settings.OPENROUTER_BASE_URL
+        model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+
+    if not api_key:
+        logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
+        if settings.LLM_PROVIDER == "openai":
+             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+             base_url = settings.OPENROUTER_BASE_URL
+             model_name = settings.AI_MODEL
+
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)
-    return OpenAIModel(settings.AI_MODEL, provider=provider)
+    return OpenAIModel(model_name, provider=provider)
 
 
 # =============================================================================

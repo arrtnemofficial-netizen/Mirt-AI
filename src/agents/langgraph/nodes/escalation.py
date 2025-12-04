@@ -78,6 +78,30 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.warning("Escalation for session %s: %s", session_id, reason)
 
+    # =========================================================================
+    # NOTIFY MANAGER
+    # =========================================================================
+    try:
+        from src.services.notification_service import NotificationService
+        notifier = NotificationService()
+        
+        # Get last user message for context
+        messages = state.get("messages", [])
+        user_context = None
+        if messages:
+            # Try to find last user message
+            for m in reversed(messages):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    user_context = m.get("content")
+                    break
+                elif hasattr(m, "type") and m.type == "human":
+                    user_context = m.content
+                    break
+
+        await notifier.send_escalation_alert(session_id, reason, user_context)
+    except Exception as e:
+        logger.error("Failed to send manager notification: %s", e)
+
     return {
         "current_state": State.STATE_8_COMPLAINT.value,
         "messages": [{"role": "assistant", "content": response.model_dump_json()}],

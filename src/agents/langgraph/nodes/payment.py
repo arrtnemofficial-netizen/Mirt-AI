@@ -58,7 +58,7 @@ async def payment_node(
 
     # Check if we're resuming from interrupt
     if state.get("awaiting_human_approval"):
-        return _handle_approval_response(state, session_id)
+        return await _handle_approval_response(state, session_id)
 
     # First entry - prepare payment and request approval
     return await _prepare_payment_and_interrupt(state, runner, session_id)
@@ -153,7 +153,7 @@ async def _prepare_payment_and_interrupt(
     )
 
 
-def _handle_approval_response(
+async def _handle_approval_response(
     state: dict[str, Any],
     session_id: str,
 ) -> Command[Literal["upsell", "end", "validation"]]:
@@ -177,6 +177,55 @@ def _handle_approval_response(
         # Payment approved - proceed to upsell
         logger.info("Payment APPROVED for session %s", session_id)
         track_metric("payment_approved", 1, {"session_id": session_id})
+
+        # =========================================================================
+        # SAVE ORDER TO DB (Persistence)
+        # =========================================================================
+        try:
+            deps = create_deps_from_state(state)
+            
+            # Construct order payload
+            # Ensure products have necessary fields
+            products = state.get("selected_products", [])
+            order_items = []
+            for p in products:
+                order_items.append({
+                    "product_id": p.get("id"), # Assuming ID is present
+                    "name": p.get("name"),
+                    "price": p.get("price"),
+                    "size": p.get("size"), # Might be missing if not selected yet? 
+                    # Actually at payment stage size MUST be selected.
+                    "color": p.get("color"),
+                    "quantity": 1
+                })
+
+            order_data = {
+                "external_id": session_id,
+                "source_id": deps.user_id,
+                "customer": {
+                    "name": deps.customer_name,
+                    "phone": deps.customer_phone,
+                    "city": deps.customer_city,
+                    "delivery_address": deps.customer_nova_poshta,
+                },
+                "items": order_items,
+                "totals": {
+                    "total": approval_data.get("total_price", 0)
+                },
+                "status": "new",
+                "delivery_method": "nova_poshta",
+                "notes": "Created via Mirt-AI Agent"
+            }
+
+            order_id = await deps.db.create_order(order_data)
+            if order_id:
+                logger.info("Order successfully saved to Supabase: ID %s", order_id)
+            else:
+                logger.error("Failed to save order to Supabase (returned None)")
+
+        except Exception as e:
+            logger.exception("CRITICAL: Failed to save order to DB: %s", e)
+            # We don't stop the flow, but we log critical error
 
         return Command(
             update={

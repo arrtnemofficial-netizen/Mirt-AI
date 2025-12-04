@@ -22,10 +22,10 @@ class Settings(BaseSettings):
         default=SecretStr(""), description="API key for OpenRouter/Grok 4.1 fast access."
     )
     AI_MODEL: str = Field(
-        default="x-ai/grok-4.1-fast", description="Identifier of the model used for reasoning."
+        default="gpt-5.1", description="Identifier of the primary model used for reasoning."
     )
     OPENAI_API_KEY: SecretStr = Field(
-        default=SecretStr(""), description="API key for embedding generation."
+        default=SecretStr(""), description="API key for OpenAI GPT-5.1 and embeddings."
     )
     # EMBEDDING_MODEL and EMBEDDING_DIM removed - RAG disabled, using Embedded Catalog
     DEFAULT_SESSION_ID: str = Field(
@@ -43,6 +43,19 @@ class Settings(BaseSettings):
         description="Publicly reachable base URL used for webhook registration.",
     )
 
+    # Manager Notification Bot
+    MANAGER_BOT_TOKEN: SecretStr = Field(
+        default=SecretStr(""), description="Token for internal manager notification bot."
+    )
+    MANAGER_CHAT_ID: str = Field(
+        default="", description="Chat ID to send manager notifications to."
+    )
+
+    # ManyChat Integration
+    MANYCHAT_API_KEY: SecretStr = Field(
+        default=SecretStr(""),
+        description="ManyChat API key for full API access (sending messages, tags, fields).",
+    )
     MANYCHAT_VERIFY_TOKEN: str = Field(
         default="", description="Shared token to validate ManyChat webhook calls."
     )
@@ -130,12 +143,15 @@ class Settings(BaseSettings):
     # =========================================================================
     # LLM CONFIGURATION (Parameterized)
     # =========================================================================
+    # =========================================================================
+    # LLM CONFIGURATION (Parameterized)
+    # =========================================================================
     LLM_PROVIDER: str = Field(
-        default="openrouter",
+        default="openai",
         description="LLM provider: openrouter, openai, google",
     )
     LLM_MODEL_GROK: str = Field(
-        default="x-ai/grok-4.1-fast",
+        default="x-ai/grok-beta",
         description="Grok model identifier for OpenRouter",
     )
     LLM_MODEL_GPT: str = Field(
@@ -145,6 +161,10 @@ class Settings(BaseSettings):
     LLM_MODEL_GEMINI: str = Field(
         default="gemini-3-pro",
         description="Google Gemini model identifier",
+    )
+    LLM_REASONING_EFFORT: str = Field(
+        default="low",
+        description="Reasoning effort for reasoning models (none, low, medium, high).",
     )
     LLM_TEMPERATURE: float = Field(
         default=0.3,

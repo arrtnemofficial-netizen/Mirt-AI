@@ -48,15 +48,58 @@ def _load_vision_guide() -> str:
 
 def _build_model() -> OpenAIModel:
     """Build OpenAI model."""
-    api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-    client = AsyncOpenAI(base_url=settings.OPENROUTER_BASE_URL, api_key=api_key)
+    if settings.LLM_PROVIDER == "openai":
+        api_key = settings.OPENAI_API_KEY.get_secret_value()
+        base_url = "https://api.openai.com/v1"
+        model_name = settings.LLM_MODEL_GPT
+    else:
+        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+        base_url = settings.OPENROUTER_BASE_URL
+        model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+
+    if not api_key:
+        logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
+        if settings.LLM_PROVIDER == "openai":
+             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+             base_url = settings.OPENROUTER_BASE_URL
+             model_name = settings.AI_MODEL
+
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)
-    return OpenAIModel(settings.AI_MODEL, provider=provider)
+    return OpenAIModel(model_name, provider=provider)
 
 
 # =============================================================================
 # VISION AGENT PROMPT
 # =============================================================================
+
+
+async def _search_products(
+    ctx: RunContext[AgentDeps],
+    query: str,
+    category: str | None = None,
+) -> str:
+    """
+    Знайти товари в каталозі.
+    
+    Використовуй це щоб знайти товар який ти бачиш на фото.
+    Наприклад: search_products("рожева сукня") або search_products("костюм з лампасами")
+    """
+    products = await ctx.deps.catalog.search_products(query, category)
+    
+    if not products:
+        return "На жаль, за вашим запитом нічого не знайдено."
+        
+    lines = ["Знайдені товари:"]
+    for p in products:
+        name = p.get("name")
+        price = p.get("price")
+        sizes = ", ".join(p.get("sizes", []))
+        colors = ", ".join(p.get("colors", []))
+        sku = p.get("sku", "N/A")
+        lines.append(f"- {name} (SKU: {sku}, {price} грн). Розміри: {sizes}. Кольори: {colors}")
+        
+    return "\n".join(lines)
 
 
 def _get_vision_prompt() -> str:
@@ -74,18 +117,20 @@ def _get_vision_prompt() -> str:
 
 ## ТВОЯ ЗАДАЧА:
 1. Проаналізуй фото яке надіслав клієнт
-2. Визнач товар з КАТАЛОГУ нижче (НЕ ВИГАДУЙ ТОВАРИ!)
-3. Дай точну ціну та характеристики з каталогу
-4. Запропонуй розмір якщо можеш визначити
+2. Опиши що ти бачиш (колір, тип одягу, деталі)
+3. ВИКОРИСТОВУЙ інструмент `search_products` щоб знайти цей товар в базі даних!
+   - Шукай за ключовими словами (наприклад "рожева сукня", "костюм мерея")
+4. Якщо знайшов товар - поверни його деталі (назву, ціну, ID)
+5. Якщо не знайшов - запропонуй схожі
 
 ## ФОРМАТ ВІДПОВІДІ:
 - Якщо знайшов товар: опиши його, дай ціну, запитай розмір
-- Якщо не впевнений: запропонуй схожі варіанти з каталогу
+- Якщо не впевнений: запропонуй схожі варіанти
 - Якщо не з каталогу: ввічливо поясни що не маємо такого
 
 ## ЗАБОРОНЕНО:
-- Вигадувати товари яких немає в каталозі
-- Називати ціни які не з каталогу
+- Вигадувати товари яких немає в результатах пошуку
+- Називати ціни "зі стелі"
 - Пропонувати кольори/розміри яких немає
 
 Відповідай УКРАЇНСЬКОЮ, тепло як менеджер Ольга 🤍
@@ -93,9 +138,10 @@ def _get_vision_prompt() -> str:
 
     # Build final prompt with vision guide
     if vision_guide:
-        return f"{vision_instructions}\n---\n# VISION RECOGNITION GUIDE\n{vision_guide}\n\n---\n# CATALOG\n{full_prompt}"
+        return f"{vision_instructions}\n---\n# VISION RECOGNITION GUIDE\n{vision_guide}"
     else:
-        return f"{vision_instructions}\n---\n{full_prompt}"
+        return vision_instructions
+
 
 _vision_agent: Agent[AgentDeps, VisionResponse] | None = None
 
@@ -115,10 +161,11 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
             _build_model(),
             deps_type=AgentDeps,
             output_type=VisionResponse,  # Changed from result_type (PydanticAI 1.23+)
-            system_prompt=_get_vision_prompt(),  # Use REAL catalog!
+            system_prompt=_get_vision_prompt(),
             retries=2,
         )
         _vision_agent.system_prompt(_add_image_url)
+        _vision_agent.tool(name="search_products")(_search_products)
     return _vision_agent
 
 

@@ -23,86 +23,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# DATABASE SERVICE (Mock for now, real Supabase in production)
-# =============================================================================
-
-
-@dataclass
-class Database:
-    """
-    Database service for agent tools.
-
-    In production: connects to Supabase/PostgreSQL.
-    In tests: use mock implementation.
-    """
-
-    async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
-        """Get user profile from database."""
-        # TODO: Replace with real Supabase query
-        # from src.services.supabase_client import get_supabase_client
-        # client = get_supabase_client()
-        # return client.table("users").select("*").eq("id", user_id).single().execute()
-        return {
-            "id": user_id,
-            "name": "Клієнт",
-            "phone": None,
-            "city": None,
-        }
-
-    async def get_user_orders(self, user_id: str) -> list[dict[str, Any]]:
-        """Get user's order history."""
-        return []
-
-    async def save_order(self, order_data: dict[str, Any]) -> str:
-        """Save new order to database."""
-        # Returns order ID
-        return "order_123"
-
+from src.services.catalog_service import CatalogService
+from src.services.order_service import OrderService
 
 # =============================================================================
-# CATALOG SERVICE
+# DATABASE SERVICE (Real Supabase Implementation)
 # =============================================================================
 
+# We use OrderService as the main database interface for agents
+Database = OrderService
 
-@dataclass
-class CatalogService:
-    """
-    Product catalog service.
+# =============================================================================
+# CATALOG SERVICE (Real Supabase Implementation)
+# =============================================================================
 
-    Uses embedded catalog from system prompt.
-    """
-
-    async def search_products(
-        self,
-        query: str,
-        category: str | None = None,
-        max_results: int = 5,
-    ) -> list[dict[str, Any]]:
-        """Search products in catalog."""
-        # For now, returns empty - LLM uses embedded catalog
-        # In future: could use vector search
-        return []
-
-    async def get_product_by_id(self, product_id: int) -> dict[str, Any] | None:
-        """Get product details by ID."""
-        return None
-
-    async def get_size_recommendation(
-        self,
-        product_id: int,
-        height_cm: int,
-        age_years: int | None = None,
-    ) -> str:
-        """Get size recommendation based on height/age."""
-        import bisect
-
-        # Height thresholds and corresponding sizes
-        thresholds = [80, 90, 100, 110, 120, 130, 140]
-        sizes = ["68", "80", "92", "104", "116", "128", "140", "152"]
-
-        index = bisect.bisect_left(thresholds, height_cm)
-        return sizes[index]
+# CatalogService is now imported directly from src.services.catalog_service
 
 
 # =============================================================================
@@ -149,7 +84,7 @@ class AgentDeps:
     customer_nova_poshta: str | None = None
 
     # Services (injected)
-    db: Database = field(default_factory=Database)
+    db: OrderService = field(default_factory=OrderService)
     catalog: CatalogService = field(default_factory=CatalogService)
 
     # Environment
