@@ -12,7 +12,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
 from typing import TYPE_CHECKING
+
+# Windows fix for psycopg async (must be before other imports that use asyncio)
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -143,6 +148,21 @@ async def _process_incoming(
     """Process incoming Telegram message using ConversationHandler."""
     text = override_text or message.text or ""
     session_id = str(message.chat.id)
+    
+    # LOG: Incoming message
+    msg_type = "📷 PHOTO" if has_image else "💬 TEXT"
+    logger.info(
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    logger.info(
+        "📩 [%s] INCOMING %s | user=%s | msg='%s'",
+        session_id[:8],
+        msg_type,
+        message.from_user.username or message.from_user.id if message.from_user else "unknown",
+        text[:50] + "..." if len(text) > 50 else text,
+    )
+    if image_url:
+        logger.debug("   🖼️ Image URL: %s", image_url[:80])
 
     # Build extra metadata for photos
     extra_metadata = None
@@ -153,12 +173,33 @@ async def _process_incoming(
         }
 
     # Use centralized handler - all error handling is done internally
+    import time
+    start = time.perf_counter()
     result = await handler.process_message(session_id, text, extra_metadata=extra_metadata)
+    elapsed = (time.perf_counter() - start) * 1000
+    
+    # LOG: Result
+    response = result.response
+    msg_count = len(response.messages) if response.messages else 0
+    prod_count = len(response.products) if response.products else 0
+    first_msg = response.messages[0].content[:50] if response.messages else ""
+    
+    logger.info(
+        "📤 [%s] RESPONSE in %.0fms | event=%s | state=%s | msgs=%d | prods=%d",
+        session_id[:8],
+        elapsed,
+        response.event,
+        response.metadata.current_state,
+        msg_count,
+        prod_count,
+    )
+    if first_msg:
+        logger.debug("   💬 First msg: '%s...'", first_msg)
 
     if result.is_fallback:
         logger.warning(
-            "Fallback response for session %s: %s",
-            session_id,
+            "⚠️ [%s] FALLBACK response: %s",
+            session_id[:8],
             result.error,
         )
 
@@ -198,15 +239,70 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
             )
 
 
-def run_polling(store: SessionStore | None = None) -> None:
-    """Convenience entry point for local polling runs."""
+async def run_polling(store: SessionStore | None = None) -> None:
+    """
+    Convenience entry point for local polling runs.
+    
+    This function:
+    1. Runs persistence health check
+    2. Creates session store and message store
+    3. Starts polling
+    """
+    from src.services.persistence import create_session_store, init_persistence
+    from src.core.logging_config import setup_logging
+    
+    # Setup logging (DEBUG mode for development)
+    setup_logging(debug=True)
+    
+    print("\n" + "=" * 60)
+    print("🤖 MIRT AI Telegram Bot Starting...")
+    print("=" * 60)
+    
+    # Run health check and log persistence status
+    print("\n🔍 Checking persistence layers...")
+    status = await init_persistence()
+    
+    if not status.is_fully_persistent:
+        print("\n" + "=" * 60)
+        print("⚠️  WARNING: Not fully persistent!")
+        if status.missing_env_vars:
+            print(f"   Missing env vars: {', '.join(status.missing_env_vars)}")
+        if status.errors:
+            for error in status.errors:
+                print(f"   Error: {error}")
+        print("=" * 60 + "\n")
+    else:
+        print("✅ All persistence layers are PERSISTENT - production ready!\n")
+    
+    # Use provided store or create from factory
+    if store is None:
+        session_store, _ = create_session_store()
+    else:
+        session_store = store
 
-    session_store = store or InMemorySessionStore()
     message_store = create_message_store()
     bot = build_bot()
     dp = build_dispatcher(session_store, message_store)
-    asyncio.run(dp.start_polling(bot))
+
+    # Check if there's already a running bot instance
+    try:
+        # Try to get updates - if successful, no conflict
+        await bot.get_updates(limit=1, timeout=1)
+        # Success means no conflict, proceed with polling
+    except Exception as e:
+        # Check for conflict error specifically
+        if "Conflict" in str(e) or "terminated by other" in str(e):
+            logger.warning("Another bot instance is already running. Stopping to avoid conflicts.")
+            print("❌ Another bot instance is already running. Stopping to avoid conflicts.")
+            return
+        # Other errors - log but proceed
+        logger.debug("get_updates check failed: %s", e)
+
+    print("\n✅ Bot is ready! Waiting for messages...")
+    print("=" * 60 + "\n")
+    
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    run_polling()
+    asyncio.run(run_polling())

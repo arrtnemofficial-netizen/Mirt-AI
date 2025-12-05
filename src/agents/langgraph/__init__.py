@@ -16,6 +16,7 @@ This is NOT a toy. This is production-ready.
 from .checkpointer import (
     CheckpointerType,
     get_checkpointer,
+    get_database_url,
     get_postgres_checkpointer,
 )
 from .edges import (

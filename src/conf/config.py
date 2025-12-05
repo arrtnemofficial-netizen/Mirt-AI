@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     SUPABASE_API_KEY: SecretStr = Field(
         default=SecretStr(""), description="Service or anon key for Supabase client."
     )
+    DATABASE_URL: str = Field(
+        default="",
+        description="Primary Postgres connection string for LangGraph checkpointer (falls back to SUPABASE_* when empty).",
+    )
     SUPABASE_TABLE: str = Field(
         default="agent_sessions", description="Table name storing chat session state JSON."
     )

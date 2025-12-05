@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -101,12 +101,26 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     - Store full state at every step
     - Enable time travel and forking
     """
+    settings = None
     # Try to get database URL from environment
     database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
 
     if not database_url:
+        try:
+            from src.conf.config import settings as app_settings
+
+            settings = app_settings
+            if getattr(settings, "DATABASE_URL", ""):
+                database_url = settings.DATABASE_URL
+        except Exception:
+            logger.debug("Unable to load settings for DATABASE_URL fallback", exc_info=True)
+
+    if not database_url:
         # Try to build from Supabase settings
-        from src.conf.config import settings
+        if settings is None:
+            from src.conf.config import settings as app_settings
+
+            settings = app_settings
 
         if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_API_KEY"):
             # Supabase connection string format
@@ -136,39 +150,85 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         )
         return SerializableMemorySaver()
 
+    # Store DATABASE_URL for async checkpointer creation
+    global _database_url
+    _database_url = database_url
+
     try:
-        # Create connection pool
-        from psycopg_pool import ConnectionPool
-        from langgraph.checkpoint.postgres import PostgresSaver
         import psycopg
 
-        # First, setup tables with a separate autocommit connection
-        # CREATE INDEX CONCURRENTLY requires autocommit mode
-        setup_conn = psycopg.connect(database_url, autocommit=True)
+        # Setup tables synchronously first (CREATE INDEX CONCURRENTLY requires autocommit)
+        setup_conn = psycopg.connect(database_url, autocommit=True, connect_timeout=30)
         try:
-            setup_checkpointer = PostgresSaver(setup_conn)
+            from langgraph.checkpoint.postgres import PostgresSaver as SyncPostgresSaver
+            setup_checkpointer = SyncPostgresSaver(setup_conn)
             setup_checkpointer.setup()
+            logger.info("✅ PostgreSQL checkpoint tables setup complete")
         finally:
             setup_conn.close()
 
-        # Now create the pool for actual checkpointing
-        pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=5)
-        checkpointer = PostgresSaver(pool)
-
-        logger.info("PostgreSQL checkpointer initialized successfully")
-        return checkpointer
-
-    except ImportError:
-        logger.error(
-            "langgraph-checkpoint-postgres not installed! "
-            "Run: pip install langgraph-checkpoint-postgres"
+        # Return MemorySaver for now - async checkpointer will be created in graph.py
+        # The graph module will use create_async_checkpointer() in async context
+        logger.info(
+            "✅ DATABASE_URL configured. Use create_async_checkpointer() in async context for persistence."
         )
-        return SerializableMemorySaver()
+        return MemorySaver()
+
+    except ImportError as e:
+        logger.error(
+            "langgraph-checkpoint-postgres not installed or import error: %s. "
+            "Run: pip install langgraph-checkpoint-postgres",
+            e,
+        )
+        return MemorySaver()
 
     except Exception as e:
-        logger.error("Failed to create PostgreSQL checkpointer: %s", e)
-        logger.warning("Falling back to MemorySaver - NOT PRODUCTION READY!")
-        return SerializableMemorySaver()
+        logger.error("Failed to setup PostgreSQL checkpointer: %s", e)
+        logger.warning("Falling back to MemorySaver - state NOT persisted!")
+        return MemorySaver()
+
+
+# Store DATABASE_URL for async usage
+_database_url: str | None = None
+
+
+async def create_async_checkpointer():
+    """
+    Create async checkpointer for use in async context.
+    
+    This should be called from within an async function (e.g., during graph invocation).
+    Returns AsyncPostgresSaver context manager.
+    """
+    global _database_url
+    
+    if not _database_url:
+        # Try to get from settings
+        from src.conf.config import settings
+        _database_url = settings.DATABASE_URL
+    
+    if not _database_url:
+        logger.warning("No DATABASE_URL for async checkpointer, using MemorySaver")
+        return MemorySaver()
+    
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        
+        # from_conn_string returns an async context manager
+        # The caller must use it with `async with`
+        return AsyncPostgresSaver.from_conn_string(_database_url)
+    except Exception as e:
+        logger.error("Failed to create async checkpointer: %s", e)
+        return MemorySaver()
+
+
+def get_database_url() -> str | None:
+    """Get the configured DATABASE_URL."""
+    global _database_url
+    if _database_url:
+        return _database_url
+    
+    from src.conf.config import settings
+    return settings.DATABASE_URL or None
 
 
 # =============================================================================
@@ -236,8 +296,13 @@ def get_checkpointer(
         return _checkpointer
 
     # Auto-detect type if not specified
+    # Import settings for proper .env loading via pydantic_settings
+    from src.conf.config import settings as app_settings
+    
     if checkpointer_type is None:
-        if os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"):
+        if app_settings.DATABASE_URL or os.getenv("POSTGRES_URL"):
+            checkpointer_type = CheckpointerType.POSTGRES
+        elif app_settings.SUPABASE_URL:
             checkpointer_type = CheckpointerType.POSTGRES
         elif os.getenv("REDIS_URL"):
             checkpointer_type = CheckpointerType.REDIS

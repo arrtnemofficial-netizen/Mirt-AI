@@ -142,7 +142,7 @@ async def _add_state_instructions(ctx: RunContext[AgentDeps]) -> str:
         "STATE_1_DISCOVERY": "Допоможи знайти потрібний товар. Запитай про зріст/вік дитини.",
         "STATE_2_VISION": "Аналізуй фото і пропонуй товар з каталогу.",
         "STATE_3_SIZE_COLOR": "Допоможи з розміром. Використай розмірну сітку.",
-        "STATE_4_OFFER": "Зроби конкретну пропозицію з ціною. Запитай чи оформлюємо.",
+        "STATE_4_OFFER": "ТОВАРИ ЗНАЙДЕНО! Напишіть: 'Це наш [Назва] - [Ціна] грн'. Запитайте: 'Оформлюємо замовлення?' або 'Який розмір підібрати?'. НЕ ескалюй, якщо є товари!",
         "STATE_5_PAYMENT_DELIVERY": "Збирай дані для доставки: ПІБ, телефон, місто, НП.",
         "STATE_6_UPSELL": "Запропонуй аксесуар. Не наполягай якщо відмовляються.",
         "STATE_7_END": "Подякуй за замовлення. Нагадай про термін доставки.",
@@ -373,8 +373,18 @@ async def run_support(
         Validated SupportResponse
     """
     import asyncio
+    import time
 
     agent = get_support_agent()
+    session_id = deps.session_id or "unknown"
+    
+    logger.info(
+        "🧠 [%s] LLM call starting | state=%s | msg='%s...'",
+        session_id[:8],
+        deps.current_state,
+        message[:40],
+    )
+    start = time.perf_counter()
 
     try:
         result = await asyncio.wait_for(
@@ -386,12 +396,41 @@ async def run_support(
             timeout=120,  # Increased for slow API tiers
         )
 
+        elapsed = (time.perf_counter() - start) * 1000
+        response = result.output
+        
+        # Log success with details
+        logger.info(
+            "✅ [%s] LLM completed in %.0fms | event=%s | intent=%s | new_state=%s",
+            session_id[:8],
+            elapsed,
+            response.event,
+            response.metadata.intent,
+            response.metadata.current_state,
+        )
+        if response.products:
+            logger.debug(
+                "   📦 Products: %s",
+                [p.name for p in response.products[:3]],
+            )
+        if response.escalation:
+            logger.warning(
+                "   ⚠️ Escalation: %s (level=%s)",
+                response.escalation.reason,
+                response.metadata.escalation_level,
+            )
+
         # result.output is the typed output (SupportResponse)
         # Note: output_type param (not result_type) but result.output (not result.response)
-        return result.output
+        return response
 
     except TimeoutError:
-        logger.error("Support agent timeout for session %s", deps.session_id)
+        elapsed = (time.perf_counter() - start) * 1000
+        logger.error(
+            "⏰ [%s] LLM TIMEOUT after %.0fms",
+            session_id[:8],
+            elapsed,
+        )
         return SupportResponse(
             event="escalation",
             messages=[MessageItem(content="Вибачте, система перевантажена. Спробуйте ще раз 🤍")],
@@ -405,7 +444,13 @@ async def run_support(
         )
 
     except Exception as e:
-        logger.exception("Support agent error: %s", e)
+        elapsed = (time.perf_counter() - start) * 1000
+        logger.exception(
+            "💥 [%s] LLM ERROR after %.0fms: %s",
+            session_id[:8],
+            elapsed,
+            str(e)[:200],
+        )
         return SupportResponse(
             event="escalation",
             messages=[MessageItem(content="Вибачте, сталася помилка. Менеджер зв'яжеться з вами 🤍")],
