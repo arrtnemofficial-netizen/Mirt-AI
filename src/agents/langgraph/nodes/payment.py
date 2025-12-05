@@ -183,7 +183,7 @@ async def _handle_approval_response(
         # =========================================================================
         try:
             deps = create_deps_from_state(state)
-            
+
             # Construct order payload
             # Ensure products have necessary fields
             products = state.get("selected_products", [])
@@ -193,7 +193,7 @@ async def _handle_approval_response(
                     "product_id": p.get("id"), # Assuming ID is present
                     "name": p.get("name"),
                     "price": p.get("price"),
-                    "size": p.get("size"), # Might be missing if not selected yet? 
+                    "size": p.get("size"), # Might be missing if not selected yet?
                     # Actually at payment stage size MUST be selected.
                     "color": p.get("color"),
                     "quantity": 1

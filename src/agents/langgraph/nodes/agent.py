@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
-from src.services.observability import log_agent_step, track_metric, log_trace
+from src.services.observability import log_agent_step, log_trace, track_metric
 
 
 if TYPE_CHECKING:

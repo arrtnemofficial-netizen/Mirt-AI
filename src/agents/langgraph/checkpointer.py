@@ -152,9 +152,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
     try:
         # Create async connection pool for async checkpointing
-        from psycopg_pool import AsyncConnectionPool
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         import psycopg
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from psycopg_pool import AsyncConnectionPool
 
         # First, setup tables with a separate autocommit connection (sync is fine for setup)
         setup_conn = psycopg.connect(database_url, autocommit=True)
@@ -254,11 +254,9 @@ def get_checkpointer(
     # Auto-detect type if not specified
     # Import settings for proper .env loading via pydantic_settings
     from src.conf.config import settings as app_settings
-    
+
     if checkpointer_type is None:
-        if app_settings.DATABASE_URL or os.getenv("POSTGRES_URL"):
-            checkpointer_type = CheckpointerType.POSTGRES
-        elif app_settings.SUPABASE_URL:
+        if app_settings.DATABASE_URL or os.getenv("POSTGRES_URL") or app_settings.SUPABASE_URL:
             checkpointer_type = CheckpointerType.POSTGRES
         elif os.getenv("REDIS_URL"):
             checkpointer_type = CheckpointerType.REDIS

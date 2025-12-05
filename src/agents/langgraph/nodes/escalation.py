@@ -84,7 +84,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         from src.services.notification_service import NotificationService
         notifier = NotificationService()
-        
+
         # Get last user message for context
         messages = state.get("messages", [])
         user_context = None

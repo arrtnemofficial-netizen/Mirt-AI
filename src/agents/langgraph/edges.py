@@ -70,7 +70,8 @@ def _resolve_intent_route(
 
     # Payment requires context check
     if intent == "PAYMENT_DELIVERY":
-        if current_state in ["STATE_4_OFFER", "STATE_5_PAYMENT_DELIVERY"]:
+        payment_states = (State.STATE_4_OFFER.value, State.STATE_5_PAYMENT_DELIVERY.value)
+        if current_state in payment_states:
             return "payment"
         if state.get("selected_products") or state.get("offered_products"):
             return "offer"
@@ -136,7 +137,8 @@ def route_after_agent(state: dict[str, Any]) -> AgentRoute:
     if state.get("selected_products"):
         current_state = state.get("current_state", "")
         # Already in offer/payment flow
-        if current_state in ["STATE_4_OFFER", "STATE_5_PAYMENT_DELIVERY"]:
+        offer_payment_states = (State.STATE_4_OFFER.value, State.STATE_5_PAYMENT_DELIVERY.value)
+        if current_state in offer_payment_states:
             return "validation"
         return "offer"
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import warnings
 
+
 warnings.warn(
     "prompt_loader is deprecated and will be removed in future versions. "
     "Use src.core.prompt_registry.PromptRegistry instead.",
@@ -26,7 +27,6 @@ warnings.warn(
 )
 
 from pathlib import Path
-
 from typing import Any
 
 import yaml

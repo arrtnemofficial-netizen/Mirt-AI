@@ -23,7 +23,7 @@ import logging
 from typing import Any
 
 from src.core.product_adapter import ProductAdapter
-from src.services.observability import log_validation_result, track_metric, log_trace
+from src.services.observability import log_trace, log_validation_result, track_metric
 
 
 logger = logging.getLogger(__name__)
@@ -95,11 +95,11 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Update retry count if validation failed
     retry_count = state.get("retry_count", 0)
-    
+
     # Trace Logging
     if not passed:
         retry_count += 1
-        
+
         # Categorize error
         error_category = "BUSINESS"
         if any("structure" in e or "Missing" in e for e in errors):

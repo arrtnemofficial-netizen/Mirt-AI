@@ -8,6 +8,44 @@ from __future__ import annotations
 from typing import Any
 
 
+# =============================================================================
+# MESSAGE BUILDERS (DRY helpers)
+# =============================================================================
+
+
+def text_msg(content: str) -> dict[str, str]:
+    """Create a text message dict for assistant response."""
+    return {"role": "assistant", "type": "text", "content": content}
+
+
+def image_msg(url: str) -> dict[str, str]:
+    """Create an image message dict for assistant response."""
+    return {"role": "assistant", "type": "image", "content": url}
+
+
+def get_message_role(msg: Any) -> str:
+    """Get role from message (handles both dict and LangChain objects)."""
+    if isinstance(msg, dict):
+        return msg.get("role", "")
+    # LangChain: HumanMessage.type = "human", AIMessage.type = "ai"
+    msg_type = getattr(msg, "type", "")
+    if msg_type == "human":
+        return "user"
+    if msg_type == "ai":
+        return "assistant"
+    return msg_type
+
+
+def has_assistant_reply(messages: list[Any]) -> bool:
+    """Check if there's already an assistant reply in messages."""
+    return any(get_message_role(m) in ("assistant", "ai") for m in messages)
+
+
+# =============================================================================
+# MESSAGE EXTRACTORS
+# =============================================================================
+
+
 def extract_user_message(messages: list[Any]) -> str:
     """
     Extract the latest user message from messages list.

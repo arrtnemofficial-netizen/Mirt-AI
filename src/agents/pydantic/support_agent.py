@@ -32,9 +32,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
-from src.conf.config import settings
 from src.core.prompt_registry import registry
-
 
 from .deps import AgentDeps
 from .models import (
@@ -283,14 +281,14 @@ async def _search_products(
 ) -> str:
     """
     Знайти товари в каталозі.
-    
+
     Використовуй це коли клієнт питає про наявність або просить показати товари.
     """
     products = await ctx.deps.catalog.search_products(query, category)
-    
+
     if not products:
         return "На жаль, за вашим запитом нічого не знайдено."
-        
+
     lines = ["Знайдені товари:"]
     for p in products:
         name = p.get("name")
@@ -298,7 +296,7 @@ async def _search_products(
         sizes = ", ".join(p.get("sizes", []))
         colors = ", ".join(p.get("colors", []))
         lines.append(f"- {name} ({price} грн). Розміри: {sizes}. Кольори: {colors}")
-        
+
     return "\n".join(lines)
 
 

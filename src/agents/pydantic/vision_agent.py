@@ -6,9 +6,7 @@ Handles photo identification and product matching.
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -68,15 +66,15 @@ async def _search_products(
 ) -> str:
     """
     Знайти товари в каталозі.
-    
+
     Використовуй це щоб знайти товар який ти бачиш на фото.
     Наприклад: search_products("рожева сукня") або search_products("костюм з лампасами")
     """
     products = await ctx.deps.catalog.search_products(query, category)
-    
+
     if not products:
         return "На жаль, за вашим запитом нічого не знайдено."
-        
+
     lines = ["Знайдені товари:"]
     for p in products:
         name = p.get("name")
@@ -85,25 +83,114 @@ async def _search_products(
         colors = ", ".join(p.get("colors", []))
         sku = p.get("sku", "N/A")
         lines.append(f"- {name} (SKU: {sku}, {price} грн). Розміри: {sizes}. Кольори: {colors}")
-        
+
     return "\n".join(lines)
 
 
+def _load_vision_guide() -> str:
+    """Load and format vision_guide.json for prompt injection."""
+    import json
+    from pathlib import Path
+
+    # Path: src/agents/pydantic/vision_agent.py → data/vision_guide.json
+    # Go up 4 levels: pydantic → agents → src → project_root → data
+    guide_path = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
+
+    try:
+        with open(guide_path, encoding="utf-8") as f:
+            guide = json.load(f)
+
+        products = guide.get("visual_recognition_guide", {}).get("products", {})
+        detection_rules = guide.get("visual_recognition_guide", {}).get("detection_rules", {})
+
+        lines = ["# VISION GUIDE — Детальні ознаки кожного товару\n"]
+
+        for sku, data in products.items():
+            name = data.get("name", "Unknown")
+            tips = data.get("recognition_tips", [])
+            features = data.get("key_features", {})
+
+            lines.append(f"## {name} (SKU: {sku})")
+            lines.append(f"- **Верх**: {features.get('top_style', features.get('silhouette', 'N/A'))}")
+            lines.append(f"- **Низ**: {features.get('bottom_style', features.get('pants_style', 'N/A'))}")
+            lines.append(f"- **Тканина**: {features.get('material', features.get('fabric_texture', 'N/A'))}")
+            lines.append(f"- **Вид ззаду**: {features.get('back_view', 'N/A')}")
+            lines.append("- **Як розпізнати**:")
+            for tip in tips[:3]:  # Top 3 tips
+                lines.append(f"  - {tip}")
+            lines.append("")
+
+        # Add detection rules summary
+        lines.append("# DETECTION RULES (швидкий пошук)")
+        lines.append("## По текстурі:")
+        for texture, models in detection_rules.get("by_texture", {}).items():
+            lines.append(f"- {texture}: {', '.join(models)}")
+        lines.append("## По застібці:")
+        for closure, models in detection_rules.get("by_closure", {}).items():
+            lines.append(f"- {closure}: {', '.join(models)}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.warning("Failed to load vision_guide.json: %s", e)
+        return ""
+
+
 def _get_vision_prompt() -> str:
-    """Build vision prompt with REAL catalog and recognition guide."""
-    # Load main vision prompt
+    """
+    Build comprehensive vision prompt with ALL available context:
+
+    1. Main recognition algorithm (vision_main.md)
+    2. Model rules database (model_rules.yaml)
+    3. Vision guide with detailed features (vision_guide.json) ← NEW!
+    4. Quick reference table for common confusions
+    """
+    parts = []
+
+    # 1. Load main vision prompt (algorithm)
     try:
         vision_main = registry.get("vision.main").content
+        parts.append(vision_main)
     except Exception as e:
-        logger.error(f"Failed to load vision.main prompt: {e}")
-        vision_main = "Error loading vision prompt."
+        logger.error("Failed to load vision.main: %s", e)
+        parts.append("# Vision Agent\nАналізуй фото та знаходь товари MIRT.")
 
-    # Load model rules
+    # 2. Load model rules (database)
     try:
         model_rules = registry.get("vision.model_rules").content
-        return f"{vision_main}\n---\n# MODEL RULES\n{model_rules}"
-    except Exception:
-        return vision_main
+        parts.append("\n---\n# MODEL DATABASE\n")
+        parts.append(model_rules)
+    except Exception as e:
+        logger.warning("Model rules not loaded: %s", e)
+
+    # 3. Load vision guide (detailed features per product) ← NEW!
+    vision_guide = _load_vision_guide()
+    if vision_guide:
+        parts.append("\n---\n")
+        parts.append(vision_guide)
+
+    # 4. Add quick confusion prevention table
+    parts.append("""
+---
+# QUICK CONFUSION PREVENTION
+
+| Якщо бачиш... | Це НЕ... | Це... | Чому? |
+|---------------|----------|-------|-------|
+| Коротку блискавку (half-zip) | Лагуна | МРІЯ | Лагуна = повна |
+| Повну блискавку + стоячий комір | Мрія | ЛАГУНА | Мрія = half-zip |
+| Капюшон + бавовна | Каприз | РИТМ | Каприз = без капюшона |
+| Palazzo + без капюшона | Ритм | КАПРИЗ | Ритм = з капюшоном |
+| Лампаси на штанах | Ритм/Каприз | МЕРЕЯ | Тільки Мерея з лампасами |
+| Смужка на блузі | Каприз | ВАЛЕРІ | Валері = смужка |
+| Блискуча тканина + пояс | Костюм | ТРЕНЧ | Екошкіра блищить |
+
+ВАЖЛИВО:
+- Якщо фото зі спини — шукай back_view ознаки!
+- Якщо скріншот — шукай текстуру та силует!
+- ЗАВЖДИ виклич search_products() для підтвердження!
+""")
+
+    return "\n".join(parts)
 
 
 _vision_agent: Agent[AgentDeps, VisionResponse] | None = None

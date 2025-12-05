@@ -68,9 +68,30 @@ class TestStatePromptsBasics:
             "STATE_5_PAYMENT_DELIVERY",
             "STATE_6_UPSELL",
             "STATE_7_END",
-            "STATE_8_COMPLAINT"
+            "STATE_8_COMPLAINT",
+            "STATE_9_OOD",
         ]
         for state in states:
             content = registry.get(f"state.{state}").content
             assert len(content) > 10, f"State {state} is empty"
             assert "## DO" in content, f"State {state} missing DO section"
+
+    def test_all_states_from_enum_have_prompts(self):
+        """Every state in State enum must have a prompt file."""
+        from src.core.prompt_registry import validate_all_states_have_prompts
+        missing = validate_all_states_have_prompts()
+        assert not missing, f"Missing prompt files for states: {missing}"
+
+    def test_state_prompts_have_transitions(self):
+        """State prompts should document transitions."""
+        from src.core.state_machine import State
+        for state in State:
+            content = registry.get(f"state.{state.value}").content
+            assert "## TRANSITIONS" in content, f"{state.value} missing TRANSITIONS section"
+
+    def test_state_prompts_have_examples(self):
+        """State prompts should have examples."""
+        from src.core.state_machine import State
+        for state in State:
+            content = registry.get(f"state.{state.value}").content
+            assert "## EXAMPLES" in content, f"{state.value} missing EXAMPLES section"

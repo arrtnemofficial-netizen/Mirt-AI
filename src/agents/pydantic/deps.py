@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 from src.services.catalog_service import CatalogService
 from src.services.order_service import OrderService
 
+
 # =============================================================================
 # DATABASE SERVICE (Real Supabase Implementation)
 # =============================================================================
