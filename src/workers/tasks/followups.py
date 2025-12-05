@@ -239,13 +239,50 @@ def _send_telegram_followup(chat_id: str, text: str) -> None:
 
 
 def _send_manychat_followup(subscriber_id: str, text: str) -> None:
-    """Send follow-up message via ManyChat API."""
+    """Send follow-up message via ManyChat API.
+    
+    Uses the existing ManyChatClient to send messages.
+    """
+    from src.integrations.manychat.api_client import get_manychat_client
+    from src.workers.sync_utils import run_sync
 
-    # ManyChat API requires API key and subscriber ID
-    # This is a placeholder - actual implementation depends on ManyChat setup
-    logger.info(
-        "[WORKER:FOLLOWUP] ManyChat followup for %s: %s",
-        subscriber_id,
-        text[:50],
-    )
-    # TODO: Implement ManyChat API call when API key is configured
+    client = get_manychat_client()
+    if not client.is_configured:
+        logger.warning(
+            "[WORKER:FOLLOWUP] ManyChat not configured, skipping followup for %s",
+            subscriber_id,
+        )
+        return
+
+    async def _send() -> bool:
+        # Use set_custom_field to store follow-up text
+        # ManyChat will pick this up and send via configured automation
+        success = await client.set_custom_field(
+            subscriber_id=subscriber_id,
+            field_name="ai_followup_message",
+            field_value=text[:500],  # ManyChat field limit
+        )
+        if success:
+            # Add tag to trigger ManyChat automation flow
+            await client.add_tag(subscriber_id, "ai_followup_pending")
+        return success
+
+    try:
+        result = run_sync(_send())
+        if result:
+            logger.info(
+                "[WORKER:FOLLOWUP] ManyChat followup queued for %s: %s",
+                subscriber_id,
+                text[:50],
+            )
+        else:
+            logger.error(
+                "[WORKER:FOLLOWUP] Failed to queue ManyChat followup for %s",
+                subscriber_id,
+            )
+    except Exception as e:
+        logger.exception(
+            "[WORKER:FOLLOWUP] Error sending ManyChat followup for %s: %s",
+            subscriber_id,
+            e,
+        )

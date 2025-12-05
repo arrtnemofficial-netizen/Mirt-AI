@@ -93,13 +93,16 @@ async def offer_node(
         )
         track_metric("offer_node_latency_ms", latency_ms)
 
-        # Build assistant message from response
-        assistant_content = "\n".join(m.content for m in response.messages)
+        # Keep assistant messages as separate bubbles (do not join)
+        assistant_messages = [{"role": "assistant", "content": m.content} for m in response.messages]
+        if not assistant_messages:
+            assistant_messages = [{"role": "assistant", "content": ""}]
 
         return {
             "current_state": State.STATE_4_OFFER.value,
-            "messages": [{"role": "assistant", "content": assistant_content}],
+            "messages": assistant_messages,
             "metadata": response.metadata.model_dump(),
+            "products": [p.model_dump() for p in response.products],
             "offered_products": offered_products,
             "agent_response": response.model_dump(),
             "step_number": state.get("step_number", 0) + 1,

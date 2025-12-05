@@ -1,111 +1,86 @@
-# MIRT AI Architecture
+# Architecture v3.0: The Golden Era 🏛️
 
-## Overview
-
-MIRT AI is an intelligent shopping assistant for children's clothing, built on a modern, type-safe stack. It combines **LangGraph** for orchestration and **PydanticAI** for strict structured outputs.
-
-## Tech Stack
-
-- **Orchestration**: LangGraph (StateGraph, checkpointer, nodes)
-- **Agents**: PydanticAI (Type-safe LLM wrapper)
-- **Runtime**: FastAPI (Webhooks, REST API)
-- **Persistence**: PostgreSQL (via Supabase)
-- **Background Tasks**: Celery + Redis
-- **Observability**: Logfire + Sentry
+**Mirt-AI** is a production-grade AI stylist engine designed for reliability, scalability, and strict business compliance.
 
 ---
 
-## 🏗️ High-Level Architecture
+## 1. High-Level Overview
 
+The system follows a **Queue-Based Event-Driven Architecture**. Use of `Celery` + `Redis` ensures that:
+1.  **Users never wait** for sync HTTP calls.
+2.  **Bursts of traffic** are buffered.
+3.  **Failures are retried** automatically.
+
+### Diagram
 ```mermaid
 graph TD
-    User((User)) -->|Message| Telegram[Telegram/ManyChat]
-    Telegram -->|Webhook| FastAPI[FastAPI Server]
+    Client[Telegram/ManyChat] -->|Webhook| Web[FastAPI Server]
+    Web -->|Idempotent Dispatch| Redis[(Redis Broker)]
     
-    subgraph "AI Core (LangGraph)"
-        FastAPI -->|Invoke| Graph[LangGraph Orchestrator]
-        
-        Graph -->|Check| Moderation[Moderation Node]
-        Moderation -->|Allowed| Intent[Intent Node]
-        Moderation -->|Blocked| Escalation[Escalation Node]
-        
-        Intent -->|Routing| Router{Router}
-        
-        Router -->|Support| Agent[Support Agent (PydanticAI)]
-        Router -->|Payment| Payment[Payment Node]
-        Router -->|Vision| Vision[Vision Agent (PydanticAI)]
-        
-        Agent -->|Tool Call| Tools[Catalog/CRM Tools]
-        
-        Payment -->|HITL| Human[Human Review]
+    subgraph "Celery Workers Layer"
+        Redis -->|Queue: llm| WorkerLLM[Agent Worker]
+        Redis -->|Queue: crm| WorkerCRM[CRM Worker]
+        Redis -->|Queue: tasks| WorkerTasks[Background Tasks]
     end
     
-    subgraph "Data Layer"
-        Graph -->|State| Postgres[(Supabase DB)]
-        Agent -->|Catalog| JSON[Catalog.json]
-        Tools -->|Orders| CRM[Snitkix CRM]
-    end
+    WorkerLLM -->|LangGraph v2| BRAIN[AI Logic]
+    BRAIN -->|Registry| PROMPTS[Prompt Files]
+    WorkerCRM -->|API| Snitkix[CRM System]
+    WorkerTasks -->|Write| DB[(Supabase)]
 ```
 
 ---
 
-## 🧩 Key Components
+## 2. Core Components
 
-### 1. Agents Layer (`src/agents/pydantic/`)
-Powered by **PydanticAI**. Ensures 100% schema compliance for LLM outputs.
+### 🧠 The Brain: `src/agents/`
+- **LangGraph v2**: A stateful graph with 5 nodes.
+  - `moderation`: Guard against abuse.
+  - `intent`: Classify user intent (Buy vs Support).
+  - `agent`: Generate response using Pydantic AI.
+  - `validation`: Regex-check output prices and URLs.
+- **State Machine**: Deterministic transitions defined in `state_machine.py`. The LLM *proposes* moves, but code *executes* them.
 
-- **Support Agent**: Main conversationalist. Handles sizing, product questions.
-- **Vision Agent**: Analyzes photos (receipts, product issues).
-- **Payment Agent**: Processes orders and payments.
+### 📜 Prompt Registry: `src/core/prompt_registry.py`
+The "Source of Truth" for AI behavior.
+- **SSOT**: Prompts are loaded from `data/prompts/`.
+- **Versioning**: Can serve different prompt versions (though currently v1 default).
+- **Format**: Markdown files with clear `# Role` and `## Rules` sections.
 
-### 2. Orchestration Layer (`src/agents/langgraph/`)
-Powered by **LangGraph**. Manages conversation flow and state.
-
-- **Graph**: Defines the DAG (Directed Acyclic Graph) of the conversation.
-- **State**: `ConversationState` (TypedDict) holding messages and metadata.
-- **Persistence**: `PostgresSaver` stores state in Supabase.
-
-### 3. Service Layer (`src/services/`)
-Business logic decoupled from the AI core.
-
-- `message_store.py`: Logs raw messages.
-- `client_data_parser.py`: Parses ManyChat payloads.
-- `moderation.py`: Safety checks.
-- `order_model.py`: CRM data contracts.
-
-### 4. Worker Layer (`src/workers/`)
-Background processing via Celery.
-
-- `tasks/crm.py`: Async order creation.
-- `tasks/messages.py`: Async message processing.
-- `dispatcher.py`: Routes tasks (Sync vs Async support).
-
----
-
-## 🔄 Data Flow
-
-1. **Webhook**: Received by `src/server/main.py`.
-2. **Persist**: User message saved to `message_store`.
-3. **Invoke**: `get_active_graph().ainvoke()` called.
-4. **Process**: 
-   - Moderation check.
-   - Intent classification.
-   - Agent execution (LLM inference).
-   - Tool execution (if needed).
-5. **Response**: Structured `SupportResponse` returned.
-6. **Render**: Converted to text/images for platform (Telegram/ManyChat).
+### 👷 The Workers: `src/workers/` (The Engine)
+This is a **10/10 Production System**.
+- **Queues**:
+  - `llm` (60s limit): Fast, interactive chat tasks.
+  - `summarization` (120s): Heavy background processing.
+  - `priority`: For paid users (future proofing).
+- **Dispatcher** (`dispatcher.py`):
+  - Handles **Idempotency** using message_id hashes.
+  - Supports `Sync` mode for local dev (`CELERY_ENABLED=false`).
+  - Generates `trace_id` for observability.
+- **Usage Tracking** (`llm_usage.py`):
+  - Calcluates cost per token (Input/Output).
+  - Aggregates daily spend.
 
 ---
 
-## 🛡️ Type Safety
+## 3. Data Flow (Life of a Message)
 
-We use strict typing everywhere:
-- **Pydantic Models**: Define all data contracts (`src/core/models.py`, `src/agents/pydantic/models.py`).
-- **Mypy**: Enforced strict mode in CI.
-- **Ruff**: Enforced linting rules.
+1. **Ingestion**: `POST /webhooks/telegram` receives JSON.
+2. **Dispatch**: `dispatcher.dispatch_message()` creates a unique `task_id`.
+3. **Queue**: Message pushed to Redis `llm` queue.
+4. **Execution**: Celery Worker picks up task.
+   - Loads conversation history from Supabase.
+   - Runs LangGraph Agent.
+   - Saves new state key-value.
+5. **Response**: Result sent back to Telegram API.
 
-## 🚀 Deployment
+---
 
-- **Platform**: Railway / Docker
-- **Config**: Environment variables (see `.env.example`)
-- **CI/CD**: GitHub Actions (Lint -> Test -> Deploy)
+## 4. Key Design Decisions
+
+| Feature | Implementation | Why? |
+| :--- | :--- | :--- |
+| **Strictness** | Unit Tests verify Prompt Text | LLMs hallucinate rules; Code does not. |
+| **Persistence** | Supabase (Postgres) | Structured history for long-term memory. |
+| **Reliability** | Celery Retries + Dead Letter | Network blips shouldn't lose orders. |
+| **Cost Control** | Token Tracking Table | Monitor spend per user/model/day. |

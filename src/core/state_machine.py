@@ -392,23 +392,6 @@ def get_keyboard_for_state(
 
 
 # =============================================================================
-# TOOL NAMES (DEPRECATED - Embedded Catalog Mode)
-# =============================================================================
-
-
-class ToolName(str, Enum):
-    """
-    Tool identifiers - DEPRECATED.
-    RAG tools disabled, using Embedded Catalog in prompt.
-    Kept for backward compatibility only.
-    """
-
-    SEARCH_BY_QUERY = "T_CATALOG_SEARCH"  # renamed, no longer calls Supabase
-    GET_BY_ID = "T_CATALOG_GET_BY_ID"
-    GET_BY_PHOTO_URL = "T_CATALOG_GET_BY_PHOTO_URL"
-
-
-# =============================================================================
 # LEGACY ALIASES (for backward compatibility)
 # =============================================================================
 
@@ -443,3 +426,4 @@ def normalize_state(value: str) -> State:
 
     # Try direct parse
     return State.from_string(upper)
+

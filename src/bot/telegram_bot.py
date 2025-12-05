@@ -198,15 +198,44 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
             )
 
 
-def run_polling(store: SessionStore | None = None) -> None:
+async def run_polling(store: SessionStore | None = None) -> None:
     """Convenience entry point for local polling runs."""
+    from src.services.supabase_store import create_supabase_store
 
-    session_store = store or InMemorySessionStore()
+    # Try to use Supabase store if not provided
+    if store is None:
+        store = create_supabase_store()
+
+    if store is None:
+        print(
+            "⚠️ Using InMemorySessionStore - session state will be lost on restart!\n"
+            "   Set SUPABASE_URL and SUPABASE_API_KEY for persistent session storage."
+        )
+        session_store = InMemorySessionStore()
+    else:
+        print("✅ Using SupabaseSessionStore - session state is persistent.")
+        session_store = store
+
     message_store = create_message_store()
     bot = build_bot()
     dp = build_dispatcher(session_store, message_store)
-    asyncio.run(dp.start_polling(bot))
+
+    # Check if there's already a running bot instance
+    try:
+        # Try to get updates - if successful, no conflict
+        await bot.get_updates(limit=1, timeout=1)
+        # Success means no conflict, proceed with polling
+    except Exception as e:
+        # Check for conflict error specifically
+        if "Conflict" in str(e) or "terminated by other" in str(e):
+            logger.warning("Another bot instance is already running. Stopping to avoid conflicts.")
+            print("Another bot instance is already running. Stopping to avoid conflicts.")
+            return
+        # Other errors - log but proceed
+        logger.debug("get_updates check failed: %s", e)
+
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    run_polling()
+    asyncio.run(run_polling())

@@ -30,6 +30,7 @@ def sample_deps() -> AgentDeps:
         session_id="test-session-123",
         current_state="STATE_0_INIT",
         channel="telegram",
+        trace_id="test-trace-123",
     )
 
 
@@ -42,6 +43,7 @@ def sample_vision_deps() -> AgentDeps:
         channel="telegram",
         has_image=True,
         image_url="https://example.com/test.jpg",
+        trace_id="test-vision-trace",
     )
 
 
@@ -80,7 +82,7 @@ class TestAgentDeps:
 
     def test_deps_defaults(self):
         """Test AgentDeps default values."""
-        deps = AgentDeps(session_id="test")
+        deps = AgentDeps(session_id="test", trace_id="trace-default")
 
         assert deps.session_id == "test"
         assert deps.current_state == "STATE_0_INIT"

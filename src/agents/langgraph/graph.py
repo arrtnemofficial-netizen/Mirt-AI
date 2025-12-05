@@ -241,6 +241,12 @@ def get_production_graph(
     global _production_graph
 
     if _production_graph is None:
+        # Validate prompt files exist for all states (fail-fast)
+        from src.core.prompt_registry import validate_all_states_have_prompts
+        missing = validate_all_states_have_prompts()
+        if missing:
+            logger.warning("Graph starting with missing state prompts: %s", missing)
+
         from src.agents.pydantic.support_agent import run_support
 
         # Create a wrapper that matches the runner signature

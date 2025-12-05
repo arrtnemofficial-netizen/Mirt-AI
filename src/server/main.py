@@ -154,11 +154,31 @@ async def health() -> dict[str, Any]:
     else:
         checks["celery"] = "disabled"
 
+    # LLM Provider health (circuit breaker status)
+    try:
+        from src.services.llm_fallback import get_llm_service
+        llm_service = get_llm_service()
+        llm_health = llm_service.get_health_status()
+        checks["llm"] = {
+            "any_available": llm_health["any_available"],
+            "providers": [
+                {"name": p["name"], "status": p["circuit_state"], "available": p["available"]}
+                for p in llm_health["providers"]
+            ],
+        }
+        if not llm_health["any_available"]:
+            status = "degraded"
+    except Exception as e:
+        checks["llm"] = f"error: {type(e).__name__}"
+        status = "degraded"
+
     return {
         "status": status,
         "checks": checks,
         "version": "1.0.0",
         "celery_enabled": settings.CELERY_ENABLED,
+        "llm_provider": settings.LLM_PROVIDER,
+        "active_model": settings.active_llm_model,
     }
 
 

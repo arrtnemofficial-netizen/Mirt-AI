@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -215,6 +216,10 @@ class ConversationHandler:
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
 
+            # Generate new trace_id for this request (Observability)
+            trace_id = str(uuid.uuid4())
+            state["trace_id"] = trace_id
+
             # Persist user message
             self._persist_user_message(session_id, text)
 
@@ -269,19 +274,21 @@ class ConversationHandler:
                 return result
             except Exception as e:
                 last_error = e
+                error_info = f"{type(e).__name__}: {str(e)}" if str(e) else type(e).__name__
                 if attempt < self.max_retries:
                     logger.warning(
                         "Agent attempt %d failed for session %s: %s. Retrying...",
                         attempt + 1,
                         session_id,
-                        str(e)[:100],
+                        error_info[:200],
                     )
                     await asyncio.sleep(self.retry_delay * (attempt + 1))
                 else:
-                    logger.error(
-                        "Agent failed after %d attempts for session %s",
+                    logger.exception(
+                        "Agent failed after %d attempts for session %s: %s",
                         self.max_retries + 1,
                         session_id,
+                        error_info,
                     )
 
         raise AgentInvocationError(

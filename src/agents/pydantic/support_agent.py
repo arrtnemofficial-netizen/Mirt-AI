@@ -32,7 +32,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
-from src.core.prompt_loader import get_system_prompt_text
+from src.core.prompt_registry import registry
 
 from .deps import AgentDeps
 from .models import (
@@ -58,22 +58,37 @@ def _get_model() -> OpenAIModel:
     """Get or create OpenAI model (lazy initialization)."""
     global _model
     if _model is None:
-        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+        if settings.LLM_PROVIDER == "openai":
+            api_key = settings.OPENAI_API_KEY.get_secret_value()
+            base_url = "https://api.openai.com/v1"
+            model_name = settings.LLM_MODEL_GPT
+        else:
+            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+            base_url = settings.OPENROUTER_BASE_URL
+            model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+
         if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is missing")
+            # Fallback or error
+            logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
+            # Try OpenRouter as fallback if OpenAI missing
+            if settings.LLM_PROVIDER == "openai":
+                 api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+                 base_url = settings.OPENROUTER_BASE_URL
+                 model_name = settings.AI_MODEL
 
         client = AsyncOpenAI(
-            base_url=settings.OPENROUTER_BASE_URL,
+            base_url=base_url,
             api_key=api_key,
         )
         provider = OpenAIProvider(openai_client=client)
-        _model = OpenAIModel(settings.AI_MODEL, provider=provider)
+        _model = OpenAIModel(model_name, provider=provider)
     return _model
 
 
 def _get_base_prompt() -> str:
     """Get system prompt (lazy load)."""
-    return get_system_prompt_text("grok")
+    return registry.get("system.main").content
+
 
 
 # =============================================================================
@@ -123,22 +138,14 @@ async def _add_state_instructions(ctx: RunContext[AgentDeps]) -> str:
     """Add state-specific behavioral instructions."""
     state = ctx.deps.current_state
 
-    instructions = {
-        "STATE_0_INIT": "Привітай клієнта тепло. Запитай чим можеш допомогти.",
-        "STATE_1_DISCOVERY": "Допоможи знайти потрібний товар. Запитай про зріст/вік дитини.",
-        "STATE_2_VISION": "Аналізуй фото і пропонуй товар з каталогу.",
-        "STATE_3_SIZE_COLOR": "Допоможи з розміром. Використай розмірну сітку.",
-        "STATE_4_OFFER": "Зроби конкретну пропозицію з ціною. Запитай чи оформлюємо.",
-        "STATE_5_PAYMENT_DELIVERY": "Збирай дані для доставки: ПІБ, телефон, місто, НП.",
-        "STATE_6_UPSELL": "Запропонуй аксесуар. Не наполягай якщо відмовляються.",
-        "STATE_7_END": "Подякуй за замовлення. Нагадай про термін доставки.",
-        "STATE_8_COMPLAINT": "Вислухай скаргу. Передай менеджеру якщо потрібно.",
-    }
+    try:
+        # Load state prompt from registry (e.g., state.STATE_0_INIT)
+        prompt = registry.get(f"state.{state}")
+        return f"\n--- ІНСТРУКЦІЯ ДЛЯ СТАНУ ({state}) ---\n{prompt.content}"
+    except (FileNotFoundError, ValueError):
+        logger.warning(f"No prompt found for state: {state}")
+        return ""
 
-    instruction = instructions.get(state, "")
-    if instruction:
-        return f"\n--- ІНСТРУКЦІЯ ДЛЯ СТАНУ ---\n{instruction}"
-    return ""
 
 
 # =============================================================================
@@ -267,6 +274,32 @@ async def _get_order_summary(ctx: RunContext[AgentDeps]) -> str:
     return "\n".join(lines)
 
 
+async def _search_products(
+    ctx: RunContext[AgentDeps],
+    query: str,
+    category: str | None = None,
+) -> str:
+    """
+    Знайти товари в каталозі.
+
+    Використовуй це коли клієнт питає про наявність або просить показати товари.
+    """
+    products = await ctx.deps.catalog.search_products(query, category)
+
+    if not products:
+        return "На жаль, за вашим запитом нічого не знайдено."
+
+    lines = ["Знайдені товари:"]
+    for p in products:
+        name = p.get("name")
+        price = p.get("price")
+        sizes = ", ".join(p.get("sizes", []))
+        colors = ", ".join(p.get("colors", []))
+        lines.append(f"- {name} ({price} грн). Розміри: {sizes}. Кольори: {colors}")
+
+    return "\n".join(lines)
+
+
 # =============================================================================
 # REGISTRATION FUNCTIONS
 # =============================================================================
@@ -284,6 +317,7 @@ def _register_tools(agent: Agent[AgentDeps, SupportResponse]) -> None:
     agent.tool(name="get_size_recommendation")(_get_size_recommendation)
     agent.tool(name="check_customer_data")(_check_customer_data)
     agent.tool(name="get_order_summary")(_get_order_summary)
+    agent.tool(name="search_products")(_search_products)
 
 
 # =============================================================================
