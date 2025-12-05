@@ -23,7 +23,7 @@ import logging
 from typing import Any
 
 from src.core.product_adapter import ProductAdapter
-from src.services.observability import log_validation_result, track_metric
+from src.services.observability import log_validation_result, track_metric, log_trace
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         If errors found, retry_count is incremented
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    trace_id = state.get("trace_id", "")
     errors: list[str] = []
 
     # Get latest assistant response
@@ -94,8 +95,28 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Update retry count if validation failed
     retry_count = state.get("retry_count", 0)
+    
+    # Trace Logging
     if not passed:
         retry_count += 1
+        
+        # Categorize error
+        error_category = "BUSINESS"
+        if any("structure" in e or "Missing" in e for e in errors):
+            error_category = "SCHEMA"
+        elif any("hallucination" in e for e in errors):
+            error_category = "SAFETY"
+
+        await log_trace(
+            session_id=session_id,
+            trace_id=trace_id,
+            node_name="validation_node",
+            status="ERROR",
+            error_category=error_category,
+            error_message="; ".join(errors),
+            output_snapshot={"errors": errors},
+        )
+
         logger.warning(
             "Validation failed for session %s (attempt %d): %s",
             session_id,
@@ -104,6 +125,12 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         )
         track_metric("validation_failed", 1, {"session_id": session_id})
     else:
+        await log_trace(
+            session_id=session_id,
+            trace_id=trace_id,
+            node_name="validation_node",
+            status="SUCCESS",
+        )
         track_metric("validation_passed", 1, {"session_id": session_id})
 
     return {

@@ -63,6 +63,7 @@ class AgentDeps:
     """
     # Session identification
     session_id: str
+    trace_id: str  # For distributed tracing of this specific request
     user_id: str = ""
 
     # Current conversation state (Literal type from models)
@@ -132,6 +133,7 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
 
     return AgentDeps(
         session_id=state.get("session_id", metadata.get("session_id", "")),
+        trace_id=state.get("trace_id", ""),  # Must be populated by graph
         user_id=metadata.get("user_id", ""),
         current_state=state.get("current_state", "STATE_0_INIT"),
         channel=metadata.get("channel", "instagram"),
@@ -150,6 +152,7 @@ def create_mock_deps(session_id: str = "test_session") -> AgentDeps:
     """Create mock deps for testing."""
     return AgentDeps(
         session_id=session_id,
+        trace_id="mock_trace_id",
         user_id="test_user",
         env="test",
     )

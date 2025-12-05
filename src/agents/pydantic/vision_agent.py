@@ -17,7 +17,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
-from src.core.prompt_loader import get_system_prompt_text
+from src.core.prompt_registry import registry
 
 from .deps import AgentDeps
 from .models import VisionResponse
@@ -25,20 +25,7 @@ from .models import VisionResponse
 
 logger = logging.getLogger(__name__)
 
-# Vision guide path
-VISION_GUIDE_PATH = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
-
-
-def _load_vision_guide() -> str:
-    """Load vision recognition guide for better photo analysis."""
-    try:
-        if VISION_GUIDE_PATH.exists():
-            with open(VISION_GUIDE_PATH, encoding="utf-8") as f:
-                guide = json.load(f)
-            return json.dumps(guide, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.warning("Failed to load vision guide: %s", e)
-    return ""
+# Vision guide logic replaced by prompt registry
 
 
 # =============================================================================
@@ -80,36 +67,17 @@ async def _search_products(
     category: str | None = None,
 ) -> str:
     """
-    Знайти товари в каталозі MIRT_UA.
+    Знайти товари в каталозі.
     
-    ОБОВ'ЯЗКОВО використовуй цей інструмент для пошуку товару!
-    Приклади: search_products("Костюм Лагуна помаранчевий")
+    Використовуй це щоб знайти товар який ти бачиш на фото.
+    Наприклад: search_products("рожева сукня") або search_products("костюм з лампасами")
     """
-    logger.info("🔍 [VISION] search_products called | query='%s'", query)
-    
-    # 1. Try exact search (handled by catalog service smart logic)
     products = await ctx.deps.catalog.search_products(query, category)
     
-    # 2. If no results, try fallback search by color + type
-    if not products and len(query.split()) > 1:
-        logger.info("🔍 [VISION] No exact match, trying fallback search...")
-        
-        # Extract color (simple heuristic)
-        colors = ["бежевий", "чорний", "білий", "зелений", "синій", "рожевий", "сірий", "шоколад", "помаранчевий", "жовтий"]
-        found_color = next((c for c in colors if c in query.lower()), None)
-        
-        if found_color:
-            fallback_query = f"костюм {found_color}"
-            logger.info("🔍 [VISION] Fallback query: '%s'", fallback_query)
-            products = await ctx.deps.catalog.search_products(fallback_query, category)
-
     if not products:
-        logger.warning("🔍 [VISION] No products found for query='%s'", query)
-        return "На жаль, за вашим запитом нічого не знайдено. Спробуй інший запит (наприклад, просто 'костюм' або 'сукня')."
+        return "На жаль, за вашим запитом нічого не знайдено."
         
-    logger.info("🔍 [VISION] Found %d products for query='%s'", len(products), query)
-    
-    lines = ["Знайдені товари (вибери найбільш схожий):"]
+    lines = ["Знайдені товари:"]
     for p in products:
         name = p.get("name")
         price = p.get("price")
@@ -123,72 +91,19 @@ async def _search_products(
 
 def _get_vision_prompt() -> str:
     """Build vision prompt with REAL catalog and recognition guide."""
-    # Load vision recognition guide
-    vision_guide = _load_vision_guide()
+    # Load main vision prompt
+    try:
+        vision_main = registry.get("vision.main").content
+    except Exception as e:
+        logger.error(f"Failed to load vision.main prompt: {e}")
+        vision_main = "Error loading vision prompt."
 
-    vision_instructions = """
-# VISION AGENT - Аналіз фото товарів MIRT_UA
-
-Ти спеціаліст з розпізнавання товарів магазину дитячого одягу MIRT_UA (Ольга).
-
-## ⚠️ КРИТИЧНО ВАЖЛИВО - ОБОВ'ЯЗКОВІ КРОКИ:
-
-### КРОК 1: Аналіз фото
-Опиши що бачиш:
-- Тип одягу (костюм, сукня, тренч)
-- Колір (помаранчевий, рожевий, сірий, жовтий, бежевий)
-- Ключові деталі (блискавка, капюшон, лампаси, плюш)
-
-### КРОК 2: Розпізнавання за VISION_GUIDE (обов'язково!)
-Використай recognition_tips з VISION_GUIDE:
-- Плюш + повна блискавка = "Костюм Лагуна"
-- Плюш + half-zip = "Костюм Мрія"
-- Капюшон + oversize = "Костюм Ритм"
-- Лампаси на штанах = "Костюм Мерея"
-- Широкі palazzo штани = "Костюм Каприз" або "Костюм Валері"
-- А-силует сукня = "Сукня Анна"
-
-### КРОК 3: ОБОВ'ЯЗКОВО викликати search_products!
-Після розпізнавання моделі - ЗАВЖДИ викликай tool:
-```
-search_products("Костюм Лагуна помаранчевий")
-```
-або
-```
-search_products("Костюм Мрія рожевий")
-```
-
-### КРОК 4: Відповідь з результатів пошуку
-- Назва товару з результату
-- Ціна з результату (НЕ вигадувати!)
-- Запитати про розмір
-
-## ФОРМАТ ВІДПОВІДІ:
-"Це наш [НАЗВА] у [КОЛІР] кольорі — [ЦІНА] грн 🤍
-Який розмір потрібен? Підкажіть зріст дитини."
-
-## АЛГОРИТМ РОЗПІЗНАВАННЯ ЗА ФОТО:
-1. Якщо бачиш ВОРСИСТУ фактуру (плюш/тедді):
-   - Повна блискавка спереду → "Лагуна"
-   - Блискавка до грудей (half-zip) → "Мрія"
-2. Якщо бачиш гладку бавовну + капюшон → "Ритм"
-3. Якщо бачиш смуги по боках штанів → "Мерея"
-4. Якщо широкі palazzo штани → "Каприз" або "Валері"
-
-## ЗАБОРОНЕНО:
-- ❌ Вигадувати ціни (ТІЛЬКИ з search_products!)
-- ❌ Відповідати без виклику search_products
-- ❌ Говорити "не знайшов" без спроби пошуку
-
-Відповідай УКРАЇНСЬКОЮ, тепло як менеджер Ольга 🤍
-"""
-
-    # Build final prompt with vision guide
-    if vision_guide:
-        return f"{vision_instructions}\n---\n# VISION RECOGNITION GUIDE\n{vision_guide}"
-    else:
-        return vision_instructions
-
+    # Load model rules
+    try:
+        model_rules = registry.get("vision.model_rules").content
+        return f"{vision_main}\n---\n# MODEL RULES\n{model_rules}"
+    except Exception:
+        return vision_main
 
 
 _vision_agent: Agent[AgentDeps, VisionResponse] | None = None

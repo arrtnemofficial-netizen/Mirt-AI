@@ -31,54 +31,30 @@ class CatalogService:
         """
         Search products in catalog.
         
-        Uses word-by-word matching to find relevant products.
+        TODO: Implement vector search when embeddings are ready.
+        For now, uses simple text search on name/description.
         """
         if not self.client:
             logger.warning("Supabase client not available, returning empty search")
             return []
 
         try:
-            # Extract key search terms (model name like "Лагуна", "Мрія", "Ритм")
-            query_lower = query.lower()
+            # Start building query
+            db_query = self.client.table("products").select("*")
             
-            # Known model names to match
-            model_names = [
-                "лагуна", "мрія", "ритм", "каприз", "валері", "мерея", "анна"
-            ]
-            
-            # Find which model is mentioned
-            found_model = None
-            for model in model_names:
-                if model in query_lower:
-                    found_model = model
-                    break
-            
-            logger.info("🔍 [CATALOG] Searching: query='%s', found_model='%s'", query, found_model)
-            
-            if found_model:
-                # Search by model name (case insensitive)
-                db_query = self.client.table("products").select("*")
-                db_query = db_query.ilike("name", f"%{found_model}%")
-            elif query:
-                # Fallback: search by first word
-                first_word = query.split()[0] if query.split() else query
-                db_query = self.client.table("products").select("*")
-                db_query = db_query.ilike("name", f"%{first_word}%")
-            else:
-                return []
+            # Text search filter (ilike is case-insensitive)
+            # We search in name OR description OR category
+            if query:
+                # Supabase doesn't support generic OR across columns easily in simple client
+                # So we'll prioritize name search for now
+                db_query = db_query.ilike("name", f"%{query}%")
             
             if category:
                 db_query = db_query.eq("category", category)
                 
             # Execute
             response = db_query.limit(limit).execute()
-            results = response.data or []
-            
-            logger.info("🔍 [CATALOG] Found %d products", len(results))
-            if results:
-                logger.debug("🔍 [CATALOG] First result: %s", results[0].get("name"))
-            
-            return results
+            return response.data or []
 
         except Exception as e:
             logger.error("Catalog search failed: %s", e)

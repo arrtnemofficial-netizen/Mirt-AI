@@ -150,29 +150,28 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         )
         return SerializableMemorySaver()
 
-    # Store DATABASE_URL for async checkpointer creation
-    global _database_url
-    _database_url = database_url
-
     try:
+        # Create async connection pool for async checkpointing
+        from psycopg_pool import AsyncConnectionPool
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         import psycopg
 
-        # Setup tables synchronously first (CREATE INDEX CONCURRENTLY requires autocommit)
-        setup_conn = psycopg.connect(database_url, autocommit=True, connect_timeout=30)
+        # First, setup tables with a separate autocommit connection (sync is fine for setup)
+        setup_conn = psycopg.connect(database_url, autocommit=True)
         try:
+            # Use sync PostgresSaver just for table setup
             from langgraph.checkpoint.postgres import PostgresSaver as SyncPostgresSaver
             setup_checkpointer = SyncPostgresSaver(setup_conn)
             setup_checkpointer.setup()
-            logger.info("✅ PostgreSQL checkpoint tables setup complete")
         finally:
             setup_conn.close()
 
-        # Return MemorySaver for now - async checkpointer will be created in graph.py
-        # The graph module will use create_async_checkpointer() in async context
-        logger.info(
-            "✅ DATABASE_URL configured. Use create_async_checkpointer() in async context for persistence."
-        )
-        return MemorySaver()
+        # Now create ASYNC pool for actual checkpointing (required for ainvoke)
+        pool = AsyncConnectionPool(conninfo=database_url, min_size=1, max_size=5, open=False)
+        checkpointer = AsyncPostgresSaver(pool)
+
+        logger.info("AsyncPostgresSaver checkpointer initialized successfully")
+        return checkpointer
 
     except ImportError as e:
         logger.error(
@@ -180,55 +179,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             "Run: pip install langgraph-checkpoint-postgres",
             e,
         )
-        return MemorySaver()
+        return SerializableMemorySaver()
 
     except Exception as e:
-        logger.error("Failed to setup PostgreSQL checkpointer: %s", e)
-        logger.warning("Falling back to MemorySaver - state NOT persisted!")
-        return MemorySaver()
-
-
-# Store DATABASE_URL for async usage
-_database_url: str | None = None
-
-
-async def create_async_checkpointer():
-    """
-    Create async checkpointer for use in async context.
-    
-    This should be called from within an async function (e.g., during graph invocation).
-    Returns AsyncPostgresSaver context manager.
-    """
-    global _database_url
-    
-    if not _database_url:
-        # Try to get from settings
-        from src.conf.config import settings
-        _database_url = settings.DATABASE_URL
-    
-    if not _database_url:
-        logger.warning("No DATABASE_URL for async checkpointer, using MemorySaver")
-        return MemorySaver()
-    
-    try:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        
-        # from_conn_string returns an async context manager
-        # The caller must use it with `async with`
-        return AsyncPostgresSaver.from_conn_string(_database_url)
-    except Exception as e:
-        logger.error("Failed to create async checkpointer: %s", e)
-        return MemorySaver()
-
-
-def get_database_url() -> str | None:
-    """Get the configured DATABASE_URL."""
-    global _database_url
-    if _database_url:
-        return _database_url
-    
-    from src.conf.config import settings
-    return settings.DATABASE_URL or None
+        logger.error("Failed to create PostgreSQL checkpointer: %s", e)
+        logger.warning("Falling back to MemorySaver - NOT PRODUCTION READY!")
+        return SerializableMemorySaver()
 
 
 # =============================================================================

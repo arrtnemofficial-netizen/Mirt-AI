@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -117,12 +118,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Reusable persistent graph/checkpointer (avoid DuplicatePreparedStatement)
-_persistent_graph: Any | None = None
-_persistent_checkpointer: Any | None = None
-_persistent_checkpointer_cm: Any | None = None
-_persistent_database_url: str | None = None
-
 
 class ConversationError(Exception):
     """Base exception for conversation processing errors."""
@@ -221,6 +216,10 @@ class ConversationHandler:
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
 
+            # Generate new trace_id for this request (Observability)
+            trace_id = str(uuid.uuid4())
+            state["trace_id"] = trace_id
+
             # Persist user message
             self._persist_user_message(session_id, text)
 
@@ -258,125 +257,44 @@ class ConversationHandler:
             return self._build_fallback_result(session_id, state, str(e))
 
     async def _invoke_agent(self, state: ConversationState) -> ConversationState:
-        """Invoke the LangGraph agent with retry logic and persistent checkpointing."""
+        """Invoke the LangGraph agent with retry logic and thread_id for persistence."""
         import asyncio
-        from src.services.persistence import get_database_url
 
         session_id = state.get("metadata", {}).get("session_id", "unknown")
         last_error: Exception | None = None
-        
-        # Log incoming state
-        user_msg = state.get("messages", [{}])[-1].get("content", "")[:50] if state.get("messages") else ""
-        logger.info("🚀 [%s] Agent invoke started | msg='%s...'", session_id[:8], user_msg)
 
         # Use thread_id for LangGraph checkpointer persistence
         config = {"configurable": {"thread_id": session_id}}
-        
-        database_url = get_database_url()
-        
-        persistence_mode = "PostgreSQL" if database_url else "Memory"
-        logger.debug("📦 [%s] Persistence: %s", session_id[:8], persistence_mode)
-        
-        if persistence_mode == "Memory":
-            logger.warning("⚠️ [%s] Using MemorySaver - state will be lost on restart", session_id[:8])
 
-        if database_url:
-            graph = await self._get_persistent_graph(database_url, session_id)
-
-            for attempt in range(self.max_retries + 1):
-                try:
-                    logger.debug("?- [%s] Graph.ainvoke starting (attempt %d)...", session_id[:8], attempt + 1)
-                    result = await graph.ainvoke(state, config=config)
-                    logger.info("?o. [%s] Agent completed | nodes=%d", session_id[:8], result.get("step_number", 0))
-                    if attempt > 0:
-                        logger.info("Agent succeeded on retry %d for session %s (persistent)", attempt, session_id)
-                    return result
-
-                except Exception as e:
-                    last_error = e
-                    error_info = f"{type(e).__name__}: {str(e)}" if str(e) else type(e).__name__
-                    logger.error("??O [%s] Agent attempt %d FAILED: %s", session_id[:8], attempt + 1, error_info[:300])
-
-                    if attempt < self.max_retries:
-                        logger.warning(
-                            "??3 [%s] Retrying in %.1fs... (attempt %d/%d)",
-                            session_id[:8],
-                            self.retry_delay * (attempt + 1),
-                            attempt + 1,
-                            self.max_retries + 1,
-                        )
-                        await asyncio.sleep(self.retry_delay * (attempt + 1))
-                    else:
-                        logger.exception(
-                            "💀 [%s] Agent FAILED after %d attempts",
-                            session_id[:8],
-                            self.max_retries + 1,
-                        )
-        else:
-            # Fallback to default runner (MemorySaver)
-            for attempt in range(self.max_retries + 1):
-                try:
-                    logger.debug("▶ [%s] Using MemorySaver graph (attempt %d)...", session_id[:8], attempt + 1)
-                    result = await self.runner.ainvoke(state, config=config)
-                    logger.info("✅ [%s] Agent completed (memory)", session_id[:8])
-                    if attempt > 0:
-                        logger.info("Agent succeeded on retry %d for session %s", attempt, session_id)
-                    return result
-                    
-                except Exception as e:
-                    last_error = e
-                    error_info = f"{type(e).__name__}: {str(e)}" if str(e) else type(e).__name__
-                    logger.error("❌ [%s] Agent attempt %d FAILED: %s", session_id[:8], attempt + 1, error_info[:300])
-                    
-                    if attempt < self.max_retries:
-                        logger.warning(
-                            "⏳ [%s] Retrying in %.1fs... (attempt %d/%d)",
-                            session_id[:8],
-                            self.retry_delay * (attempt + 1),
-                            attempt + 1,
-                            self.max_retries + 1,
-                        )
-                        await asyncio.sleep(self.retry_delay * (attempt + 1))
-                    else:
-                        logger.exception(
-                            "💀 [%s] Agent FAILED after %d attempts",
-                            session_id[:8],
-                            self.max_retries + 1,
-                        )
+        for attempt in range(self.max_retries + 1):
+            try:
+                result = await self.runner.ainvoke(state, config=config)
+                if attempt > 0:
+                    logger.info("Agent succeeded on retry %d for session %s", attempt, session_id)
+                return result
+            except Exception as e:
+                last_error = e
+                error_info = f"{type(e).__name__}: {str(e)}" if str(e) else type(e).__name__
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "Agent attempt %d failed for session %s: %s. Retrying...",
+                        attempt + 1,
+                        session_id,
+                        error_info[:200],
+                    )
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+                else:
+                    logger.exception(
+                        "Agent failed after %d attempts for session %s: %s",
+                        self.max_retries + 1,
+                        session_id,
+                        error_info,
+                    )
 
         raise AgentInvocationError(
             f"Agent invocation failed after {self.max_retries + 1} attempts: {last_error}",
             session_id=session_id,
         ) from last_error
-
-    async def _get_persistent_graph(self, database_url: str, session_id: str):
-        """Create or reuse a persistent graph/checkpointer to avoid prepared-statement conflicts."""
-        global _persistent_graph, _persistent_checkpointer, _persistent_database_url
-
-        if _persistent_graph is not None and _persistent_database_url == database_url:
-            return _persistent_graph
-
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        from src.agents.langgraph.graph import build_production_graph
-        from src.agents.pydantic.support_agent import run_support
-        from src.agents.pydantic.deps import create_deps_from_state
-
-        async def _runner(msg: str, metadata: dict) -> dict:
-            logger.debug("dYÿ [%s] PydanticAI agent called | msg='%s...'", session_id[:8], msg[:30])
-            deps = create_deps_from_state(metadata)
-            result = await run_support(msg, deps)
-            logger.debug("dYÿ [%s] PydanticAI agent returned | intent=%s", session_id[:8], getattr(result, 'intent', 'unknown'))
-            return result.model_dump()
-
-        logger.debug("dY\"O [%s] Connecting to PostgreSQL checkpointer (persistent)...", session_id[:8])
-        # AsyncPostgresSaver.from_conn_string returns an async context manager.
-        # Enter once and reuse to avoid DuplicatePreparedStatement errors.
-        _persistent_checkpointer_cm = AsyncPostgresSaver.from_conn_string(database_url)
-        _persistent_checkpointer = await _persistent_checkpointer_cm.__aenter__()
-        _persistent_graph = build_production_graph(_runner, _persistent_checkpointer)
-        _persistent_database_url = database_url
-        logger.info("ƒo. [%s] Persistent graph built and cached", session_id[:8])
-        return _persistent_graph
 
     def _parse_response(self, result_state: ConversationState, session_id: str) -> AgentResponse:
         """Parse the agent response from the result state with robust fallbacks."""

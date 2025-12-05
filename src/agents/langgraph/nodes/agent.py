@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
-from src.services.observability import log_agent_step, track_metric
+from src.services.observability import log_agent_step, track_metric, log_trace
 
 
 if TYPE_CHECKING:
@@ -53,6 +53,7 @@ async def agent_node(
     """
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    trace_id = state.get("trace_id", "")
     current_state = state.get("current_state", State.STATE_0_INIT.value)
 
     # Get user message (handles both dict and LangChain Message objects)
@@ -138,6 +139,20 @@ async def agent_node(
         metadata_update = state.get("metadata", {}).copy()
         metadata_update["current_state"] = new_state_str
         metadata_update["intent"] = intent
+
+        # Async Trace Logging (Success)
+        await log_trace(
+            session_id=session_id,
+            trace_id=trace_id,
+            node_name="agent_node",
+            status="SUCCESS",
+            state_name=new_state_str,
+            prompt_key=f"state.{new_state_str}",  # Approximate key
+            input_snapshot={"message": user_message.content if hasattr(user_message, "content") else str(user_message)},
+            output_snapshot=assistant_content,
+            latency_ms=latency_ms,
+        )
+
         if response.customer_data:
             if response.customer_data.name:
                 metadata_update["customer_name"] = response.customer_data.name
@@ -163,6 +178,17 @@ async def agent_node(
 
     except Exception as e:
         logger.error("Agent node failed for session %s: %s", session_id, e)
+
+        # Async Trace Logging (Error)
+        await log_trace(
+            session_id=session_id,
+            trace_id=trace_id,
+            node_name="agent_node",
+            status="ERROR",
+            error_message=str(e),
+            error_category="SYSTEM",
+            state_name=current_state,
+        )
 
         return {
             "last_error": str(e),

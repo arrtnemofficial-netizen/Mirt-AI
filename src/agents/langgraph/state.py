@@ -61,6 +61,7 @@ class ConversationState(TypedDict, total=False):
 
     # Session identification
     session_id: str
+    trace_id: str   # UUID for the current interaction chain
     thread_id: str  # LangGraph thread for persistence
 
     # Intent & routing
@@ -138,6 +139,7 @@ def create_initial_state(
 
         # Session
         "session_id": session_id,
+        "trace_id": kwargs.get("trace_id"),  # Should be generated at entry point
         "thread_id": session_id,  # Use same ID for LangGraph threading
 
         # Intent
@@ -216,6 +218,10 @@ def validate_state(state: ConversationState) -> list[str]:
 
     if not state.get("session_id"):
         errors.append("Missing session_id")
+
+    if not state.get("trace_id"):
+        # Not a blocking error yet, but worth noting
+        pass
 
     if not state.get("current_state"):
         errors.append("Missing current_state")
