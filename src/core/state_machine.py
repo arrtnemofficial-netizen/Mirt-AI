@@ -426,4 +426,3 @@ def normalize_state(value: str) -> State:
 
     # Try direct parse
     return State.from_string(upper)
-

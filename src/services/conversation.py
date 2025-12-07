@@ -28,6 +28,7 @@ from src.services.message_store import MessageStore, StoredMessage
 
 class TransitionResult:
     """Stub for validate_state_transition result."""
+
     def __init__(self, new_state: str, was_corrected: bool = False, reason: str | None = None):
         self.new_state = new_state
         self.was_corrected = was_corrected
@@ -274,7 +275,7 @@ class ConversationHandler:
                 return result
             except Exception as e:
                 last_error = e
-                error_info = f"{type(e).__name__}: {str(e)}" if str(e) else type(e).__name__
+                error_info = f"{type(e).__name__}: {e!s}" if str(e) else type(e).__name__
                 if attempt < self.max_retries:
                     logger.warning(
                         "Agent attempt %d failed for session %s: %s. Retrying...",
@@ -344,8 +345,7 @@ class ConversationHandler:
         # Extract messages
         raw_messages = data.get("messages", [])
         messages = [
-            Message(type=m.get("type", "text"), content=m.get("content", ""))
-            for m in raw_messages
+            Message(type=m.get("type", "text"), content=m.get("content", "")) for m in raw_messages
         ]
         if not messages:
             messages = [Message(type="text", content="")]
@@ -371,17 +371,20 @@ class ConversationHandler:
 
         # Extract products (ProductMatch -> Product compatible)
         from src.core.models import Product
+
         products = []
         for p in data.get("products", []):
             with contextlib.suppress(Exception):
-                products.append(Product(
-                    id=p.get("id", 0),
-                    name=p.get("name", ""),
-                    size=p.get("size", ""),
-                    color=p.get("color", ""),
-                    price=p.get("price", 0),
-                    photo_url=p.get("photo_url", ""),
-                ))
+                products.append(
+                    Product(
+                        id=p.get("id", 0),
+                        name=p.get("name", ""),
+                        size=p.get("size", ""),
+                        color=p.get("color", ""),
+                        price=p.get("price", 0),
+                        photo_url=p.get("photo_url", ""),
+                    )
+                )
 
         return AgentResponse(
             event=data.get("event", "simple_answer"),

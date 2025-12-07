@@ -42,20 +42,20 @@ class ManyChatAPIError(Exception):
 
 class ManyChatClient:
     """Full ManyChat API client.
-    
+
     Usage:
         client = ManyChatClient()
-        
+
         # Send text message
         await client.send_message(subscriber_id, "Привіт!")
-        
+
         # Send with buttons
         await client.send_message_with_buttons(
             subscriber_id,
             "Оберіть розмір:",
             [{"title": "S", "payload": "size_s"}, {"title": "M", "payload": "size_m"}]
         )
-        
+
         # Send product card
         await client.send_card(
             subscriber_id,
@@ -250,7 +250,11 @@ class ManyChatClient:
             card["subtitle"] = subtitle[:80]
         if buttons:
             card["buttons"] = [
-                {"type": "postback", "title": btn["title"], "payload": btn.get("payload", btn["title"])}
+                {
+                    "type": "postback",
+                    "title": btn["title"],
+                    "payload": btn.get("payload", btn["title"]),
+                }
                 for btn in buttons[:3]  # Max 3 buttons per card
             ]
 
@@ -310,7 +314,11 @@ class ManyChatClient:
                 card["subtitle"] = item["subtitle"][:80]
             if item.get("buttons"):
                 card["buttons"] = [
-                    {"type": "postback", "title": btn["title"], "payload": btn.get("payload", btn["title"])}
+                    {
+                        "type": "postback",
+                        "title": btn["title"],
+                        "payload": btn.get("payload", btn["title"]),
+                    }
                     for btn in item["buttons"][:3]
                 ]
             elements.append(card)
@@ -667,29 +675,29 @@ async def send_ai_response(
     buttons: list[dict[str, str]] | None = None,
 ) -> bool:
     """Send AI agent response to ManyChat subscriber.
-    
+
     This is the main function to call when sending AI responses back to users.
-    
+
     Args:
         subscriber_id: ManyChat subscriber ID
         text: Response text
         products: Optional list of products to show as gallery
         buttons: Optional quick reply buttons
-        
+
     Returns:
         True if successful
     """
     client = get_manychat_client()
-    
+
     # Mark as AI responded
     await client.add_tag(subscriber_id, "ai_responded")
-    
+
     # Send text with buttons if provided
     if buttons:
         await client.send_message_with_buttons(subscriber_id, text, buttons)
     else:
         await client.send_message(subscriber_id, text)
-    
+
     # Send product gallery if provided
     if products:
         gallery_items = [
@@ -702,7 +710,7 @@ async def send_ai_response(
             for p in products[:10]
         ]
         await client.send_gallery(subscriber_id, gallery_items)
-    
+
     return True
 
 

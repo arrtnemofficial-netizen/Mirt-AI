@@ -11,7 +11,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-def _build_model() -> OpenAIModel:
+def _build_model() -> OpenAIChatModel:
     """Build OpenAI model."""
     if settings.LLM_PROVIDER == "openai":
         api_key = settings.OPENAI_API_KEY.get_secret_value()
@@ -37,18 +37,20 @@ def _build_model() -> OpenAIModel:
     else:
         api_key = settings.OPENROUTER_API_KEY.get_secret_value()
         base_url = settings.OPENROUTER_BASE_URL
-        model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+        model_name = (
+            settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+        )
 
     if not api_key:
         logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
         if settings.LLM_PROVIDER == "openai":
-             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-             base_url = settings.OPENROUTER_BASE_URL
-             model_name = settings.AI_MODEL
+            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+            base_url = settings.OPENROUTER_BASE_URL
+            model_name = settings.AI_MODEL
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)
-    return OpenAIModel(model_name, provider=provider)
+    return OpenAIChatModel(model_name, provider=provider)
 
 
 # =============================================================================

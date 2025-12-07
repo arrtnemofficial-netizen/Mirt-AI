@@ -243,6 +243,7 @@ def get_production_graph(
     if _production_graph is None:
         # Validate prompt files exist for all states (fail-fast)
         from src.core.prompt_registry import validate_all_states_have_prompts
+
         missing = validate_all_states_have_prompts()
         if missing:
             logger.warning("Graph starting with missing state prompts: %s", missing)
@@ -252,6 +253,7 @@ def get_production_graph(
         # Create a wrapper that matches the runner signature
         async def _default_runner(msg: str, metadata: dict[str, Any]) -> dict[str, Any]:
             from src.agents.pydantic.deps import create_deps_from_state
+
             deps = create_deps_from_state(metadata)
             result = await run_support(msg, deps)
             return result.model_dump()

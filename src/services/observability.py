@@ -62,7 +62,7 @@ class MetricsCollector:
         point = MetricPoint(
             name=name,
             value=value,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             tags=tags or {},
         )
         self.points.append(point)
@@ -274,13 +274,14 @@ def log_validation_result(
 class AsyncTracingService:
     """
     Background service for logging LLM traces to Supabase.
-    
+
     Designed to be fire-and-forget so it doesn't block the bot.
     """
-    
+
     def __init__(self):
-        self._enabled = True
-    
+        # Disabled by default - enable when llm_usage table is properly configured
+        self._enabled = False
+
     async def log_trace(
         self,
         session_id: str,
@@ -304,7 +305,7 @@ class AsyncTracingService:
 
         try:
             from src.services.supabase_client import get_supabase_client
-            
+
             client = get_supabase_client()
             if not client:
                 return
@@ -326,18 +327,19 @@ class AsyncTracingService:
                 "model_name": model_name,
                 "created_at": datetime.now(UTC).isoformat(),
             }
-            
+
             # Remove None values to let DB defaults work or avoid null issues
             payload = {k: v for k, v in payload.items() if v is not None}
 
-            # Fire and forget - using simple await here but in production 
+            # Fire and forget - using simple await here but in production
             # this should be offloaded to a true background task if high volume.
             # For now, Supabase HTTP call is fast enough for < 100 concurrent users.
-            await client.table("llm_traces").insert(payload).execute()
-            
+            # llm_traces table doesn't exist, use llm_usage instead
+            await client.table("llm_usage").insert(payload).execute()
+
         except Exception as e:
-            # Observability shouldn't crash the app
-            logger.error(f"Failed to log trace: {e}")
+            # Observability shouldn't crash the app - use debug level to avoid spam
+            logger.debug(f"Failed to log trace: {e}")
 
 
 # Global singleton
@@ -353,10 +355,5 @@ async def log_trace(
 ) -> None:
     """Public API for logging traces."""
     await _tracer.log_trace(
-        session_id=session_id,
-        trace_id=trace_id,
-        node_name=node_name,
-        status=status,
-        **kwargs
+        session_id=session_id, trace_id=trace_id, node_name=node_name, status=status, **kwargs
     )
-

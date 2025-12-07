@@ -6,13 +6,17 @@ from src.services.observability import AsyncTracingService
 def mock_supabase():
     with patch("src.services.supabase_client.get_supabase_client") as mock:
         client = MagicMock()
-        client.table.return_value.insert.return_value.execute = AsyncMock()
+        # Create proper mock chain for table().insert().execute()
+        insert_mock = MagicMock()
+        insert_mock.execute = AsyncMock()
+        client.table.return_value.insert.return_value = insert_mock
         mock.return_value = client
         yield client
 
 @pytest.mark.asyncio
 async def test_log_trace_success(mock_supabase):
     service = AsyncTracingService()
+    service._enabled = True  # Enable the service for testing
     
     await service.log_trace(
         session_id="sess_123",
@@ -23,8 +27,8 @@ async def test_log_trace_success(mock_supabase):
         latency_ms=100.5
     )
     
-    # Verify insert called with correct payload
-    mock_supabase.table.assert_called_with("llm_traces")
+    # Verify insert called with correct payload (table is llm_usage, not llm_traces)
+    mock_supabase.table.assert_called_with("llm_usage")
     mock_supabase.table().insert.assert_called_once()
     
     call_args = mock_supabase.table().insert.call_args[0][0]
@@ -37,6 +41,7 @@ async def test_log_trace_success(mock_supabase):
 @pytest.mark.asyncio
 async def test_log_trace_error(mock_supabase):
     service = AsyncTracingService()
+    service._enabled = True  # Enable the service for testing
     
     await service.log_trace(
         session_id="sess_123",

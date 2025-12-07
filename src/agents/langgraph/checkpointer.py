@@ -55,7 +55,13 @@ class SerializableMemorySaver(MemorySaver):
         else:
             return value
 
-    def put(self, config: dict[str, Any], checkpoint: dict[str, Any], metadata: dict[str, Any], new_versions: dict[str, str]) -> dict[str, Any]:
+    def put(
+        self,
+        config: dict[str, Any],
+        checkpoint: dict[str, Any],
+        metadata: dict[str, Any],
+        new_versions: dict[str, str],
+    ) -> dict[str, Any]:
         """Override put to serialize Message objects before storage."""
         try:
             # Serialize checkpoint data to handle Message objects
@@ -70,9 +76,10 @@ class SerializableMemorySaver(MemorySaver):
 
 class CheckpointerType(str, Enum):
     """Available checkpointer backends."""
-    MEMORY = "memory"      # Development only! State lost on restart
+
+    MEMORY = "memory"  # Development only! State lost on restart
     POSTGRES = "postgres"  # Production - use this
-    REDIS = "redis"        # Alternative for high-throughput
+    REDIS = "redis"  # Alternative for high-throughput
 
 
 # =============================================================================
@@ -126,12 +133,15 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             # Supabase connection string format
             supabase_url = str(settings.SUPABASE_URL)
             logger.info(f"DEBUG: Supabase URL found: {supabase_url[:20]}...")
-            logger.info(f"DEBUG: Supabase API key present: {bool(settings.SUPABASE_API_KEY.get_secret_value())}")
+            logger.info(
+                f"DEBUG: Supabase API key present: {bool(settings.SUPABASE_API_KEY.get_secret_value())}"
+            )
 
             if "supabase" in supabase_url:
                 # Extract project ref from URL
                 # https://xxx.supabase.co -> xxx
                 import re
+
                 match = re.search(r"https://([^.]+)\.supabase", supabase_url)
                 logger.info(f"DEBUG: Regex match result: {match}")
 
@@ -141,7 +151,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     # Build postgres connection string
                     # Default Supabase postgres port is 5432, password from service_role key
                     database_url = f"postgresql://postgres:{settings.SUPABASE_API_KEY.get_secret_value()}@db.{project_ref}.supabase.co:5432/postgres"
-                    logger.info(f"DEBUG: Built DATABASE_URL: postgresql://postgres:***@db.{project_ref}.supabase.co:5432/postgres")
+                    logger.info(
+                        f"DEBUG: Built DATABASE_URL: postgresql://postgres:***@db.{project_ref}.supabase.co:5432/postgres"
+                    )
 
     if not database_url:
         logger.warning(
@@ -161,13 +173,14 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         try:
             # Use sync PostgresSaver just for table setup
             from langgraph.checkpoint.postgres import PostgresSaver as SyncPostgresSaver
+
             setup_checkpointer = SyncPostgresSaver(setup_conn)
             setup_checkpointer.setup()
         finally:
             setup_conn.close()
 
         # Now create ASYNC pool for actual checkpointing (required for ainvoke)
-        pool = AsyncConnectionPool(conninfo=database_url, min_size=1, max_size=5, open=False)
+        pool = AsyncConnectionPool(conninfo=database_url, min_size=1, max_size=5)
         checkpointer = AsyncPostgresSaver(pool)
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
@@ -204,6 +217,7 @@ def get_redis_checkpointer() -> BaseCheckpointSaver:
 
     if not redis_url:
         from src.conf.config import settings
+
         redis_url = getattr(settings, "REDIS_URL", None)
 
     if not redis_url:
@@ -256,7 +270,10 @@ def get_checkpointer(
     from src.conf.config import settings as app_settings
 
     if checkpointer_type is None:
-        if app_settings.DATABASE_URL or os.getenv("POSTGRES_URL") or app_settings.SUPABASE_URL:
+        # Only auto-select POSTGRES when an explicit database URL is provided.
+        # The presence of SUPABASE_URL alone is not enough in development, otherwise
+        # local runs (like Telegram polling) will break when Postgres is not ready.
+        if app_settings.DATABASE_URL or os.getenv("POSTGRES_URL"):
             checkpointer_type = CheckpointerType.POSTGRES
         elif os.getenv("REDIS_URL"):
             checkpointer_type = CheckpointerType.REDIS
@@ -283,6 +300,8 @@ def get_checkpointer(
             "Set DATABASE_URL for production persistence."
         )
         _checkpointer = SerializableMemorySaver()
+
+    logger.info("Checkpointer selected: %s", checkpointer_type)
 
     _checkpointer_type = checkpointer_type
     return _checkpointer

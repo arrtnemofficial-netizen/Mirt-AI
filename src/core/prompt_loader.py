@@ -23,7 +23,7 @@ warnings.warn(
     "prompt_loader is deprecated and will be removed in future versions. "
     "Use src.core.prompt_registry.PromptRegistry instead.",
     DeprecationWarning,
-    stacklevel=2
+    stacklevel=2,
 )
 
 from pathlib import Path
@@ -190,9 +190,13 @@ def get_system_prompt_text(model_key: str = "grok") -> str:
                 if isinstance(sub_value, str):
                     sections.append(f"## {sub_key}\n{sub_value}")
                 elif isinstance(sub_value, list | dict):
-                    sections.append(f"## {sub_key}\n{yaml.dump(sub_value, allow_unicode=True, default_flow_style=False)}")
+                    sections.append(
+                        f"## {sub_key}\n{yaml.dump(sub_value, allow_unicode=True, default_flow_style=False)}"
+                    )
         elif isinstance(value, list):
-            sections.append(f"# {key}\n{yaml.dump(value, allow_unicode=True, default_flow_style=False)}")
+            sections.append(
+                f"# {key}\n{yaml.dump(value, allow_unicode=True, default_flow_style=False)}"
+            )
 
     return "\n\n".join(sections)
 

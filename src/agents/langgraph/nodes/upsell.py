@@ -47,6 +47,7 @@ async def upsell_node(
 
     # Get user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
+
     user_message = extract_user_message(state.get("messages", []))
     if not user_message:
         user_message = "Замовлення оформлено"

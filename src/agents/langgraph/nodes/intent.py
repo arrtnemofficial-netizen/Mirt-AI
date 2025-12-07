@@ -19,31 +19,129 @@ logger = logging.getLogger(__name__)
 # Intent keywords for quick detection
 INTENT_PATTERNS = {
     "PAYMENT_DELIVERY": [
-        "купую", "беру", "оплата", "реквізит", "замовл", "оформ",
-        "карта", "переказ", "оплачу", "доставк", "нова пошта",
+        "купую",
+        "беру",
+        "оплата",
+        "реквізит",
+        "замовл",
+        "оформ",
+        "карта",
+        "переказ",
+        "оплачу",
+        "доставк",
+        "нова пошта",
+        "хочу куп",  # explicit purchase intent
+    ],
+    # Confirmation words that mean "yes" in OFFER state
+    "CONFIRMATION": [
+        "так",
+        "да",
+        "yes",
+        "ок",
+        "добре",
+        "згодна",
+        "згоден",
+        "підходить",
+        "давай",
+        "давайте",
+        "можна",
+        "хочу",
+        "буду",
+        "годі",
+        "файно",
+        "супер",
+    ],
+    # Product names for selection in OFFER state
+    "PRODUCT_NAMES": [
+        "лагуна",
+        "мрія",
+        "ритм",
+        "каприз",
+        "валері",
+        "мерея",
+        "анна",
+        "тренч",
+        "еліт",
+        "зірка",
+        "софія",
+        "вікторія",
+        "мілана",
+        "діана",
+        "перший",
+        "другий",
+        "третій",
+        "1",
+        "2",
+        "3",  # selection by number
     ],
     "SIZE_HELP": [
-        "зріст", "розмір", "вік", "см", "років", "рік", "міс",
-        "скільки", "який розмір", "підбери", "підійде",
+        "зріст",
+        "розмір",
+        "вік",
+        "см",
+        "років",
+        "рік",
+        "міс",
+        "скільки",
+        "який розмір",
+        "підбери",
+        "підійде",
     ],
     "COLOR_HELP": [
-        "колір", "кольор", "інший", "чорн", "біл", "рожев",
-        "синій", "червон", "зелен",
+        "колір",
+        "кольор",
+        "інший",
+        "чорн",
+        "біл",
+        "рожев",
+        "синій",
+        "червон",
+        "зелен",
     ],
     "COMPLAINT": [
-        "скарга", "проблем", "повернен", "брак", "жалоба", "обман",
-        "не працює", "зламан", "погано", "відмов",
+        "скарга",
+        "проблем",
+        "повернен",
+        "брак",
+        "жалоба",
+        "обман",
+        "не працює",
+        "зламан",
+        "погано",
+        "відмов",
     ],
     "PHOTO_IDENT": [
-        "фото", "фотографія", "зображення", "покажи фото", "можна фото",
-        "дивись фото", "картинка", "знімок", "фотк",
+        "фото",
+        "фотографія",
+        "зображення",
+        "покажи фото",
+        "можна фото",
+        "дивись фото",
+        "картинка",
+        "знімок",
+        "фотк",
     ],
     "DISCOVERY_OR_QUESTION": [
-        "сукн", "костюм", "тренч", "плаття", "покаж", "є", "хочу",
-        "підбери", "порадь", "шукаю", "ціна", "скільки кошт",
+        "сукн",
+        "костюм",
+        "тренч",
+        "плаття",
+        "покаж",
+        "є",
+        "хочу",
+        "підбери",
+        "порадь",
+        "шукаю",
+        "ціна",
+        "скільки кошт",
     ],
     "GREETING_ONLY": [
-        "привіт", "вітаю", "добр", "hello", "hi", "хай",
+        "привіт",
+        "вітаю",
+        "добр",
+        "hello",
+        "hi",
+        "хай",
     ],
 }
 
@@ -75,20 +173,54 @@ def detect_intent_from_text(
 
 def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -> str | None:
     """Check special cases before keyword matching."""
-    # Empty text with image
+    # Empty text with image = definitely photo identification
     if not text_lower and has_image:
         return "PHOTO_IDENT"
 
-    # Payment context takes priority in payment state
-    if current_state == "STATE_5_PAYMENT_DELIVERY":
-        if has_image:
-            return "PAYMENT_DELIVERY"
+    # In OFFER state: payment keywords, confirmations, or product names = PAYMENT
+    if current_state == "STATE_4_OFFER":
+        # Payment keywords
         for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
             if keyword in text_lower:
+                logger.info(
+                    "Intent override: PAYMENT_DELIVERY in OFFER state (payment keyword: %s)",
+                    keyword,
+                )
+                return "PAYMENT_DELIVERY"
+        # Confirmation words (так, да, ок, etc.)
+        for keyword in INTENT_PATTERNS["CONFIRMATION"]:
+            if keyword in text_lower:
+                logger.info(
+                    "Intent override: PAYMENT_DELIVERY in OFFER state (confirmation: %s)", keyword
+                )
+                return "PAYMENT_DELIVERY"
+        # Product name selection (лагуна, мрія, etc.)
+        for keyword in INTENT_PATTERNS["PRODUCT_NAMES"]:
+            if keyword in text_lower:
+                logger.info(
+                    "Intent override: PAYMENT_DELIVERY in OFFER state (product selection: %s)",
+                    keyword,
+                )
                 return "PAYMENT_DELIVERY"
 
-    # Photo identification (not in payment context)
+    # Payment context takes priority in payment state - ANY input continues payment flow
+    if current_state == "STATE_5_PAYMENT_DELIVERY":
+        # In payment state, most inputs are payment-related (size, address, phone, etc.)
+        # Only explicit questions or complaints should break out
+        for keyword in INTENT_PATTERNS["COMPLAINT"]:
+            if keyword in text_lower:
+                return None  # Let keyword matching handle complaints
+        # Everything else in payment state stays in payment
+        logger.info("Intent: PAYMENT_DELIVERY (in payment state, continuing flow)")
+        return "PAYMENT_DELIVERY"
+
+    # Photo identification ONLY if user sent text that looks like photo query
+    # OR if there's no meaningful text (just "ціна" etc with image)
     if has_image:
+        # Check if text is a payment/action keyword - don't override to PHOTO_IDENT
+        for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
+            if keyword in text_lower:
+                return None  # Let keyword matching handle it
         return "PHOTO_IDENT"
 
     return None
@@ -142,6 +274,7 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Get latest user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
+
     user_content = extract_user_message(state.get("messages", []))
 
     # Check for image

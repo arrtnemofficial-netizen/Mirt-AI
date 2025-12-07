@@ -62,6 +62,7 @@ class AgentDeps:
         )
         result = await agent.run(message, deps=deps)
     """
+
     # Session identification
     session_id: str
     trace_id: str  # For distributed tracing of this specific request
@@ -110,13 +111,15 @@ class AgentDeps:
 
     def is_ready_for_order(self) -> bool:
         """Check if all required data is collected for order."""
-        return all([
-            self.customer_name,
-            self.customer_phone,
-            self.customer_city,
-            self.customer_nova_poshta,
-            self.selected_products,
-        ])
+        return all(
+            [
+                self.customer_name,
+                self.customer_phone,
+                self.customer_city,
+                self.customer_nova_poshta,
+                self.selected_products,
+            ]
+        )
 
 
 # =============================================================================

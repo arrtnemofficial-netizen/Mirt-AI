@@ -47,7 +47,7 @@ class InputMetadata(BaseModel):
         if v:
             return True
         # Check if image_url is present in the data being validated
-        data = info.data if hasattr(info, 'data') else {}
+        data = info.data if hasattr(info, "data") else {}
         image_url = data.get("image_url")
         if image_url and isinstance(image_url, str) and image_url.strip():
             return True

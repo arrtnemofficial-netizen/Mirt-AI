@@ -52,18 +52,22 @@ async def get_state_history(
         # Get state history from checkpointer
         history = []
         async for state_snapshot in graph.aget_state_history(config, limit=limit):
-            history.append({
-                "checkpoint_id": state_snapshot.config.get("configurable", {}).get("checkpoint_id"),
-                "step": state_snapshot.values.get("step_number", 0),
-                "current_state": state_snapshot.values.get("current_state"),
-                "detected_intent": state_snapshot.values.get("detected_intent"),
-                "products_count": len(state_snapshot.values.get("selected_products", [])),
-                "has_error": bool(state_snapshot.values.get("last_error")),
-                "timestamp": state_snapshot.created_at,
-                "next_node": state_snapshot.next,
-                # Include full values for debugging
-                "_values": state_snapshot.values,
-            })
+            history.append(
+                {
+                    "checkpoint_id": state_snapshot.config.get("configurable", {}).get(
+                        "checkpoint_id"
+                    ),
+                    "step": state_snapshot.values.get("step_number", 0),
+                    "current_state": state_snapshot.values.get("current_state"),
+                    "detected_intent": state_snapshot.values.get("detected_intent"),
+                    "products_count": len(state_snapshot.values.get("selected_products", [])),
+                    "has_error": bool(state_snapshot.values.get("last_error")),
+                    "timestamp": state_snapshot.created_at,
+                    "next_node": state_snapshot.next,
+                    # Include full values for debugging
+                    "_values": state_snapshot.values,
+                }
+            )
 
         return history
 

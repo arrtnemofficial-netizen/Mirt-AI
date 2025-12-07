@@ -1,6 +1,7 @@
 import pytest
 from src.core.prompt_registry import PromptRegistry
-from tests.conftest import GoldenLoader
+
+# GoldenLoader imported but not used in this file - remove unused import
 
 # Load Registry (Subject Under Test)
 registry = PromptRegistry()

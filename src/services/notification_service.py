@@ -7,9 +7,11 @@ Handles sending alerts to managers via Telegram.
 from __future__ import annotations
 
 import logging
+
 import aiohttp
 
 from src.conf.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,7 @@ class NotificationService:
     ) -> bool:
         """
         Send escalation alert to manager.
-        
+
         Args:
             session_id: ID of the user session
             reason: Reason for escalation
@@ -44,7 +46,7 @@ class NotificationService:
             f"**Session ID:** `{session_id}`\n"
             f"**Reason:** {reason}\n"
         )
-        
+
         if user_context:
             message += f"\n**Context:**\n{user_context}"
 

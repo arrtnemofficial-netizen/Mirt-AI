@@ -167,8 +167,8 @@ class Settings(BaseSettings):
         description="Google Gemini model identifier",
     )
     LLM_REASONING_EFFORT: str = Field(
-        default="low",
-        description="Reasoning effort for reasoning models (none, low, medium, high).",
+        default="medium",
+        description="Reasoning effort for reasoning models (none, low, medium, high). Medium recommended for vision.",
     )
     LLM_TEMPERATURE: float = Field(
         default=0.3,

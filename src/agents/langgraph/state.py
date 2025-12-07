@@ -54,6 +54,7 @@ class ConversationState(TypedDict, total=False):
 
     Every field has a proper reducer for LangGraph's state management.
     """
+
     # Core conversation data
     messages: Annotated[list[dict[str, Any]], add_messages]
     current_state: str  # FSM state (STATE_0_INIT, etc.)
@@ -61,7 +62,7 @@ class ConversationState(TypedDict, total=False):
 
     # Session identification
     session_id: str
-    trace_id: str   # UUID for the current interaction chain
+    trace_id: str  # UUID for the current interaction chain
     thread_id: str  # LangGraph thread for persistence
 
     # Intent & routing
@@ -136,42 +137,34 @@ def create_initial_state(
             "language": "uk",
             **(metadata or {}),
         },
-
         # Session
         "session_id": session_id,
         "trace_id": kwargs.get("trace_id"),  # Should be generated at entry point
         "thread_id": session_id,  # Use same ID for LangGraph threading
-
         # Intent
         "detected_intent": None,
         "has_image": False,
         "image_url": None,
-
         # Products
         "selected_products": [],
         "offered_products": [],
-
         # Moderation
         "moderation_result": None,
         "should_escalate": False,
         "escalation_reason": None,
-
         # Tools
         "tool_plan_result": None,
         "tool_errors": [],
-
         # Validation (self-correction)
         "validation_errors": [],
         "retry_count": 0,
         "max_retries": 3,
         "last_error": None,
-
         # Payment (human-in-the-loop)
         "awaiting_human_approval": False,
         "approval_type": None,
         "approval_data": None,
         "human_approved": None,
-
         # Time travel
         "checkpoint_id": None,
         "parent_checkpoint_id": None,

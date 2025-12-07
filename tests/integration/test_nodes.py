@@ -194,16 +194,14 @@ async def test_intent_node_with_photo():
 )
 async def test_vision_node_deps_have_image_url():
     """Test that vision node correctly passes image_url to deps."""
-    from unittest.mock import patch
-
-    from src.agents.langgraph.nodes.vision import vision_node
+    from unittest.mock import AsyncMock, patch
 
     state = create_vision_state()
 
     # Mock run_vision to capture deps
     captured_deps: AgentDeps | None = None
 
-    async def mock_run_vision(message, deps, message_history):
+    async def mock_run_vision(message, deps):
         nonlocal captured_deps
         captured_deps = deps
         # Return minimal valid response
@@ -214,8 +212,13 @@ async def test_vision_node_deps_have_image_url():
             needs_clarification=False,
         )
 
-    with patch("src.agents.langgraph.nodes.vision.run_vision", mock_run_vision):
-        output = await vision_node(state)
+    # Patch at the module level BEFORE importing vision_node
+    with patch("src.agents.pydantic.vision_agent.run_vision", new=mock_run_vision):
+        # Import inside patch context to ensure mock is used
+        import importlib
+        import src.agents.langgraph.nodes.vision as vision_module
+        importlib.reload(vision_module)
+        output = await vision_module.vision_node(state)
 
     # CRITICAL CHECK: Did image_url reach deps?
     assert captured_deps is not None, "run_vision was not called"

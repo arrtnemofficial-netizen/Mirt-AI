@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from typing import Any
 
 from src.agents import ConversationState
+from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
 from src.services.session_store import SessionStore, _serialize_for_json
 from src.services.supabase_client import get_supabase_client
+
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,11 @@ logger = logging.getLogger(__name__)
 class SupabaseSessionStore:
     """Session storage using Supabase table 'mirt_sessions'."""
 
-    def __init__(self, table_name: str = "mirt_sessions") -> None:
+    def __init__(self, table_name: str | None = None) -> None:
+        if table_name is None:
+            table_name = settings.SUPABASE_TABLE or "mirt_sessions"
         self.table_name = table_name
+        logger.info("SupabaseSessionStore initialized with table '%s'", self.table_name)
 
     def get(self, session_id: str) -> ConversationState:
         """Return stored state or a fresh empty state."""
@@ -63,9 +67,7 @@ class SupabaseSessionStore:
                 # 'updated_at' is usually handled by DB default/trigger, but we can explicit if needed
             }
 
-            client.table(self.table_name).upsert(
-                data, on_conflict="session_id"
-            ).execute()
+            client.table(self.table_name).upsert(data, on_conflict="session_id").execute()
 
         except Exception as e:
             logger.error(f"Failed to save session {session_id}: {e}")

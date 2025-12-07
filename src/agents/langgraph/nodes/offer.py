@@ -51,6 +51,7 @@ async def offer_node(
 
     # Get user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
+
     user_message = extract_user_message(state.get("messages", []))
 
     if not user_message:
@@ -94,15 +95,21 @@ async def offer_node(
         track_metric("offer_node_latency_ms", latency_ms)
 
         # Keep assistant messages as separate bubbles (do not join)
-        assistant_messages = [{"role": "assistant", "content": m.content} for m in response.messages]
+        assistant_messages = [
+            {"role": "assistant", "content": m.content} for m in response.messages
+        ]
         if not assistant_messages:
             assistant_messages = [{"role": "assistant", "content": ""}]
+
+        # Update selected_products if agent returned new products
+        if response.products:
+            selected_products = [p.model_dump() for p in response.products]
 
         return {
             "current_state": State.STATE_4_OFFER.value,
             "messages": assistant_messages,
             "metadata": response.metadata.model_dump(),
-            "products": [p.model_dump() for p in response.products],
+            "selected_products": selected_products,  # Use selected_products, not "products"
             "offered_products": offered_products,
             "agent_response": response.model_dump(),
             "step_number": state.get("step_number", 0) + 1,

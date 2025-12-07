@@ -240,7 +240,7 @@ def _send_telegram_followup(chat_id: str, text: str) -> None:
 
 def _send_manychat_followup(subscriber_id: str, text: str) -> None:
     """Send follow-up message via ManyChat API.
-    
+
     Uses the existing ManyChatClient to send messages.
     """
     from src.integrations.manychat.api_client import get_manychat_client

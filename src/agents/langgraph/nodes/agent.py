@@ -58,6 +58,7 @@ async def agent_node(
 
     # Get user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
+
     user_message = extract_user_message(state.get("messages", []))
 
     if not user_message:
@@ -148,7 +149,11 @@ async def agent_node(
             status="SUCCESS",
             state_name=new_state_str,
             prompt_key=f"state.{new_state_str}",  # Approximate key
-            input_snapshot={"message": user_message.content if hasattr(user_message, "content") else str(user_message)},
+            input_snapshot={
+                "message": user_message.content
+                if hasattr(user_message, "content")
+                else str(user_message)
+            },
             output_snapshot=assistant_content,
             latency_ms=latency_ms,
         )

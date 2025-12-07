@@ -173,7 +173,9 @@ def _validate_products(products: list[dict[str, Any]]) -> list[str]:
     for i, p in enumerate(products):
         price = p.get("price", 0)
         if price and (price < MIN_PRICE or price > MAX_PRICE):
-            errors.append(f"Product {i}: price {price} outside valid range ({MIN_PRICE}-{MAX_PRICE})")
+            errors.append(
+                f"Product {i}: price {price} outside valid range ({MIN_PRICE}-{MAX_PRICE})"
+            )
 
         # Check photo URL
         photo_url = p.get("photo_url") or p.get("image_url")

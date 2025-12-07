@@ -79,6 +79,7 @@ async def _prepare_payment_and_interrupt(
 
     # Get user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
+
     user_message = extract_user_message(state.get("messages", []))
     if not user_message:
         user_message = "Хочу оформити замовлення"
@@ -189,15 +190,17 @@ async def _handle_approval_response(
             products = state.get("selected_products", [])
             order_items = []
             for p in products:
-                order_items.append({
-                    "product_id": p.get("id"), # Assuming ID is present
-                    "name": p.get("name"),
-                    "price": p.get("price"),
-                    "size": p.get("size"), # Might be missing if not selected yet?
-                    # Actually at payment stage size MUST be selected.
-                    "color": p.get("color"),
-                    "quantity": 1
-                })
+                order_items.append(
+                    {
+                        "product_id": p.get("id"),  # Assuming ID is present
+                        "name": p.get("name"),
+                        "price": p.get("price"),
+                        "size": p.get("size"),  # Might be missing if not selected yet?
+                        # Actually at payment stage size MUST be selected.
+                        "color": p.get("color"),
+                        "quantity": 1,
+                    }
+                )
 
             order_data = {
                 "external_id": session_id,
@@ -209,12 +212,10 @@ async def _handle_approval_response(
                     "delivery_address": deps.customer_nova_poshta,
                 },
                 "items": order_items,
-                "totals": {
-                    "total": approval_data.get("total_price", 0)
-                },
+                "totals": {"total": approval_data.get("total_price", 0)},
                 "status": "new",
                 "delivery_method": "nova_poshta",
-                "notes": "Created via Mirt-AI Agent"
+                "notes": "Created via Mirt-AI Agent",
             }
 
             order_id = await deps.db.create_order(order_data)

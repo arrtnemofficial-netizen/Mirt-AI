@@ -48,24 +48,23 @@ class ProductMatch(BaseModel):
     """
     Product from CATALOG.
 
-    BLOCK 10 validation_rules:
-    - products[i].id MUST exist in CATALOG
-    - products[i].price MUST be > 0 AND from CATALOG
-    - products[i].photo_url MUST start with 'https://' AND from CATALOG
-    - products[i].size MUST be in CATALOG.sizes
+    Relaxed validation for Vision agent - only name is required.
+    Price/color can be filled later from DB lookup.
     """
 
-    id: int = Field(description="Product ID з CATALOG (обов'язково існує в каталозі)")
+    id: int = Field(default=0, description="Product ID (0 if unknown, will lookup by name)")
     name: str = Field(description="Назва товару точно як в CATALOG")
-    price: float = Field(gt=0, description="Ціна в грн (ТІЛЬКИ з CATALOG!)")
-    size: str = Field(description="Розмір з CATALOG.sizes")
-    color: str = Field(description="Колір з CATALOG.colors")
-    photo_url: str = Field(description="URL фото з CATALOG (https://cdn.sitniks.com/...)")
+    price: float = Field(
+        default=0.0, ge=0, description="Ціна в грн (0 = варіативна, дізнатись з DB)"
+    )
+    size: str | None = Field(default=None, description="Розмір (якщо клієнт вказав)")
+    color: str = Field(default="", description="Колір (може бути порожнім)")
+    photo_url: str = Field(default="", description="URL фото з CATALOG (може бути порожнім)")
 
     @field_validator("photo_url")
     @classmethod
     def validate_photo_url(cls, v: str) -> str:
-        if not v.startswith("https://"):
+        if v and not v.startswith("https://"):
             raise ValueError("photo_url MUST start with 'https://'")
         return v
 
@@ -81,6 +80,7 @@ class MessageItem(BaseModel):
 
     BLOCK 10: messages[].type = "text", content = "string (plain text, NO markdown)"
     """
+
     type: Literal["text"] = "text"
     content: str = Field(
         max_length=900,
@@ -103,6 +103,7 @@ class ResponseMetadata(BaseModel):
     - intent: MUST be valid INTENT_LABEL
     - escalation_level: NONE/L1/L2
     """
+
     session_id: str = Field(default="", description="Copy from input as-is. NEVER generate!")
     current_state: StateType = Field(default="STATE_0_INIT")
     intent: IntentType = Field(default="UNKNOWN_OR_EMPTY")
@@ -116,6 +117,7 @@ class ResponseMetadata(BaseModel):
 
 class EscalationInfo(BaseModel):
     """Escalation details when event='escalation'."""
+
     reason: str = Field(description="Причина ескалації")
     target: str = Field(default="human_operator")
 
@@ -133,6 +135,7 @@ class CustomerDataExtracted(BaseModel):
     - Зібрати ПІБ, телефон, місто та відділення/адресу
     - Зафіксувати спосіб оплати
     """
+
     name: str | None = Field(default=None, description="ПІБ отримувача")
     phone: str | None = Field(default=None, description="Номер телефону")
     city: str | None = Field(default=None, description="Місто доставки")

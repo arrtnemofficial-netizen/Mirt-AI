@@ -11,6 +11,7 @@ from typing import Any
 
 from src.services.supabase_client import get_supabase_client
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,10 +26,10 @@ class OrderService:
     async def create_order(self, order_data: dict[str, Any]) -> str | None:
         """
         Create a new order in the database.
-        
+
         Args:
             order_data: Dict containing order details (from Order model)
-            
+
         Returns:
             Created order ID (str) or None if failed
         """
@@ -40,7 +41,7 @@ class OrderService:
             # 1. Prepare Order Payload
             customer = order_data.get("customer", {})
             totals = order_data.get("totals", {})
-            
+
             order_payload = {
                 "user_id": order_data.get("source_id") or "unknown",
                 "session_id": order_data.get("external_id"),
@@ -55,36 +56,34 @@ class OrderService:
             }
 
             # 2. Insert Order
-            response = (
-                self.client.table("orders")
-                .insert(order_payload)
-                .execute()
-            )
-            
+            response = self.client.table("orders").insert(order_payload).execute()
+
             if not response.data:
                 logger.error("Failed to insert order, no data returned")
                 return None
-                
+
             new_order = response.data[0]
             order_id = new_order["id"]
-            
+
             # 3. Insert Order Items
             items = order_data.get("items", [])
             if items:
                 items_payload = []
                 for item in items:
-                    items_payload.append({
-                        "order_id": order_id,
-                        "product_id": item.get("product_id"),
-                        "product_name": item.get("name"),
-                        "quantity": item.get("quantity", 1),
-                        "price_at_purchase": item.get("price", 0),
-                        "selected_size": item.get("size"),
-                        "selected_color": item.get("color"),
-                    })
-                
+                    items_payload.append(
+                        {
+                            "order_id": order_id,
+                            "product_id": item.get("product_id"),
+                            "product_name": item.get("name"),
+                            "quantity": item.get("quantity", 1),
+                            "price_at_purchase": item.get("price", 0),
+                            "selected_size": item.get("size"),
+                            "selected_color": item.get("color"),
+                        }
+                    )
+
                 self.client.table("order_items").insert(items_payload).execute()
-                
+
             logger.info("Order created successfully: ID %s", order_id)
             return str(order_id)
 

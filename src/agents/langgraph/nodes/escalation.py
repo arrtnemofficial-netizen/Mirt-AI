@@ -43,10 +43,14 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     # Build escalation response
     response = AgentResponse(
         event="escalation",
-        messages=[Message(content=(
-            "Вибачте, я передаю ваш запит колезі для перевірки. "
-            "Менеджер зв'яжеться з вами найближчим часом 🤍"
-        ))],
+        messages=[
+            Message(
+                content=(
+                    "Вибачте, я передаю ваш запит колезі для перевірки. "
+                    "Менеджер зв'яжеться з вами найближчим часом 🤍"
+                )
+            )
+        ],
         products=[],
         metadata=Metadata(
             session_id=session_id,
@@ -71,10 +75,14 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
         escalation_level="L1",
         extra={"reason": reason},
     )
-    track_metric("escalation_triggered", 1, {
-        "session_id": session_id,
-        "reason": reason[:50] if reason else "unknown",
-    })
+    track_metric(
+        "escalation_triggered",
+        1,
+        {
+            "session_id": session_id,
+            "reason": reason[:50] if reason else "unknown",
+        },
+    )
 
     logger.warning("Escalation for session %s: %s", session_id, reason)
 
@@ -83,6 +91,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     # =========================================================================
     try:
         from src.services.notification_service import NotificationService
+
         notifier = NotificationService()
 
         # Get last user message for context

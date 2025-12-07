@@ -56,3 +56,20 @@ pytest tests/unit/test_prompt_basics.py
 # Test the Business Logic (Compliance)
 pytest tests/unit/test_prompt_compliance.py
 ```
+
+---
+
+## 5. Vision & Catalog Tests
+
+Коли змінюєш **master-каталог** (`data/vision/products_master.yaml`) або логіку Vision/каталогу, проганяй ці тести:
+
+```bash
+pytest \
+  tests/test_vision_health.py \
+  tests/test_product_matcher.py \
+  tests/test_vision_contract.py -v
+```
+
+- `tests/test_vision_health.py` — перевіряє цілісність `data/vision/generated/test_set.json` і `canonical_names.json`.
+- `tests/test_product_matcher.py` — нормалізація назв/кольорів, парсинг відповіді Vision.
+- `tests/test_vision_contract.py` — контракт `VisionResponse` + критичні правила розрізнення (Лагуна vs Мрія, Ритм vs Каприз, Мерея, тренчі).

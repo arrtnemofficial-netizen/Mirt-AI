@@ -28,7 +28,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
@@ -50,11 +50,11 @@ logger = logging.getLogger(__name__)
 # MODEL SETUP (Lazy initialization)
 # =============================================================================
 
-_model: OpenAIModel | None = None
+_model: OpenAIChatModel | None = None
 _agent: Agent[AgentDeps, SupportResponse] | None = None
 
 
-def _get_model() -> OpenAIModel:
+def _get_model() -> OpenAIChatModel:
     """Get or create OpenAI model (lazy initialization)."""
     global _model
     if _model is None:
@@ -65,30 +65,33 @@ def _get_model() -> OpenAIModel:
         else:
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
             base_url = settings.OPENROUTER_BASE_URL
-            model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+            model_name = (
+                settings.LLM_MODEL_GROK
+                if settings.LLM_PROVIDER == "openrouter"
+                else settings.AI_MODEL
+            )
 
         if not api_key:
             # Fallback or error
             logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
             # Try OpenRouter as fallback if OpenAI missing
             if settings.LLM_PROVIDER == "openai":
-                 api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-                 base_url = settings.OPENROUTER_BASE_URL
-                 model_name = settings.AI_MODEL
+                api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+                base_url = settings.OPENROUTER_BASE_URL
+                model_name = settings.AI_MODEL
 
         client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key,
         )
         provider = OpenAIProvider(openai_client=client)
-        _model = OpenAIModel(model_name, provider=provider)
+        _model = OpenAIChatModel(model_name, provider=provider)
     return _model
 
 
 def _get_base_prompt() -> str:
     """Get system prompt (lazy load)."""
     return registry.get("system.main").content
-
 
 
 # =============================================================================
@@ -141,11 +144,11 @@ async def _add_state_instructions(ctx: RunContext[AgentDeps]) -> str:
     try:
         # Load state prompt from registry (e.g., state.STATE_0_INIT)
         prompt = registry.get(f"state.{state}")
+        logger.info("📋 Loaded state prompt for %s (%d chars)", state, len(prompt.content))
         return f"\n--- ІНСТРУКЦІЯ ДЛЯ СТАНУ ({state}) ---\n{prompt.content}"
-    except (FileNotFoundError, ValueError):
-        logger.warning(f"No prompt found for state: {state}")
+    except (FileNotFoundError, ValueError) as e:
+        logger.warning("No prompt found for state: %s (%s)", state, e)
         return ""
-
 
 
 # =============================================================================
@@ -401,7 +404,9 @@ async def run_support(
         logger.exception("Support agent error: %s", e)
         return SupportResponse(
             event="escalation",
-            messages=[MessageItem(content="Вибачте, сталася помилка. Менеджер зв'яжеться з вами 🤍")],
+            messages=[
+                MessageItem(content="Вибачте, сталася помилка. Менеджер зв'яжеться з вами 🤍")
+            ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
                 current_state=deps.current_state or "STATE_0_INIT",

@@ -49,9 +49,16 @@ def route_after_intent(state: dict[str, Any]) -> IntentRoute:
     intent = state.get("detected_intent", "DISCOVERY_OR_QUESTION")
     current_state = state.get("current_state", State.STATE_0_INIT.value)
 
-    logger.debug("Routing after intent: %s (state=%s)", intent, current_state)
-
-    return _resolve_intent_route(intent, current_state, state)
+    route = _resolve_intent_route(intent, current_state, state)
+    session_id = state.get("session_id", state.get("metadata", {}).get("session_id", "?"))
+    logger.info(
+        "🚦 [SESSION %s] ROUTING: intent=%s, current_state=%s -> next=%s",
+        session_id,
+        intent,
+        current_state,
+        route,
+    )
+    return route
 
 
 def _resolve_intent_route(

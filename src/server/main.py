@@ -157,6 +157,7 @@ async def health() -> dict[str, Any]:
     # LLM Provider health (circuit breaker status)
     try:
         from src.services.llm_fallback import get_llm_service
+
         llm_service = get_llm_service()
         llm_health = llm_service.get_health_status()
         checks["llm"] = {

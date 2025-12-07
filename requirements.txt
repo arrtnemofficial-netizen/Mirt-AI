@@ -1,7 +1,7 @@
 # --- Core Application ---
 pydantic-ai>=0.0.50
 langgraph>=0.2.0
-openai>=1.50.0
+openai>=2.9.0
 pydantic>=2.10.0
 pydantic-settings>=2.5.0
 
@@ -12,7 +12,7 @@ httpx>=0.27.0
 aiogram>=3.17.0
 
 # --- Database & External Services ---
-supabase>=2.5.0
+supabase>=2.25.0
 langgraph-checkpoint-postgres>=2.0.0
 psycopg[binary,pool]>=3.1.0
 
