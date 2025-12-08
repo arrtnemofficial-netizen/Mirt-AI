@@ -3,11 +3,12 @@ Agent Node - Main LLM processing.
 =================================
 General-purpose agent for discovery, size/color questions.
 
-Uses PydanticAI agents with:
-- deps_type for proper dependency injection
-- output_type for structured output (no manual parsing!)
-- @agent.system_prompt for dynamic context
-- @agent.tool for tools with DI
+QUALITY IMPLEMENTATION:
+- Детальні промпти для кожного стейту
+- Правильна логіка переходів
+- Sub-phases для payment
+- Intent-based routing
+- Multi-bubble responses
 """
 
 from __future__ import annotations
@@ -21,6 +22,14 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, log_trace, track_metric
+
+# State prompts and transition logic
+from ..state_prompts import (
+    detect_simple_intent,
+    determine_next_dialog_phase,
+    get_payment_sub_phase,
+    get_state_prompt,
+)
 
 
 if TYPE_CHECKING:
@@ -68,6 +77,28 @@ async def agent_node(
 
     # Create deps from state (proper DI!)
     deps = create_deps_from_state(state)
+
+    # =========================================================================
+    # QUALITY: Inject state-specific prompt
+    # =========================================================================
+    # Додаємо детальні інструкції для поточного стейту
+    dialog_phase = state.get("dialog_phase", "INIT")
+    state_prompt = get_state_prompt(current_state)
+    
+    # Для payment додаємо sub-phase prompt
+    if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
+        payment_sub = get_payment_sub_phase(state)
+        state_prompt = get_state_prompt(current_state, payment_sub)
+        logger.info(
+            "💰 [SESSION %s] Payment sub-phase: %s",
+            session_id,
+            payment_sub,
+        )
+
+    # Inject state prompt into deps for LLM context
+    if state_prompt:
+        deps.state_specific_prompt = state_prompt
+        logger.debug("Injected state prompt for %s (%d chars)", current_state, len(state_prompt))
 
     try:
         # Call PydanticAI agent with proper DI
@@ -168,9 +199,33 @@ async def agent_node(
             if response.customer_data.nova_poshta:
                 metadata_update["customer_nova_poshta"] = response.customer_data.nova_poshta
 
+        # =====================================================
+        # DIALOG PHASE (Turn-Based State Machine)
+        # =====================================================
+        # QUALITY: Повна логіка переходів з state_prompts
+        # - Враховує intent, products, size, color
+        # - Для payment враховує sub-phases
+        # =====================================================
+        dialog_phase = _determine_dialog_phase(
+            current_state=new_state_str,
+            event=response.event,
+            selected_products=selected_products,
+            metadata=response.metadata,
+            state=state,  # Передаємо state для payment sub-phase detection
+        )
+
+        logger.info(
+            "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s)",
+            session_id,
+            state.get("dialog_phase", "INIT"),
+            dialog_phase,
+            new_state_str,
+        )
+
         return {
             "current_state": new_state_str,
             "detected_intent": intent,
+            "dialog_phase": dialog_phase,
             "messages": [{"role": "assistant", "content": str(assistant_content)}],
             "metadata": metadata_update,
             "selected_products": selected_products,
@@ -201,6 +256,63 @@ async def agent_node(
             "retry_count": state.get("retry_count", 0) + 1,
             "step_number": state.get("step_number", 0) + 1,
         }
+
+
+def _determine_dialog_phase(
+    current_state: str,
+    event: str,
+    selected_products: list,
+    metadata: Any,
+    state: dict[str, Any] | None = None,
+) -> str:
+    """
+    Determine dialog_phase from LLM response for Turn-Based routing.
+
+    QUALITY IMPLEMENTATION:
+    - Використовує determine_next_dialog_phase з state_prompts
+    - Перевіряє sub-phases для payment
+    - Враховує наявність товарів, розміру, кольору
+    """
+    # Escalation завжди завершує діалог
+    if event == "escalation":
+        return "COMPLETED"
+
+    # Отримуємо дані для визначення фази
+    has_products = bool(selected_products)
+    
+    # Перевіряємо чи є розмір і колір
+    has_size = False
+    has_color = False
+    if selected_products:
+        first_product = selected_products[0]
+        has_size = bool(first_product.get("size"))
+        has_color = bool(first_product.get("color"))
+
+    # Отримуємо intent
+    intent = ""
+    if hasattr(metadata, "intent"):
+        intent = metadata.intent
+    elif isinstance(metadata, dict):
+        intent = metadata.get("intent", "")
+
+    # Перевіряємо user_confirmed (чи клієнт сказав "беру")
+    user_confirmed = event in ("simple_answer",) and intent == "PAYMENT_DELIVERY"
+
+    # Для STATE_5 перевіряємо sub-phase
+    payment_sub_phase = None
+    if current_state == State.STATE_5_PAYMENT_DELIVERY.value and state:
+        payment_sub_phase = get_payment_sub_phase(state)
+
+    # Використовуємо повну логіку переходів
+    return determine_next_dialog_phase(
+        current_state=current_state,
+        intent=intent,
+        has_products=has_products,
+        has_size=has_size,
+        has_color=has_color,
+        user_confirmed=user_confirmed,
+        payment_sub_phase=payment_sub_phase,
+    )
 
 
 def _get_instructions_for_intent(intent: str, state: dict[str, Any]) -> str:

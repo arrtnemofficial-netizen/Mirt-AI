@@ -138,13 +138,29 @@ async def _add_image_context(ctx: RunContext[AgentDeps]) -> str:
 
 
 async def _add_state_instructions(ctx: RunContext[AgentDeps]) -> str:
-    """Add state-specific behavioral instructions."""
-    state = ctx.deps.current_state
+    """
+    Add state-specific behavioral instructions.
 
+    QUALITY: Пріоритет промптів:
+    1. state_specific_prompt з deps (injected by agent_node)
+    2. Промпт з registry (state.STATE_X_Y)
+    """
+    deps = ctx.deps
+    state = deps.current_state
+
+    # QUALITY: Prefer injected state_specific_prompt (from state_prompts.py)
+    if deps.state_specific_prompt:
+        logger.info(
+            "📋 Using injected state prompt for %s (%d chars)",
+            state,
+            len(deps.state_specific_prompt),
+        )
+        return f"\n--- ІНСТРУКЦІЯ ДЛЯ СТАНУ ({state}) ---\n{deps.state_specific_prompt}"
+
+    # Fallback to registry
     try:
-        # Load state prompt from registry (e.g., state.STATE_0_INIT)
         prompt = registry.get(f"state.{state}")
-        logger.info("📋 Loaded state prompt for %s (%d chars)", state, len(prompt.content))
+        logger.info("📋 Loaded state prompt from registry for %s (%d chars)", state, len(prompt.content))
         return f"\n--- ІНСТРУКЦІЯ ДЛЯ СТАНУ ({state}) ---\n{prompt.content}"
     except (FileNotFoundError, ValueError) as e:
         logger.warning("No prompt found for state: %s (%s)", state, e)

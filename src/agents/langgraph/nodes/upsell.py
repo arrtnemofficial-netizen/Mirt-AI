@@ -85,11 +85,20 @@ async def upsell_node(
         # Build assistant message from response
         assistant_content = "\n".join(m.content for m in response.messages)
 
+        # =====================================================
+        # DIALOG PHASE (Turn-Based State Machine)
+        # =====================================================
+        # STATE_6_UPSELL → STATE_7_END
+        #
+        # Після upsell встановлюємо COMPLETED
+        # - Діалог завершено, подяка за замовлення
+        # =====================================================
         return {
-            "current_state": State.STATE_6_UPSELL.value,
+            "current_state": State.STATE_7_END.value,
             "messages": [{"role": "assistant", "content": assistant_content}],
             "metadata": response.metadata.model_dump(),
             "agent_response": response.model_dump(),
+            "dialog_phase": "COMPLETED",
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
         }
@@ -100,5 +109,6 @@ async def upsell_node(
         # Non-critical - just skip upsell on error
         return {
             "current_state": State.STATE_7_END.value,
+            "dialog_phase": "COMPLETED",
             "step_number": state.get("step_number", 0) + 1,
         }

@@ -105,13 +105,23 @@ async def offer_node(
         if response.products:
             selected_products = [p.model_dump() for p in response.products]
 
+        # =====================================================
+        # DIALOG PHASE (Turn-Based State Machine)
+        # =====================================================
+        # STATE_4_OFFER: Пропозиція зроблена
+        #
+        # Наступна фаза: OFFER_MADE
+        # - Чекаємо "Беру" або відмову
+        # - Наступне повідомлення юзера йде в payment_node
+        # =====================================================
         return {
             "current_state": State.STATE_4_OFFER.value,
             "messages": assistant_messages,
             "metadata": response.metadata.model_dump(),
-            "selected_products": selected_products,  # Use selected_products, not "products"
+            "selected_products": selected_products,
             "offered_products": offered_products,
             "agent_response": response.model_dump(),
+            "dialog_phase": "OFFER_MADE",
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
         }

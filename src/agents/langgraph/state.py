@@ -60,6 +60,31 @@ class ConversationState(TypedDict, total=False):
     current_state: str  # FSM state (STATE_0_INIT, etc.)
     metadata: Annotated[dict[str, Any], merge_dict]
 
+    # ==========================================================================
+    # DIALOG PHASE (Turn-Based State Machine)
+    # ==========================================================================
+    # This is the KEY field for turn-based conversation!
+    # Master router checks this to know where to continue the dialog.
+    #
+    # ПОВНИЙ СПИСОК ФАЗ (відповідає n8n state machine):
+    #
+    #   INIT                      - STATE_0: Новий діалог, потрібен intent detection
+    #   DISCOVERY                 - STATE_1: Збір контексту (зріст, тип речі, подія)
+    #   VISION_DONE               - STATE_2: Vision впізнав товар, чекаємо уточнення
+    #   WAITING_FOR_SIZE          - STATE_3: Потрібен розмір (зріст дитини)
+    #   WAITING_FOR_COLOR         - STATE_3: Потрібен вибір кольору
+    #   SIZE_COLOR_DONE           - STATE_3→4: Є розмір і колір, готові до offer
+    #   OFFER_MADE                - STATE_4: Пропозиція зроблена, чекаємо "Беру"
+    #   WAITING_FOR_DELIVERY_DATA - STATE_5: Чекаємо ПІБ, телефон, НП
+    #   WAITING_FOR_PAYMENT_METHOD- STATE_5: Чекаємо вибір способу оплати
+    #   WAITING_FOR_PAYMENT_PROOF - STATE_5: Чекаємо скрін оплати
+    #   UPSELL_OFFERED            - STATE_6: Запропонували допродаж
+    #   COMPLETED                 - STATE_7: Діалог завершено
+    #   COMPLAINT                 - STATE_8: Скарга, ескалація
+    #   OUT_OF_DOMAIN             - STATE_9: Поза доменом
+    # ==========================================================================
+    dialog_phase: str
+
     # Session identification
     session_id: str
     trace_id: str  # UUID for the current interaction chain
@@ -137,6 +162,8 @@ def create_initial_state(
             "language": "uk",
             **(metadata or {}),
         },
+        # Dialog Phase (Turn-Based State Machine)
+        "dialog_phase": "INIT",
         # Session
         "session_id": session_id,
         "trace_id": kwargs.get("trace_id"),  # Should be generated at entry point
@@ -187,6 +214,7 @@ def get_state_snapshot(state: ConversationState) -> dict[str, Any]:
     return {
         "session_id": state.get("session_id"),
         "current_state": state.get("current_state"),
+        "dialog_phase": state.get("dialog_phase"),  # Turn-Based State Machine
         "detected_intent": state.get("detected_intent"),
         "has_image": state.get("has_image"),
         "products_count": len(state.get("selected_products", [])),

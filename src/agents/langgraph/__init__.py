@@ -21,8 +21,8 @@ from .checkpointer import (
 from .edges import (
     route_after_intent,
     route_after_validation,
-    should_retry,
 )
+from .nodes.validation import should_retry
 from .graph import (
     build_production_graph,
     get_production_graph,

@@ -93,6 +93,10 @@ class AgentDeps:
     # Environment
     env: str = "production"
 
+    # State-specific prompt (injected by agent_node for Turn-Based routing)
+    # Contains detailed instructions for current state (e.g., STATE_4_OFFER prompt)
+    state_specific_prompt: str | None = None
+
     def get_customer_data_summary(self) -> str:
         """Get summary of collected customer data for prompts."""
         data = []

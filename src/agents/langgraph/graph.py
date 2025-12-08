@@ -25,8 +25,10 @@ from .checkpointer import get_checkpointer
 from .edges import (
     get_agent_routes,
     get_intent_routes,
+    get_master_routes,
     get_moderation_routes,
     get_validation_routes,
+    master_router,
     route_after_agent,
     route_after_intent,
     route_after_moderation,
@@ -136,9 +138,29 @@ def build_production_graph(
     graph.add_node("end", _end)
 
     # =========================================================================
-    # ENTRY POINT
+    # ENTRY POINT (Master Router for Turn-Based Conversation)
     # =========================================================================
-    graph.add_edge(START, "moderation")
+    # Повна відповідність n8n state machine:
+    #
+    # dialog_phase          → node
+    # ─────────────────────────────────────
+    # INIT                  → moderation (повний pipeline)
+    # DISCOVERY             → agent (STATE_1)
+    # VISION_DONE           → agent (STATE_2→3)
+    # WAITING_FOR_SIZE      → agent (STATE_3)
+    # WAITING_FOR_COLOR     → agent (STATE_3)
+    # SIZE_COLOR_DONE       → offer (STATE_4)
+    # OFFER_MADE            → payment (STATE_5)
+    # WAITING_FOR_*         → payment (STATE_5)
+    # UPSELL_OFFERED        → upsell (STATE_6)
+    # COMPLETED             → end (STATE_7)
+    # COMPLAINT/OOD         → escalation (STATE_8/9)
+    # =========================================================================
+    graph.add_conditional_edges(
+        START,
+        master_router,
+        get_master_routes(),
+    )
 
     # =========================================================================
     # CONDITIONAL EDGES (Smart Routing)
@@ -177,15 +199,16 @@ def build_production_graph(
     # SIMPLE EDGES
     # =========================================================================
 
-    # Vision -> offer (photo found product)
+    # Vision -> end (return multi-bubble response to user after product identification)
     graph.add_conditional_edges(
         "vision",
         route_after_vision,
-        {"offer": "offer", "agent": "agent", "validation": "validation"},
+        {"offer": "offer", "agent": "agent", "validation": "validation", "end": "end"},
     )
 
-    # Offer -> validation (check before sending)
-    graph.add_edge("offer", "validation")
+    # Offer -> END (Turn-Based: wait for user confirmation)
+    # Next message will go through master_router → payment
+    graph.add_edge("offer", "end")
 
     # Payment uses Command for routing (handled internally)
     # But we need edges for the graph structure

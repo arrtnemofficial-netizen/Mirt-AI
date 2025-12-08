@@ -111,10 +111,19 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     except Exception as e:
         logger.error("Failed to send manager notification: %s", e)
 
+    # =====================================================
+    # DIALOG PHASE (Turn-Based State Machine)
+    # =====================================================
+    # STATE_8_COMPLAINT / STATE_9_OOD → ескалація
+    #
+    # Після ескалації встановлюємо COMPLETED
+    # - Діалог передано менеджеру
+    # =====================================================
     return {
         "current_state": State.STATE_8_COMPLAINT.value,
         "messages": [{"role": "assistant", "content": response.model_dump_json()}],
         "metadata": response.metadata.model_dump(),
+        "dialog_phase": "COMPLETED",
         "should_escalate": True,
         "escalation_reason": reason,
         "step_number": state.get("step_number", 0) + 1,

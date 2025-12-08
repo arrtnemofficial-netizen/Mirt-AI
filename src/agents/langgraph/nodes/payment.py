@@ -4,11 +4,10 @@ Payment Node - Human-in-the-loop for money.
 CRITICAL NODE. This is where money changes hands.
 MUST have human approval before processing.
 
-This is NOT optional. This is insurance against:
-- Hallucinated discounts
-- Fraudulent refunds
-- Accidental charges
-- Compliance violations
+QUALITY IMPLEMENTATION:
+- Sub-phases: REQUEST_DATA → CONFIRM_DATA → SHOW_PAYMENT → THANK_YOU
+- Детальні промпти для кожного кроку
+- Правильна логіка переходів
 """
 
 from __future__ import annotations
@@ -24,12 +23,43 @@ from src.agents.pydantic.payment_agent import run_payment
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
 
+# State prompts for sub-phases
+from ..state_prompts import get_payment_sub_phase, get_state_prompt
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# PAYMENT SUB-PHASE TEMPLATES (from n8n prompt)
+# =============================================================================
+
+PAYMENT_TEMPLATES = {
+    "REQUEST_DATA": """Щоб одразу зарезервувати для вас замовлення, напишіть, будь ласка:
+📍Місто та відділення Нової пошти
+📍ПІБ та номер телефону
+
+Як вам зручніше оплатити - повна оплата на рахунок ФОП (без додаткових комісій) чи передплата 200 грн, а решту при отриманні (але тоді Нова пошта додатково нараховує комісію за післяплату) 🤍""",
+
+    "CONFIRM_DATA": "Підтверджую дані замовлення: {product_name} - {color} - розмір {size} - {price} грн. Отримувач: {name}, телефон {phone}, місто {city}, НП {nova_poshta}. Перевірте, будь ласка, чи все вірно.",
+
+    "SHOW_PAYMENT": """Сума до сплати зараз: {amount} грн.
+
+Отримувач: ФОП Кутний Михайло Михайлович
+IBAN: UA653220010000026003340139893
+ІПН/ЄДРПОУ: 3278315599
+Призначення платежу: ОПЛАТА ЗА ТОВАР
+
+Надішліть, будь ласка, скрін квитанції після оплати, щоб ми одразу сформували ваше замовлення 🤍""",
+
+    "THANK_YOU": """Дякуємо за замовлення🥰
+
+Гарного вам дня та мирного неба 🕊""",
+}
 
 
 async def payment_node(
@@ -140,10 +170,14 @@ async def _prepare_payment_and_interrupt(
 
     # When we get here, human has responded
     # Update state and loop back to process the response
+    #
+    # DIALOG PHASE: WAITING_FOR_PAYMENT_PROOF
+    # - Показали реквізити, чекаємо скрін оплати
     return Command(
         update={
             "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
             "messages": [{"role": "assistant", "content": response_text}],
+            "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
             "awaiting_human_approval": True,
             "approval_type": "payment",
             "approval_data": approval_request,
@@ -186,17 +220,15 @@ async def _handle_approval_response(
             deps = create_deps_from_state(state)
 
             # Construct order payload
-            # Ensure products have necessary fields
             products = state.get("selected_products", [])
             order_items = []
             for p in products:
                 order_items.append(
                     {
-                        "product_id": p.get("id"),  # Assuming ID is present
+                        "product_id": p.get("id"),
                         "name": p.get("name"),
                         "price": p.get("price"),
-                        "size": p.get("size"),  # Might be missing if not selected yet?
-                        # Actually at payment stage size MUST be selected.
+                        "size": p.get("size"),
                         "color": p.get("color"),
                         "quantity": 1,
                     }
@@ -226,28 +258,33 @@ async def _handle_approval_response(
 
         except Exception as e:
             logger.exception("CRITICAL: Failed to save order to DB: %s", e)
-            # We don't stop the flow, but we log critical error
 
+        # DIALOG PHASE: UPSELL_OFFERED (STATE_6)
+        # - Оплата підтверджена, пропонуємо допродаж
         return Command(
             update={
                 "awaiting_human_approval": False,
                 "approval_type": None,
                 "current_state": State.STATE_6_UPSELL.value,
+                "dialog_phase": "UPSELL_OFFERED",
                 "step_number": state.get("step_number", 0) + 1,
             },
             goto="upsell",
         )
     else:
-        # Payment rejected - back to validation or end
+        # Payment rejected - back to offer
         logger.info("Payment REJECTED for session %s", session_id)
         track_metric("payment_rejected", 1, {"session_id": session_id})
 
+        # DIALOG PHASE: OFFER_MADE (повертаємо до STATE_4)
+        # - Юзер може спробувати ще раз
         return Command(
             update={
                 "awaiting_human_approval": False,
                 "approval_type": None,
                 "human_approved": None,
                 "current_state": State.STATE_4_OFFER.value,
+                "dialog_phase": "OFFER_MADE",
                 "step_number": state.get("step_number", 0) + 1,
             },
             goto="end",

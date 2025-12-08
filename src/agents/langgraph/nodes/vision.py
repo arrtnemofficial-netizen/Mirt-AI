@@ -93,44 +93,44 @@ def _build_vision_messages(
     """
     Build multi-bubble assistant response from VisionResponse.
 
-    Message order:
-    1. Greeting (if first message)
-    2. Main vision reply
-    3. Product highlight + photo
-    4. Clarification question (if needed)
+    Message order (if product found):
+    1. Greeting (if first message): "Вітаю 🎀 З вами Ольга. Дякую за фото!"
+    2. Product: "Це наш {name} у кольорі {color} 💛" (БЕЗ ціни!)
+    3. Photo: [product image]
+    4. Size question: "Який розмір потрібен?"
+
+    If product NOT found:
+    - Clarification question from LLM or fallback
     """
     messages: list[dict[str, str]] = []
 
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
-    # Не прив'язуємось до технічних службових повідомлень типу
-    # "Можемо почати спілкування!".
     if not vision_greeted:
         messages.append(text_msg("Вітаю 🎀 З вами Ольга. Дякую за фото!"))
 
-    # 2. Main vision response
-    if response.reply_to_user:
-        messages.append(text_msg(response.reply_to_user.strip()))
-
-    # 3. Product highlight
+    # 2. Product highlight (БЕЗ ціни - ціна залежить від розміру!)
+    # НЕ використовуємо reply_to_user від LLM — будуємо відповідь самі з точними даними з БД
     product = response.identified_product
     if product:
-        # Build product description
+        # Build product description without price
         parts = [f"Це наш {product.name}"]
         if product.color:
             parts.append(f"у кольорі {product.color}")
-        if product.price:
-            parts.append(f"— {product.price} грн")
-        messages.append(text_msg(" ".join(parts) + "."))
+        # НЕ додаємо ціну тут! Ціна залежить від розміру.
+        messages.append(text_msg(" ".join(parts) + " 💛"))
 
         # Add product photo
         if product.photo_url:
             messages.append(image_msg(product.photo_url))
 
-    # 4. Clarification
-    if response.clarification_question:
+        # ЗАВЖДИ питаємо розмір після ідентифікації товару
+        messages.append(text_msg("Який розмір потрібен? Підкажіть, будь ласка, зріст дитини 🤍"))
+
+    # 4. Clarification (тільки якщо НЕ впізнали товар)
+    elif response.clarification_question:
         messages.append(text_msg(response.clarification_question.strip()))
     elif response.needs_clarification:
-        messages.append(text_msg("Який розмір потрібен? Підкажіть, будь ласка, зріст дитини 🤍"))
+        messages.append(text_msg("Не можу точно визначити модель. Підкажіть, будь ласка, що це за товар? 🤍"))
 
     # 5. Fallback
     if not messages:
@@ -199,19 +199,9 @@ async def vision_node(
                 response.identified_product.color = enriched.get("color", "")
                 response.identified_product.id = enriched.get("id", 0)
 
-                # Побудувати канонічну відповіь з правильним кольором/ціною з БД,
-                # ігноруючи можливі галюцинації моделі у reply_to_user.
-                price_display = enriched.get("price_display")
-                name = response.identified_product.name
-                color = response.identified_product.color
-
-                if price_display:
-                    if color:
-                        response.reply_to_user = (
-                            f"За {name} у {color} кольорі ціна {price_display} 🤍"
-                        )
-                    else:
-                        response.reply_to_user = f"За {name} ціна {price_display} 🤍"
+                # НЕ генеруємо reply з ціною тут!
+                # Ціна залежить від розміру, тому питаємо розмір спочатку.
+                # _build_vision_messages() створює правильну відповідь.
 
         # Log response with clear visibility
         product_name = (
@@ -275,10 +265,36 @@ async def vision_node(
         )
         track_metric("vision_node_latency_ms", latency_ms)
 
+        # =====================================================
+        # DIALOG PHASE (Turn-Based State Machine)
+        # =====================================================
+        # Визначаємо наступну фазу на основі результату Vision:
+        #
+        # 1. Товар впізнано → WAITING_FOR_SIZE (STATE_3)
+        #    - Вже показали товар, питаємо зріст
+        #    - Наступне повідомлення юзера йде в agent
+        #
+        # 2. Товар НЕ впізнано → VISION_DONE
+        #    - Потрібно уточнення від юзера
+        #
+        # 3. needs_clarification → VISION_DONE
+        #    - Vision не впевнений, питає уточнення
+        # =====================================================
+        if selected_products:
+            next_phase = "WAITING_FOR_SIZE"
+            next_state = State.STATE_3_SIZE_COLOR.value
+        elif response.needs_clarification:
+            next_phase = "VISION_DONE"
+            next_state = State.STATE_2_VISION.value
+        else:
+            next_phase = "INIT"
+            next_state = State.STATE_0_INIT.value
+
         return {
-            "current_state": State.STATE_2_VISION.value,
+            "current_state": next_state,
             "messages": assistant_messages,
             "selected_products": selected_products,
+            "dialog_phase": next_phase,
             # ВАЖЛИВО: Скидаємо has_image після обробки!
             # Це запобігає повторному входу в vision при наступних текстових повідомленнях
             "has_image": False,

@@ -236,12 +236,74 @@ def _build_detection_rules_from_products(products: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _load_model_rules_yaml() -> str:
+    """Load model rules from generated YAML file."""
+    from pathlib import Path
+
+    import yaml
+
+    rules_path = Path(__file__).parent.parent.parent.parent / "data" / "vision" / "generated" / "model_rules.yaml"
+
+    try:
+        with open(rules_path, encoding="utf-8") as f:
+            rules = yaml.safe_load(f)
+
+        if not rules:
+            return ""
+
+        lines = []
+
+        # Add MODEL_RULES section
+        model_rules = rules.get("MODEL_RULES", {})
+        for name, data in model_rules.items():
+            lines.append(f"## {name}")
+            lines.append(f"- **Категорія**: {data.get('category', '?')}")
+            lines.append(f"- **Тканина**: {data.get('fabric_type', '?')}")
+            lines.append(f"- **Ціна**: {data.get('price', '?')} грн")
+
+            markers = data.get("visual_markers", [])
+            if markers:
+                lines.append("- **Візуальні ознаки**:")
+                for m in markers:
+                    lines.append(f"  - {m}")
+
+            identify = data.get("identify_by")
+            if identify:
+                lines.append(f"- **ГОЛОВНА ОЗНАКА**: {identify}")
+
+            confused = data.get("confused_with", [])
+            if confused:
+                lines.append(f"- **Не плутай з**: {', '.join(confused)}")
+                if data.get("how_to_distinguish"):
+                    lines.append(f"- **Як відрізнити**: {data['how_to_distinguish'].strip()}")
+                if data.get("critical_check"):
+                    lines.append(f"- **⚠️ КРИТИЧНА ПЕРЕВІРКА**: {data['critical_check'].strip()}")
+
+            colors = data.get("colors", [])
+            if colors:
+                lines.append(f"- **Кольори**: {', '.join(colors)}")
+
+            lines.append("")
+
+        # Add DECISION_TREE
+        decision_tree = rules.get("DECISION_TREE", "")
+        if decision_tree:
+            lines.append("# DECISION TREE")
+            lines.append(decision_tree)
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.warning("Failed to load model_rules.yaml: %s", e)
+        return ""
+
+
 def _load_vision_guide_from_json() -> str:
     """Fallback: Load from static JSON file."""
     import json
     from pathlib import Path
 
-    guide_path = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
+    guide_path = Path(__file__).parent.parent.parent.parent / "data" / "vision" / "generated" / "vision_guide.json"
 
     try:
         with open(guide_path, encoding="utf-8") as f:
@@ -284,11 +346,12 @@ def _get_base_vision_prompt() -> str:
         logger.error("Failed to load vision.main: %s", e)
         parts.append("# Vision Agent\nАналізуй фото та знаходь товари MIRT.")
 
-    # 2. Load model rules (static decision tree)
+    # 2. Load model rules from generated file (auto-updated from products_master.yaml)
     try:
-        model_rules = registry.get("vision.model_rules").content
-        parts.append("\n---\n# MODEL DATABASE\n")
-        parts.append(model_rules)
+        model_rules = _load_model_rules_yaml()
+        if model_rules:
+            parts.append("\n---\n# MODEL DATABASE\n")
+            parts.append(model_rules)
     except Exception as e:
         logger.warning("Model rules not loaded: %s", e)
 
@@ -387,7 +450,7 @@ def _load_recognition_tips_from_json() -> str:
     import json
     from pathlib import Path
 
-    guide_path = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
+    guide_path = Path(__file__).parent.parent.parent.parent / "data" / "vision" / "generated" / "vision_guide.json"
 
     try:
         with open(guide_path, encoding="utf-8") as f:
@@ -403,25 +466,53 @@ def _load_recognition_tips_from_json() -> str:
         for _sku, product_data in products.items():
             name = product_data.get("name", "Unknown")
             key_features = product_data.get("key_features", {})
-            tips = product_data.get("recognition_tips", [])
+            distinction = product_data.get("distinction", {})
+            recognition_by_angle = product_data.get("recognition_by_angle", {})
 
             lines.append(f"## {name}")
 
-            # Key distinguishing features
-            if key_features.get("top_style"):
-                lines.append(f"- **Верх**: {key_features['top_style']}")
-            if key_features.get("zip_detail"):
-                lines.append(f"- **Застібка**: {key_features['zip_detail']}")
-            if key_features.get("material"):
-                lines.append(f"- **Матеріал**: {key_features['material']}")
-            if key_features.get("bottom_style"):
-                lines.append(f"- **Штани**: {key_features['bottom_style']}")
+            # Fabric type (CRITICAL for plush vs cotton vs leather)
+            fabric = key_features.get("fabric")
+            if fabric:
+                lines.append(f"- **ТКАНИНА**: {fabric}")
 
-            # Recognition tips
-            if tips:
-                lines.append("- **ЯК РОЗПІЗНАТИ**:")
-                for tip in tips[:4]:
-                    lines.append(f"  - {tip}")
+            # Visual markers (CRITICAL)
+            markers = key_features.get("markers", [])
+            if markers:
+                lines.append("- **КЛЮЧОВІ ОЗНАКИ**:")
+                for marker in markers:
+                    lines.append(f"  - {marker}")
+
+            # Recognition by angle
+            if recognition_by_angle:
+                front = recognition_by_angle.get("front")
+                if front:
+                    lines.append(f"- **Вид спереду**: {front}")
+                detail = recognition_by_angle.get("detail")
+                if detail:
+                    lines.append(f"- **Деталь**: {detail}")
+
+            # Texture description
+            texture = product_data.get("texture_description")
+            if texture:
+                lines.append(f"- **Текстура**: {texture}")
+
+            # CRITICAL: Distinction from similar products
+            confused_with = distinction.get("confused_with", [])
+            if confused_with:
+                lines.append(f"- **⚠️ НЕ ПЛУТАЙ З**: {', '.join(confused_with)}")
+                how = distinction.get("how_to_distinguish")
+                if how:
+                    lines.append(f"- **ЯК ВІДРІЗНИТИ**: {how.strip()}")
+                critical = distinction.get("critical_check")
+                if critical:
+                    lines.append(f"- **🔍 КРИТИЧНА ПЕРЕВІРКА**: {critical.strip()}")
+
+            # Unique identifier
+            unique = distinction.get("unique_identifier")
+            if unique:
+                lines.append(f"- **УНІКАЛЬНА ОЗНАКА**: {unique}")
+
             lines.append("")
 
         # Add detection rules
