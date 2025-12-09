@@ -76,7 +76,19 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
         
         if product:
             price_display = CatalogService.format_price_display(product)
-            logger.info("📦 Enriched from DB: %s (color=%s) -> %s", product_name, color, price_display)
+            # Try multiple possible column names for photo URL
+            photo_url = (
+                product.get("photo_url") 
+                or product.get("image_url") 
+                or product.get("photo") 
+                or product.get("image")
+                or ""
+            )
+            logger.info(
+                "📦 Enriched from DB: %s (color=%s) -> %s, photo=%s",
+                product_name, color, price_display, 
+                photo_url[:50] if photo_url else "<no photo>"
+            )
             return {
                 "id": product.get("id", 0),
                 "name": product.get("name", product_name),
@@ -85,7 +97,7 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
                 "color": (product.get("colors") or [""])[0]
                 if isinstance(product.get("colors"), list)
                 else product.get("colors", ""),
-                "photo_url": product.get("photo_url", ""),
+                "photo_url": photo_url,
                 "description": product.get("description", ""),
             }
     except Exception as e:

@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from openai import AsyncOpenAI
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, ImageUrl, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -32,24 +32,36 @@ logger = logging.getLogger(__name__)
 
 
 def _build_model() -> OpenAIChatModel:
-    """Build OpenAI model."""
-    if settings.LLM_PROVIDER == "openai":
+    """Build OpenAI-compatible model for VISION (multimodal).
+    
+    IMPORTANT: Uses LLM_MODEL_VISION which MUST be a vision-capable model!
+    - OpenAI: gpt-5.1, gpt-4o, gpt-4-vision-preview
+    - OpenRouter: x-ai/grok-2-vision-1212, openai/gpt-4o
+    """
+    model_name = settings.LLM_MODEL_VISION  # MUST be vision-capable!
+    
+    # Detect if model is OpenAI native (gpt-*) or OpenRouter (provider/model)
+    is_openai_model = model_name.startswith("gpt-") or model_name.startswith("o1") or model_name.startswith("o3")
+    
+    if is_openai_model:
+        # Use OpenAI directly
         api_key = settings.OPENAI_API_KEY.get_secret_value()
         base_url = "https://api.openai.com/v1"
-        model_name = settings.LLM_MODEL_GPT
-    else:
-        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-        base_url = settings.OPENROUTER_BASE_URL
-        model_name = (
-            settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
-        )
-
-    if not api_key:
-        logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
-        if settings.LLM_PROVIDER == "openai":
+        if not api_key:
+            # Fallback to OpenRouter for OpenAI models
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
             base_url = settings.OPENROUTER_BASE_URL
-            model_name = settings.AI_MODEL
+            model_name = f"openai/{model_name}"  # OpenRouter format
+            logger.info("Vision using OpenRouter for %s (OPENAI_API_KEY missing)", model_name)
+    else:
+        # Use OpenRouter for other models (x-ai/*, anthropic/*, etc.)
+        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+        base_url = settings.OPENROUTER_BASE_URL
+
+    if not api_key:
+        logger.error("❌ No API key for vision model! Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
+
+    logger.info("👁️ Vision model: %s (via %s)", model_name, base_url[:30])
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)
@@ -635,17 +647,26 @@ async def run_vision(
 
     agent = get_vision_agent()
 
-    # Add image context to message
-    if deps.image_url and "[IMAGE_URL:" not in message:
-        message = f"{message}\n\n[IMAGE_URL: {deps.image_url}]"
-
-    logger.info(
-        "👁️ Vision agent starting: image_url=%s", deps.image_url[:50] if deps.image_url else "<none>"
-    )
+    # Build MULTIMODAL input: [text, ImageUrl]
+    # PydanticAI requires ImageUrl for vision models to actually SEE the image!
+    if deps.image_url:
+        # Multimodal input: list of content parts
+        user_input: list[str | ImageUrl] = [
+            message or "Аналізуй це фото та знайди товар MIRT.",
+            ImageUrl(url=deps.image_url),
+        ]
+        logger.info(
+            "👁️ Vision agent starting (MULTIMODAL): image_url=%s",
+            deps.image_url[:80] if deps.image_url else "<none>",
+        )
+    else:
+        # No image - just text (fallback)
+        user_input = [message]
+        logger.warning("👁️ Vision agent started WITHOUT image! deps.image_url is empty.")
 
     try:
         result = await asyncio.wait_for(
-            agent.run(message, deps=deps, message_history=message_history),
+            agent.run(user_input, deps=deps, message_history=message_history),
             timeout=120,  # Increased for slow API tiers
         )
         response = result.output  # output_type param, result.output attr

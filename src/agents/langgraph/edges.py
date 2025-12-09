@@ -153,10 +153,11 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
         logger.info("🔀 [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
         return "agent"
 
-    # STATE_5: Collecting delivery data
+    # STATE_5: Collecting delivery data → use AGENT to extract name/phone/city
+    # Payment node uses interrupt() for HITL which blocks - only use it after data is collected
     if dialog_phase == "WAITING_FOR_DELIVERY_DATA":
-        logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_DELIVERY_DATA)", session_id)
-        return "payment"
+        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_DELIVERY_DATA - collecting data)", session_id)
+        return "agent"
 
     # STATE_5: Waiting for payment method
     if dialog_phase == "WAITING_FOR_PAYMENT_METHOD":

@@ -41,6 +41,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# SIZE EXTRACTION HELPER
+# =============================================================================
+
+# Common Ukrainian size patterns
+_SIZE_PATTERNS = [
+    r"розмір\s*(\d{2,3}[-–]\d{2,3})",  # "розмір 146-152"
+    r"раджу\s*(\d{2,3}[-–]\d{2,3})",   # "раджу 146-152"
+    r"підійде\s*(\d{2,3}[-–]\d{2,3})", # "підійде 122-128"
+    r"(\d{2,3}[-–]\d{2,3})\s*см",      # "146-152 см"
+    r"розмір\s*(\d{2,3})",              # "розмір 140"
+]
+
+
+def _extract_size_from_response(messages: list) -> str | None:
+    """
+    Extract size from LLM response messages.
+    
+    Fallback when LLM forgets to include size in products[].
+    Looks for patterns like "раджу 146-152" or "розмір 122-128".
+    """
+    import re
+    
+    for msg in messages:
+        content = msg.content if hasattr(msg, "content") else str(msg)
+        
+        for pattern in _SIZE_PATTERNS:
+            # Use re.IGNORECASE for proper Unicode handling
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                size = match.group(1)
+                # Normalize dash
+                size = size.replace("–", "-")
+                logger.debug("Extracted size '%s' from: %s", size, content[:50])
+                return size
+    
+    return None
+
+
 async def agent_node(
     state: dict[str, Any],
     runner: Callable[..., Any] | None = None,
@@ -133,6 +172,32 @@ async def agent_node(
         if response.products:
             selected_products = [p.model_dump() for p in response.products]
             logger.info("Agent found products: %s", [p.name for p in response.products])
+        
+        # =====================================================================
+        # FALLBACK: Extract size from LLM response if not in products
+        # This prevents dead loop when LLM says "раджу 146-152" but forgets
+        # to include size in products[]
+        # =====================================================================
+        if selected_products and current_state == State.STATE_3_SIZE_COLOR.value:
+            first_product = selected_products[0]
+            if not first_product.get("size"):
+                # Try to extract size from response messages
+                extracted_size = _extract_size_from_response(response.messages)
+                if extracted_size:
+                    first_product["size"] = extracted_size
+                    logger.info(
+                        "🔧 [SESSION %s] Fallback: extracted size='%s' from LLM response",
+                        session_id,
+                        extracted_size,
+                    )
+            # Also check if color is known from vision but missing
+            if not first_product.get("color") and state.get("identified_color"):
+                first_product["color"] = state.get("identified_color")
+                logger.info(
+                    "🔧 [SESSION %s] Fallback: copied color='%s' from vision",
+                    session_id,
+                    first_product["color"],
+                )
 
         # Build assistant message (OUTPUT_CONTRACT format)
         assistant_content = {
@@ -287,6 +352,15 @@ def _determine_dialog_phase(
         first_product = selected_products[0]
         has_size = bool(first_product.get("size"))
         has_color = bool(first_product.get("color"))
+        
+        # FALLBACK: Color may be embedded in product name like "Сукня Анна (червона клітинка)"
+        # If color field is empty but name contains color in parentheses, treat as has_color=True
+        if not has_color:
+            product_name = first_product.get("name", "")
+            if "(" in product_name and ")" in product_name:
+                # Наявність варіанту в дужках означає що колір вже визначений
+                has_color = True
+                logger.debug("Color inferred from product name: %s", product_name)
 
     # Отримуємо intent
     intent = ""

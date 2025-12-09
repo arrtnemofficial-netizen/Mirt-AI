@@ -166,6 +166,10 @@ class Settings(BaseSettings):
         default="gemini-3-pro",
         description="Google Gemini model identifier",
     )
+    LLM_MODEL_VISION: str = Field(
+        default="gpt-5.1",
+        description="Vision-capable model for photo analysis (must support multimodal)",
+    )
     LLM_REASONING_EFFORT: str = Field(
         default="medium",
         description="Reasoning effort for reasoning models (none, low, medium, high). Medium recommended for vision.",

@@ -74,13 +74,22 @@ class ManychatWebhook:
 
     async def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Process a ManyChat webhook body and produce a response envelope."""
-        user_id, text = self._extract_user_and_text(payload)
+        user_id, text, image_url = self._extract_user_text_and_image(payload)
 
         # Parse client data from message text (ПІБ, телефон, місто, НП)
         client_data = parse_client_data(text)
 
+        # Build extra_metadata for images (like Telegram does)
+        extra_metadata = None
+        if image_url:
+            extra_metadata = {
+                "has_image": True,
+                "image_url": image_url,
+            }
+            logger.info("[MANYCHAT:%s] 📷 Image received: %s", user_id, image_url[:80])
+
         # Use centralized handler with error handling
-        result = await self._handler.process_message(user_id, text)
+        result = await self._handler.process_message(user_id, text, extra_metadata=extra_metadata)
 
         if result.is_fallback:
             logger.warning(
@@ -92,16 +101,49 @@ class ManychatWebhook:
         return self._to_manychat_response(result.response, client_data)
 
     @staticmethod
-    def _extract_user_and_text(payload: dict[str, Any]) -> tuple[str, str]:
+    def _extract_user_text_and_image(payload: dict[str, Any]) -> tuple[str, str, str | None]:
+        """Extract user ID, text, and optional image URL from ManyChat payload.
+        
+        ManyChat image formats:
+        - message.attachments[].payload.url (Instagram images)
+        - message.image (direct image URL)
+        - data.image_url (custom field)
+        """
         subscriber = payload.get("subscriber") or payload.get("user")
         message = payload.get("message") or payload.get("data", {}).get("message")
+        
         text = None
+        image_url = None
+        
         if isinstance(message, dict):
-            text = message.get("text") or message.get("content")
-        if not subscriber or not text:
-            raise ManychatPayloadError("Missing subscriber or message text in payload")
+            text = message.get("text") or message.get("content") or ""
+            
+            # Extract image from attachments (Instagram format)
+            attachments = message.get("attachments", [])
+            for attachment in attachments:
+                if attachment.get("type") == "image":
+                    payload_data = attachment.get("payload", {})
+                    image_url = payload_data.get("url")
+                    break
+            
+            # Fallback: direct image field
+            if not image_url:
+                image_url = message.get("image") or message.get("image_url")
+        
+        # Also check data.image_url (for custom ManyChat flows)
+        if not image_url:
+            data = payload.get("data", {})
+            image_url = data.get("image_url") or data.get("photo_url")
+        
+        if not subscriber:
+            raise ManychatPayloadError("Missing subscriber in payload")
+        
+        # Allow empty text if image is present
+        if not text and not image_url:
+            raise ManychatPayloadError("Missing message text or image in payload")
+        
         user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
-        return user_id, text
+        return user_id, text or "", image_url
 
     def _to_manychat_response(
         self,

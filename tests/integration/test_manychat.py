@@ -154,3 +154,76 @@ async def test_manychat_quick_replies():
     assert "👗 Сукні" in captions
     assert "👔 Костюми" in captions
     assert "🧥 Тренчі" in captions
+
+
+@pytest.mark.asyncio
+async def test_manychat_image_extraction():
+    """Test image extraction from ManyChat payload (Instagram format)."""
+    response = AgentResponse(
+        event="simple_answer",
+        messages=[Message(content="Бачу фото!")],
+        products=[],
+        metadata=Metadata(current_state="STATE_2_VISION", intent="PHOTO_IDENT"),
+    )
+    runner = DummyRunner(response)
+    store = InMemorySessionStore()
+    handler = ManychatWebhook(store, runner=runner)
+
+    # Instagram-style attachment payload
+    payload = {
+        "subscriber": {"id": "user123"},
+        "message": {
+            "text": "",
+            "attachments": [
+                {
+                    "type": "image",
+                    "payload": {"url": "https://instagram.com/photo.jpg"}
+                }
+            ]
+        }
+    }
+
+    output = await handler.handle(payload)
+
+    # Should NOT raise and should return v2 response
+    assert output["version"] == "v2"
+    assert output["_debug"]["intent"] == "PHOTO_IDENT"
+
+
+@pytest.mark.asyncio
+async def test_manychat_image_only_no_text():
+    """Test that image-only messages are accepted (no text required)."""
+    # Test the extraction function directly
+    from src.integrations.manychat.webhook import ManychatWebhook
+
+    payload = {
+        "subscriber": {"id": "user456"},
+        "message": {
+            "attachments": [
+                {
+                    "type": "image",
+                    "payload": {"url": "https://example.com/photo.jpg"}
+                }
+            ]
+        }
+    }
+
+    user_id, text, image_url = ManychatWebhook._extract_user_text_and_image(payload)
+    
+    assert user_id == "user456"
+    assert text == ""
+    assert image_url == "https://example.com/photo.jpg"
+
+
+@pytest.mark.asyncio
+async def test_manychat_missing_text_and_image_raises():
+    """Test that missing both text and image raises error."""
+    from src.integrations.manychat.webhook import ManychatPayloadError, ManychatWebhook
+
+    payload = {
+        "subscriber": {"id": "user789"},
+        "message": {}  # No text, no attachments
+    }
+
+    with pytest.raises(ManychatPayloadError, match="Missing message text or image"):
+        ManychatWebhook._extract_user_text_and_image(payload)
