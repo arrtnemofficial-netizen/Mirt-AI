@@ -1,5 +1,7 @@
 # Telegram Bot Launcher
 
+> **Центральний індекс документації:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+
 This directory contains scripts for launching the Telegram bot.
 
 ## Available Scripts

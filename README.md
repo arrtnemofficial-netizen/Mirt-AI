@@ -1,13 +1,13 @@
 # Mirt-AI 🤖
 
 AI-стиліст для бренду дитячого одягу **MIRT**.
-Побудований на **LangGraph v2**, **Pydantic AI**, **Prompt Registry** та **Celery**.
+Побудований на **LangGraph**, **Pydantic AI**, **Prompt Registry** та **Celery**.
 
 [![Tests](https://img.shields.io/badge/tests-passed-brightgreen.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Architecture](https://img.shields.io/badge/architecture-v3.0-orange.svg)]()
+[![Architecture](https://img.shields.io/badge/architecture-v4.0-orange.svg)]()
 
-## 🏗 Архітектура v3.0 (Golden Era)
+## 🏗 Архітектура v4.0 (Agentic System)
 
 Система перейшла на **File-Based Prompting** та **Strict Testing**.
 
@@ -16,6 +16,7 @@ AI-стиліст для бренду дитячого одягу **MIRT**.
 2. **Golden Suite Testing** (`tests/data/golden_data.yaml`): Набір "золотих" сценаріїв, затверджених бізнесом (розмірна сітка 119см, оплата, кольори).
 3. **Strict Validation**: Regex-перевірка кожного промпта на наявність критичних бізнес-правил (UnitTest).
 4. **Celery Scalability**: Асинхронна обробка черг (LLM, CRM, Followups).
+5. **Agentic LangGraph + PydanticAI**: багатовузловий граф (moderation, intent, vision, agent, offer, payment, upsell, validation, escalation, crm_error, memory) + строгі моделі OUTPUT_CONTRACT.
 
 ### Структура проекту
 
@@ -27,8 +28,12 @@ src/
 │   └── models.py              # Pydantic models
 │
 ├── agents/                    # AI Brain
-│   ├── graph_v2.py            # LangGraph оркестратор
-│   └── pydantic/              # Pydantic AI агенти
+│   ├── pydantic/              # Pydantic AI агенти (Support/Vision/Payment)
+│   └── langgraph/             # LangGraph оркестрація
+│       ├── graph.py           # Production Graph Builder
+│       ├── state.py           # ConversationState + reducers
+│       ├── edges.py           # master_router + routing
+│       └── nodes/             # Ноди: moderation, intent, vision, agent, offer, payment, upsell, crm_error, validation, escalation, memory
 │
 ├── workers/                   # Background Tasks
 │   └── tasks/messages.py      # AI processing
@@ -50,7 +55,7 @@ tests/                         # 🛡️ Production QA
 | Модуль | Призначення |
 | :--- | :--- |
 | **PromptRegistry** | Керує версійністю та завантаженням всіх промптів. |
-| **LangGraph Agent** | Керує діалогом через 5 вузлів (Moderation -> Intent -> Plan -> Agent -> Validation). |
+| **LangGraph Graph** | Керує діалогом через багатовузловий граф (Moderation, Intent, Vision, Agent, Offer, Payment, Upsell, Validation, Escalation, CRM Error, Memory). |
 | **Golden Suite** | Гарантує, що AI ніколи не порушить критичні правила (напр. "білий=молочний"). |
 
 ## 🚀 Testing Strategy "Golden Suite"
@@ -65,6 +70,18 @@ tests/                         # 🛡️ Production QA
 ```bash
 pytest
 ```
+
+## 📚 Документація
+
+Повний індекс документації: **[DOCUMENTATION.md](DOCUMENTATION.md)**
+
+| Документ | Опис |
+|----------|------|
+| [PRD.md](PRD.md) | Product Requirements Document |
+| [docs/DEV_SYSTEM_GUIDE.md](docs/DEV_SYSTEM_GUIDE.md) | Повний гайд розробника |
+| [docs/STATUS_REPORT.md](docs/STATUS_REPORT.md) | Поточний статус реалізації |
+| [docs/AGENTS_ARCHITECTURE.md](docs/AGENTS_ARCHITECTURE.md) | Архітектура агентів |
+| [.rules/rulesllm.md](.rules/rulesllm.md) | Правила для AI/LLM |
 
 ## 🛠 Технології
 

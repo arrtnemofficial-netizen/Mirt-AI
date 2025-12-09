@@ -143,12 +143,23 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
         logger.info("🔀 [SESSION %s] → offer (SIZE_COLOR_DONE)", session_id)
         return "offer"
 
-    # STATE_4: Offer made - чекаємо "Беру"
+    # STATE_4: Offer made - чекаємо "Беру" або підтвердження
     if dialog_phase == "OFFER_MADE":
-        # QUALITY: Перевіряємо чи юзер каже "беру"
+        # QUALITY: Перевіряємо чи юзер каже "беру" або підтверджує
         if detected_intent == "PAYMENT_DELIVERY":
             logger.info("🔀 [SESSION %s] → payment (OFFER_MADE + 'беру')", session_id)
             return "payment"
+        
+        # Check confirmation keywords directly (да, так, ок, etc.)
+        # detect_simple_intent doesn't check these, but in OFFER_MADE they mean "yes"
+        confirmation_keywords = ["так", "да", "yes", "ок", "добре", "згодна", "згоден", 
+                                  "підходить", "давай", "давайте", "можна", "хочу", "буду"]
+        msg_lower = user_message.lower() if user_message else ""
+        for keyword in confirmation_keywords:
+            if keyword in msg_lower:
+                logger.info("🔀 [SESSION %s] → payment (OFFER_MADE + confirmation: '%s')", session_id, keyword)
+                return "payment"
+        
         # Інакше - юзер питає щось інше
         logger.info("🔀 [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
         return "agent"

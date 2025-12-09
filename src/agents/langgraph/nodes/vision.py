@@ -53,13 +53,19 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
     try:
         catalog = CatalogService()
         
-        # Якщо колір є - шукаємо з ним для точного match
+        # Якщо колір вже в назві (наприклад "Костюм Ритм (рожевий)") - не дублюємо
         search_query = product_name
-        if color:
+        if color and f"({color})" not in product_name.lower() and color.lower() not in product_name.lower():
             # Спробуємо знайти точний match з кольором
             search_query = f"{product_name} ({color})"
         
         results = await catalog.search_products(query=search_query, limit=5)
+        
+        # Якщо не знайшли з повною назвою - спробуємо базову назву без кольору
+        if not results and "(" in product_name:
+            base_name = product_name.split("(")[0].strip()
+            logger.debug("Retry search with base name: '%s'", base_name)
+            results = await catalog.search_products(query=base_name, limit=5)
         
         # Якщо є колір - шукаємо товар з цим кольором
         product = None

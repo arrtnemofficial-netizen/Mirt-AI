@@ -203,3 +203,81 @@ WHERE name LIKE '%Мрія%' AND name LIKE '%рожев%';
 
 -- CREATE POLICY "Allow write for authenticated" ON public.products
 --     FOR ALL USING (auth.role() = 'authenticated');
+
+
+-- ============================================================================
+-- 8. MEMORY SYSTEM TABLES (Titans-like 3-layer memory)
+-- ============================================================================
+-- Детальна схема в: src/db/memory_schema.sql
+-- Нижче — скорочена версія для швидкого старту.
+
+-- Включаємо pgvector для semantic search
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 8.1. Persistent Memory (профілі користувачів)
+CREATE TABLE IF NOT EXISTS public.mirt_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT UNIQUE NOT NULL,
+    channel TEXT DEFAULT 'telegram',
+    
+    -- Child info
+    child_profile JSONB DEFAULT '{}',      -- {name, height, age, sizes}
+    style_preferences JSONB DEFAULT '{}',  -- {colors, categories, brands}
+    
+    -- Logistics
+    logistics JSONB DEFAULT '{}',          -- {city, nova_poshta, phone}
+    
+    -- Commerce
+    commerce JSONB DEFAULT '{}',           -- {total_orders, avg_order, last_order}
+    
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8.2. Fluid Memory (атомарні факти)
+CREATE TABLE IF NOT EXISTS public.mirt_memories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES public.mirt_profiles(user_id) ON DELETE CASCADE,
+    
+    fact TEXT NOT NULL,                    -- "Дитина зріст 140 см"
+    category TEXT,                         -- child_info, preferences, logistics, etc.
+    
+    importance FLOAT DEFAULT 0.5,          -- 0.0-1.0, gating threshold 0.6
+    surprise FLOAT DEFAULT 0.5,            -- 0.0-1.0, gating threshold 0.4
+    
+    embedding vector(1536),                -- OpenAI ada-002 embedding
+    
+    source_message_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_accessed_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_user ON public.mirt_memories(user_id);
+CREATE INDEX IF NOT EXISTS idx_memories_importance ON public.mirt_memories(importance);
+
+-- 8.3. Compressed Memory (summaries)
+CREATE TABLE IF NOT EXISTS public.mirt_memory_summaries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES public.mirt_profiles(user_id) ON DELETE CASCADE,
+    
+    summary TEXT NOT NULL,
+    period_start TIMESTAMPTZ NOT NULL,
+    period_end TIMESTAMPTZ NOT NULL,
+    
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Trigger для auto-update updated_at
+CREATE OR REPLACE FUNCTION update_mirt_profiles_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_mirt_profiles_updated_at ON public.mirt_profiles;
+CREATE TRIGGER update_mirt_profiles_updated_at
+    BEFORE UPDATE ON public.mirt_profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION update_mirt_profiles_updated_at();

@@ -33,5 +33,9 @@ If you change how the bot handles "Returns", you MUST add a "Return Policy" scen
 
 ## 4. Documentation
 
-- If you change Architecture -> Update `docs/ARCHITECTURE.md`.
-- If you add Env Vars -> Update `README.md` and `.env.example`.
+> **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+
+- Якщо змінюєш архітектуру → Оновлюй `DEV_SYSTEM_GUIDE.md` (НЕ `docs/ARCHITECTURE.md` — він legacy).
+- Якщо додаєш Env Vars → Оновлюй `README.md` і `.env.example`.
+- Якщо змінюєш FSM логіку → **СПОЧАТКУ** оновлюй `docs/FSM_TRANSITION_TABLE.md`, потім код.
+- Якщо змінюєш промпти → Читай `docs/PROMPT_ENGINEERING.md`.

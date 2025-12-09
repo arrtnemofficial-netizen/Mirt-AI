@@ -128,3 +128,8 @@ Each cell in the transition table MUST have:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2024-12-07 | Initial frozen specification |
+| 1.1 | 2025-12-09 | Verified alignment with current codebase (v4.0 Agentic System) |
+
+---
+
+> 📚 **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)

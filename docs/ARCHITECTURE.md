@@ -1,5 +1,9 @@
 # Architecture v3.0: The Golden Era 🏛️
 
+> ⚠️ **LEGACY DOC (v3.0)**
+> Поточну архітектуру дивись у `DEV_SYSTEM_GUIDE.md` (розділ 3–4) та `PROJECT_STATUS_REPORT.md`.
+> Цей файл збережено як історичний snapshot старої Celery‑орієнтованої архітектури і **не є Single Source of Truth**.
+
 **Mirt-AI** is a production-grade AI stylist engine designed for reliability, scalability, and strict business compliance.
 
 ---

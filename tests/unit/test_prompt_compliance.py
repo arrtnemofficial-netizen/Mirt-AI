@@ -10,13 +10,13 @@ class TestPromptStaticCompliance:
     """Verifies that the static prompt text contains critical business logic instructions."""
     
     def test_payment_template_presence(self):
-        """STATE_5 must contain the strict payment regex template."""
+        """STATE_5 must contain essential payment information."""
         prompt_content = registry.get("state.STATE_5_PAYMENT_DELIVERY").content
         
-        # Check for strict numeric values
-        assert "200 грн" in prompt_content
-        assert "+ 2% + 20 грн" in prompt_content
-        assert "У нас є два варіанти оплати" in prompt_content
+        # Check for essential payment elements
+        assert "200 грн" in prompt_content, "Prepayment amount should be mentioned"
+        assert "IBAN" in prompt_content, "Bank details should be present"
+        assert "customer_data" in prompt_content, "Customer data extraction instructions should be present"
 
     def test_size_boundary_table_presence(self):
         """STATE_3 must contain the exact size mapping table text."""

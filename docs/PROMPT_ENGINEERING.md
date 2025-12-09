@@ -1,5 +1,7 @@
 # Prompt Engineering Guide
 
+> 📚 **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+
 ## Overview
 
 MIRT AI uses a **single source of truth** for all prompts, managed by the `PromptRegistry` and stored as Markdown files under `data/prompts/`.  

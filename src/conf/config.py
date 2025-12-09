@@ -188,6 +188,18 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
+    # FEATURE FLAGS
+    # =========================================================================
+    USE_OFFER_DELIBERATION: bool = Field(
+        default=True,
+        description="Enable Multi-Role Deliberation for STATE_4_OFFER (Customer/Business/Quality views)",
+    )
+    DELIBERATION_MIN_CONFIDENCE: float = Field(
+        default=0.6,
+        description="Minimum confidence for offer. Below this → fallback message",
+    )
+
+    # =========================================================================
     # OBSERVABILITY
     # =========================================================================
     ENABLE_OBSERVABILITY: bool = Field(

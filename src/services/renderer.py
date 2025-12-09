@@ -37,8 +37,6 @@ def render_agent_response_text(response: AgentResponse) -> list[str]:
     """Prepare a list of textual chunks including product suggestions."""
 
     chunks = render_messages_text(response.messages)
-    # Для PHOTO_IDENT не додаємо блок "Пропозиції", щоб уникнути зайвих бульбашок
-    if response.metadata.intent != "PHOTO_IDENT" and response.products:
-        product_lines = ["Пропозиції:"] + [f"• {format_product(p)}" for p in response.products]
-        chunks.append("\n".join(product_lines))
+    # НЕ додаємо блок "Пропозиції" — AI сам формує пропозицію в тексті
+    # Цей блок дублював інформацію і плутав користувачів
     return chunks

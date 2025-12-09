@@ -4,6 +4,8 @@
 > Цей документ визначає **НЕПОРУШНІ ЗАКОНИ** архітектури проекту MIRT AI.
 > **PydanticAI + LangGraph + CRM Integration = Production-Grade Agentic System**
 > Будь-яке відхилення від цих правил вважається **КРИТИЧНОЮ ПОМИЛКОЮ**.
+>
+> 📚 **Центральний індекс документації:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
 
 ---
 
@@ -355,28 +357,67 @@ print(response.metadata.intent)          # "SIZE_HELP"
 print(response.escalation)               # EscalationInfo | None
 ```
 
-### 4.3. OUTPUT_CONTRACT Models
+### 4.3. OUTPUT_CONTRACT Models (актуальна схема)
 
 ```python
 class SupportResponse(BaseModel):
-    """Головна модель відповіді агента."""
+    """Головна модель відповіді агента (OUTPUT_CONTRACT)."""
     
-    event: EventType                 # simple_answer/clarifying_question/multi_option/escalation/end_smalltalk
-    messages: list[MessageItem]      # [{type: "text", content: "..."}]
-    products: list[ProductMatch]     # [{id, name, price, size, color, photo_url}]
+    # REQUIRED
+    event: EventType                 # "simple_answer" | "clarifying_question" | ...
+    messages: list[MessageItem]      # [{type: "text", content: "..."}], min_length=1
     metadata: ResponseMetadata       # {session_id, current_state, intent, escalation_level}
-    escalation: EscalationInfo | None
-    customer_data: CustomerDataExtracted | None
-    reasoning: str | None            # Chain-of-thought (debug)
+
+    # OPTIONAL (можуть бути порожні)
+    products: list[ProductMatch] = Field(
+        default_factory=list,
+        description="Товари ТІЛЬКИ з CATALOG (id, name, price, size, color, photo_url)",
+    )
+    reasoning: str | None = Field(
+        default=None,
+        description="Internal debug log (Input -> Intent -> Catalog -> State -> Output)",
+    )
+    escalation: EscalationInfo | None = Field(
+        default=None,
+        description="Required if event='escalation'",
+    )
+    customer_data: CustomerDataExtracted | None = Field(
+        default=None,
+        description="Дані клієнта з повідомлення (для STATE_5)",
+    )
+    deliberation: OfferDeliberation | None = Field(
+        default=None,
+        description="Multi-role analysis: customer/business/quality views (для STATE_4_OFFER)",
+    )
+
 
 class ProductMatch(BaseModel):
-    """Товар з CATALOG - валідація вбудована!"""
-    id: int                          # Product ID (MUST exist in CATALOG)
-    name: str                        # Назва з каталогу
-    price: float = Field(gt=0)       # Ціна > 0
-    size: str                        # Розмір з CATALOG.sizes
-    color: str                       # Колір з CATALOG.colors
-    photo_url: str                   # https://cdn.sitniks.com/...
+    """Товар з CATALOG - relaxed валідація (Vision-friendly)."""
+
+    # name обовʼязковий, інші поля можуть бути заповнені пізніше з БД
+    id: int = Field(
+        default=0,
+        description="Product ID (0 якщо невідомий, шукаємо по name в CATALOG)",
+    )
+    name: str = Field(description="Назва товару точно як в CATALOG")
+    price: float = Field(
+        default=0.0,
+        ge=0,
+        description="Ціна в грн (0 = варіативна, дізнатись з DB)",
+    )
+    size: str | None = Field(default=None, description="Розмір (якщо клієнт вказав)")
+    color: str = Field(default="", description="Колір (може бути порожнім)")
+    photo_url: str = Field(
+        default="",
+        description="URL фото з CATALOG (може бути порожнім)",
+    )
+
+    @field_validator("photo_url")
+    @classmethod
+    def validate_photo_url(cls, v: str) -> str:
+        if v and not v.startswith("https://"):
+            raise ValueError("photo_url MUST start with 'https://'")
+        return v
 ```
 
 ### 4.4. Dynamic System Prompts
@@ -425,6 +466,20 @@ response = result.output  # НЕ result.response (це ModelResponse)!
 
 # ❌ ЗАСТАРІЛО (PydanticAI < 1.23)
 # result_type=SupportResponse  # Помилка: Unknown keyword arguments
+```
+
+### 4.6. Memory-Aware AgentDeps (Titans-like памʼять)
+
+```python
+from src.agents.pydantic.deps import create_deps_with_memory
+
+# LangGraph state → AgentDeps + memory context
+deps = await create_deps_with_memory(state)
+
+# Усередині:
+# - Завантажуються профіль (Persistent Memory)
+# - Останні факти (Fluid Memory)
+# - Формується memory_context_prompt для system prompt
 ```
 
 ---

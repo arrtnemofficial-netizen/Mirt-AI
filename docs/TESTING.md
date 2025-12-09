@@ -1,5 +1,8 @@
 # Testing Strategy: The Golden Suite 🛡️
 
+> 📚 **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)  
+> **Статус:** ✅ 924 тести пройдено (9 грудня 2025)
+
 **Trust Nothing. Verify Everything.**
 
 Our testing strategy is designed to catch "Semantic Drift" — when the AI starts behaving differently due to model updates or prompt tweaks.

@@ -114,9 +114,26 @@
     "current_state": "STATE_NAME",
     "intent": "INTENT_LABEL",
     "escalation_level": "NONE" | "L1" | "L2"
+  },
+  "deliberation": {
+    // ⚠️ ОБОВ'ЯЗКОВО для STATE_4_OFFER!
+    "customer_view": "Чи зрозуміло клієнту? (1-2 речення)",
+    "business_view": "Чи маржа ок? Чи є upsell? (1-2 речення)",
+    "quality_view": "Чи ціна з каталогу? Чи розмір є? (1-2 речення)",
+    "confidence": 0.9,
+    "flags": []  // "price_mismatch", "size_unavailable", "low_margin"
+  },
+  "customer_data": {
+    // Тільки для STATE_5_PAYMENT_DELIVERY
+    "name": "ПІБ", "phone": "+380...", "city": "Київ", "nova_poshta": "25"
   }
 }
 ```
+
+**Поле `deliberation`:**
+- ОБОВ'ЯЗКОВЕ для STATE_4_OFFER
+- Якщо ціна не з каталогу → `flags: ["price_mismatch"]` і `confidence < 0.5`
+- Якщо розмір не в наявності → `flags: ["size_unavailable"]`
 
 # Робота з інструментами
 Твій основний інструмент - **EMBEDDED CATALOG** (надається у контексті).

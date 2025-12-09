@@ -143,6 +143,45 @@ class CustomerDataExtracted(BaseModel):
 
 
 # =============================================================================
+# OFFER DELIBERATION (Multi-Role Analysis)
+# =============================================================================
+
+
+class OfferDeliberation(BaseModel):
+    """
+    Multi-role analysis before presenting offer to customer.
+    
+    Used in STATE_4_OFFER to validate offers from multiple perspectives:
+    - Customer Advocate: clarity, value, no pressure
+    - Business Owner: margin check, upsell potential
+    - Quality Control: price/size/model validation against DB
+    """
+    
+    customer_view: str = Field(
+        default="",
+        description="Customer Advocate: Is this clear? Does it show value? No pressure?"
+    )
+    business_view: str = Field(
+        default="",
+        description="Business Owner: Is margin healthy? Any upsell opportunity?"
+    )
+    quality_view: str = Field(
+        default="",
+        description="Quality Control: Is price from DB? Is size available? Any data issues?"
+    )
+    confidence: float = Field(
+        default=0.9,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in this offer (0.0-1.0). Lower if views conflict."
+    )
+    flags: list[str] = Field(
+        default_factory=list,
+        description="Warnings: 'price_mismatch', 'size_unavailable', 'low_margin', etc."
+    )
+
+
+# =============================================================================
 # SUPPORT RESPONSE (OUTPUT_CONTRACT)
 # =============================================================================
 
@@ -200,6 +239,12 @@ class SupportResponse(BaseModel):
     customer_data: CustomerDataExtracted | None = Field(
         default=None,
         description="Дані клієнта з повідомлення (для STATE_5)",
+    )
+
+    # Multi-role deliberation for offer validation (STATE_4_OFFER)
+    deliberation: OfferDeliberation | None = Field(
+        default=None,
+        description="Multi-role analysis: customer/business/quality views (for STATE_4_OFFER)",
     )
 
     @field_validator("messages")

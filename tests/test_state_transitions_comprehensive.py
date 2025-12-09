@@ -172,8 +172,8 @@ class TestMasterRouterTransitions:
         result = master_router(state)
         assert result == "agent", f"OFFER_MADE with question should route to agent, got {result}"
     
-    def test_waiting_for_delivery_data_routes_to_payment(self):
-        """WAITING_FOR_DELIVERY_DATA → payment (збір даних)"""
+    def test_waiting_for_delivery_data_routes_to_agent(self):
+        """WAITING_FOR_DELIVERY_DATA → agent (збір даних через agent, не payment з interrupt)"""
         state = create_initial_state(
             session_id="test_delivery",
             messages=[{"role": "user", "content": "Олена Ковальчук, Київ, НП 5"}],
@@ -182,7 +182,8 @@ class TestMasterRouterTransitions:
         state["dialog_phase"] = "WAITING_FOR_DELIVERY_DATA"
         
         result = master_router(state)
-        assert result == "payment", f"WAITING_FOR_DELIVERY_DATA should route to payment, got {result}"
+        # Changed: payment node uses interrupt() which blocks, so we use agent for data collection
+        assert result == "agent", f"WAITING_FOR_DELIVERY_DATA should route to agent, got {result}"
     
     def test_waiting_for_payment_method_routes_to_payment(self):
         """WAITING_FOR_PAYMENT_METHOD → payment (спосіб оплати)"""

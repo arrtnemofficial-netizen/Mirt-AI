@@ -1,6 +1,10 @@
-# Implementation Status
+# Implementation Status (Snapshot)
 
-**Current Status: 🟢 STABLE / PRODUCTION READY**
+> ⚠️ **LEGACY STATUS**
+> Актуальний стан системи тепер описано в `PROJECT_STATUS_REPORT.md`.
+> Цей файл — snapshot міграції на PydanticAI + LangGraph станом на 2025‑12‑07.
+
+**Current Status (на момент snapshot): 🟢 STABLE / PRODUCTION READY**
 **Last Updated:** 2025-12-07
 
 ---

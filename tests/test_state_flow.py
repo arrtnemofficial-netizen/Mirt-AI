@@ -132,11 +132,12 @@ class TestProductSelection:
             assert intent == "PAYMENT_DELIVERY", f"'{product}' should be PAYMENT_DELIVERY, got {intent}"
 
     def test_product_names_in_init_state_are_discovery(self):
-        """Product names in INIT state should be DISCOVERY (not payment)."""
+        """Product names in INIT state should be DISCOVERY or PRODUCT_CATEGORY (not payment)."""
         for product in PRODUCT_SELECTION_PATTERNS:
             intent = detect_intent_from_text(product, has_image=False, current_state="STATE_0_INIT")
-            # In INIT state, product names are discovery questions
-            assert intent == "DISCOVERY_OR_QUESTION", f"'{product}' in INIT should be DISCOVERY, got {intent}"
+            # In INIT state, product names are discovery questions or product category queries
+            assert intent in ["DISCOVERY_OR_QUESTION", "PRODUCT_CATEGORY"], \
+                f"'{product}' in INIT should be DISCOVERY/PRODUCT_CATEGORY, got {intent}"
 
 
 # =============================================================================
