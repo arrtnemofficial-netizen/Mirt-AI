@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 # Type aliases for routing destinations
-MasterRoute = Literal["moderation", "agent", "offer", "payment", "upsell", "escalation", "end"]
+MasterRoute = Literal["moderation", "agent", "offer", "payment", "upsell", "escalation", "end", "crm_error"]
 ModerationRoute = Literal["intent", "escalation"]
 IntentRoute = Literal["vision", "agent", "offer", "payment", "escalation"]
 ValidationRoute = Literal["agent", "escalation", "end"]
@@ -75,14 +75,15 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     """
     dialog_phase = state.get("dialog_phase", "INIT")
     session_id = state.get("session_id", "?")
-    has_image = state.get("has_image", False)
+    # Prefer top-level flag, but fall back to metadata (photo handler writes there)
+    has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
 
     # QUALITY: Отримуємо останнє повідомлення для аналізу intent
     user_message = _extract_user_message(state)
     detected_intent = detect_simple_intent(user_message) if user_message else None
 
     logger.info(
-        "🔀 [SESSION %s] Master router: phase=%s, has_image=%s, intent=%s, msg='%s'",
+        " [SESSION %s] Master router: phase=%s, has_image=%s, intent=%s, msg='%s'",
         session_id,
         dialog_phase,
         has_image,
@@ -91,18 +92,20 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     )
 
     # =========================================================================
-    # RULE 1: NEW IMAGE always goes through full pipeline
+    # SPECIAL CASES (highest priority)
     # =========================================================================
     if has_image:
-        logger.info("🔀 [SESSION %s] → moderation (new image)", session_id)
+        logger.info(" [SESSION %s] → moderation (new image)", session_id)
         return "moderation"
 
-    # =========================================================================
-    # RULE 2: COMPLAINT intent overrides everything
-    # =========================================================================
     if detected_intent == "COMPLAINT":
-        logger.info("🔀 [SESSION %s] → escalation (COMPLAINT detected)", session_id)
+        logger.info(" [SESSION %s] → escalation (COMPLAINT detected)", session_id)
         return "escalation"
+
+    # CRM ERROR HANDLING - route to crm_error node
+    if dialog_phase == "CRM_ERROR_HANDLING":
+        logger.info(" [SESSION %s] → crm_error (CRM_ERROR_HANDLING)", session_id)
+        return "crm_error"
 
     # =========================================================================
     # RULE 3: Route based on dialog_phase + intent
@@ -205,6 +208,7 @@ def get_master_routes() -> dict[str, str]:
         "payment": "payment",
         "upsell": "upsell",
         "escalation": "escalation",
+        "crm_error": "crm_error",
         "end": "end",
     }
 
@@ -216,7 +220,10 @@ def route_after_moderation(state: dict[str, Any]) -> ModerationRoute:
     - Blocked -> escalation
     - Allowed -> intent detection
     """
-    if state.get("should_escalate"):
+    # Перевіряємо moderation_result, НЕ should_escalate!
+    # should_escalate може залишитись від попередньої ескалації
+    moderation_result = state.get("moderation_result", {})
+    if moderation_result.get("allowed") is False:
         logger.info("Routing to escalation: moderation blocked")
         return "escalation"
     return "intent"
@@ -228,7 +235,9 @@ def route_after_intent(state: dict[str, Any]) -> IntentRoute:
 
     This is the main routing decision point.
     """
-    if state.get("should_escalate"):
+    # Перевіряємо intent, НЕ should_escalate!
+    detected_intent = state.get("detected_intent", "")
+    if detected_intent == "COMPLAINT":
         return "escalation"
 
     intent = state.get("detected_intent", "DISCOVERY_OR_QUESTION")
@@ -272,6 +281,16 @@ def _resolve_intent_route(
     # Size/color with products -> offer
     if intent in ["SIZE_HELP", "COLOR_HELP"] and state.get("selected_products"):
         return "offer"
+
+    # REQUEST_PHOTO - user wants to see product photos (no attachment)
+    # Route to agent which will show photos from catalog
+    if intent == "REQUEST_PHOTO":
+        return "agent"  # Explicit routing (was implicit fallback)
+
+    # PRODUCT_CATEGORY - user browsing by clothing type (костюм, сукня)
+    # Route to agent for discovery/recommendations
+    if intent == "PRODUCT_CATEGORY":
+        return "agent"  # Explicit routing (was implicit fallback)
 
     return "agent"
 
@@ -374,8 +393,8 @@ def route_after_vision(state: dict[str, Any]) -> Literal["offer", "agent", "vali
     Route after vision processing.
 
     ВАЖЛИВО: Якщо vision впізнав товар і сформував відповідь з питанням про розмір,
-    ми повертаємо END (віддаємо повідомлення користувачу) замість offer.
-    Offer буде після того як користувач обере розмір.
+    ми повертаємо END (віддаємо повідомлення користувачу) замість offer/agent.
+    Offer буде після того як користувач відповість і ми зберемо розмір.
     """
     # Found products -> END (return multi-bubble response to user)
     # Vision вже питає про розмір, offer буде пізніше
@@ -409,9 +428,12 @@ def route_after_payment(state: dict[str, Any]) -> Literal["upsell", "end", "vali
 
 
 def get_moderation_routes() -> dict[str, str]:
-    """Get route map for moderation node."""
+    """Get route map for moderation node.
+    
+    Memory System: moderation → memory_context → intent
+    """
     return {
-        "intent": "intent",
+        "intent": "memory_context",  # Changed: go through memory_context first
         "escalation": "escalation",
     }
 

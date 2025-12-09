@@ -216,6 +216,7 @@ async def _handle_approval_response(
         # =========================================================================
         # SAVE ORDER TO DB (Persistence)
         # =========================================================================
+        crm_order_result = None
         try:
             deps = create_deps_from_state(state)
 
@@ -238,16 +239,19 @@ async def _handle_approval_response(
                 "external_id": session_id,
                 "source_id": deps.user_id,
                 "customer": {
-                    "name": deps.customer_name,
+                    "full_name": deps.customer_name,
                     "phone": deps.customer_phone,
                     "city": deps.customer_city,
-                    "delivery_address": deps.customer_nova_poshta,
+                    "nova_poshta_branch": deps.customer_nova_poshta,
+                    "telegram_id": session_id if "telegram" in str(deps.user_id) else None,
+                    "manychat_id": session_id if "manychat" in str(deps.user_id) else None,
                 },
                 "items": order_items,
                 "totals": {"total": approval_data.get("total_price", 0)},
                 "status": "new",
                 "delivery_method": "nova_poshta",
                 "notes": "Created via Mirt-AI Agent",
+                "source": "telegram" if "telegram" in str(deps.user_id) else "manychat",
             }
 
             order_id = await deps.db.create_order(order_data)
@@ -256,21 +260,59 @@ async def _handle_approval_response(
             else:
                 logger.error("Failed to save order to Supabase (returned None)")
 
+            # =========================================================================
+            # CREATE ORDER IN SNITKIX CRM (Async via Celery)
+            # =========================================================================
+            from src.integrations.crm.crmservice import get_crm_service
+
+            crm_service = get_crm_service()
+            crm_order_result = await crm_service.create_order_with_persistence(
+                session_id=session_id,
+                order_data=order_data,
+                external_id=f"{session_id}_{int(time.time())}",  # Unique external ID
+            )
+
+            logger.info(
+                "CRM order creation result for session %s: %s",
+                session_id,
+                crm_order_result.get("status", "unknown"),
+            )
+
         except Exception as e:
-            logger.exception("CRITICAL: Failed to save order to DB: %s", e)
+            logger.exception("CRITICAL: Failed to save order to DB or queue CRM: %s", e)
+            crm_order_result = {"status": "failed", "error": str(e)}
 
         # DIALOG PHASE: UPSELL_OFFERED (STATE_6)
         # - Оплата підтверджена, пропонуємо допродаж
-        return Command(
-            update={
-                "awaiting_human_approval": False,
-                "approval_type": None,
-                "current_state": State.STATE_6_UPSELL.value,
-                "dialog_phase": "UPSELL_OFFERED",
-                "step_number": state.get("step_number", 0) + 1,
-            },
-            goto="upsell",
-        )
+        if crm_order_result and crm_order_result.get("status") in ["failed", "error"]:
+            # CRM creation failed - route to error handler
+            return Command(
+                update={
+                    "awaiting_human_approval": False,
+                    "approval_type": None,
+                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "dialog_phase": "CRM_ERROR_HANDLING",
+                    "crm_order_result": crm_order_result,
+                    "crm_external_id": crm_order_result.get("external_id"),
+                    "crm_retry_count": 0,
+                    "step_number": state.get("step_number", 0) + 1,
+                },
+                goto="crm_error",
+            )
+        else:
+            # CRM creation queued/successful - proceed to upsell
+            return Command(
+                update={
+                    "awaiting_human_approval": False,
+                    "approval_type": None,
+                    "current_state": State.STATE_6_UPSELL.value,
+                    "dialog_phase": "UPSELL_OFFERED",
+                    "crm_order_result": crm_order_result,
+                    "crm_external_id": crm_order_result.get("external_id") if crm_order_result else None,
+                    "step_number": state.get("step_number", 0) + 1,
+                },
+                goto="upsell",
+            )
     else:
         # Payment rejected - back to offer
         logger.info("Payment REJECTED for session %s", session_id)

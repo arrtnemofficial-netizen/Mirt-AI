@@ -2,7 +2,7 @@
 
 Features:
 - Text and photo message handling
-- Quick Reply keyboard based on conversation state
+- Без бот-клавіатур: AI повністю формує контент відповіді
 - Product photo sending
 - Centralized error handling
 """
@@ -16,16 +16,11 @@ from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import (
-    KeyboardButton,
-    Message,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
-)
+from aiogram.types import Message
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
-from src.core.state_machine import EscalationLevel, State, get_keyboard_for_state, normalize_state
+from src.core.state_machine import normalize_state
 from src.services.conversation import ConversationHandler, create_conversation_handler
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
@@ -37,39 +32,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Quick Reply Keyboards по станах (використовує state_machine)
-# ---------------------------------------------------------------------------
-
-
-def build_keyboard(
-    current_state: str, escalation_level: str = "NONE"
-) -> ReplyKeyboardMarkup | None:
-    """Build Reply Keyboard based on conversation state using centralized state_machine."""
-
-    # Normalize state and escalation
-    state = normalize_state(current_state)
-    esc_level = EscalationLevel.NONE
-    with contextlib.suppress(ValueError):
-        esc_level = EscalationLevel(escalation_level.upper())
-
-    platform_kb = get_keyboard_for_state(state, esc_level)
-    if not platform_kb:
-        # If END state, remove keyboard explicitly
-        if state == State.STATE_7_END:
-            return ReplyKeyboardRemove()
-        return None
-
-    # Convert generic PlatformKeyboard to aiogram ReplyKeyboardMarkup
-    buttons = [[KeyboardButton(text=btn_text) for btn_text in row] for row in platform_kb.buttons]
-
-    return ReplyKeyboardMarkup(
-        keyboard=buttons,
-        resize_keyboard=True,
-        one_time_keyboard=platform_kb.one_time,
-    )
 
 
 def build_dispatcher(
@@ -224,7 +186,7 @@ async def _process_incoming(
 async def _dispatch_to_telegram(
     message: Message, agent_response: AgentResponse, session_id: str = ""
 ) -> None:
-    """Send formatted agent response back to the chat with keyboard."""
+    """Send formatted agent response back to the chat (без бот-клавіатури)."""
 
     # Log outgoing response
     response_preview = ""
@@ -240,34 +202,22 @@ async def _dispatch_to_telegram(
         response_preview,
     )
 
-    # Build keyboard based on state
-    keyboard = build_keyboard(
-        current_state=agent_response.metadata.current_state,
-        escalation_level=agent_response.metadata.escalation_level,
-    )
-
     text_chunks = render_agent_response_text(agent_response)
 
-    # Send text messages (last one with keyboard)
+    # Send text messages
     for i, chunk in enumerate(text_chunks):
         if not chunk or not chunk.strip():
             continue
+        await message.answer(chunk)
 
-        is_last_text = (i == len(text_chunks) - 1) and not agent_response.products
-        await message.answer(
-            chunk,
-            reply_markup=keyboard if is_last_text else None,
-        )
-
-    # Send product photos (last one with keyboard)
-    for i, product in enumerate(agent_response.products):
-        if product.photo_url:
-            is_last = i == len(agent_response.products) - 1
-            await message.answer_photo(
-                photo=product.photo_url,
-                caption=f"{product.name} - {product.price} грн",
-                reply_markup=keyboard if is_last else None,
-            )
+    # Send product photos only for vision/photo-ident responses to avoid повторних фото
+    if agent_response.metadata.intent == "PHOTO_IDENT":
+        for i, product in enumerate(agent_response.products):
+            if product.photo_url:
+                await message.answer_photo(
+                    photo=product.photo_url,
+                    caption="",  # без дублювання тексту/ціни
+                )
 
 
 async def run_polling(store: SessionStore | None = None) -> None:

@@ -7,6 +7,12 @@ Dependencies - Dependency Injection для агентів.
 - Тестування: підсунь мок-об'єкт замість реальної БД
 - Безпека: ніяких глобальних змінних
 - Чистота: кожен виклик ізольований
+
+Memory System (Titans-like):
+- memory: MemoryService для роботи з памʼяттю
+- profile: UserProfile з Persistent Memory
+- facts: list[Fact] з Fluid Memory
+- memory_context_prompt: форматований контекст для промпта
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from .memory_models import Fact, MemoryContext, UserProfile
     from .models import StateType
 
 
@@ -24,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 from src.services.catalog_service import CatalogService
+from src.services.memory_service import MemoryService
 from src.services.order_service import OrderService
 
 
@@ -59,6 +67,7 @@ class AgentDeps:
             user_id="manychat_456",
             db=Database(),
             catalog=CatalogService(),
+            memory=MemoryService(),
         )
         result = await agent.run(message, deps=deps)
     """
@@ -89,6 +98,7 @@ class AgentDeps:
     # Services (injected)
     db: OrderService = field(default_factory=OrderService)
     catalog: CatalogService = field(default_factory=CatalogService)
+    memory: MemoryService = field(default_factory=MemoryService)
 
     # Environment
     env: str = "production"
@@ -96,6 +106,20 @@ class AgentDeps:
     # State-specific prompt (injected by agent_node for Turn-Based routing)
     # Contains detailed instructions for current state (e.g., STATE_4_OFFER prompt)
     state_specific_prompt: str | None = None
+
+    # ==========================================================================
+    # MEMORY SYSTEM (Titans-like)
+    # ==========================================================================
+    # These are populated by memory_context_node before agent execution
+    
+    # Persistent Memory - user profile (always loaded)
+    profile: UserProfile | None = None
+    
+    # Fluid Memory - relevant facts (top-K by importance)
+    facts: list[Fact] = field(default_factory=list)
+    
+    # Pre-formatted memory context for prompt injection
+    memory_context_prompt: str | None = None
 
     def get_customer_data_summary(self) -> str:
         """Get summary of collected customer data for prompts."""
@@ -124,6 +148,64 @@ class AgentDeps:
                 self.selected_products,
             ]
         )
+    
+    def get_memory_context_prompt(self) -> str:
+        """
+        Get formatted memory context for prompt injection.
+        
+        Returns pre-formatted string or generates from profile/facts.
+        """
+        # Use pre-formatted if available (set by memory_context_node)
+        if self.memory_context_prompt:
+            return self.memory_context_prompt
+        
+        # Generate from profile and facts
+        lines = []
+        
+        if self.profile:
+            p = self.profile
+            
+            # Child info
+            if hasattr(p, 'child_profile') and p.child_profile:
+                child = p.child_profile
+                child_info = []
+                if hasattr(child, 'name') and child.name:
+                    child_info.append(f"імʼя: {child.name}")
+                if hasattr(child, 'age') and child.age:
+                    child_info.append(f"вік: {child.age}")
+                if hasattr(child, 'height_cm') and child.height_cm:
+                    child_info.append(f"зріст: {child.height_cm} см")
+                if hasattr(child, 'gender') and child.gender:
+                    child_info.append(f"стать: {child.gender}")
+                if child_info:
+                    lines.append(f"Дитина: {', '.join(child_info)}")
+            
+            # Logistics from profile
+            if hasattr(p, 'logistics') and p.logistics:
+                if hasattr(p.logistics, 'city') and p.logistics.city:
+                    lines.append(f"Місто: {p.logistics.city}")
+                if hasattr(p.logistics, 'favorite_branch') and p.logistics.favorite_branch:
+                    lines.append(f"НП: {p.logistics.favorite_branch}")
+            
+            # Style preferences
+            if hasattr(p, 'style_preferences') and p.style_preferences:
+                if hasattr(p.style_preferences, 'favorite_models') and p.style_preferences.favorite_models:
+                    lines.append(f"Улюблені моделі: {', '.join(p.style_preferences.favorite_models)}")
+        
+        # Add facts
+        if self.facts:
+            fact_lines = [f"- {f.content}" for f in self.facts[:5]]
+            if fact_lines:
+                lines.append("Факти: " + "; ".join(f.content for f in self.facts[:5]))
+        
+        if not lines:
+            return ""
+        
+        return "### ЩО МИ ЗНАЄМО ПРО КЛІЄНТА:\n" + "\n".join(lines)
+    
+    def has_memory_context(self) -> bool:
+        """Check if any memory context is available."""
+        return bool(self.profile or self.facts or self.memory_context_prompt)
 
 
 # =============================================================================
@@ -136,6 +218,9 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
     Create AgentDeps from LangGraph state.
 
     This is the bridge between LangGraph and PydanticAI.
+    
+    Memory fields (profile, facts, memory_context_prompt) are populated
+    by memory_context_node before agent execution.
     """
     metadata = state.get("metadata", {})
 
@@ -153,6 +238,10 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
         customer_phone=metadata.get("customer_phone"),
         customer_city=metadata.get("customer_city"),
         customer_nova_poshta=metadata.get("customer_nova_poshta"),
+        # Memory system fields (populated by memory_context_node)
+        profile=state.get("memory_profile"),
+        facts=state.get("memory_facts", []),
+        memory_context_prompt=state.get("memory_context_prompt"),
     )
 
 
@@ -164,3 +253,44 @@ def create_mock_deps(session_id: str = "test_session") -> AgentDeps:
         user_id="test_user",
         env="test",
     )
+
+
+async def create_deps_with_memory(
+    state: dict[str, Any],
+    memory_service: MemoryService | None = None,
+) -> AgentDeps:
+    """
+    Create AgentDeps with memory context loaded.
+    
+    This is an async version that loads memory from Supabase.
+    Use this when memory_context_node hasn't run yet.
+    
+    Args:
+        state: LangGraph state
+        memory_service: Optional MemoryService (creates one if not provided)
+        
+    Returns:
+        AgentDeps with profile and facts loaded
+    """
+    deps = create_deps_from_state(state)
+    
+    if not deps.user_id:
+        return deps
+    
+    # Get or create memory service
+    if memory_service is None:
+        memory_service = MemoryService()
+    
+    if not memory_service.enabled:
+        return deps
+    
+    # Load memory context
+    try:
+        context = await memory_service.load_memory_context(deps.user_id)
+        deps.profile = context.profile
+        deps.facts = context.facts
+        deps.memory_context_prompt = context.to_prompt_block()
+    except Exception as e:
+        logger.warning("Failed to load memory context for user %s: %s", deps.user_id, e)
+    
+    return deps

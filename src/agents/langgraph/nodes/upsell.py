@@ -26,6 +26,40 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _build_crm_status_message(state: dict[str, Any]) -> str:
+    """Build CRM status message for user display."""
+    crm_order_result = state.get("crm_order_result", {})
+    crm_external_id = state.get("crm_external_id", "")
+    
+    if not crm_order_result:
+        return ""
+    
+    status = crm_order_result.get("status", "unknown")
+    crm_order_id = crm_order_result.get("crm_order_id")
+    task_id = crm_order_result.get("task_id")
+    
+    if status == "queued":
+        message = "🔄 Замовлення відправлено до CRM системи"
+        if task_id:
+            message += f" (завдання #{task_id[:8]}...)"
+        message += "\n✅ Очікуємо підтвердження від оператора"
+    elif status == "created":
+        message = "✅ Замовлення успішно створено в CRM"
+        if crm_order_id:
+            message += f" (№{crm_order_id})"
+    elif status == "exists":
+        message = "ℹ️ Замовлення вже існує в CRM"
+        if crm_order_id:
+            message += f" (№{crm_order_id})"
+    elif status == "failed":
+        error = crm_order_result.get("error", "Невідома помилка")
+        message = f"⚠️ Проблема з створенням замовлення в CRM: {error}"
+    else:
+        message = f"📋 Статус замовлення в CRM: {status}"
+    
+    return message
+
+
 async def upsell_node(
     state: dict[str, Any],
     runner: Callable[..., Any] | None = None,  # Kept for signature compatibility
@@ -54,6 +88,9 @@ async def upsell_node(
 
     # Get current order for context
     ordered_products = state.get("offered_products", []) or state.get("selected_products", [])
+
+    # Check CRM order status and build status message
+    crm_status_message = _build_crm_status_message(state)
 
     # Create deps with upsell context
     deps = create_deps_from_state(state)
@@ -84,6 +121,10 @@ async def upsell_node(
 
         # Build assistant message from response
         assistant_content = "\n".join(m.content for m in response.messages)
+        
+        # Prepend CRM status message if available
+        if crm_status_message:
+            assistant_content = f"{crm_status_message}\n\n{assistant_content}"
 
         # =====================================================
         # DIALOG PHASE (Turn-Based State Machine)

@@ -120,16 +120,17 @@ class ManychatWebhook:
         text_chunks = render_agent_response_text(agent_response)
         messages: list[dict[str, Any]] = [{"type": "text", "text": chunk} for chunk in text_chunks]
 
-        # Add product images
-        for product in agent_response.products:
-            if product.photo_url:
-                messages.append(
-                    {
-                        "type": "image",
-                        "url": product.photo_url,
-                        "caption": f"{product.name} - {product.price} грн",
-                    }
-                )
+        # Add product images only для PHOTO_IDENT, щоб не дублювати фото в подальших стейтах
+        if agent_response.metadata.intent == "PHOTO_IDENT":
+            for product in agent_response.products:
+                if product.photo_url:
+                    messages.append(
+                        {
+                            "type": "image",
+                            "url": product.photo_url,
+                            "caption": "",  # без дублювання тексту/ціни
+                        }
+                    )
 
         # Build Custom Field values (including parsed client data)
         field_values = self._build_field_values(agent_response, client_data)

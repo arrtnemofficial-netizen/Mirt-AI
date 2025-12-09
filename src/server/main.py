@@ -73,11 +73,11 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting MIRT AI Webhooks server")
 
-    # Register Telegram webhook if configured
+    # Telegram webhook: реєструємо, якщо є token і публічна адреса
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
 
-    if base_url and token and base_url != "http://localhost:8000":
+    if base_url and token:
         try:
             bot = get_bot()
             full_url = f"{base_url}{settings.TELEGRAM_WEBHOOK_PATH}"
@@ -185,7 +185,7 @@ async def health() -> dict[str, Any]:
 
 @app.post(settings.TELEGRAM_WEBHOOK_PATH)
 async def telegram_webhook(request: Request) -> JSONResponse:
-    """Handle incoming Telegram webhook updates."""
+    """Handle incoming Telegram webhook updates (AI-only відповіді)."""
     bot = get_bot()
     dp = get_cached_dispatcher()
 
@@ -210,6 +210,31 @@ async def manychat_webhook(
         return await handler.handle(payload)
     except ManychatPayloadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# =============================================================================
+# SNITKIX CRM WEBHOOK ENDPOINTS
+# =============================================================================
+
+@app.post("/webhooks/snitkix/order-status")
+async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
+    """Handle order status updates from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_order_status_webhook as webhook_handler
+    return await webhook_handler(request)
+
+
+@app.post("/webhooks/snitkix/payment")
+async def snitkix_payment_webhook(request: Request) -> JSONResponse:
+    """Handle payment confirmation from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_payment_webhook as webhook_handler
+    return await webhook_handler(request)
+
+
+@app.post("/webhooks/snitkix/inventory")
+async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
+    """Handle inventory updates from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_inventory_webhook as webhook_handler
+    return await webhook_handler(request)
 
 
 @app.post("/automation/mirt-summarize-prod-v1")

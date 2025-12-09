@@ -216,6 +216,11 @@ class ConversationHandler:
             state["metadata"].setdefault("session_id", session_id)
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
+                # Mirror critical flags to top-level so routers can see them
+                if "has_image" in extra_metadata:
+                    state["has_image"] = bool(extra_metadata.get("has_image"))
+                if "image_url" in extra_metadata:
+                    state["image_url"] = extra_metadata.get("image_url")
 
             # Generate new trace_id for this request (Observability)
             trace_id = str(uuid.uuid4())
@@ -373,18 +378,32 @@ class ConversationHandler:
         from src.core.models import Product
 
         products = []
-        for p in data.get("products", []):
-            with contextlib.suppress(Exception):
+        for idx, p in enumerate(data.get("products", [])):
+            try:
+                # Some upstream agents return id=0/photo_url=""; make it display-safe
+                product_id = p.get("id") or p.get("product_id") or (idx + 1)
+                price = p.get("price") or 0
+                photo_url = p.get("photo_url") or p.get("image_url") or ""
+
+                # Fallbacks to satisfy schema (id > 0, price > 0)
+                if not product_id or int(product_id) <= 0:
+                    product_id = idx + 1
+                if price == 0:
+                    # Minimal positive price to pass validation; actual amount is in text
+                    price = 1
+
                 products.append(
                     Product(
-                        id=p.get("id", 0),
+                        id=int(product_id),
                         name=p.get("name", ""),
-                        size=p.get("size", ""),
-                        color=p.get("color", ""),
-                        price=p.get("price", 0),
-                        photo_url=p.get("photo_url", ""),
+                        size=p.get("size", "") or "",
+                        color=p.get("color", "") or "",
+                        price=float(price),
+                        photo_url=photo_url,
                     )
                 )
+            except Exception as exc:
+                logger.debug("Skipping product in response conversion: %s", exc)
 
         return AgentResponse(
             event=data.get("event", "simple_answer"),

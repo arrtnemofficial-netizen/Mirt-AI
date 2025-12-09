@@ -2,11 +2,17 @@
 LangGraph Nodes - Individual processing units.
 ==============================================
 Each node is a pure function: state in -> state update out.
+
+Memory System (Titans-like):
+- memory_context_node: loads profile + facts BEFORE agents
+- memory_update_node: silently updates memory AFTER key states
 """
 
 from .agent import agent_node
+from .crm_error import crm_error_node
 from .escalation import escalation_node
 from .intent import intent_detection_node
+from .memory import memory_context_node, memory_update_node, should_load_memory, should_update_memory
 from .moderation import moderation_node
 from .offer import offer_node
 from .payment import payment_node
@@ -25,4 +31,10 @@ __all__ = [
     "upsell_node",
     "escalation_node",
     "validation_node",
+    "crm_error_node",
+    # Memory System
+    "memory_context_node",
+    "memory_update_node",
+    "should_load_memory",
+    "should_update_memory",
 ]

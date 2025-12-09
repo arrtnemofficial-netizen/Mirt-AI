@@ -326,11 +326,36 @@ PAYMENT_SUB_PHASES = {
 
 
 def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
-    """Get the prompt for a specific state."""
+    """
+    Get the prompt for a specific state.
+    
+    PRIORITY ORDER (Single Source of Truth):
+    1. PromptRegistry (data/prompts/states/*.md) - PREFERRED
+    2. STATE_PROMPTS dict - FALLBACK
+    
+    This allows editing prompts via .md files without code changes.
+    """
+    from src.core.prompt_registry import registry
+    
+    # Handle payment sub-phases specially
     if sub_phase and state_name == "STATE_5_PAYMENT_DELIVERY":
         key = PAYMENT_SUB_PHASES.get(sub_phase)
         if key:
-            return STATE_PROMPTS.get(key, "")
+            # Try registry first for payment sub-phase
+            try:
+                prompt_config = registry.get(f"state.{key}")
+                return prompt_config.content
+            except (FileNotFoundError, ValueError):
+                return STATE_PROMPTS.get(key, "")
+    
+    # PRIORITY 1: Try PromptRegistry (data/prompts/states/*.md)
+    try:
+        prompt_config = registry.get(f"state.{state_name}")
+        return prompt_config.content
+    except (FileNotFoundError, ValueError):
+        pass
+    
+    # PRIORITY 2: Fallback to hardcoded STATE_PROMPTS
     return STATE_PROMPTS.get(state_name, "")
 
 
@@ -411,15 +436,24 @@ def determine_next_dialog_phase(
             return "SIZE_COLOR_DONE"
         elif has_products:
             return "WAITING_FOR_SIZE"
+        # FIXED: Handle intent-based transitions to avoid dead loops
+        elif intent == "PAYMENT_DELIVERY" and user_confirmed:
+            return "WAITING_FOR_DELIVERY_DATA"
+        elif intent == "COMPLAINT":
+            return "COMPLAINT"
+        elif intent == "THANKYOU_SMALLTALK":
+            return "COMPLETED"
         else:
-            return "DISCOVERY"
+            return "DISCOVERY"  # Stay in discovery until we have products
     
     # STATE_2_VISION transitions
     if current_state == "STATE_2_VISION":
         if has_products:
             return "WAITING_FOR_SIZE"
+        # FIXED: If vision didn't find product, go to DISCOVERY for clarification
+        # instead of staying in VISION_DONE which causes dead loop
         else:
-            return "VISION_DONE"
+            return "DISCOVERY"  # Let agent ask clarifying questions
     
     # STATE_3_SIZE_COLOR transitions
     if current_state == "STATE_3_SIZE_COLOR":
@@ -471,34 +505,54 @@ def determine_next_dialog_phase(
 # =============================================================================
 # INTENT KEYWORDS (for simple detection)
 # =============================================================================
+# SINGLE SOURCE OF TRUTH: Use INTENT_PATTERNS from intent.py
+# This prevents keyword duplication and keeps detection consistent
+#
+# NOTE: We use lazy loading to avoid circular imports:
+# state_prompts.py <- edges.py <- intent.py <- nodes/agent.py <- state_prompts.py
 
-INTENT_KEYWORDS = {
-    "PAYMENT_DELIVERY": [
-        "беру", "оформлюємо", "замовляю", "хочу замовити", "оформити",
-        "оплачу", "оплатила", "відправив", "скинув оплату",
-    ],
-    "SIZE_HELP": [
-        "розмір", "зріст", "підійде", "який розмір", "розмірна сітка",
-    ],
-    "COLOR_HELP": [
-        "колір", "кольори", "інший колір", "є в", "який колір",
-    ],
-    "COMPLAINT": [
-        "брак", "претензія", "скарга", "незадоволен", "погано", "жахливо",
-    ],
-    "THANKYOU_SMALLTALK": [
-        "дякую", "спасибі", "ок", "супер", "дякуємо",
-    ],
-}
+# Cached reference to avoid repeated imports
+_INTENT_PATTERNS_CACHE: dict | None = None
+
+
+def _get_intent_patterns() -> dict:
+    """Lazy load INTENT_PATTERNS to avoid circular imports."""
+    global _INTENT_PATTERNS_CACHE
+    if _INTENT_PATTERNS_CACHE is None:
+        from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
+        _INTENT_PATTERNS_CACHE = INTENT_PATTERNS
+    return _INTENT_PATTERNS_CACHE
 
 
 def detect_simple_intent(message: str) -> str | None:
-    """Simple keyword-based intent detection."""
+    """
+    Simple keyword-based intent detection.
+    
+    Uses INTENT_PATTERNS from intent.py as Single Source of Truth.
+    """
+    patterns = _get_intent_patterns()
     message_lower = message.lower()
     
-    for intent, keywords in INTENT_KEYWORDS.items():
+    # Check priority intents from INTENT_PATTERNS
+    # ORDER MATTERS! Higher priority first.
+    priority_intents = [
+        "PAYMENT_DELIVERY",
+        "COMPLAINT", 
+        "SIZE_HELP",
+        "COLOR_HELP",
+        "REQUEST_PHOTO",     # Before THANKYOU to catch "покажи фото"
+        "PRODUCT_CATEGORY",
+        "THANKYOU_SMALLTALK",  # Last - catch "дякую", "ок" at end
+    ]
+    
+    for intent in priority_intents:
+        keywords = patterns.get(intent, [])
         for keyword in keywords:
             if keyword in message_lower:
                 return intent
     
     return None
+
+
+# Legacy alias for backward compatibility
+INTENT_KEYWORDS = {}  # Deprecated - use _get_intent_patterns() instead

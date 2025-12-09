@@ -1,4 +1,5 @@
 import sys
+import os
 from pathlib import Path
 import yaml
 from typing import List, Dict
@@ -10,6 +11,9 @@ root = Path(__file__).resolve().parents[1]
 project_root = str(root)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+
+# Set environment variables for testing
+os.environ["CELERY_EAGER"] = "true"  # Enable eager mode for tests
 
 # Setup Paths
 TESTS_DIR = Path(__file__).parent

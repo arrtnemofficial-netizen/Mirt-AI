@@ -37,11 +37,15 @@ from .edges import (
 )
 from .nodes import (
     agent_node,
+    crm_error_node,
     escalation_node,
     intent_detection_node,
+    memory_context_node,
+    memory_update_node,
     moderation_node,
     offer_node,
     payment_node,
+    should_load_memory,
     upsell_node,
     validation_node,
     vision_node,
@@ -116,9 +120,23 @@ def build_production_graph(
     async def _validation(state: dict[str, Any]) -> dict[str, Any]:
         return await validation_node(state)
 
+    async def _crm_error(state: dict[str, Any]) -> dict[str, Any]:
+        return await crm_error_node(state)
+
     async def _end(state: dict[str, Any]) -> dict[str, Any]:
         """Terminal node - just returns empty update."""
         return {"step_number": state.get("step_number", 0) + 1}
+
+    # =========================================================================
+    # MEMORY NODES (Titans-like Memory System)
+    # =========================================================================
+    async def _memory_context(state: dict[str, Any]) -> dict[str, Any]:
+        """Load memory context before agents."""
+        return await memory_context_node(state)
+
+    async def _memory_update(state: dict[str, Any]) -> dict[str, Any]:
+        """Silently update memory after key states."""
+        return await memory_update_node(state)
 
     # Build the graph with TYPED state (enables reducers!)
     graph = StateGraph(ConversationState)
@@ -127,6 +145,7 @@ def build_production_graph(
     # ADD NODES
     # =========================================================================
     graph.add_node("moderation", _moderation)
+    graph.add_node("memory_context", _memory_context)  # Memory: load before agents
     graph.add_node("intent", _intent)
     graph.add_node("vision", _vision)
     graph.add_node("agent", _agent)
@@ -135,6 +154,8 @@ def build_production_graph(
     graph.add_node("upsell", _upsell)
     graph.add_node("escalation", _escalation)
     graph.add_node("validation", _validation)
+    graph.add_node("crm_error", _crm_error)
+    graph.add_node("memory_update", _memory_update)  # Memory: update after key states
     graph.add_node("end", _end)
 
     # =========================================================================
@@ -196,6 +217,14 @@ def build_production_graph(
     )
 
     # =========================================================================
+    # MEMORY EDGES (Titans-like Memory System)
+    # =========================================================================
+    # memory_context runs AFTER moderation, BEFORE intent
+    # memory_update runs AFTER offer/upsell, BEFORE end
+    
+    graph.add_edge("memory_context", "intent")  # Memory → Intent
+
+    # =========================================================================
     # SIMPLE EDGES
     # =========================================================================
 
@@ -206,19 +235,22 @@ def build_production_graph(
         {"offer": "offer", "agent": "agent", "validation": "validation", "end": "end"},
     )
 
-    # Offer -> END (Turn-Based: wait for user confirmation)
-    # Next message will go through master_router → payment
-    graph.add_edge("offer", "end")
+    # Offer -> memory_update -> END (Turn-Based: wait for user confirmation)
+    # Memory update runs silently after offer is made
+    graph.add_edge("offer", "memory_update")
 
     # Payment uses Command for routing (handled internally)
     # But we need edges for the graph structure
     graph.add_edge("payment", "upsell")  # Default path
 
-    # Upsell -> end
-    graph.add_edge("upsell", "end")
+    # Upsell -> memory_update -> end
+    graph.add_edge("upsell", "memory_update")
 
     # Escalation -> end
     graph.add_edge("escalation", "end")
+
+    # Memory update -> end (after offer/upsell)
+    graph.add_edge("memory_update", "end")
 
     # End -> END
     graph.add_edge("end", END)

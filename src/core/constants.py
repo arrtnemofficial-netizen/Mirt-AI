@@ -69,6 +69,11 @@ class DBTable:
     MESSAGES = "mirt_messages"
     SESSIONS = "agent_sessions"
     LLM_USAGE = "llm_usage"
+    
+    # Memory System (Titans-like)
+    PROFILES = "mirt_profiles"
+    MEMORIES = "mirt_memories"
+    MEMORY_SUMMARIES = "mirt_memory_summaries"
 
 
 # =============================================================================

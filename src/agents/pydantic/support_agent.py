@@ -122,6 +122,28 @@ async def _add_state_context(ctx: RunContext[AgentDeps]) -> str:
     return "\n".join(lines)
 
 
+async def _add_memory_context(ctx: RunContext[AgentDeps]) -> str:
+    """
+    Add memory context (Titans-like) to prompt.
+    
+    This injects persistent profile and fluid facts from memory system.
+    Populated by memory_context_node before agent execution.
+    """
+    deps = ctx.deps
+    
+    # Use pre-formatted memory context if available
+    memory_prompt = deps.get_memory_context_prompt()
+    
+    if memory_prompt:
+        logger.debug(
+            "📚 Memory context injected (%d chars)",
+            len(memory_prompt),
+        )
+        return f"\n{memory_prompt}"
+    
+    return ""
+
+
 async def _add_image_context(ctx: RunContext[AgentDeps]) -> str:
     """Add image analysis instructions if image present."""
     if not ctx.deps.has_image:
@@ -327,6 +349,7 @@ async def _search_products(
 def _register_dynamic_prompts(agent: Agent[AgentDeps, SupportResponse]) -> None:
     """Register dynamic system prompts with the agent."""
     agent.system_prompt(_add_state_context)
+    agent.system_prompt(_add_memory_context)  # Titans-like memory context
     agent.system_prompt(_add_image_context)
     agent.system_prompt(_add_state_instructions)
 

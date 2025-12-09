@@ -128,6 +128,14 @@ class ConversationState(TypedDict, total=False):
     saved_parent_checkpoint_id: str | None
     step_number: int
 
+    # ==========================================================================
+    # MEMORY SYSTEM (Titans-like)
+    # ==========================================================================
+    # Populated by memory_context_node, consumed by AgentDeps
+    memory_profile: Any  # UserProfile from memory_models
+    memory_facts: list[Any]  # list[Fact] from memory_models
+    memory_context_prompt: str | None  # Pre-formatted prompt block
+
 
 # =============================================================================
 # STATE FACTORY
@@ -196,6 +204,10 @@ def create_initial_state(
         "checkpoint_id": None,
         "parent_checkpoint_id": None,
         "step_number": 0,
+        # Memory System (Titans-like)
+        "memory_profile": None,
+        "memory_facts": [],
+        "memory_context_prompt": None,
     }
 
     # Apply overrides

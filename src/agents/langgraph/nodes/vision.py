@@ -5,9 +5,9 @@ Handles image identification and product matching.
 Uses run_vision directly (NOT through generic runner).
 
 REFACTORED for clarity:
-- _extract_products() — get products from VisionResponse
-- _build_vision_messages() — build multi-bubble response
-- vision_node() — main orchestrator (simple!)
+- _extract_products() - get products from VisionResponse
+- _build_vision_messages() - build multi-bubble response
+- vision_node() - main orchestrator (simple!)
 """
 
 from __future__ import annotations
@@ -22,7 +22,12 @@ from src.core.state_machine import State
 from src.services.catalog_service import CatalogService
 from src.services.observability import log_agent_step, log_trace, track_metric
 
-from .utils import image_msg, text_msg
+from .utils import (
+    extract_height_from_text,
+    get_size_and_price_for_height,
+    image_msg,
+    text_msg,
+)
 
 
 if TYPE_CHECKING:
@@ -39,18 +44,39 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-async def _enrich_product_from_db(product_name: str) -> dict[str, Any] | None:
-    """Lookup product in DB by name and return enriched data.
+async def _enrich_product_from_db(product_name: str, color: str | None = None) -> dict[str, Any] | None:
+    """Lookup product in DB by name (and color if provided) and return enriched data.
 
-    Використовується, коли Vision повернув тільки назву без ціни/фото.
+    Використовується, коли Vision повернув назву без ціни/фото.
+    ВАЖЛИВО: Якщо є колір - шукає з кольором для точного match!
     """
     try:
         catalog = CatalogService()
-        results = await catalog.search_products(query=product_name, limit=1)
-        if results:
+        
+        # Якщо колір є - шукаємо з ним для точного match
+        search_query = product_name
+        if color:
+            # Спробуємо знайти точний match з кольором
+            search_query = f"{product_name} ({color})"
+        
+        results = await catalog.search_products(query=search_query, limit=5)
+        
+        # Якщо є колір - шукаємо товар з цим кольором
+        product = None
+        if color and results:
+            for p in results:
+                p_name = p.get("name", "").lower()
+                if color.lower() in p_name:
+                    product = p
+                    break
+        
+        # Якщо не знайшли з кольором - беремо перший
+        if not product and results:
             product = results[0]
+        
+        if product:
             price_display = CatalogService.format_price_display(product)
-            logger.info("📦 Enriched from DB: %s -> %s", product_name, price_display)
+            logger.info("📦 Enriched from DB: %s (color=%s) -> %s", product_name, color, price_display)
             return {
                 "id": product.get("id", 0),
                 "name": product.get("name", product_name),
@@ -89,15 +115,16 @@ def _build_vision_messages(
     response: VisionResponse,
     previous_messages: list[Any],
     vision_greeted: bool,
+    user_message: str = "",
 ) -> list[dict[str, str]]:
     """
     Build multi-bubble assistant response from VisionResponse.
 
     Message order (if product found):
-    1. Greeting (if first message): "Вітаю 🎀 З вами Ольга. Дякую за фото!"
-    2. Product: "Це наш {name} у кольорі {color} 💛" (БЕЗ ціни!)
-    3. Photo: [product image]
-    4. Size question: "Який розмір потрібен?"
+    1. Greeting (if first message): без згадки про фото/бота
+    2. Product: назва + колір
+    3. Ціна (якщо зріст вже вказано) АБО запит про зріст
+    4. Photo: [product image]
 
     If product NOT found:
     - Clarification question from LLM or fallback
@@ -106,25 +133,36 @@ def _build_vision_messages(
 
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
     if not vision_greeted:
-        messages.append(text_msg("Вітаю 🎀 З вами Ольга. Дякую за фото!"))
+        messages.append(text_msg("Вітаю 🎀 З вами MIRT_UA, менеджер Ольга."))
 
-    # 2. Product highlight (БЕЗ ціни - ціна залежить від розміру!)
-    # НЕ використовуємо reply_to_user від LLM — будуємо відповідь самі з точними даними з БД
+    # 2. Product highlight БЕЗ ЦІНИ (ціна тільки після зросту!)
+    # НЕ використовуємо reply_to_user від LLM - будуємо відповідь самі з точними даними з БД
     product = response.identified_product
     if product:
-        # Build product description without price
+        # БАБЛА 2: Назва товару + колір (БЕЗ ЦІНИ!)
+        # Ціна буде показана тільки після того як клієнт вкаже зріст
         parts = [f"Це наш {product.name}"]
         if product.color:
             parts.append(f"у кольорі {product.color}")
-        # НЕ додаємо ціну тут! Ціна залежить від розміру.
+        # НЕ показуємо ціну тут! Спочатку питаємо зріст
         messages.append(text_msg(" ".join(parts) + " 💛"))
+        
+        # БАБЛА 3: Якщо зріст вже в тексті (фото + текст разом) - показуємо ціну одразу!
+        # Інакше питаємо зріст, і agent_node обробить відповідь
+        height = extract_height_from_text(user_message)
+        if height:
+            # Зріст є в тексті разом з фото - показуємо ціну одразу!
+            size_label, price = get_size_and_price_for_height(height)
+            messages.append(text_msg(f"На {height} см підійде розмір {size_label}"))
+            messages.append(text_msg(f"Ціна {price} грн"))
+            messages.append(text_msg("Оформлюємо? 🌸"))
+        else:
+            # Тільки фото без зросту - питаємо
+            messages.append(text_msg("На який зріст підказати? 🌸"))
 
-        # Add product photo
+        # БАБЛА 4: Фото товару (якщо є)
         if product.photo_url:
             messages.append(image_msg(product.photo_url))
-
-        # ЗАВЖДИ питаємо розмір після ідентифікації товару
-        messages.append(text_msg("Який розмір потрібен? Підкажіть, будь ласка, зріст дитини 🤍"))
 
     # 4. Clarification (тільки якщо НЕ впізнали товар)
     elif response.clarification_question:
@@ -134,7 +172,11 @@ def _build_vision_messages(
 
     # 5. Fallback
     if not messages:
-        messages.append(text_msg("Зчитала фото. Готова допомогти з розміром чи деталями 🤍"))
+        messages.append(
+            text_msg(
+                "Не впізнала модель на фото. Можу показати популярні варіанти - скажіть, який тип або колір цікавить, і на який зріст шукаєте."
+            )
+        )
 
     return messages
 
@@ -189,14 +231,25 @@ async def vision_node(
         # Call vision agent
         response = await run_vision(message=user_message, deps=deps)
 
-        # Enrich product from DB if Vision returned partial data (price=0)
-        if response.identified_product and response.identified_product.price == 0:
-            enriched = await _enrich_product_from_db(response.identified_product.name)
+        # Enrich product from DB if Vision returned partial data (missing id/photo/price)
+        if response.identified_product and (
+            response.identified_product.price == 0
+            or not response.identified_product.photo_url
+            or not response.identified_product.id
+        ):
+            # Передаємо колір для точного match в БД!
+            vision_color = response.identified_product.color
+            enriched = await _enrich_product_from_db(
+                response.identified_product.name, 
+                color=vision_color
+            )
             if enriched:
                 # Update identified_product with DB data (DB = єдине джерело правди)
                 response.identified_product.price = enriched.get("price", 0)
                 response.identified_product.photo_url = enriched.get("photo_url", "")
-                response.identified_product.color = enriched.get("color", "")
+                # Зберігаємо колір від vision якщо він є, інакше беремо з БД
+                if not vision_color:
+                    response.identified_product.color = enriched.get("color", "")
                 response.identified_product.id = enriched.get("id", 0)
 
                 # НЕ генеруємо reply з ціною тут!
@@ -248,6 +301,7 @@ async def vision_node(
             response,
             messages,
             vision_greeted=vision_greeted_before,
+            user_message=user_message,  # Передаємо текст для витягування зросту!
         )
 
         # Metrics
@@ -280,9 +334,18 @@ async def vision_node(
         # 3. needs_clarification → VISION_DONE
         #    - Vision не впевнений, питає уточнення
         # =====================================================
+        # Перевіряємо чи зріст вже є в тексті
+        height_in_text = extract_height_from_text(user_message)
+        
         if selected_products:
-            next_phase = "WAITING_FOR_SIZE"
-            next_state = State.STATE_3_SIZE_COLOR.value
+            if height_in_text:
+                # Зріст вже є - готові до оформлення!
+                next_phase = "SIZE_COLOR_DONE"
+                next_state = State.STATE_4_OFFER.value
+            else:
+                # Тільки фото - чекаємо зріст
+                next_phase = "WAITING_FOR_SIZE"
+                next_state = State.STATE_3_SIZE_COLOR.value
         elif response.needs_clarification:
             next_phase = "VISION_DONE"
             next_state = State.STATE_2_VISION.value
@@ -304,6 +367,22 @@ async def vision_node(
                 "needs_clarification": response.needs_clarification,
                 "has_image": False,  # Також в metadata
                 "vision_greeted": True,  # greeting уже відправлено
+            },
+            # Lightweight agent_response so renderers (Telegram/ManyChat) можуть показати фото/текст
+            "agent_response": {
+                "event": "simple_answer",
+                "messages": [
+                    {"type": "text", "content": m.get("content", "")}
+                    for m in assistant_messages
+                    if m.get("type") == "text"
+                ],
+                "products": selected_products,
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": next_state,
+                    "intent": "PHOTO_IDENT",
+                    "escalation_level": "NONE",
+                },
             },
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
