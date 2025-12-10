@@ -64,8 +64,19 @@ def build_dispatcher(
             session_id,
             {
                 "messages": [],
-                "metadata": {"session_id": session_id},
+                "metadata": {
+                    "session_id": session_id,
+                    "vision_greeted": False,  # Reset greeting flag
+                    "has_image": False,
+                },
                 "current_state": "STATE_0_INIT",
+                "dialog_phase": "INIT",
+                "should_escalate": False,
+                "has_image": False,
+                "detected_intent": None,
+                "selected_products": [],
+                "offered_products": [],
+                "step_number": 0,
             },
         )
         await message.answer("Можемо почати спілкування!")
@@ -85,8 +96,19 @@ def build_dispatcher(
             session_id,
             {
                 "messages": [],
-                "metadata": {"session_id": session_id},
+                "metadata": {
+                    "session_id": session_id,
+                    "vision_greeted": False,  # Reset greeting flag
+                    "has_image": False,
+                },
                 "current_state": "STATE_0_INIT",
+                "dialog_phase": "INIT",
+                "should_escalate": False,
+                "has_image": False,
+                "detected_intent": None,
+                "selected_products": [],
+                "offered_products": [],
+                "step_number": 0,
             },
         )
 
@@ -143,13 +165,22 @@ async def _process_incoming(
     text = override_text or message.text or ""
     session_id = str(message.chat.id)
 
-    # Build extra metadata for photos
+    # Build extra metadata (username, photos, etc.)
     extra_metadata = None
+    username = None
+    if getattr(message, "from_user", None):
+        username = message.from_user.username
+    if username:
+        extra_metadata = {"user_nickname": username}
     if has_image:
-        extra_metadata = {
+        image_meta = {
             "has_image": True,
             "image_url": image_url,
         }
+        if extra_metadata:
+            extra_metadata.update(image_meta)
+        else:
+            extra_metadata = image_meta
 
     # Log incoming message
     logger.info(
@@ -273,4 +304,6 @@ async def run_polling(store: SessionStore | None = None) -> None:
 
 
 if __name__ == "__main__":
+    if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(run_polling())

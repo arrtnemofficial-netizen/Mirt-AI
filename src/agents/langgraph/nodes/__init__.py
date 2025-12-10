@@ -19,6 +19,14 @@ from .payment import payment_node
 from .upsell import upsell_node
 from .validation import validation_node
 from .vision import vision_node
+from .sitniks_status import (
+    sitniks_pre_response_node,
+    sitniks_status_node,
+    determine_stage,
+    STAGE_FIRST_TOUCH,
+    STAGE_GIVE_REQUISITES,
+    STAGE_ESCALATION,
+)
 
 
 __all__ = [
@@ -37,4 +45,11 @@ __all__ = [
     "memory_update_node",
     "should_load_memory",
     "should_update_memory",
+    # Sitniks CRM Status Integration
+    "sitniks_pre_response_node",
+    "sitniks_status_node",
+    "determine_stage",
+    "STAGE_FIRST_TOUCH",
+    "STAGE_GIVE_REQUISITES",
+    "STAGE_ESCALATION",
 ]

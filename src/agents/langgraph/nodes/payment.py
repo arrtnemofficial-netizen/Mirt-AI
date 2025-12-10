@@ -21,6 +21,7 @@ from langgraph.types import Command, interrupt
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
 from src.core.state_machine import State
+from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.observability import log_agent_step, track_metric
 
 # State prompts for sub-phases
@@ -164,6 +165,17 @@ async def _prepare_payment_and_interrupt(
         product_names,
     )
 
+    # =========================================================================
+    # SITNIKS: Set status to "Виставлено рахунок" when showing payment details
+    # =========================================================================
+    try:
+        sitniks_service = get_sitniks_chat_service()
+        if sitniks_service.enabled:
+            await sitniks_service.handle_invoice_sent(session_id)
+            logger.info("[SESSION %s] Sitniks invoice_sent status set", session_id)
+    except Exception as e:
+        logger.warning("[SESSION %s] Sitniks invoice_sent error: %s", session_id, e)
+    
     # This call PAUSES the graph execution
     # It returns ONLY when someone calls graph.invoke(Command(resume=...))
     human_response = interrupt(approval_request)
@@ -238,6 +250,7 @@ async def _handle_approval_response(
             order_data = {
                 "external_id": session_id,
                 "source_id": deps.user_id,
+                "user_nickname": deps.user_nickname,
                 "customer": {
                     "full_name": deps.customer_name,
                     "phone": deps.customer_phone,
@@ -245,6 +258,7 @@ async def _handle_approval_response(
                     "nova_poshta_branch": deps.customer_nova_poshta,
                     "telegram_id": session_id if "telegram" in str(deps.user_id) else None,
                     "manychat_id": session_id if "manychat" in str(deps.user_id) else None,
+                    "username": deps.user_nickname,
                 },
                 "items": order_items,
                 "totals": {"total": approval_data.get("total_price", 0)},

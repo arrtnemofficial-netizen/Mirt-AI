@@ -76,6 +76,7 @@ class AgentDeps:
     session_id: str
     trace_id: str  # For distributed tracing of this specific request
     user_id: str = ""
+    user_nickname: str | None = None
 
     # Current conversation state (Literal type from models)
     current_state: StateType = "STATE_0_INIT"
@@ -228,6 +229,7 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
         session_id=state.get("session_id", metadata.get("session_id", "")),
         trace_id=state.get("trace_id", ""),  # Must be populated by graph
         user_id=metadata.get("user_id", ""),
+        user_nickname=metadata.get("user_nickname"),
         current_state=state.get("current_state", "STATE_0_INIT"),
         channel=metadata.get("channel", "instagram"),
         language=metadata.get("language", "uk"),

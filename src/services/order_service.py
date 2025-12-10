@@ -45,14 +45,18 @@ class OrderService:
             order_payload = {
                 "user_id": order_data.get("source_id") or "unknown",
                 "session_id": order_data.get("external_id"),
-                "customer_name": customer.get("name"),
+                # Support both "full_name" (from payment.py) and "name" (legacy)
+                "customer_name": customer.get("full_name") or customer.get("name"),
                 "customer_phone": customer.get("phone"),
                 "customer_city": customer.get("city"),
                 "delivery_method": order_data.get("delivery_method"),
-                "delivery_address": customer.get("delivery_address"),
+                # Support both "nova_poshta_branch" and "delivery_address"
+                "delivery_address": customer.get("nova_poshta_branch") or customer.get("delivery_address"),
                 "status": order_data.get("status", "new"),
                 "total_amount": totals.get("total", 0),
                 "notes": order_data.get("notes"),
+                # User nickname from Telegram/Instagram
+                "user_nickname": order_data.get("user_nickname") or customer.get("username"),
             }
 
             # 2. Insert Order

@@ -25,6 +25,7 @@ from typing import Any
 
 from src.agents.pydantic.memory_agent import analyze_for_memory, extract_quick_facts
 from src.agents.pydantic.memory_models import NewFact
+from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.memory_service import MemoryService
 from src.services.observability import log_agent_step, track_metric
 
@@ -105,12 +106,42 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
             },
         )
         
+        # =================================================================
+        # SITNIKS FIRST TOUCH (on first message only)
+        # =================================================================
+        sitniks_result = None
+        step_number = state.get("step_number", 0)
+        
+        if step_number <= 1:
+            metadata = state.get("metadata", {})
+            instagram_username = metadata.get("instagram_username")
+            telegram_username = metadata.get("user_nickname")
+            
+            if instagram_username or telegram_username:
+                try:
+                    sitniks_service = get_sitniks_chat_service()
+                    if sitniks_service.enabled:
+                        sitniks_result = await sitniks_service.handle_first_touch(
+                            user_id=session_id,
+                            instagram_username=instagram_username,
+                            telegram_username=telegram_username,
+                        )
+                        logger.info(
+                            "[SESSION %s] Sitniks first touch: %s",
+                            session_id,
+                            sitniks_result,
+                        )
+                except Exception as e:
+                    logger.warning("[SESSION %s] Sitniks first touch error: %s", session_id, e)
+        
         # Return state update with memory context
         return {
-            "step_number": state.get("step_number", 0) + 1,
+            "step_number": step_number + 1,
             "memory_profile": context.profile,
             "memory_facts": context.facts,
             "memory_context_prompt": memory_prompt,
+            "sitniks_chat_id": sitniks_result.get("chat_id") if sitniks_result else None,
+            "sitniks_first_touch_done": sitniks_result.get("success") if sitniks_result else False,
         }
         
     except Exception as e:

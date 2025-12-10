@@ -205,13 +205,28 @@ class ConversationHandler:
             # Load or create session state
             state = self.session_store.get(session_id)
 
-            # Ensure state has required structure
+            # Ensure state has required structure with ALL necessary flags
             if not state or not isinstance(state, dict):
-                state = ConversationState(messages=[], metadata={"session_id": session_id})
+                state = ConversationState(
+                    messages=[],
+                    metadata={
+                        "session_id": session_id,
+                        "vision_greeted": False,
+                        "has_image": False,
+                    },
+                    current_state="STATE_0_INIT",
+                    dialog_phase="INIT",
+                    should_escalate=False,
+                    has_image=False,
+                    detected_intent=None,
+                    selected_products=[],
+                    offered_products=[],
+                    step_number=0,
+                )
             if "messages" not in state:
                 state["messages"] = []
             if "metadata" not in state:
-                state["metadata"] = {}
+                state["metadata"] = {"session_id": session_id, "vision_greeted": False}
             state["messages"].append({"role": "user", "content": text})
             state["metadata"].setdefault("session_id", session_id)
             if extra_metadata:

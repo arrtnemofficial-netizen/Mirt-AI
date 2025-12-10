@@ -245,7 +245,7 @@ async def run_summarization(
     """Summarize and prune old messages for a session.
 
     Called by ManyChat after 3 days of inactivity.
-    Saves summary to mirt_users.summary and deletes messages from mirt_messages.
+    Saves summary to users.summary and deletes messages from messages table.
 
     Uses Celery if CELERY_ENABLED=true, otherwise runs synchronously.
 

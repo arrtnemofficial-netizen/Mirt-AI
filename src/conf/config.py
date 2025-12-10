@@ -77,11 +77,11 @@ class Settings(BaseSettings):
         default="agent_sessions", description="Table name storing chat session state JSON."
     )
     SUPABASE_MESSAGES_TABLE: str = Field(
-        default="mirt_messages",
+        default="messages",  # Was: mirt_messages (dropped in migration)
         description="Table storing raw chat messages (session-scoped).",
     )
     SUPABASE_USERS_TABLE: str = Field(
-        default="mirt_users",
+        default="users",  # Was: mirt_users (dropped, profiles in mirt_profiles)
         description="Table storing user profiles and summaries.",
     )
     # RAG tables removed - using Embedded Catalog in prompt

@@ -11,6 +11,7 @@ from typing import Any
 
 from src.core.models import AgentResponse, DebugInfo, Escalation, Message, Metadata
 from src.core.state_machine import State
+from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.observability import log_agent_step, track_metric
 
 
@@ -110,6 +111,21 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
         await notifier.send_escalation_alert(session_id, reason, user_context)
     except Exception as e:
         logger.error("Failed to send manager notification: %s", e)
+
+    # =========================================================================
+    # SITNIKS: Set status to "AI Увага" and assign to human manager
+    # =========================================================================
+    try:
+        sitniks_service = get_sitniks_chat_service()
+        if sitniks_service.enabled:
+            sitniks_result = await sitniks_service.handle_escalation(session_id)
+            logger.info(
+                "[SESSION %s] Sitniks escalation: %s",
+                session_id,
+                sitniks_result,
+            )
+    except Exception as e:
+        logger.warning("[SESSION %s] Sitniks escalation error: %s", session_id, e)
 
     # =====================================================
     # DIALOG PHASE (Turn-Based State Machine)
