@@ -1,13 +1,14 @@
-"""Tests for client data parser."""
+"""Tests for minimal client data parser.
 
-from src.services.client_data_parser import (
-    ClientData,
-    extract_city,
-    extract_full_name,
+The minimal parser handles ONLY phone and Nova Poshta numbers.
+Names and cities are handled by LLM with proper prompting.
+"""
+
+from src.services.client_data_parser_minimal import (
+    MinimalClientData,
     extract_nova_poshta,
     extract_phone,
-    normalize_phone,
-    parse_client_data,
+    parse_minimal,
 )
 
 
@@ -30,34 +31,11 @@ class TestPhoneExtraction:
         assert extract_phone("немає телефону тут") is None
 
 
-class TestCityExtraction:
-    """Test city extraction."""
-
-    def test_extract_city_kyiv(self):
-        # Direct city name mention
-        result = extract_city("Київ, відділення 25")
-        assert result is not None
-        assert "київ" in result.lower()
-
-    def test_extract_city_kharkiv(self):
-        result = extract_city("м. Харків")
-        assert result is not None
-        assert "харків" in result.lower()
-
-    def test_extract_city_lviv(self):
-        result = extract_city("Львів, відділення 25")
-        assert result is not None
-        assert "львів" in result.lower()
-
-    def test_extract_city_none(self):
-        assert extract_city("просто текст") is None
-
-
 class TestNovaPoshtaExtraction:
     """Test Nova Poshta branch extraction."""
 
-    def test_extract_np_viddilennya(self):
-        assert extract_nova_poshta("відділення 25") == "25"
+    def test_extract_np_short(self):
+        assert extract_nova_poshta("нп 25") == "25"
 
     def test_extract_np_number_sign(self):
         assert extract_nova_poshta("НП №123") == "123"
@@ -65,87 +43,53 @@ class TestNovaPoshtaExtraction:
     def test_extract_np_poshtamat(self):
         assert extract_nova_poshta("поштомат 456") == "456"
 
+    def test_extract_np_viddilennya(self):
+        assert extract_nova_poshta("відділення 25") == "25"
+
+    def test_extract_np_nova_poshta_full(self):
+        assert extract_nova_poshta("нова пошта 15") == "15"
+
     def test_extract_np_none(self):
         assert extract_nova_poshta("просто текст") is None
 
 
-class TestFullNameExtraction:
-    """Test full name extraction."""
+class TestParseMinimal:
+    """Test minimal client data parsing."""
 
-    def test_extract_name_three_words(self):
-        # Three words is more reliable for detection
-        result = extract_full_name("Петренко Петро Петрович")
-        assert result is not None
-        assert "Петренко" in result
-
-    def test_extract_name_with_context(self):
-        # Name with surrounding context
-        result = extract_full_name("Отримувач: Коваленко Олена Миколаївна, телефон")
-        assert result is not None
-        assert "Коваленко" in result
-
-    def test_extract_name_with_phone(self):
-        result = extract_full_name("Шевченко Тарас Григорович 0501234567")
-        assert result is not None
-        assert "Шевченко" in result
-        assert "0501234567" not in (result or "")
-
-
-class TestParseClientData:
-    """Test full client data parsing."""
-
-    def test_parse_complete_data(self):
-        text = "Іванов Іван Іванович, 0501234567, Київ, відділення 25"
-        data = parse_client_data(text)
+    def test_parse_phone_and_np(self):
+        text = "+380501234567, нп 25"
+        data = parse_minimal(text)
 
         assert data.phone == "+380501234567"
-        assert data.city is not None
-        assert "київ" in data.city.lower()
         assert data.nova_poshta == "25"
 
-    def test_parse_partial_data(self):
+    def test_parse_only_phone(self):
         text = "телефон 0501234567"
-        data = parse_client_data(text)
+        data = parse_minimal(text)
 
         assert data.phone == "+380501234567"
-        assert data.city is None
         assert data.nova_poshta is None
 
-    def test_is_complete(self):
-        complete = ClientData(
-            full_name="Іванов Іван",
-            phone="+380501234567",
-            city="Київ",
-            nova_poshta="25",
-        )
-        assert complete.is_complete() is True
+    def test_parse_only_np(self):
+        text = "відділення 54"
+        data = parse_minimal(text)
 
-        incomplete = ClientData(phone="+380501234567")
-        assert incomplete.is_complete() is False
+        assert data.phone is None
+        assert data.nova_poshta == "54"
 
-    def test_to_dict(self):
-        data = ClientData(
-            full_name="Іванов Іван",
-            phone="+380501234567",
-            city="Київ",
-            nova_poshta="25",
-        )
-        d = data.to_dict()
+    def test_parse_nothing(self):
+        text = "привіт, як справи?"
+        data = parse_minimal(text)
 
-        assert d["client_name"] == "Іванов Іван"
-        assert d["client_phone"] == "+380501234567"
-        assert d["client_city"] == "Київ"
-        assert d["client_nova_poshta"] == "25"
+        assert data.phone is None
+        assert data.nova_poshta is None
 
+    def test_parse_complex_message(self):
+        """Test parsing real user message with all data."""
+        text = "Немченко юрий волоимирович +380951392121 нп 54 киев"
+        data = parse_minimal(text)
 
-class TestNormalizePhone:
-    """Test phone normalization."""
-
-    def test_normalize_380(self):
-        assert normalize_phone("380501234567") == "+380501234567"
-
-    def test_normalize_0(self):
-        assert normalize_phone("0501234567") == "+380501234567"
-
-    def test_normalize_with_plus(self):
-        assert normalize_phone("+380501234567") == "+380501234567"
+        # Minimal parser only extracts phone and NP
+        # Name and city are handled by LLM
+        assert data.phone == "+380951392121"
+        assert data.nova_poshta == "54"

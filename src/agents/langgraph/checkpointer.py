@@ -163,24 +163,46 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         return SerializableMemorySaver()
 
     try:
-        # Create async connection pool for async checkpointing
         import psycopg
+        from langgraph.checkpoint.postgres import PostgresSaver
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         from psycopg_pool import AsyncConnectionPool
-
-        # First, setup tables with a separate autocommit connection (sync is fine for setup)
-        setup_conn = psycopg.connect(database_url, autocommit=True)
+        
+        # Setup tables first using sync connection with prepare_threshold=None
+        # None completely disables prepared statements (vs 0 which means "after 0 uses")
+        setup_conn = psycopg.connect(database_url, autocommit=True, prepare_threshold=None)
         try:
-            # Use sync PostgresSaver just for table setup
-            from langgraph.checkpoint.postgres import PostgresSaver as SyncPostgresSaver
-
-            setup_checkpointer = SyncPostgresSaver(setup_conn)
-            setup_checkpointer.setup()
+            temp_checkpointer = PostgresSaver(setup_conn)
+            temp_checkpointer.setup()
         finally:
             setup_conn.close()
-
-        # Now create ASYNC pool for actual checkpointing (required for ainvoke)
-        pool = AsyncConnectionPool(conninfo=database_url, min_size=1, max_size=5)
+        
+        # Create async pool with prepare_threshold=None
+        # CRITICAL for Supabase PgBouncer which doesn't support prepared statements
+        # None = never use prepared statements (0 still creates them after 0 uses)
+        #
+        # Also configure for Supabase connection limits:
+        # - max_idle=30: Close idle connections before Supabase does (avoids SSL errors)
+        # - check: Verify connection is alive before use
+        
+        async def check_connection(conn):
+            """Check if connection is still alive before returning from pool."""
+            try:
+                await conn.execute("SELECT 1")
+            except Exception:
+                raise  # Connection is dead, pool will discard it
+        
+        pool = AsyncConnectionPool(
+            conninfo=database_url,
+            min_size=1,
+            max_size=10,
+            max_idle=30.0,  # Close idle connections after 30s (before Supabase kills them)
+            check=check_connection,  # Verify connection health before use
+            kwargs={
+                "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
+            },
+        )
+        
         checkpointer = AsyncPostgresSaver(pool)
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")

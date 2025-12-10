@@ -213,6 +213,57 @@ def _check_for_hallucination(
     return errors
 
 
+# Russian-specific characters (not shared with Ukrainian)
+# ы, э, ъ are ONLY in Russian, not Ukrainian
+RUSSIAN_ONLY_CHARS = set("ыэъЫЭЪёЁ")
+
+# Russian words that should NEVER appear in Ukrainian response
+RUSSIAN_MARKERS = [
+    r"\bщас\b",      # сейчас (рос) vs зараз (укр)
+    r"\bсейчас\b",   # сейчас (рос)
+    r"\bтолько\b",   # только (рос) vs тільки (укр)
+    r"\bхорошо\b",   # хорошо (рос) vs добре (укр)
+    r"\bконечно\b",  # конечно (рос) vs звичайно (укр)
+    r"\bпожалуйста\b",  # пожалуйста (рос) vs будь ласка (укр)
+    r"\bспасибо\b",  # спасибо (рос) vs дякую (укр)
+    r"\bждите\b",    # ждите (рос) vs чекайте (укр)
+    r"\bподождите\b",  # подождите (рос) vs зачекайте (укр)
+    r"\bздравствуйте\b",  # здравствуйте (рос) vs вітаю (укр)
+    r"\bпривет\b",   # привет (рос) vs привіт (укр)
+]
+
+
+def _validate_language_ukrainian(response: dict[str, Any]) -> list[str]:
+    """Validate that response is in Ukrainian, not Russian.
+    
+    This is CRITICAL for brand consistency and legal compliance.
+    """
+    import re
+    
+    errors = []
+    messages = response.get("messages", [])
+    
+    for i, msg in enumerate(messages):
+        text = msg.get("text", "") if isinstance(msg, dict) else str(msg)
+        
+        # Check for Russian-only characters
+        russian_chars_found = [c for c in text if c in RUSSIAN_ONLY_CHARS]
+        if russian_chars_found:
+            errors.append(
+                f"Message {i}: contains Russian characters {set(russian_chars_found)} - must be Ukrainian only"
+            )
+        
+        # Check for Russian marker words
+        text_lower = text.lower()
+        for pattern in RUSSIAN_MARKERS:
+            if re.search(pattern, text_lower):
+                errors.append(
+                    f"Message {i}: contains Russian word '{pattern.strip(chr(92)+'b')}' - use Ukrainian equivalent"
+                )
+    
+    return errors
+
+
 def _validate_response_structure(response: dict[str, Any]) -> list[str]:
     """Validate response has required structure."""
     errors = []
@@ -228,6 +279,10 @@ def _validate_response_structure(response: dict[str, Any]) -> list[str]:
         errors.append("'messages' must be an array")
     elif len(response["messages"]) == 0:
         errors.append("'messages' array is empty")
+    else:
+        # VALIDATE LANGUAGE - must be Ukrainian!
+        lang_errors = _validate_language_ukrainian(response)
+        errors.extend(lang_errors)
 
     # Must have metadata
     if "metadata" not in response:

@@ -140,28 +140,52 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
     # STATE_3→4: Size and color ready
     if dialog_phase == "SIZE_COLOR_DONE":
-        logger.info("🔀 [SESSION %s] → offer (SIZE_COLOR_DONE)", session_id)
+        logger.info(" [SESSION %s] → offer (SIZE_COLOR_DONE)", session_id)
         return "offer"
 
     # STATE_4: Offer made - чекаємо "Беру" або підтвердження
     if dialog_phase == "OFFER_MADE":
+        current_state = state.get("current_state", State.STATE_0_INIT.value)
+
         # QUALITY: Перевіряємо чи юзер каже "беру" або підтверджує
         if detected_intent == "PAYMENT_DELIVERY":
-            logger.info("🔀 [SESSION %s] → payment (OFFER_MADE + 'беру')", session_id)
-            return "payment"
+            if current_state == State.STATE_4_OFFER.value:
+                # Перше підтвердження після офферу ("беру") → в payment
+                logger.info(" [SESSION %s] → payment (OFFER_MADE + 'беру', STATE_4)", session_id)
+                return "payment"
+            else:
+                # Вже в STATE_5: короткі підтвердження повинні йти в agent,
+                # щоб payment sub-phase логіка показала реквізити, а не повторювала питання
+                logger.info(
+                    " [SESSION %s] → agent (OFFER_MADE + PAYMENT_DELIVERY, STATE_5)",
+                    session_id,
+                )
+                return "agent"
         
         # Check confirmation keywords directly (да, так, ок, etc.)
-        # detect_simple_intent doesn't check these, but in OFFER_MADE they mean "yes"
+        # detect_simple_intent doesn't check these, but in OFFER_MADE вони mean "yes"
         confirmation_keywords = ["так", "да", "yes", "ок", "добре", "згодна", "згоден", 
                                   "підходить", "давай", "давайте", "можна", "хочу", "буду"]
         msg_lower = user_message.lower() if user_message else ""
         for keyword in confirmation_keywords:
             if keyword in msg_lower:
-                logger.info("🔀 [SESSION %s] → payment (OFFER_MADE + confirmation: '%s')", session_id, keyword)
-                return "payment"
+                if current_state == State.STATE_4_OFFER.value:
+                    logger.info(
+                        " [SESSION %s] → payment (OFFER_MADE + confirmation: '%s', STATE_4)",
+                        session_id,
+                        keyword,
+                    )
+                    return "payment"
+                else:
+                    logger.info(
+                        " [SESSION %s] → agent (OFFER_MADE + confirmation: '%s', STATE_5)",
+                        session_id,
+                        keyword,
+                    )
+                    return "agent"
         
         # Інакше - юзер питає щось інше
-        logger.info("🔀 [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
+        logger.info(" [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
         return "agent"
 
     # STATE_5: Collecting delivery data → use AGENT to extract name/phone/city

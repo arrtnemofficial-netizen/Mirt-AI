@@ -115,16 +115,29 @@ def _extract_products(
     response: VisionResponse,
     existing: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Extract products from VisionResponse into state format."""
+    """Extract products from VisionResponse into state format.
+    
+    Logic:
+    - If confidence >= 85% → show ONLY identified product (no alternatives)
+    - If confidence < 85% → show identified + alternatives for user to choose
+    """
     products = list(existing)
+    confidence = response.confidence or 0.0
 
     if response.identified_product:
         products = [response.identified_product.model_dump()]
-        logger.info("Vision identified: %s", response.identified_product.name)
+        logger.info("Vision identified: %s (confidence=%.0f%%)", 
+                   response.identified_product.name, confidence * 100)
 
-    if response.alternative_products:
+    # Only show alternatives if NOT confident enough
+    # High confidence = we know what it is, no need to confuse user with options
+    if response.alternative_products and confidence < 0.85:
         products.extend([p.model_dump() for p in response.alternative_products])
-        logger.info("Vision alternatives: %d", len(response.alternative_products))
+        logger.info("Vision alternatives: %d (showing because confidence < 85%%)", 
+                   len(response.alternative_products))
+    elif response.alternative_products:
+        logger.info("Vision: skipping %d alternatives (confidence=%.0f%% >= 85%%)",
+                   len(response.alternative_products), confidence * 100)
 
     return products
 
@@ -159,11 +172,26 @@ def _build_vision_messages(
     if product:
         # БАБЛА 2: Назва товару + колір (БЕЗ ЦІНИ!)
         # Ціна буде показана тільки після того як клієнт вкаже зріст
-        parts = [f"Це наш {product.name}"]
-        if product.color:
-            parts.append(f"у кольорі {product.color}")
-        # НЕ показуємо ціну тут! Спочатку питаємо зріст
-        messages.append(text_msg(" ".join(parts) + " 💛"))
+        product_name = product.name
+        
+        # Check if color is already in the name (e.g., "Костюм Ритм (рожевий)")
+        # to avoid duplication like "Костюм Ритм (рожевий) у кольорі рожевий"
+        color_already_in_name = (
+            product.color and 
+            product.color.lower() in product_name.lower()
+        )
+        
+        if color_already_in_name:
+            # Color is in name - just use the name
+            message_text = f"Це наш {product_name} 💛"
+        elif product.color:
+            # Color NOT in name - add it
+            message_text = f"Це наш {product_name} у кольорі {product.color} 💛"
+        else:
+            # No color info at all
+            message_text = f"Це наш {product_name} 💛"
+        
+        messages.append(text_msg(message_text))
         
         # БАБЛА 3: Якщо зріст вже в тексті (фото + текст разом) - показуємо ціну одразу!
         # Інакше питаємо зріст, і agent_node обробить відповідь

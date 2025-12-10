@@ -227,8 +227,10 @@ class ConversationHandler:
                 state["messages"] = []
             if "metadata" not in state:
                 state["metadata"] = {"session_id": session_id, "vision_greeted": False}
-            state["messages"].append({"role": "user", "content": text})
+            # Ensure core identifiers are present
             state["metadata"].setdefault("session_id", session_id)
+            state["metadata"].setdefault("thread_id", state["metadata"].get("thread_id", session_id))
+            state["messages"].append({"role": "user", "content": text})
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
                 # Mirror critical flags to top-level so routers can see them
@@ -281,11 +283,13 @@ class ConversationHandler:
         """Invoke the LangGraph agent with retry logic and thread_id for persistence."""
         import asyncio
 
-        session_id = state.get("metadata", {}).get("session_id", "unknown")
+        metadata = state.get("metadata", {})
+        session_id = metadata.get("session_id", "unknown")
+        thread_id = metadata.get("thread_id", session_id)
         last_error: Exception | None = None
 
         # Use thread_id for LangGraph checkpointer persistence
-        config = {"configurable": {"thread_id": session_id}}
+        config = {"configurable": {"thread_id": thread_id}}
 
         for attempt in range(self.max_retries + 1):
             try:

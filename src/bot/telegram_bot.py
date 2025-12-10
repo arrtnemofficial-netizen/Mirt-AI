@@ -25,6 +25,7 @@ from src.services.conversation import ConversationHandler, create_conversation_h
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore, SessionStore
+from src.services.debouncer import MessageDebouncer, BufferedMessage
 
 
 if TYPE_CHECKING:
@@ -52,21 +53,28 @@ def build_dispatcher(
         runner=active_runner,
     )
 
+    # Initialize debouncer with 2.5 second delay
+    # This gives user time to write multiple messages (bubbles)
+    debouncer = MessageDebouncer(delay=2.5)
+
     @dp.message(CommandStart())
     async def handle_start(message: Message) -> None:
         """Старт діалогу: м'який ресет стану.
 
         Використовується при першому запуску або коли користувач сам натиснув /start.
         """
+        import uuid
 
         session_id = str(message.chat.id)
+        thread_id = f"{session_id}:{uuid.uuid4()}"
         store.save(
             session_id,
             {
                 "messages": [],
                 "metadata": {
                     "session_id": session_id,
-                    "vision_greeted": False,  # Reset greeting flag
+                    "thread_id": thread_id,
+                    "vision_greeted": False,
                     "has_image": False,
                 },
                 "current_state": "STATE_0_INIT",
@@ -89,16 +97,19 @@ def build_dispatcher(
         - Видаляє історію повідомлень з MessageStore
         """
 
-        session_id = str(message.chat.id)
+        import uuid
 
-        # 1) Скидаємо стан розмови в SessionStore
+        session_id = str(message.chat.id)
+        thread_id = f"{session_id}:{uuid.uuid4()}"
+
         store.save(
             session_id,
             {
                 "messages": [],
                 "metadata": {
                     "session_id": session_id,
-                    "vision_greeted": False,  # Reset greeting flag
+                    "thread_id": thread_id,
+                    "vision_greeted": False,
                     "has_image": False,
                 },
                 "current_state": "STATE_0_INIT",
@@ -126,7 +137,7 @@ def build_dispatcher(
 
     @dp.message(F.text)
     async def handle_text(message: Message) -> None:
-        await _process_incoming(message, conversation_handler)
+        await _process_incoming_debounced(message, conversation_handler, debouncer)
 
     @dp.message(F.photo)
     async def handle_photo(message: Message) -> None:
@@ -138,9 +149,10 @@ def build_dispatcher(
         file = await message.bot.get_file(photo.file_id)
         image_url = f"https://api.telegram.org/file/bot{settings.TELEGRAM_BOT_TOKEN.get_secret_value()}/{file.file_path}"
 
-        await _process_incoming(
+        await _process_incoming_debounced(
             message,
             conversation_handler,
+            debouncer,
             override_text=description,
             has_image=True,
             image_url=image_url,
@@ -154,39 +166,70 @@ def build_bot() -> Bot:
     return Bot(token=settings.TELEGRAM_BOT_TOKEN.get_secret_value())
 
 
-async def _process_incoming(
+async def _process_incoming_debounced(
     message: Message,
     handler: ConversationHandler,
+    debouncer: MessageDebouncer,
     override_text: str | None = None,
     has_image: bool = False,
     image_url: str | None = None,
 ) -> None:
-    """Process incoming Telegram message using ConversationHandler."""
+    """Queue message into debouncer instead of processing immediately."""
     text = override_text or message.text or ""
     session_id = str(message.chat.id)
 
     # Build extra metadata (username, photos, etc.)
-    extra_metadata = None
+    extra_metadata = {}
     username = None
     if getattr(message, "from_user", None):
         username = message.from_user.username
     if username:
-        extra_metadata = {"user_nickname": username}
+        extra_metadata["user_nickname"] = username
+    
+    # We don't construct full image_meta here, the debouncer handles merging.
+    # But we pass the raw ingredients via BufferedMessage fields.
+
+    buffered_msg = BufferedMessage(
+        text=text,
+        has_image=has_image,
+        image_url=image_url,
+        extra_metadata=extra_metadata,
+        original_message=message
+    )
+
+    # Define the actual processing logic as a callback
+    async def processing_callback(sess_id: str, aggregated_msg: BufferedMessage):
+        await _execute_aggregated_logic(sess_id, aggregated_msg, handler)
+
+    # Add to debouncer
+    await debouncer.add_message(session_id, buffered_msg, processing_callback)
+
+
+async def _execute_aggregated_logic(
+    session_id: str,
+    aggregated_msg: BufferedMessage,
+    handler: ConversationHandler
+) -> None:
+    """Actual processing logic executed after debounce delay."""
+    
+    text = aggregated_msg.text
+    has_image = aggregated_msg.has_image
+    image_url = aggregated_msg.image_url
+    extra_metadata = aggregated_msg.extra_metadata
+    original_message: Message = aggregated_msg.original_message
+
     if has_image:
         image_meta = {
             "has_image": True,
             "image_url": image_url,
         }
-        if extra_metadata:
-            extra_metadata.update(image_meta)
-        else:
-            extra_metadata = image_meta
+        extra_metadata.update(image_meta)
 
-    # Log incoming message
+    # Log aggregated incoming message
     logger.info(
-        "[SESSION %s] 📩 Incoming: text='%s', has_image=%s",
+        "[SESSION %s] 📩 Processing AGGREGATED: text='%s', has_image=%s",
         session_id,
-        text[:50] if text else "<empty>",
+        text[:50].replace("\n", " ") if text else "<empty>",
         has_image,
     )
 
@@ -211,7 +254,7 @@ async def _process_incoming(
             result.error,
         )
 
-    await _dispatch_to_telegram(message, result.response, session_id)
+    await _dispatch_to_telegram(original_message, result.response, session_id)
 
 
 async def _dispatch_to_telegram(
