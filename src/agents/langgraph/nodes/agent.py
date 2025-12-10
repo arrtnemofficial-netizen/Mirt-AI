@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 # PydanticAI imports
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
+from src.agents.pydantic.models import MessageItem
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, log_trace, track_metric
 
@@ -206,12 +207,18 @@ async def agent_node(
                         
                         # CRITICAL: Inject payment requisites into response!
                         # LLM didn't do it, so we do it manually
-                        from src.agents.pydantic.models import MessageBubble
                         response.messages = [
-                            MessageBubble(type="text", content="Чудово, дані зафіксовано! 🤍"),
-                            MessageBubble(type="text", content="Ловіть реквізити для оплати:"),
-                            MessageBubble(type="text", content="ФОП Кутний Михайло Михайлович\nIBAN: UA653220010000026003340139893\nІПН/ЄДРПОУ: 3278315599\nПризначення: ОПЛАТА ЗА ТОВАР"),
-                            MessageBubble(type="text", content="Надішліть, будь ласка, скрін оплати 🌸"),
+                            MessageItem(content="Чудово, дані зафіксовано! 🤍"),
+                            MessageItem(content="Ловіть реквізити для оплати:"),
+                            MessageItem(
+                                content=(
+                                    "ФОП Кутний Михайло Михайлович\n"
+                                    "IBAN: UA653220010000026003340139893\n"
+                                    "ІПН/ЄДРПОУ: 3278315599\n"
+                                    "Призначення: ОПЛАТА ЗА ТОВАР"
+                                )
+                            ),
+                            MessageItem(content="Надішліть, будь ласка, скрін оплати 🌸"),
                         ]
                         
                         logger.info(
@@ -223,6 +230,36 @@ async def agent_node(
         # Extract from OUTPUT_CONTRACT structure
         new_state_str = response.metadata.current_state
         is_escalation = response.event == "escalation"
+
+        # =====================================================================
+        # PAYMENT START OVERRIDE (STATE_4 → STATE_5)
+        # =====================================================================
+        # Якщо ми в STATE_4_OFFER з фазою OFFER_MADE і юзер підтверджує
+        # коротким "беру/да/ок" то примусово переходимо в STATE_5_PAYMENT_DELIVERY
+        # навіть якщо LLM залишив current_state=STATE_4.
+        if current_state == State.STATE_4_OFFER.value and dialog_phase == "OFFER_MADE":
+            user_text = user_message if isinstance(user_message, str) else str(user_message)
+            user_text_lower = user_text.lower()
+            confirm_words = [
+                "беру",
+                "оформлюємо",
+                "оформляємо",
+                "хочу замовити",
+                "так",
+                "да",
+                "ok",
+                "ок",
+                "підходить",
+            ]
+            if any(w in user_text_lower for w in confirm_words):
+                # Якщо LLM ще не перевів стан у STATE_5, робимо це явно
+                if new_state_str == State.STATE_4_OFFER.value:
+                    new_state_str = State.STATE_5_PAYMENT_DELIVERY.value
+                    response.metadata.current_state = new_state_str
+                # Гарантуємо правильний intent для подальших переходів
+                if intent != "PAYMENT_DELIVERY":
+                    intent = "PAYMENT_DELIVERY"
+                    response.metadata.intent = "PAYMENT_DELIVERY"
 
         # Extract products (already typed from CATALOG!)
         selected_products = state.get("selected_products", [])
@@ -256,23 +293,6 @@ async def agent_node(
                     first_product["color"],
                 )
 
-        # Build assistant message (OUTPUT_CONTRACT format)
-        assistant_content = {
-            "event": response.event,
-            "messages": [m.model_dump() for m in response.messages],
-            "products": [p.model_dump() for p in response.products],
-            "metadata": response.metadata.model_dump(),
-        }
-
-        if response.escalation:
-            assistant_content["escalation"] = response.escalation.model_dump()
-
-        if response.reasoning:
-            assistant_content["reasoning"] = response.reasoning
-
-        # Persist structured response for downstream consumers (Telegram, ManyChat, etc.)
-        agent_response_payload = response.model_dump()
-
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         # Log
@@ -294,23 +314,6 @@ async def agent_node(
         metadata_update["current_state"] = new_state_str
         metadata_update["intent"] = intent
 
-        # Async Trace Logging (Success)
-        await log_trace(
-            session_id=session_id,
-            trace_id=trace_id,
-            node_name="agent_node",
-            status="SUCCESS",
-            state_name=new_state_str,
-            prompt_key=f"state.{new_state_str}",  # Approximate key
-            input_snapshot={
-                "message": user_message.content
-                if hasattr(user_message, "content")
-                else str(user_message)
-            },
-            output_snapshot=assistant_content,
-            latency_ms=latency_ms,
-        )
-
         if response.customer_data:
             if response.customer_data.name:
                 metadata_update["customer_name"] = response.customer_data.name
@@ -330,10 +333,13 @@ async def agent_node(
         #   3. SHOW_REQUISITES: реквізити ФОП
         #   4. WAIT_SCREENSHOT: чекаємо скрін
         #   5. COMPLETE: замовлення прийнято
+        #
+        # ВАЖЛИВО: орієнтуємось на НОВИЙ стан new_state_str (що повернув LLM
+        # або був перевизначений вище), а не на вхідний current_state.
+        # Так ми одразу запускаємо payment-flow в тому ж кроці, коли
+        # відбувся перехід STATE_4 → STATE_5.
         # =====================================================================
-        if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
-            from src.agents.pydantic.models import MessageBubble
-            
+        if new_state_str == State.STATE_5_PAYMENT_DELIVERY.value:
             user_text = user_message if isinstance(user_message, str) else str(user_message)
             user_text_lower = user_text.lower()
             
@@ -377,11 +383,17 @@ async def agent_node(
                 np_num = metadata_update["customer_nova_poshta"]
                 
                 response.messages = [
-                    MessageBubble(type="text", content=f"Записала дані 📝"),
-                    MessageBubble(type="text", content=f"Отримувач: {name}"),
-                    MessageBubble(type="text", content=f"Телефон: {phone}"),
-                    MessageBubble(type="text", content=f"Доставка: {city}, НП {np_num}"),
-                    MessageBubble(type="text", content="Як зручніше оплатити?\n✅ Повна оплата на ФОП (без комісій)\n✅ Передплата 200 грн (решта на НП)"),
+                    MessageItem(content="Записала дані 📝"),
+                    MessageItem(content=f"Отримувач: {name}"),
+                    MessageItem(content=f"Телефон: {phone}"),
+                    MessageItem(content=f"Доставка: {city}, НП {np_num}"),
+                    MessageItem(
+                        content=(
+                            "Як зручніше оплатити?\n"
+                            "✅ Повна оплата на ФОП (без комісій)\n"
+                            "✅ Передплата 200 грн (решта на НП)"
+                        )
+                    ),
                 ]
                 metadata_update["payment_sub_phase"] = "CHOOSE_PAYMENT"
                 response.event = "simple_answer"
@@ -393,6 +405,16 @@ async def agent_node(
                 # Detect payment method choice
                 full_payment_keywords = ["повна", "повну", "повної", "повністю", "на фоп", "фоп", "без комісії"]
                 prepay_keywords = ["передплат", "200", "частин", "залишок", "нп", "накладен"]
+
+                # Detect additional request for size chart
+                size_chart_keywords = [
+                    "розмірну сітку",
+                    "розмірна сітка",
+                    "размерную сетку",
+                    "размерная сетка",
+                    "таблиця розмірів",
+                ]
+                ask_size_chart = any(kw in user_text_lower for kw in size_chart_keywords)
                 
                 is_full = any(kw in user_text_lower for kw in full_payment_keywords)
                 is_prepay = any(kw in user_text_lower for kw in prepay_keywords)
@@ -411,20 +433,56 @@ async def agent_node(
                     metadata_update["payment_amount"] = payment_amount
                     
                     response.messages = [
-                        MessageBubble(type="text", content=f"Супер! Сума до сплати: {payment_amount} грн 💳"),
-                        MessageBubble(type="text", content="Реквізити для оплати:"),
-                        MessageBubble(type="text", content="ФОП Кутний Михайло Михайлович\nІБАН: UA653220010000026003340139893\nІПН: 3278315599\nПризначення: оплата за товар"),
-                        MessageBubble(type="text", content="Після оплати надішліть скрін квитанції 🌸"),
+                        MessageItem(content=f"Супер! Сума до сплати: {payment_amount} грн 💳"),
+                        MessageItem(content="Реквізити для оплати:"),
+                        MessageItem(
+                            content=(
+                                "ФОП Кутний Михайло Михайлович\n"
+                                "ІБАН: UA653220010000026003340139893\n"
+                                "ІПН: 3278315599\n"
+                                "Призначення: оплата за товар"
+                            )
+                        ),
+                        MessageItem(content="Після оплати надішліть скрін квитанції 🌸"),
                     ]
+
+                    # If user одночасно просить розмірну сітку – коротко відповідаємо теж
+                    if ask_size_chart:
+                        size_label = ""
+                        if products:
+                            size_label = products[0].get("size") or ""
+
+                        if size_label:
+                            size_msg = (
+                                f"По розмірній сітці під цей костюм зараз радимо розмір {size_label}. "
+                                "Ми підбираємо розмір за зростом так, щоб був невеликий запас по довжині."
+                            )
+                        else:
+                            size_msg = (
+                                "По розмірній сітці ми підбираємо розмір за зростом, "
+                                "щоб речі сідали комфортно з невеликим запасом по довжині. Якщо хочете, можу ще раз "
+                                "підказати розмір саме під ваш зріст."
+                            )
+
+                        response.messages.append(MessageItem(content=size_msg))
+
                     metadata_update["payment_sub_phase"] = "WAIT_SCREENSHOT"
                     response.event = "simple_answer"
                     new_state_str = State.STATE_5_PAYMENT_DELIVERY.value
-                    logger.info("💰 [SESSION %s] Payment sub-phase: CHOOSE_PAYMENT → WAIT_SCREENSHOT (method=%s)", 
-                               session_id, metadata_update["payment_method"])
+                    logger.info(
+                        "💰 [SESSION %s] Payment sub-phase: CHOOSE_PAYMENT → WAIT_SCREENSHOT (method=%s)",
+                        session_id,
+                        metadata_update["payment_method"],
+                    )
                 else:
                     # User said something else, clarify
                     response.messages = [
-                        MessageBubble(type="text", content="Підкажіть, як зручніше оплатити - повна оплата чи передплата 200 грн? 🤍"),
+                        MessageItem(
+                            content=(
+                                "Підкажіть, як зручніше оплатити - повна оплата чи "
+                                "передплата 200 грн? 🤍"
+                            )
+                        ),
                     ]
                     response.event = "simple_answer"
             
@@ -440,9 +498,14 @@ async def agent_node(
                 
                 if is_confirmed or has_image_now:
                     response.messages = [
-                        MessageBubble(type="text", content="Дякую за оплату! 🎉"),
-                        MessageBubble(type="text", content="Замовлення прийнято. Передаю менеджеру для формування відправки."),
-                        MessageBubble(type="text", content="Як буде трек-номер — напишемо вам 🤍"),
+                        MessageItem(content="Дякую за оплату! 🎉"),
+                        MessageItem(
+                            content=(
+                                "Замовлення прийнято. Передаю менеджеру для "
+                                "формування відправки."
+                            )
+                        ),
+                        MessageItem(content="Як буде трек-номер — напишемо вам 🤍"),
                     ]
                     metadata_update["payment_sub_phase"] = "COMPLETE"
                     metadata_update["payment_confirmed"] = True
@@ -452,7 +515,7 @@ async def agent_node(
                 else:
                     # Remind about payment
                     response.messages = [
-                        MessageBubble(type="text", content="Чекаю скрін оплати 🌸"),
+                        MessageItem(content="Чекаю скрін оплати 🌸"),
                     ]
                     response.event = "simple_answer"
 
@@ -474,6 +537,40 @@ async def agent_node(
             selected_products=selected_products,
             metadata=response.metadata,
             state=state,  # Передаємо state для payment sub-phase detection
+        )
+
+        # Build assistant message (OUTPUT_CONTRACT format) **after** all overrides
+        assistant_content = {
+            "event": response.event,
+            "messages": [m.model_dump() for m in response.messages],
+            "products": [p.model_dump() for p in response.products],
+            "metadata": response.metadata.model_dump(),
+        }
+
+        if response.escalation:
+            assistant_content["escalation"] = response.escalation.model_dump()
+
+        if response.reasoning:
+            assistant_content["reasoning"] = response.reasoning
+
+        # Persist structured response for downstream consumers (Telegram, ManyChat, etc.)
+        agent_response_payload = response.model_dump()
+
+        # Async Trace Logging (Success)
+        await log_trace(
+            session_id=session_id,
+            trace_id=trace_id,
+            node_name="agent_node",
+            status="SUCCESS",
+            state_name=new_state_str,
+            prompt_key=f"state.{new_state_str}",  # Approximate key
+            input_snapshot={
+                "message": user_message.content
+                if hasattr(user_message, "content")
+                else str(user_message)
+            },
+            output_snapshot=assistant_content,
+            latency_ms=latency_ms,
         )
 
         logger.info(

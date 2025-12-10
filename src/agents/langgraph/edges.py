@@ -148,43 +148,47 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
         current_state = state.get("current_state", State.STATE_0_INIT.value)
 
         # QUALITY: Перевіряємо чи юзер каже "беру" або підтверджує
+        # НОВА ЛОГІКА: payment sub-flow веде AGENT (STATE_5), а не окрема payment-нода.
+        # Це уникає конфлікту з interrupt_before=["payment"] і гарантує, що
+        # перше "беру/да" після офферу переходить у STATE_5_PAYMENT_DELIVERY
+        # через agent_node з промптом STATE_5.
         if detected_intent == "PAYMENT_DELIVERY":
-            if current_state == State.STATE_4_OFFER.value:
-                # Перше підтвердження після офферу ("беру") → в payment
-                logger.info(" [SESSION %s] → payment (OFFER_MADE + 'беру', STATE_4)", session_id)
-                return "payment"
-            else:
-                # Вже в STATE_5: короткі підтвердження повинні йти в agent,
-                # щоб payment sub-phase логіка показала реквізити, а не повторювала питання
-                logger.info(
-                    " [SESSION %s] → agent (OFFER_MADE + PAYMENT_DELIVERY, STATE_5)",
-                    session_id,
-                )
-                return "agent"
+            logger.info(
+                " [SESSION %s] → agent (OFFER_MADE + PAYMENT_DELIVERY, state=%s)",
+                session_id,
+                current_state,
+            )
+            return "agent"
         
         # Check confirmation keywords directly (да, так, ок, etc.)
-        # detect_simple_intent doesn't check these, but in OFFER_MADE вони mean "yes"
-        confirmation_keywords = ["так", "да", "yes", "ок", "добре", "згодна", "згоден", 
-                                  "підходить", "давай", "давайте", "можна", "хочу", "буду"]
+        # detect_simple_intent doesn't check these, але в OFFER_MADE вони означають згоду.
+        confirmation_keywords = [
+            "так",
+            "да",
+            "yes",
+            "ок",
+            "добре",
+            "згодна",
+            "згоден",
+            "підходить",
+            "давай",
+            "давайте",
+            "можна",
+            "хочу",
+            "буду",
+        ]
         msg_lower = user_message.lower() if user_message else ""
         for keyword in confirmation_keywords:
             if keyword in msg_lower:
-                if current_state == State.STATE_4_OFFER.value:
-                    logger.info(
-                        " [SESSION %s] → payment (OFFER_MADE + confirmation: '%s', STATE_4)",
-                        session_id,
-                        keyword,
-                    )
-                    return "payment"
-                else:
-                    logger.info(
-                        " [SESSION %s] → agent (OFFER_MADE + confirmation: '%s', STATE_5)",
-                        session_id,
-                        keyword,
-                    )
-                    return "agent"
+                logger.info(
+                    " [SESSION %s] → agent (OFFER_MADE + confirmation: '%s', state=%s)",
+                    session_id,
+                    keyword,
+                    current_state,
+                )
+                return "agent"
         
-        # Інакше - юзер питає щось інше
+        # Інакше - юзер питає щось інше (уточнення по ціні/деталях)
         logger.info(" [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
         return "agent"
 
@@ -196,13 +200,16 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
     # STATE_5: Waiting for payment method
     if dialog_phase == "WAITING_FOR_PAYMENT_METHOD":
-        logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_PAYMENT_METHOD)", session_id)
-        return "payment"
+        # НОВА ЛОГІКА: payment sub-flow веде AGENT (STATE_5), а не окрема payment-нода.
+        # Тут агент уточнює/підтверджує спосіб оплати та при потребі дає додаткові пояснення.
+        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_PAYMENT_METHOD)", session_id)
+        return "agent"
 
     # STATE_5: Waiting for payment proof
     if dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
-        logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_PAYMENT_PROOF)", session_id)
-        return "payment"
+        # НОВА ЛОГІКА: агент чекає скрін/підтвердження оплати та завершує замовлення.
+        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_PAYMENT_PROOF)", session_id)
+        return "agent"
 
     # STATE_6: Upsell offered
     if dialog_phase == "UPSELL_OFFERED":
