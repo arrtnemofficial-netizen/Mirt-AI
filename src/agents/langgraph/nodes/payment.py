@@ -20,6 +20,12 @@ from langgraph.types import Command, interrupt
 
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
+from src.conf.config import settings
+from src.conf.payment_config import (
+    BANK_REQUISITES,
+    PAYMENT_PREPAY_AMOUNT,
+    format_requisites_multiline,
+)
 from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.observability import log_agent_step, track_metric
@@ -39,23 +45,26 @@ logger = logging.getLogger(__name__)
 # PAYMENT SUB-PHASE TEMPLATES (from n8n prompt)
 # =============================================================================
 
+# Build SHOW_PAYMENT template dynamically from centralized config
+_SHOW_PAYMENT_TEMPLATE = f"""Сума до сплати зараз: {{amount}} грн.
+
+Отримувач: {BANK_REQUISITES.fop_name}
+IBAN: {BANK_REQUISITES.iban}
+ІПН/ЄДРПОУ: {BANK_REQUISITES.tax_id}
+Призначення платежу: {BANK_REQUISITES.payment_purpose}
+
+Надішліть, будь ласка, скрін квитанції після оплати, щоб ми одразу сформували ваше замовлення 🤍"""
+
 PAYMENT_TEMPLATES = {
-    "REQUEST_DATA": """Щоб одразу зарезервувати для вас замовлення, напишіть, будь ласка:
+    "REQUEST_DATA": f"""Щоб одразу зарезервувати для вас замовлення, напишіть, будь ласка:
 📍Місто та відділення Нової пошти
 📍ПІБ та номер телефону
 
-Як вам зручніше оплатити - повна оплата на рахунок ФОП (без додаткових комісій) чи передплата 200 грн, а решту при отриманні (але тоді Нова пошта додатково нараховує комісію за післяплату) 🤍""",
+Як вам зручніше оплатити - повна оплата на рахунок ФОП (без додаткових комісій) чи передплата {PAYMENT_PREPAY_AMOUNT} грн, а решту при отриманні (але тоді Нова пошта додатково нараховує комісію за післяплату) 🤍""",
 
     "CONFIRM_DATA": "Підтверджую дані замовлення: {product_name} - {color} - розмір {size} - {price} грн. Отримувач: {name}, телефон {phone}, місто {city}, НП {nova_poshta}. Перевірте, будь ласка, чи все вірно.",
 
-    "SHOW_PAYMENT": """Сума до сплати зараз: {amount} грн.
-
-Отримувач: ФОП Кутний Михайло Михайлович
-IBAN: UA653220010000026003340139893
-ІПН/ЄДРПОУ: 3278315599
-Призначення платежу: ОПЛАТА ЗА ТОВАР
-
-Надішліть, будь ласка, скрін квитанції після оплати, щоб ми одразу сформували ваше замовлення 🤍""",
+    "SHOW_PAYMENT": _SHOW_PAYMENT_TEMPLATE,
 
     "THANK_YOU": """Дякуємо за замовлення🥰
 
@@ -168,13 +177,34 @@ async def _prepare_payment_and_interrupt(
     # =========================================================================
     # SITNIKS: Set status to "Виставлено рахунок" when showing payment details
     # =========================================================================
-    try:
-        sitniks_service = get_sitniks_chat_service()
-        if sitniks_service.enabled:
-            await sitniks_service.handle_invoice_sent(session_id)
-            logger.info("[SESSION %s] Sitniks invoice_sent status set", session_id)
-    except Exception as e:
-        logger.warning("[SESSION %s] Sitniks invoice_sent error: %s", session_id, e)
+    if settings.ENABLE_CRM_INTEGRATION:
+        try:
+            sitniks_service = get_sitniks_chat_service()
+            if sitniks_service.enabled:
+                await sitniks_service.handle_invoice_sent(session_id)
+                logger.info("[SESSION %s] Sitniks invoice_sent status set", session_id)
+        except Exception as e:
+            logger.warning("[SESSION %s] Sitniks invoice_sent error: %s", session_id, e)
+    
+    # =========================================================================
+    # HITL CHECK: Skip interrupt for Telegram polling (lightweight mode)
+    # =========================================================================
+    if not settings.ENABLE_PAYMENT_HITL:
+        # Lightweight mode: skip human approval, go directly to upsell
+        logger.info(
+            "[SESSION %s] HITL disabled - skipping payment interrupt, proceeding to upsell",
+            session_id,
+        )
+        return Command(
+            update={
+                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                "messages": [{"role": "assistant", "content": response_text}],
+                "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                "awaiting_human_approval": False,
+                "step_number": state.get("step_number", 0) + 1,
+            },
+            goto="upsell",  # Skip interrupt, go to upsell
+        )
     
     # This call PAUSES the graph execution
     # It returns ONLY when someone calls graph.invoke(Command(resume=...))

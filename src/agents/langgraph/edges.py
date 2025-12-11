@@ -14,6 +14,7 @@ from src.core.state_machine import State
 
 # Import for intent detection
 from .state_prompts import detect_simple_intent
+from .nodes.intent import INTENT_PATTERNS
 
 
 logger = logging.getLogger(__name__)
@@ -162,21 +163,7 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
         
         # Check confirmation keywords directly (да, так, ок, etc.)
         # detect_simple_intent doesn't check these, але в OFFER_MADE вони означають згоду.
-        confirmation_keywords = [
-            "так",
-            "да",
-            "yes",
-            "ок",
-            "добре",
-            "згодна",
-            "згоден",
-            "підходить",
-            "давай",
-            "давайте",
-            "можна",
-            "хочу",
-            "буду",
-        ]
+        confirmation_keywords = INTENT_PATTERNS.get("CONFIRMATION", [])
         msg_lower = user_message.lower() if user_message else ""
         for keyword in confirmation_keywords:
             if keyword in msg_lower:
@@ -313,9 +300,14 @@ def _resolve_intent_route(
         return direct_routes[intent]
 
     # Payment requires context check
+    # NOTE: Only route to payment_node if HITL is needed (interrupt)
+    # For normal STATE_5 sub-phases, master_router routes to agent_node
+    # which uses payment_flow.py for deterministic FSM
     if intent == "PAYMENT_DELIVERY":
-        payment_states = (State.STATE_4_OFFER.value, State.STATE_5_PAYMENT_DELIVERY.value)
-        if current_state in payment_states:
+        dialog_phase = state.get("dialog_phase", "INIT")
+        # If we're in payment sub-phases, let master_router handle it (→ agent)
+        # Only go to payment_node from STATE_4 offer confirmation
+        if current_state == State.STATE_4_OFFER.value and dialog_phase == "OFFER_MADE":
             return "payment"
         if state.get("selected_products") or state.get("offered_products"):
             return "offer"

@@ -287,10 +287,24 @@ def get_checkpointer(
     if _checkpointer is not None and not force_new:
         return _checkpointer
 
-    # Auto-detect type if not specified
     # Import settings for proper .env loading via pydantic_settings
     from src.conf.config import settings as app_settings
 
+    # 1) Explicit override via LANGGRAPH_CHECKPOINTER (settings/env)
+    #    This has priority over auto-detection when checkpointer_type is not passed.
+    if checkpointer_type is None:
+        raw_choice = getattr(app_settings, "LANGGRAPH_CHECKPOINTER", "auto").lower()
+
+        if raw_choice in {"memory", "postgres", "redis"}:
+            if raw_choice == "memory":
+                checkpointer_type = CheckpointerType.MEMORY
+            elif raw_choice == "postgres":
+                checkpointer_type = CheckpointerType.POSTGRES
+            elif raw_choice == "redis":
+                checkpointer_type = CheckpointerType.REDIS
+            logger.info("Checkpointer overridden via LANGGRAPH_CHECKPOINTER=%s", raw_choice)
+
+    # 2) Auto-detect type if still not specified
     if checkpointer_type is None:
         # Only auto-select POSTGRES when an explicit database URL is provided.
         # The presence of SUPABASE_URL alone is not enough in development, otherwise

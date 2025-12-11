@@ -177,6 +177,15 @@ class MessageDebouncer:
             f"Final Text: '{combined_text[:50]}...'"
         )
         
+        # Track metrics
+        try:
+            from src.services.observability import track_metric
+            track_metric("debouncer_messages_aggregated", len(messages))
+            if has_image:
+                track_metric("debouncer_has_image", 1)
+        except ImportError:
+            pass  # Observability not available
+        
         return BufferedMessage(
             text=combined_text,
             has_image=has_image,

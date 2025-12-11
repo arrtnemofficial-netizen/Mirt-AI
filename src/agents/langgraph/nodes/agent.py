@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.agents.pydantic.models import MessageItem
+from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, log_trace, track_metric
 
@@ -40,6 +41,17 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+# Centralized keyword lists for confirmations (used for STATE_4 → STATE_5 safety net)
+_CONFIRMATION_BASE = INTENT_PATTERNS.get("CONFIRMATION", [])
+
+_OFFER_CONFIRMATION_KEYWORDS = [
+    "беру",
+    "оформлюємо",
+    "оформляємо",
+    "хочу замовити",
+] + _CONFIRMATION_BASE
 
 
 # =============================================================================
@@ -115,8 +127,20 @@ async def agent_node(
             "step_number": state.get("step_number", 0) + 1,
         }
 
+    # =========================================================================
+    # HISTORY TRIMMING: Prevent LLM context overflow
+    # =========================================================================
+    from src.services.history_trimmer import trim_message_history
+    
+    original_messages = state.get("messages", [])
+    trimmed_messages = trim_message_history(original_messages)
+    
+    # Update state with trimmed messages for this LLM call
+    # (doesn't affect persisted state, only this invocation)
+    state_for_llm = {**state, "messages": trimmed_messages}
+    
     # Create deps from state (proper DI!)
-    deps = create_deps_from_state(state)
+    deps = create_deps_from_state(state_for_llm)
 
     # =========================================================================
     # QUALITY: Inject state-specific prompt
@@ -175,57 +199,16 @@ async def agent_node(
                 response.messages = response.messages[1:]
 
         # =====================================================================
-        # INTENT OVERRIDE: Fix LLM mistakes in STATE_5 (Payment flow)
+        # LLM-FIRST APPROACH: Trust improved prompts for intent classification
         # =====================================================================
-        # Problem: LLM interprets "да/так/ок" as THANKYOU_SMALLTALK (end of dialog)
-        # Reality: In STATE_5, "да" = confirmation of delivery data, NOT goodbye
-        # Solution: Override intent AND inject payment requisites
+        # The STATE_5 prompts now explicitly teach LLM that "да/так/ок" in
+        # payment flow = PAYMENT_DELIVERY, not THANKYOU. LLM should output
+        # requisites directly when user confirms data.
+        #
+        # Previous keyword-override for injecting requisites is REMOVED.
+        # If LLM still makes mistakes, improve the prompt, not add patches.
         # =====================================================================
         intent = response.metadata.intent
-        _confirmed_data_this_turn = False  # Track if we override to show requisites
-        
-        if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
-            confirmation_words = ["да", "так", "yes", "ок", "добре", "згодна", "правильно", "вірно", "все вірно", "підтверджую"]
-            user_text = user_message.lower() if isinstance(user_message, str) else str(user_message).lower()
-
-            # Determine payment sub-phase from previous state (before this turn)
-            payment_sub = get_payment_sub_phase(state)
-
-            # In CONFIRM_DATA sub-phase, short confirmations like "да/так/ок" mean
-            # the client has approved delivery details and we must immediately
-            # show payment requisites, regardless of how the LLM labeled intent.
-            if payment_sub == "CONFIRM_DATA":
-                for word in confirmation_words:
-                    if word in user_text:
-                        # Override to PAYMENT_DELIVERY - continue payment flow
-                        intent = "PAYMENT_DELIVERY"
-                        response.metadata.intent = "PAYMENT_DELIVERY"
-                        # Don't close dialog! Stay in STATE_5
-                        response.metadata.current_state = State.STATE_5_PAYMENT_DELIVERY.value
-                        response.event = "simple_answer"
-                        _confirmed_data_this_turn = True
-                        
-                        # CRITICAL: Inject payment requisites into response!
-                        # LLM didn't do it, so we do it manually
-                        response.messages = [
-                            MessageItem(content="Чудово, дані зафіксовано! 🤍"),
-                            MessageItem(content="Ловіть реквізити для оплати:"),
-                            MessageItem(
-                                content=(
-                                    "ФОП Кутний Михайло Михайлович\n"
-                                    "IBAN: UA653220010000026003340139893\n"
-                                    "ІПН/ЄДРПОУ: 3278315599\n"
-                                    "Призначення: ОПЛАТА ЗА ТОВАР"
-                                )
-                            ),
-                            MessageItem(content="Надішліть, будь ласка, скрін оплати 🌸"),
-                        ]
-                        
-                        logger.info(
-                            "🔄 [SESSION %s] CONFIRM_DATA→SHOW_PAYMENT: injected requisites after confirmation",
-                            session_id,
-                        )
-                        break
 
         # Extract from OUTPUT_CONTRACT structure
         new_state_str = response.metadata.current_state
@@ -240,17 +223,7 @@ async def agent_node(
         if current_state == State.STATE_4_OFFER.value and dialog_phase == "OFFER_MADE":
             user_text = user_message if isinstance(user_message, str) else str(user_message)
             user_text_lower = user_text.lower()
-            confirm_words = [
-                "беру",
-                "оформлюємо",
-                "оформляємо",
-                "хочу замовити",
-                "так",
-                "да",
-                "ok",
-                "ок",
-                "підходить",
-            ]
+            confirm_words = _OFFER_CONFIRMATION_KEYWORDS
             if any(w in user_text_lower for w in confirm_words):
                 # Якщо LLM ще не перевів стан у STATE_5, робимо це явно
                 if new_state_str == State.STATE_4_OFFER.value:
@@ -325,204 +298,85 @@ async def agent_node(
                 metadata_update["customer_nova_poshta"] = response.customer_data.nova_poshta
 
         # =====================================================================
-        # PAYMENT FLOW STATE MACHINE (Quality Implementation)
+        # PAYMENT FLOW FSM (Delegated to payment_flow.py)
         # =====================================================================
-        # Sub-phases:
-        #   1. COLLECT_DATA: ПІБ, телефон, місто, НП
-        #   2. CHOOSE_PAYMENT: повна оплата / передплата
-        #   3. SHOW_REQUISITES: реквізити ФОП
-        #   4. WAIT_SCREENSHOT: чекаємо скрін
-        #   5. COMPLETE: замовлення прийнято
+        # Sub-phases handled by payment_flow module (matching state_prompts.py):
+        #   1. REQUEST_DATA → CONFIRM_DATA (when all data collected)
+        #   2. CONFIRM_DATA → SHOW_PAYMENT (when payment method chosen)
+        #   3. SHOW_PAYMENT → THANK_YOU (when screenshot received)
         #
-        # ВАЖЛИВО: орієнтуємось на НОВИЙ стан new_state_str (що повернув LLM
-        # або був перевизначений вище), а не на вхідний current_state.
-        # Так ми одразу запускаємо payment-flow в тому ж кроці, коли
-        # відбувся перехід STATE_4 → STATE_5.
+        # This keeps agent_node lean and payment logic testable.
         # =====================================================================
         if new_state_str == State.STATE_5_PAYMENT_DELIVERY.value:
+            from .payment_flow import (
+                process_payment_subphase,
+                extract_customer_data_from_state,
+                get_product_info_from_state,
+                CustomerData,
+            )
+            
             user_text = user_message if isinstance(user_message, str) else str(user_message)
             user_text_lower = user_text.lower()
             
-            # Get current sub-phase
-            payment_sub_phase = metadata_update.get("payment_sub_phase", "COLLECT_DATA")
+            # Get ORIGINAL sub-phase BEFORE parsing new data
+            # This is critical to avoid skipping REQUEST_DATA → CONFIRM_DATA in one turn
+            original_sub_phase = get_payment_sub_phase(state)
             
-            # Check what data we already have
-            has_name = bool(metadata_update.get("customer_name"))
-            has_phone = bool(metadata_update.get("customer_phone"))
-            has_city = bool(metadata_update.get("customer_city"))
-            has_np = bool(metadata_update.get("customer_nova_poshta"))
-            has_all_data = has_name and has_phone and has_city and has_np
-            
-            # Parse ONLY phone and NP from message (regex-reliable)
-            # Names and cities are handled by LLM with proper prompting
+            # Parse phone and NP from message (regex-reliable fallback)
             from src.services.client_data_parser_minimal import parse_minimal
             parsed = parse_minimal(user_text)
             
-            if parsed.phone and not has_phone:
+            if parsed.phone and not metadata_update.get("customer_phone"):
                 metadata_update["customer_phone"] = parsed.phone
                 logger.info("📝 [SESSION %s] Parsed phone: %s", session_id, parsed.phone)
-            if parsed.nova_poshta and not has_np:
+            if parsed.nova_poshta and not metadata_update.get("customer_nova_poshta"):
                 metadata_update["customer_nova_poshta"] = parsed.nova_poshta
                 logger.info("📝 [SESSION %s] Parsed NP: %s", session_id, parsed.nova_poshta)
             
-            # Re-check after parsing
-            has_all_data = all([
-                metadata_update.get("customer_name"),
-                metadata_update.get("customer_phone"),
-                metadata_update.get("customer_city"),
-                metadata_update.get("customer_nova_poshta"),
-            ])
+            # Use ORIGINAL sub-phase for flow decision
+            # This ensures we don't skip showing "Як зручніше оплатити?" question
+            payment_sub_phase = original_sub_phase
+            logger.info("💰 [SESSION %s] Payment sub-phase: %s", session_id, payment_sub_phase)
             
-            # =========== SUB-PHASE LOGIC ===========
+            # Build customer data from metadata_update (includes just-parsed data)
+            customer_data = CustomerData(
+                name=metadata_update.get("customer_name"),
+                phone=metadata_update.get("customer_phone"),
+                city=metadata_update.get("customer_city"),
+                nova_poshta=metadata_update.get("customer_nova_poshta"),
+            )
             
-            # PHASE 1→2: Got all data, ask about payment method
-            if payment_sub_phase == "COLLECT_DATA" and has_all_data:
-                name = metadata_update["customer_name"]
-                phone = metadata_update["customer_phone"]
-                city = metadata_update["customer_city"]
-                np_num = metadata_update["customer_nova_poshta"]
-                
-                response.messages = [
-                    MessageItem(content="Записала дані 📝"),
-                    MessageItem(content=f"Отримувач: {name}"),
-                    MessageItem(content=f"Телефон: {phone}"),
-                    MessageItem(content=f"Доставка: {city}, НП {np_num}"),
-                    MessageItem(
-                        content=(
-                            "Як зручніше оплатити?\n"
-                            "✅ Повна оплата на ФОП (без комісій)\n"
-                            "✅ Передплата 200 грн (решта на НП)"
-                        )
-                    ),
-                ]
-                metadata_update["payment_sub_phase"] = "CHOOSE_PAYMENT"
-                response.event = "simple_answer"
-                new_state_str = State.STATE_5_PAYMENT_DELIVERY.value
-                logger.info("💰 [SESSION %s] Payment sub-phase: COLLECT_DATA → CHOOSE_PAYMENT", session_id)
+            # Get product info
+            product_price, product_size = get_product_info_from_state(state)
             
-            # PHASE 2→3: User chose payment method, show requisites
-            elif payment_sub_phase == "CHOOSE_PAYMENT":
-                # Detect payment method choice
-                full_payment_keywords = ["повна", "повну", "повної", "повністю", "на фоп", "фоп", "без комісії"]
-                prepay_keywords = ["передплат", "200", "частин", "залишок", "нп", "накладен"]
-
-                # Detect additional request for size chart
-                size_chart_keywords = [
-                    "розмірну сітку",
-                    "розмірна сітка",
-                    "размерную сетку",
-                    "размерная сетка",
-                    "таблиця розмірів",
-                ]
-                ask_size_chart = any(kw in user_text_lower for kw in size_chart_keywords)
-                
-                is_full = any(kw in user_text_lower for kw in full_payment_keywords)
-                is_prepay = any(kw in user_text_lower for kw in prepay_keywords)
-                
-                # Get price from state (selected products)
-                price = 0
-                products = state.get("selected_products", [])
-                if products:
-                    price = products[0].get("price", 0)
-                if not price:
-                    price = 2180  # Default if unknown
-                
-                if is_full or is_prepay:
-                    payment_amount = price if is_full else 200
-                    metadata_update["payment_method"] = "full" if is_full else "prepay"
-                    metadata_update["payment_amount"] = payment_amount
-                    
-                    response.messages = [
-                        MessageItem(content=f"Супер! Сума до сплати: {payment_amount} грн 💳"),
-                        MessageItem(content="Реквізити для оплати:"),
-                        MessageItem(
-                            content=(
-                                "ФОП Кутний Михайло Михайлович\n"
-                                "ІБАН: UA653220010000026003340139893\n"
-                                "ІПН: 3278315599\n"
-                                "Призначення: оплата за товар"
-                            )
-                        ),
-                        MessageItem(content="Після оплати надішліть скрін квитанції 🌸"),
-                    ]
-
-                    # If user одночасно просить розмірну сітку – коротко відповідаємо теж
-                    if ask_size_chart:
-                        size_label = ""
-                        if products:
-                            size_label = products[0].get("size") or ""
-
-                        if size_label:
-                            size_msg = (
-                                f"По розмірній сітці під цей костюм зараз радимо розмір {size_label}. "
-                                "Ми підбираємо розмір за зростом так, щоб був невеликий запас по довжині."
-                            )
-                        else:
-                            size_msg = (
-                                "По розмірній сітці ми підбираємо розмір за зростом, "
-                                "щоб речі сідали комфортно з невеликим запасом по довжині. Якщо хочете, можу ще раз "
-                                "підказати розмір саме під ваш зріст."
-                            )
-
-                        response.messages.append(MessageItem(content=size_msg))
-
-                    metadata_update["payment_sub_phase"] = "WAIT_SCREENSHOT"
-                    response.event = "simple_answer"
-                    new_state_str = State.STATE_5_PAYMENT_DELIVERY.value
-                    logger.info(
-                        "💰 [SESSION %s] Payment sub-phase: CHOOSE_PAYMENT → WAIT_SCREENSHOT (method=%s)",
-                        session_id,
-                        metadata_update["payment_method"],
-                    )
-                else:
-                    # User said something else, clarify
-                    response.messages = [
-                        MessageItem(
-                            content=(
-                                "Підкажіть, як зручніше оплатити - повна оплата чи "
-                                "передплата 200 грн? 🤍"
-                            )
-                        ),
-                    ]
-                    response.event = "simple_answer"
+            # Check for image in current message
+            has_image_now = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
             
-            # PHASE 3→4: User sent screenshot or confirmed payment
-            elif payment_sub_phase == "WAIT_SCREENSHOT":
-                # Detect payment confirmation
-                confirm_keywords = ["оплатил", "оплатила", "сплатил", "сплатила", "відправив", "відправила", 
-                                   "переказал", "переказала", "надіслав", "надіслала", "скрін", "готово", "done"]
-                is_confirmed = any(kw in user_text_lower for kw in confirm_keywords)
+            # =========== DELEGATED TO payment_flow.py ===========
+            # Only process if we have complete data OR we're past REQUEST_DATA
+            if customer_data.is_complete or payment_sub_phase != "REQUEST_DATA":
+                flow_result = process_payment_subphase(
+                    sub_phase=payment_sub_phase,
+                    user_text=user_text_lower,
+                    has_image=has_image_now,
+                    customer_data=customer_data,
+                    product_price=product_price,
+                    product_size=product_size,
+                    session_id=session_id,
+                )
                 
-                # Also check if image was sent (screenshot)
-                has_image_now = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+                # Apply results from payment flow
+                response.messages = flow_result.messages
+                response.event = flow_result.event
+                new_state_str = flow_result.next_state
+                metadata_update.update(flow_result.metadata_updates)
                 
-                if is_confirmed or has_image_now:
-                    response.messages = [
-                        MessageItem(content="Дякую за оплату! 🎉"),
-                        MessageItem(
-                            content=(
-                                "Замовлення прийнято. Передаю менеджеру для "
-                                "формування відправки."
-                            )
-                        ),
-                        MessageItem(content="Як буде трек-номер — напишемо вам 🤍"),
-                    ]
-                    metadata_update["payment_sub_phase"] = "COMPLETE"
-                    metadata_update["payment_confirmed"] = True
-                    response.event = "escalation"
-                    new_state_str = State.STATE_7_END.value
-                    logger.info("💰 [SESSION %s] Payment sub-phase: WAIT_SCREENSHOT → COMPLETE", session_id)
-                else:
-                    # Remind about payment
-                    response.messages = [
-                        MessageItem(content="Чекаю скрін оплати 🌸"),
-                    ]
-                    response.event = "simple_answer"
-
-        # Mark data as confirmed if we injected requisites this turn
-        if _confirmed_data_this_turn:
-            metadata_update["delivery_data_confirmed"] = True
-            logger.info("🔄 [SESSION %s] Set delivery_data_confirmed=True", session_id)
+                # Handle escalation if payment complete
+                if flow_result.should_escalate:
+                    response.escalation = {
+                        "reason": flow_result.escalation_reason,
+                        "target": "order_manager",
+                    }
 
         # =====================================================
         # DIALOG PHASE (Turn-Based State Machine)

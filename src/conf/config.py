@@ -200,6 +200,57 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
+    # LANGGRAPH CHECKPOINTER CONFIG
+    # =========================================================================
+    LANGGRAPH_CHECKPOINTER: str = Field(
+        default="auto",
+        description=(
+            "Backend for LangGraph checkpointer: 'auto', 'memory', 'postgres', 'redis'. "
+            "Use 'memory' for local Telegram polling if Supabase/Postgres is unstable."
+        ),
+    )
+
+    # =========================================================================
+    # INTEGRATION FEATURE FLAGS
+    # =========================================================================
+    # Use these to disable heavy integrations for lightweight Telegram polling
+    
+    ENABLE_PAYMENT_HITL: bool = Field(
+        default=False,
+        description=(
+            "Enable Human-in-the-Loop for payment approval. "
+            "Requires webhook-based flow (ManyChat). "
+            "Disable for Telegram polling to avoid graph interrupts."
+        ),
+    )
+    
+    ENABLE_CRM_INTEGRATION: bool = Field(
+        default=False,
+        description=(
+            "Enable Sitniks CRM integration (order creation, status updates). "
+            "Disable for local testing or when CRM is unavailable."
+        ),
+    )
+    
+    # =========================================================================
+    # PERFORMANCE / LOAD HANDLING
+    # =========================================================================
+    
+    LLM_MAX_HISTORY_MESSAGES: int = Field(
+        default=20,
+        description=(
+            "Maximum number of messages to send to LLM. "
+            "Older messages are trimmed to prevent context overflow. "
+            "Set to 0 to disable trimming."
+        ),
+    )
+    
+    DEBOUNCER_DELAY_SECONDS: float = Field(
+        default=2.5,
+        description="Delay before processing aggregated messages in Telegram",
+    )
+
+    # =========================================================================
     # OBSERVABILITY
     # =========================================================================
     ENABLE_OBSERVABILITY: bool = Field(

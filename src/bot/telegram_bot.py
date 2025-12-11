@@ -53,9 +53,9 @@ def build_dispatcher(
         runner=active_runner,
     )
 
-    # Initialize debouncer with 2.5 second delay
+    # Initialize debouncer with configurable delay
     # This gives user time to write multiple messages (bubbles)
-    debouncer = MessageDebouncer(delay=2.5)
+    debouncer = MessageDebouncer(delay=settings.DEBOUNCER_DELAY_SECONDS)
 
     @dp.message(CommandStart())
     async def handle_start(message: Message) -> None:
