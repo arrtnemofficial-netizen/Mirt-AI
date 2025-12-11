@@ -366,6 +366,58 @@ CREATE POLICY IF NOT EXISTS "Allow all for service role" ON llm_usage FOR ALL US
 CREATE POLICY IF NOT EXISTS "Allow all for service role" ON agent_sessions FOR ALL USING (true);
 
 -- ============================================================================
+-- FUNCTIONS: summarize_inactive_users
+-- ============================================================================
+-- Called by Python worker: client.rpc("summarize_inactive_users")
+-- Marks users inactive for 3+ days with 'needs_summary' tag
+
+DROP FUNCTION IF EXISTS summarize_inactive_users();
+
+CREATE OR REPLACE FUNCTION summarize_inactive_users()
+RETURNS TABLE (
+    user_id TEXT,
+    username TEXT,
+    last_interaction_at TIMESTAMPTZ
+) AS $$
+DECLARE
+    affected_count INT := 0;
+BEGIN
+    -- Find users inactive for 3+ days who don't already have 'needs_summary' tag
+    WITH inactive_users AS (
+        SELECT u.user_id, u.username, u.last_interaction_at, u.tags
+        FROM users u
+        WHERE 
+            u.last_interaction_at < NOW() - INTERVAL '3 days'
+            AND NOT (u.tags @> ARRAY['needs_summary']::TEXT[])
+            AND NOT (u.tags @> ARRAY['summarized']::TEXT[])
+    ),
+    updated AS (
+        UPDATE users
+        SET 
+            tags = array_append(
+                COALESCE(tags, ARRAY[]::TEXT[]),
+                'needs_summary'
+            ),
+            updated_at = NOW()
+        FROM inactive_users iu
+        WHERE users.user_id = iu.user_id
+        RETURNING users.user_id, users.username, users.last_interaction_at
+    )
+    SELECT COUNT(*) INTO affected_count FROM updated;
+    
+    RAISE NOTICE 'summarize_inactive_users: marked % users for summarization', affected_count;
+    
+    RETURN QUERY
+    SELECT u.user_id, u.username, u.last_interaction_at
+    FROM users u
+    WHERE u.tags @> ARRAY['needs_summary']::TEXT[]
+    ORDER BY u.last_interaction_at ASC;
+END;
+$$ LANGUAGE plpgsql;
+
+GRANT EXECUTE ON FUNCTION summarize_inactive_users() TO service_role;
+
+-- ============================================================================
 -- VERIFICATION
 -- ============================================================================
 DO $$
@@ -384,4 +436,6 @@ BEGIN
     RAISE NOTICE '   - messages';
     RAISE NOTICE '   - llm_usage';
     RAISE NOTICE '   - agent_sessions (with sitniks_chat_id)';
+    RAISE NOTICE '   Functions:';
+    RAISE NOTICE '   - summarize_inactive_users()';
 END $$;
