@@ -154,7 +154,7 @@ SQL функція для маркування неактивних корист
 Система готова для 100 діалогів/день при умові:
 1. ✅ Supabase налаштовано
 2. ✅ API keys (OpenRouter/Grok) налаштовано
-3. ⚠️ Memory tables migrated
+3. ✅ Memory tables migrated
 4. ⚠️ Sitniks CRM (optional, paid plan)
 
 ---
@@ -164,7 +164,7 @@ SQL функція для маркування неактивних корист
 - [x] Виправити summarize_inactive_users RPC function ✅
 - [x] Виправити hardcoded prices в промптах ✅
 - [x] Створити test_workers.py ✅
-- [ ] Запустити `src/db/memory_schema.sql` в Supabase
+- [x] Запустити Memory System SQL в Supabase ✅
 - [ ] Перевірити env vars: SUPABASE_URL, SUPABASE_API_KEY
 - [ ] Перевірити env vars: OPENROUTER_API_KEY або XAI_API_KEY
 - [ ] Запустити `python scripts/migrate_price_by_size.py`
