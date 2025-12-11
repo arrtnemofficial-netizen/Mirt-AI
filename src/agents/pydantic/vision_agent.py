@@ -60,6 +60,9 @@ def _build_model() -> OpenAIChatModel:
 
     if not api_key:
         logger.error("❌ No API key for vision model! Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
+        raise ValueError(
+            "Vision model requires API key. Set OPENAI_API_KEY or OPENROUTER_API_KEY."
+        )
 
     logger.info("👁️ Vision model: %s (via %s)", model_name, base_url[:30])
 
@@ -660,9 +663,14 @@ async def run_vision(
             deps.image_url[:80] if deps.image_url else "<none>",
         )
     else:
-        # No image - just text (fallback)
-        user_input = [message]
-        logger.warning("👁️ Vision agent started WITHOUT image! deps.image_url is empty.")
+        # No image - cannot proceed with vision analysis
+        logger.error("👁️ Vision agent called WITHOUT image! deps.image_url is empty.")
+        return VisionResponse(
+            reply_to_user="Надішліть фото товару, будь ласка 📷",
+            confidence=0.0,
+            needs_clarification=True,
+            clarification_question="Чи можете надіслати фото товару?",
+        )
 
     try:
         result = await asyncio.wait_for(
