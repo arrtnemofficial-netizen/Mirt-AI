@@ -15,9 +15,9 @@ DROP FUNCTION IF EXISTS summarize_inactive_users();
 -- Create new function using correct table names
 CREATE OR REPLACE FUNCTION summarize_inactive_users()
 RETURNS TABLE (
-    user_id TEXT,
-    username TEXT,
-    last_interaction_at TIMESTAMPTZ
+    out_user_id TEXT,
+    out_username TEXT,
+    out_last_interaction_at TIMESTAMPTZ
 ) AS $$
 DECLARE
     affected_count INT := 0;
@@ -29,20 +29,20 @@ BEGIN
         FROM users u
         WHERE 
             u.last_interaction_at < NOW() - INTERVAL '3 days'
-            AND NOT (u.tags @> ARRAY['needs_summary']::TEXT[])
-            AND NOT (u.tags @> ARRAY['summarized']::TEXT[])
+            AND NOT (COALESCE(u.tags, ARRAY[]::TEXT[]) @> ARRAY['needs_summary']::TEXT[])
+            AND NOT (COALESCE(u.tags, ARRAY[]::TEXT[]) @> ARRAY['summarized']::TEXT[])
     ),
     updated AS (
-        UPDATE users
+        UPDATE users u2
         SET 
             tags = array_append(
-                COALESCE(tags, ARRAY[]::TEXT[]),
+                COALESCE(u2.tags, ARRAY[]::TEXT[]),
                 'needs_summary'
             ),
             updated_at = NOW()
         FROM inactive_users iu
-        WHERE users.user_id = iu.user_id
-        RETURNING users.user_id, users.username, users.last_interaction_at
+        WHERE u2.user_id = iu.user_id
+        RETURNING u2.user_id, u2.username, u2.last_interaction_at
     )
     SELECT COUNT(*) INTO affected_count FROM updated;
     
@@ -53,7 +53,7 @@ BEGIN
     RETURN QUERY
     SELECT u.user_id, u.username, u.last_interaction_at
     FROM users u
-    WHERE u.tags @> ARRAY['needs_summary']::TEXT[]
+    WHERE COALESCE(u.tags, ARRAY[]::TEXT[]) @> ARRAY['needs_summary']::TEXT[]
     ORDER BY u.last_interaction_at ASC;
 END;
 $$ LANGUAGE plpgsql;
