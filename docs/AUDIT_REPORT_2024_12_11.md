@@ -1,6 +1,6 @@
-# 🔍 АУДИТ MIRT-AI: ПОВНИЙ ЗВІТ
+# 🔍 АУДИТ MIRT-AI: ПОВНИЙ ЗВІТ (ОНОВЛЕНО)
 
-**Дата:** 2024-12-11
+**Дата:** 2024-12-11 (оновлено 17:10)
 **Аудитор:** Cascade (режим Architect Opus)
 **Scope:** Production readiness для 100 діалогів/день × 10 реплік = 1000 API calls
 
@@ -17,6 +17,9 @@
 | **Routing (edges.py)** | ✅ OK | Немає dead ends, є default routes |
 | **Session Isolation** | ✅ OK | State per session, no global mutation |
 | **Memory Leaks** | ✅ OK | Rate limiter має cleanup |
+| **Checkpointer** | ✅ OK | AsyncPostgresSaver з PgBouncer support |
+| **Workers** | ✅ OK | 7/7 тестів пройшли |
+| **RPC Functions** | ✅ OK | summarize_inactive_users виправлено |
 
 ---
 
@@ -42,6 +45,18 @@
 **Було:** Редагувати ~15 полів в YAML вручну
 **Стало:** `python scripts/add_product.py` - 5-6 питань
 
+### 6. summarize_inactive_users RPC Function
+**Було:** Помилка `relation "mirt_users" does not exist`
+**Стало:** Функція оновлена для таблиці `users`, тест проходить
+
+### 7. Hardcoded Prices в Промптах
+**Було:** Конкретні ціни (1590, 1890 грн) в прикладах
+**Стало:** Placeholder `[ЦІНА З КАТАЛОГУ]` для динамічних цін
+
+### 8. Workers Testing Script
+**Було:** Немає способу тестувати воркери вручну
+**Стало:** `python scripts/test_workers.py` - 7 тестів
+
 ---
 
 ## 🟡 MINOR ISSUES (не критичні)
@@ -54,8 +69,11 @@ def __init__(self) -> None:
 **Impact:** Low - Supabase client cached через lru_cache
 **Fix (optional):** Зробити CatalogService singleton
 
-### 2. 70 TODO/FIXME коментарів
-Більшість - debug logs, не критичні
+### 2. 6 TODO коментарів (зменшено з 70)
+Всі не критичні:
+- Signature verification для webhooks
+- Product inventory updates
+- Operator notifications
 
 ---
 
@@ -73,17 +91,23 @@ def __init__(self) -> None:
 Потрібен paid plan (403 на trial)
 **Status:** Pending configuration
 
+### 4. Checkpointer на Windows
+`AsyncConnectionPool` не працює з `ProactorEventLoop`
+**Impact:** Тільки для локальної розробки на Windows
+**Production (Linux):** ✅ Працює коректно
+
 ---
 
 ## 📈 МЕТРИКИ АУДИТУ
 
 | Метрика | Значення |
 |---------|----------|
-| Файлів перевірено | ~50 |
+| Файлів перевірено | ~60 |
 | Unit тестів | 365 (всі pass) |
-| Критичних багів знайдено | 3 |
-| Критичних багів виправлено | 3 |
-| Commits | 4 |
+| Worker тестів | 7/7 pass |
+| Критичних багів знайдено | 5 |
+| Критичних багів виправлено | 5 |
+| Commits | 6 |
 
 ---
 
@@ -107,6 +131,22 @@ python scripts/migrate_price_by_size.py
 - Читає з products_master.yaml
 - Оновлює price_by_size в Supabase
 
+### scripts/test_workers.py
+Тестування всіх воркерів:
+```bash
+python scripts/test_workers.py
+```
+- Health check
+- Message store
+- LLM usage tracking
+- Summarization
+- Followups
+- CRM integration
+- Celery connection
+
+### scripts/sql/004_add_summarize_inactive_users.sql
+SQL функція для маркування неактивних користувачів
+
 ---
 
 ## ✅ READY FOR PRODUCTION
@@ -121,6 +161,9 @@ python scripts/migrate_price_by_size.py
 
 ## 📋 CHECKLIST ПЕРЕД ЗАПУСКОМ
 
+- [x] Виправити summarize_inactive_users RPC function ✅
+- [x] Виправити hardcoded prices в промптах ✅
+- [x] Створити test_workers.py ✅
 - [ ] Запустити `src/db/memory_schema.sql` в Supabase
 - [ ] Перевірити env vars: SUPABASE_URL, SUPABASE_API_KEY
 - [ ] Перевірити env vars: OPENROUTER_API_KEY або XAI_API_KEY
