@@ -59,8 +59,13 @@ products:
     category: "сукні"
     
     # ЦІНА
-    price_type: "uniform"  # uniform | by_size
-    price: 1850
+    price_type: "by_size"
+    prices_by_size:
+      "110-116": 1850
+      "122-128": 1850
+      "134-140": 1850
+      "146-152": 1850
+      "158-164": 1850
     
     # КОЛЬОРИ (ТІЛЬКИ ЦІ - НЕ ВИГАДУВАТИ ІНШІ!)
     colors:
@@ -127,8 +132,20 @@ products:
     name: "Костюм Валері"
     category: "костюми"
     
-    price_type: "uniform"
-    price: 1950
+    price_type: "by_size"
+    prices_by_size:
+      "98": 1950
+      "104": 1950
+      "110": 1950
+      "116": 1950
+      "122": 1950
+      "128": 1950
+      "134": 1950
+      "140": 1950
+      "146": 1950
+      "152": 1950
+      "158": 1950
+      "164": 1950
     
     colors:
       універсальний:
@@ -169,8 +186,12 @@ products:
     name: "Костюм Ритм"
     category: "костюми"
     
-    price_type: "uniform"
-    price: 1975
+    price_type: "by_size"
+    prices_by_size:
+      "122-128": 1975
+      "134-140": 1975
+      "146-152": 1975
+      "158-164": 1975
     
     colors:
       рожевий:
@@ -221,8 +242,12 @@ products:
     name: "Костюм Каприз"
     category: "костюми"
     
-    price_type: "uniform"
-    price: 1885
+    price_type: "by_size"
+    prices_by_size:
+      "122-128": 1885
+      "134-140": 1885
+      "146-152": 1885
+      "158-164": 1885
     
     colors:
       рожевий:
@@ -461,8 +486,13 @@ products:
     name: "Тренч екошкіра"
     category: "верхній одяг"
     
-    price_type: "uniform"
-    price: 2180
+    price_type: "by_size"
+    prices_by_size:
+      "110-116": 2180
+      "122-128": 2180
+      "134-140": 2180
+      "146-152": 2180
+      "158-164": 2180
     
     colors:
       капучіно:
@@ -514,8 +544,13 @@ products:
     name: "Тренч"
     category: "верхній одяг"
     
-    price_type: "uniform"
-    price: 2380
+    price_type: "by_size"
+    prices_by_size:
+      "110-116": 2380
+      "122-128": 2380
+      "134-140": 2380
+      "146-152": 2380
+      "158-164": 2380
     
     colors:
       рожевий:

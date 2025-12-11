@@ -31,15 +31,14 @@ def load_prices_from_yaml() -> dict[str, dict]:
     
     products = data.get("products", {})
     
-    # Збираємо товари з price_type: "by_size"
+    # Збираємо ВСІ товари з prices_by_size
     prices_map = {}
     for key, product in products.items():
-        if product.get("price_type") == "by_size":
-            name = product["name"]
-            prices = product.get("prices_by_size", {})
-            if prices:
-                prices_map[name] = prices
-                print(f"  📦 {name}: {len(prices)} розмірів")
+        name = product.get("name")
+        prices = product.get("prices_by_size", {})
+        if prices and name:
+            prices_map[name] = prices
+            print(f"  📦 {name}: {len(prices)} розмірів")
     
     return prices_map
 
