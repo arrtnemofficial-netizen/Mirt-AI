@@ -56,11 +56,19 @@ class Settings(BaseSettings):
         default=SecretStr(""),
         description="ManyChat API key for full API access (sending messages, tags, fields).",
     )
+    MANYCHAT_API_URL: str = Field(
+        default="https://api.manychat.com",
+        description="ManyChat API base URL.",
+    )
     MANYCHAT_VERIFY_TOKEN: str = Field(
         default="", description="Shared token to validate ManyChat webhook calls."
     )
     MANYCHAT_PAGE_ID: str = Field(
         default="", description="Optional page/app identifier for routing incoming ManyChat events."
+    )
+    MANYCHAT_PUSH_MODE: bool = Field(
+        default=True,
+        description="Use async push mode (recommended). If False, uses sync response mode.",
     )
 
     SUPABASE_URL: str = Field(

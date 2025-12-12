@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from aiogram.types import Update
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.conf.config import settings
@@ -198,13 +198,75 @@ async def telegram_webhook(request: Request) -> JSONResponse:
 @app.post("/webhooks/manychat")
 async def manychat_webhook(
     payload: dict[str, Any],
+    background_tasks: BackgroundTasks,
     x_manychat_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Handle incoming ManyChat webhook payloads."""
+    """Handle incoming ManyChat webhook payloads.
+    
+    Supports two modes:
+    - Push mode (MANYCHAT_PUSH_MODE=true): Returns 202 immediately, processes async
+    - Response mode (MANYCHAT_PUSH_MODE=false): Waits for AI, returns response
+    """
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
     if verify_token and verify_token != x_manychat_token:
         raise HTTPException(status_code=401, detail="Invalid ManyChat token")
 
+    # Push mode: return immediately, process in background
+    if settings.MANYCHAT_PUSH_MODE:
+        from src.integrations.manychat.async_service import get_manychat_async_service
+        from src.server.dependencies import get_session_store
+        
+        try:
+            # Extract user info from payload
+            subscriber = payload.get("subscriber") or payload.get("user") or {}
+            message = payload.get("message") or payload.get("data", {}).get("message") or {}
+            
+            user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+            text = ""
+            image_url = None
+            
+            if isinstance(message, dict):
+                text = message.get("text") or message.get("content") or ""
+                # Extract image from attachments
+                for attachment in message.get("attachments", []):
+                    if attachment.get("type") == "image":
+                        image_url = attachment.get("payload", {}).get("url")
+                        break
+                if not image_url:
+                    image_url = message.get("image") or message.get("image_url")
+            
+            # Also check data.image_url
+            if not image_url:
+                data = payload.get("data", {})
+                image_url = data.get("image_url") or data.get("photo_url")
+            
+            channel = payload.get("type") or "instagram"
+            
+            if not text and not image_url:
+                raise HTTPException(status_code=400, detail="Missing message text or image")
+            
+            # Schedule background processing
+            store = get_session_store()
+            service = get_manychat_async_service(store)
+            
+            background_tasks.add_task(
+                service.process_message_async,
+                user_id=user_id,
+                text=text or "",
+                image_url=image_url,
+                channel=channel,
+            )
+            
+            logger.info("[MANYCHAT] 📨 Accepted message from %s (push mode)", user_id)
+            return {"status": "accepted"}
+            
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("[MANYCHAT] Error in push mode: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    
+    # Response mode: wait for AI and return response
     handler = get_cached_manychat_handler()
     try:
         return await handler.handle(payload)
