@@ -200,6 +200,7 @@ async def manychat_webhook(
     payload: dict[str, Any],
     background_tasks: BackgroundTasks,
     x_manychat_token: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Handle incoming ManyChat webhook payloads.
     
@@ -208,7 +209,15 @@ async def manychat_webhook(
     - Response mode (MANYCHAT_PUSH_MODE=false): Waits for AI, returns response
     """
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
-    if verify_token and verify_token != x_manychat_token:
+    inbound_token = x_manychat_token
+    if not inbound_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            inbound_token = auth_value[7:].strip()
+        else:
+            inbound_token = auth_value
+
+    if verify_token and verify_token != inbound_token:
         raise HTTPException(status_code=401, detail="Invalid ManyChat token")
 
     # Push mode: return immediately, process in background

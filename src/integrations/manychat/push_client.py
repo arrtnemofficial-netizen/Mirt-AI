@@ -53,6 +53,7 @@ class ManyChatPushClient:
         set_field_values: list[dict[str, str]] | None = None,
         add_tags: list[str] | None = None,
         remove_tags: list[str] | None = None,
+        message_tag: str = "ACCOUNT_UPDATE",
     ) -> bool:
         """Send content to a ManyChat subscriber.
         
@@ -81,15 +82,58 @@ class ManyChatPushClient:
         if quick_replies:
             content["quick_replies"] = quick_replies
 
-        # Build actions for tags
-        actions: list[dict[str, Any]] = []
+        # Build actions for tags + custom fields (ManyChat v2 content format)
+        required_field_names = {"ai_state", "ai_intent"}
+        required_field_actions: list[dict[str, Any]] = []
+        optional_field_actions: list[dict[str, Any]] = []
+        tag_add_actions: list[dict[str, Any]] = []
+        tag_remove_actions: list[dict[str, Any]] = []
+
+        if set_field_values:
+            for item in set_field_values:
+                field_name = str(item.get("field_name") or "").strip()
+                field_value = str(item.get("field_value") or "")
+                if not field_name:
+                    continue
+                action = {
+                    "action": "set_field_value",
+                    "field_name": field_name,
+                    "value": field_value,
+                }
+                if field_name in required_field_names:
+                    required_field_actions.append(action)
+                else:
+                    optional_field_actions.append(action)
+
         if add_tags:
             for tag in add_tags:
-                actions.append({"action": "add_tag", "tag_name": tag})
+                tag_add_actions.append({"action": "add_tag", "tag_name": tag})
         if remove_tags:
             for tag in remove_tags:
-                actions.append({"action": "remove_tag", "tag_name": tag})
-        
+                tag_remove_actions.append({"action": "remove_tag", "tag_name": tag})
+
+        # ManyChat Dynamic Block limits actions to 5.
+        actions: list[dict[str, Any]] = (
+            required_field_actions
+            + tag_add_actions
+            + tag_remove_actions
+            + optional_field_actions
+        )
+        if len(actions) > 5:
+            # Keep required field updates; trim the rest (least critical first)
+            kept: list[dict[str, Any]] = list(required_field_actions)
+
+            def _append_up_to(src: list[dict[str, Any]], target: list[dict[str, Any]], max_len: int) -> None:
+                for a in src:
+                    if len(target) >= max_len:
+                        return
+                    target.append(a)
+
+            _append_up_to(tag_add_actions, kept, 5)
+            _append_up_to(tag_remove_actions, kept, 5)
+            _append_up_to(optional_field_actions, kept, 5)
+            actions = kept
+
         if actions:
             content["actions"] = actions
 
@@ -100,11 +144,8 @@ class ManyChatPushClient:
                 "version": "v2",
                 "content": content,
             },
+            "message_tag": message_tag,
         }
-
-        # Add field values at top level (ManyChat API format)
-        if set_field_values:
-            payload["data"]["set_field_values"] = set_field_values
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",
