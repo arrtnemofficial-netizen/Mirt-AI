@@ -148,35 +148,28 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     if dialog_phase == "OFFER_MADE":
         current_state = state.get("current_state", State.STATE_0_INIT.value)
 
-        # QUALITY: Перевіряємо чи юзер каже "беру" або підтверджує
-        # НОВА ЛОГІКА: payment sub-flow веде AGENT (STATE_5), а не окрема payment-нода.
-        # Це уникає конфлікту з interrupt_before=["payment"] і гарантує, що
-        # перше "беру/да" після офферу переходить у STATE_5_PAYMENT_DELIVERY
-        # через agent_node з промптом STATE_5.
+        # User confirms order ("беру", "да", "так") → payment flow
         if detected_intent == "PAYMENT_DELIVERY":
             logger.info(
-                " [SESSION %s] → agent (OFFER_MADE + PAYMENT_DELIVERY, state=%s)",
+                "🔀 [SESSION %s] → payment (OFFER_MADE + PAYMENT_DELIVERY)",
                 session_id,
-                current_state,
             )
-            return "agent"
+            return "payment"
         
-        # Check confirmation keywords directly (да, так, ок, etc.)
-        # detect_simple_intent doesn't check these, але в OFFER_MADE вони означають згоду.
+        # Check confirmation keywords directly (да, так, ок, беру, etc.)
         confirmation_keywords = INTENT_PATTERNS.get("CONFIRMATION", [])
         msg_lower = user_message.lower() if user_message else ""
         for keyword in confirmation_keywords:
             if keyword in msg_lower:
                 logger.info(
-                    " [SESSION %s] → agent (OFFER_MADE + confirmation: '%s', state=%s)",
+                    "🔀 [SESSION %s] → payment (OFFER_MADE + confirmation: '%s')",
                     session_id,
                     keyword,
-                    current_state,
                 )
-                return "agent"
+                return "payment"
         
-        # Інакше - юзер питає щось інше (уточнення по ціні/деталях)
-        logger.info(" [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
+        # User asks clarifying question → agent handles it
+        logger.info("🔀 [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
         return "agent"
 
     # STATE_5: Collecting delivery data → use AGENT to extract name/phone/city
@@ -187,16 +180,15 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
     # STATE_5: Waiting for payment method
     if dialog_phase == "WAITING_FOR_PAYMENT_METHOD":
-        # НОВА ЛОГІКА: payment sub-flow веде AGENT (STATE_5), а не окрема payment-нода.
-        # Тут агент уточнює/підтверджує спосіб оплати та при потребі дає додаткові пояснення.
-        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_PAYMENT_METHOD)", session_id)
-        return "agent"
+        # Payment sub-flow: спосіб оплати обробляється в payment node
+        logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_PAYMENT_METHOD)", session_id)
+        return "payment"
 
     # STATE_5: Waiting for payment proof
     if dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
-        # НОВА ЛОГІКА: агент чекає скрін/підтвердження оплати та завершує замовлення.
-        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_PAYMENT_PROOF)", session_id)
-        return "agent"
+        # Payment sub-flow: підтвердження оплати обробляється в payment node
+        logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_PAYMENT_PROOF)", session_id)
+        return "payment"
 
     # STATE_6: Upsell offered
     if dialog_phase == "UPSELL_OFFERED":
@@ -300,17 +292,19 @@ def _resolve_intent_route(
         return direct_routes[intent]
 
     # Payment requires context check
-    # NOTE: Only route to payment_node if HITL is needed (interrupt)
-    # For normal STATE_5 sub-phases, master_router routes to agent_node
-    # which uses payment_flow.py for deterministic FSM
     if intent == "PAYMENT_DELIVERY":
-        dialog_phase = state.get("dialog_phase", "INIT")
-        # If we're in payment sub-phases, let master_router handle it (→ agent)
-        # Only go to payment_node from STATE_4 offer confirmation
-        if current_state == State.STATE_4_OFFER.value and dialog_phase == "OFFER_MADE":
+        # STATE_5: Always route to payment node for payment flow
+        if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
             return "payment"
+        
+        # STATE_4: User confirmed offer ("беру") → payment node
+        if current_state == State.STATE_4_OFFER.value:
+            return "payment"
+        
+        # Has products but not yet in payment → offer
         if state.get("selected_products") or state.get("offered_products"):
             return "offer"
+        
         return "agent"
 
     # Size/color with products -> offer

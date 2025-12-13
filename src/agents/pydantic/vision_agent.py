@@ -647,20 +647,63 @@ async def run_vision(
         Validated VisionResponse
     """
     import asyncio
+    from urllib.parse import urlparse
 
     agent = get_vision_agent()
 
     # Build MULTIMODAL input: [text, ImageUrl]
     # PydanticAI requires ImageUrl for vision models to actually SEE the image!
     if deps.image_url:
+        # SECURITY: Validate image URL before sending to LLM
+        image_url = deps.image_url.strip()
+        
+        # Check URL format
+        try:
+            parsed = urlparse(image_url)
+            if parsed.scheme not in ("http", "https"):
+                logger.error("👁️ Invalid image URL scheme: %s", parsed.scheme)
+                return VisionResponse(
+                    reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                    confidence=0.0,
+                    needs_clarification=True,
+                    clarification_question="Чи можете надіслати фото ще раз?",
+                )
+            if not parsed.netloc:
+                logger.error("👁️ Invalid image URL - no host: %s", image_url[:50])
+                return VisionResponse(
+                    reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                    confidence=0.0,
+                    needs_clarification=True,
+                    clarification_question="Чи можете надіслати фото ще раз?",
+                )
+        except Exception as e:
+            logger.error("👁️ URL parse error: %s", e)
+            return VisionResponse(
+                reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                confidence=0.0,
+                needs_clarification=True,
+                clarification_question="Чи можете надіслати фото ще раз?",
+            )
+        
+        # Block potentially dangerous URLs (SSRF prevention)
+        blocked_hosts = ("localhost", "127.0.0.1", "0.0.0.0", "169.254.", "10.", "192.168.", "172.16.")
+        if any(parsed.netloc.startswith(h) or parsed.netloc == h.rstrip(".") for h in blocked_hosts):
+            logger.warning("👁️ Blocked internal URL attempt: %s", parsed.netloc)
+            return VisionResponse(
+                reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                confidence=0.0,
+                needs_clarification=True,
+                clarification_question="Чи можете надіслати фото ще раз?",
+            )
+        
         # Multimodal input: list of content parts
         user_input: list[str | ImageUrl] = [
             message or "Аналізуй це фото та знайди товар MIRT.",
-            ImageUrl(url=deps.image_url),
+            ImageUrl(url=image_url),
         ]
         logger.info(
             "👁️ Vision agent starting (MULTIMODAL): image_url=%s",
-            deps.image_url[:80] if deps.image_url else "<none>",
+            image_url[:80] if image_url else "<none>",
         )
     else:
         # No image - cannot proceed with vision analysis

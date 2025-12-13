@@ -16,11 +16,16 @@ import logging
 import time
 from typing import Any
 
+from src.services.exceptions import CatalogUnavailableError
 from src.services.observability import log_tool_execution, track_metric
 from src.services.supabase_client import get_supabase_client
 
 
 logger = logging.getLogger(__name__)
+
+
+# Flag to control error propagation vs silent failure (for backward compatibility)
+RAISE_ON_CATALOG_ERROR = True
 
 
 class CatalogService:
@@ -117,7 +122,8 @@ class CatalogService:
         tool_name = "catalog.search_products"
 
         if not self.client:
-            logger.warning("Supabase client not available")
+            error_msg = "Supabase client not available"
+            logger.error("[CATALOG] %s - cannot search products", error_msg)
             log_tool_execution(
                 tool_name,
                 success=False,
@@ -125,6 +131,8 @@ class CatalogService:
                 result_count=0,
                 error="no_client",
             )
+            if RAISE_ON_CATALOG_ERROR:
+                raise CatalogUnavailableError("Database connection not configured")
             return []
 
         start = time.perf_counter()
@@ -146,9 +154,13 @@ class CatalogService:
             result_count = len(data)
             return data
 
+        except CatalogUnavailableError:
+            raise  # Re-raise our custom exceptions
         except Exception as e:
-            logger.error("Catalog search failed: %s", e)
             error_msg = str(e)
+            logger.error("[CATALOG] Search failed: %s (query=%s)", e, query)
+            if RAISE_ON_CATALOG_ERROR:
+                raise CatalogUnavailableError(f"Search failed: {error_msg}") from e
             return []
 
         finally:

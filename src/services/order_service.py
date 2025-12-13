@@ -34,10 +34,32 @@ class OrderService:
             Created order ID (str) or None if failed
         """
         if not self.client:
-            logger.warning("Supabase client not available, cannot save order")
-            return None
+            logger.error("[ORDER] CRITICAL: Supabase client not available - order will NOT be saved!")
+            # Don't silently fail - raise so caller knows order wasn't created
+            from src.services.exceptions import ServiceUnavailableError
+            raise ServiceUnavailableError("database", "Cannot save order - database unavailable")
 
+        session_id = order_data.get("external_id")
+        
         try:
+            # 0. IDEMPOTENCY CHECK - prevent duplicate orders
+            if session_id:
+                existing = (
+                    self.client.table("orders")
+                    .select("id")
+                    .eq("session_id", session_id)
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    existing_id = existing.data[0]["id"]
+                    logger.warning(
+                        "[ORDER] Duplicate order attempt for session %s, existing order: %s",
+                        session_id,
+                        existing_id,
+                    )
+                    return str(existing_id)  # Return existing order ID
+            
             # 1. Prepare Order Payload
             customer = order_data.get("customer", {})
             totals = order_data.get("totals", {})
