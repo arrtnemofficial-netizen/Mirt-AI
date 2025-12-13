@@ -1,7 +1,11 @@
-# Implementation Status
+# Implementation Status (Snapshot)
 
-**Current Status: 🟢 STABLE / PRODUCTION READY**
-**Last Updated:** 2025-11-30
+> ⚠️ **LEGACY STATUS**
+> Актуальний стан системи тепер описано в `PROJECT_STATUS_REPORT.md`.
+> Цей файл — snapshot міграції на PydanticAI + LangGraph станом на 2025‑12‑07.
+
+**Current Status (на момент snapshot): 🟢 STABLE / PRODUCTION READY**
+**Last Updated:** 2025-12-07
 
 ---
 
@@ -27,6 +31,12 @@ We have successfully migrated the legacy architecture to a modern, type-safe sta
 - [x] **Imports**: Fixed all circular imports and broken references.
 - [x] **Linting**: `ruff` and `mypy` passing with strict rules.
 - [x] **Config**: Cleaned up `src/conf/config.py`, removed unused feature flags.
+
+### 🔧 Dependency & Vision Upgrades (2025-12-07)
+- [x] **LLM Clients**: Upgraded to `openai==2.9.0`, `supabase==2.25.0`.
+- [x] **Agents**: Switched to `OpenAIChatModel` (PydanticAI) to avoid deprecations.
+- [x] **Observability**: Added structured logging + tracing for `CatalogService` and `vision_node`.
+- [x] **Vision Health**: Added `tests/test_vision_health.py` + generator `data/vision/generate.py` + wrapper `scripts/generate_vision_artifacts.py`.
 
 ---
 
@@ -57,5 +67,5 @@ We have successfully migrated the legacy architecture to a modern, type-safe sta
 ## 🎯 Next Steps
 
 1. **Production Monitoring**: Watch Sentry and Logfire for runtime anomalies.
-2. **Catalog Update**: Automate `catalog.json` generation from CRM.
+2. **Catalog Update**: Automate синхронізацію Supabase `products` + `data/vision/products_master.yaml` з CRM.
 3. **User Testing**: Verify HITL flow in real scenarios.

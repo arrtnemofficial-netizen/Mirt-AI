@@ -15,10 +15,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
-from src.services.client_data_parser import ClientData, parse_client_data
 from src.services.conversation import create_conversation_handler
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
+from src.services.debouncer import MessageDebouncer, BufferedMessage
 
 
 if TYPE_CHECKING:
@@ -71,16 +71,59 @@ class ManychatWebhook:
             message_store=self.message_store,
             runner=self.runner,
         )
+        # Initialize debouncer with 3.0 second delay for ManyChat
+        # (Slightly longer than Telegram because webhooks can be slower)
+        self.debouncer = MessageDebouncer(delay=3.0)
 
     async def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Process a ManyChat webhook body and produce a response envelope."""
-        user_id, text = self._extract_user_and_text(payload)
+        user_id, text, image_url = self._extract_user_text_and_image(payload)
 
-        # Parse client data from message text (ПІБ, телефон, місто, НП)
-        client_data = parse_client_data(text)
+        # Build extra_metadata for images
+        extra_metadata = {}
+        if image_url:
+            extra_metadata = {
+                "has_image": True,
+                "image_url": image_url,
+            }
+            logger.info("[MANYCHAT:%s] 📷 Image received: %s", user_id, image_url[:80])
+
+        # ---------------------------------------------------------------------
+        # DEBOUNCING LOGIC
+        # ---------------------------------------------------------------------
+        buffered_msg = BufferedMessage(
+            text=text,
+            has_image=bool(image_url),
+            image_url=image_url,
+            extra_metadata=extra_metadata
+        )
+
+        # Wait for aggregation. 
+        # Returns None if this request is superseded by a newer one.
+        aggregated_msg = await self.debouncer.wait_for_debounce(user_id, buffered_msg)
+
+        if aggregated_msg is None:
+            # Superseded -> Return empty response ("silent success")
+            logger.info("[MANYCHAT:%s] Request superseded by newer message, skipping.", user_id)
+            return {
+                "version": "v2",
+                "content": {
+                    "messages": [],
+                    "actions": [],
+                    "quick_replies": [],
+                }
+            }
+
+        # ---------------------------------------------------------------------
+        # PROCESS AGGREGATED MESSAGE
+        # ---------------------------------------------------------------------
+        final_text = aggregated_msg.text
+        final_metadata = aggregated_msg.extra_metadata
+
+        logger.info("[MANYCHAT:%s] Processing AGGREGATED: text='%s'", user_id, final_text[:50])
 
         # Use centralized handler with error handling
-        result = await self._handler.process_message(user_id, text)
+        result = await self._handler.process_message(user_id, final_text, extra_metadata=final_metadata)
 
         if result.is_fallback:
             logger.warning(
@@ -89,24 +132,56 @@ class ManychatWebhook:
                 result.error,
             )
 
-        return self._to_manychat_response(result.response, client_data)
+        return self._to_manychat_response(result.response)
 
     @staticmethod
-    def _extract_user_and_text(payload: dict[str, Any]) -> tuple[str, str]:
+    def _extract_user_text_and_image(payload: dict[str, Any]) -> tuple[str, str, str | None]:
+        """Extract user ID, text, and optional image URL from ManyChat payload.
+        
+        ManyChat image formats:
+        - message.attachments[].payload.url (Instagram images)
+        - message.image (direct image URL)
+        - data.image_url (custom field)
+        """
         subscriber = payload.get("subscriber") or payload.get("user")
         message = payload.get("message") or payload.get("data", {}).get("message")
+        
         text = None
+        image_url = None
+        
         if isinstance(message, dict):
-            text = message.get("text") or message.get("content")
-        if not subscriber or not text:
-            raise ManychatPayloadError("Missing subscriber or message text in payload")
+            text = message.get("text") or message.get("content") or ""
+            
+            # Extract image from attachments (Instagram format)
+            attachments = message.get("attachments", [])
+            for attachment in attachments:
+                if attachment.get("type") == "image":
+                    payload_data = attachment.get("payload", {})
+                    image_url = payload_data.get("url")
+                    break
+            
+            # Fallback: direct image field
+            if not image_url:
+                image_url = message.get("image") or message.get("image_url")
+        
+        # Also check data.image_url (for custom ManyChat flows)
+        if not image_url:
+            data = payload.get("data", {})
+            image_url = data.get("image_url") or data.get("photo_url")
+        
+        if not subscriber:
+            raise ManychatPayloadError("Missing subscriber in payload")
+        
+        # Allow empty text if image is present
+        if not text and not image_url:
+            raise ManychatPayloadError("Missing message text or image in payload")
+        
         user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
-        return user_id, text
+        return user_id, text or "", image_url
 
     def _to_manychat_response(
         self,
         agent_response: AgentResponse,
-        client_data: ClientData | None = None,
     ) -> dict[str, Any]:
         """Map AgentResponse into ManyChat v2 compatible reply body.
 
@@ -120,19 +195,20 @@ class ManychatWebhook:
         text_chunks = render_agent_response_text(agent_response)
         messages: list[dict[str, Any]] = [{"type": "text", "text": chunk} for chunk in text_chunks]
 
-        # Add product images
-        for product in agent_response.products:
-            if product.photo_url:
-                messages.append(
-                    {
-                        "type": "image",
-                        "url": product.photo_url,
-                        "caption": f"{product.name} - {product.price} грн",
-                    }
-                )
+        # Add product images only для PHOTO_IDENT, щоб не дублювати фото в подальших стейтах
+        if agent_response.metadata.intent == "PHOTO_IDENT":
+            for product in agent_response.products:
+                if product.photo_url:
+                    messages.append(
+                        {
+                            "type": "image",
+                            "url": product.photo_url,
+                            "caption": "",  # без дублювання тексту/ціни
+                        }
+                    )
 
-        # Build Custom Field values (including parsed client data)
-        field_values = self._build_field_values(agent_response, client_data)
+        # Build Custom Field values
+        field_values = self._build_field_values(agent_response)
 
         # Build tags
         tags_to_add, tags_to_remove = self._build_tags(agent_response)
@@ -167,9 +243,12 @@ class ManychatWebhook:
     @staticmethod
     def _build_field_values(
         agent_response: AgentResponse,
-        client_data: ClientData | None = None,
     ) -> list[dict[str, str]]:
-        """Build Custom Field values from AgentResponse and parsed client data."""
+        """Build Custom Field values from AgentResponse.
+        
+        Note: Customer data (name, phone, city, NP) is now stored in session state
+        by LLM and accessed via conversation.py, not parsed here.
+        """
         fields = [
             {"field_name": FIELD_AI_STATE, "field_value": agent_response.metadata.current_state},
             {"field_name": FIELD_AI_INTENT, "field_value": agent_response.metadata.intent},
@@ -182,21 +261,6 @@ class ManychatWebhook:
             if last_product.price:
                 fields.append(
                     {"field_name": FIELD_ORDER_SUM, "field_value": str(last_product.price)}
-                )
-
-        # Add parsed client data (ПІБ, телефон, місто, НП)
-        if client_data:
-            if client_data.full_name:
-                fields.append(
-                    {"field_name": FIELD_CLIENT_NAME, "field_value": client_data.full_name}
-                )
-            if client_data.phone:
-                fields.append({"field_name": FIELD_CLIENT_PHONE, "field_value": client_data.phone})
-            if client_data.city:
-                fields.append({"field_name": FIELD_CLIENT_CITY, "field_value": client_data.city})
-            if client_data.nova_poshta:
-                fields.append(
-                    {"field_name": FIELD_CLIENT_NP, "field_value": client_data.nova_poshta}
                 )
 
         return fields

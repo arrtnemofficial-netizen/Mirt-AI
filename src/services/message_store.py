@@ -47,7 +47,7 @@ class InMemoryMessageStore:
 
 
 class SupabaseMessageStore:
-    """Message store using mirt_messages table schema."""
+    """Message store using messages table schema."""
 
     def __init__(self, client: Client, table: str = DBTable.MESSAGES) -> None:
         self.client = client

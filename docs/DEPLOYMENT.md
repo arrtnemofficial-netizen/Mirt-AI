@@ -1,5 +1,7 @@
 # Deployment Guide
 
+> 📚 **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+
 ## 🚀 Quick Start
 
 ### Prerequisites

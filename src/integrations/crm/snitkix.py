@@ -36,10 +36,11 @@ logger = logging.getLogger(__name__)
 
 # Status mapping: Our status -> Snitkix status
 STATUS_MAPPING = {
-    OrderStatus.NEW: "new",
-    OrderStatus.PENDING_PAYMENT: "pending",
-    OrderStatus.PAID: "paid",
-    OrderStatus.PROCESSING: "processing",
+    OrderStatus.NEW: "Нові заявки",
+    OrderStatus.PENDING_PAYMENT: "Виставлено рахунок",
+    OrderStatus.PAID: "ОПЛАЧЕНО",
+    OrderStatus.PROCESSING: "Оформлено замовлення",
+    # The following are placeholders until corresponding Sitniks statuses are created
     OrderStatus.SHIPPED: "shipped",
     OrderStatus.DELIVERED: "delivered",
     OrderStatus.CANCELLED: "cancelled",

@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from aiogram.types import Update
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.conf.config import settings
@@ -73,11 +73,11 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting MIRT AI Webhooks server")
 
-    # Register Telegram webhook if configured
+    # Telegram webhook: реєструємо, якщо є token і публічна адреса
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
 
-    if base_url and token and base_url != "http://localhost:8000":
+    if base_url and token:
         try:
             bot = get_bot()
             full_url = f"{base_url}{settings.TELEGRAM_WEBHOOK_PATH}"
@@ -154,17 +154,38 @@ async def health() -> dict[str, Any]:
     else:
         checks["celery"] = "disabled"
 
+    # LLM Provider health (circuit breaker status)
+    try:
+        from src.services.llm_fallback import get_llm_service
+
+        llm_service = get_llm_service()
+        llm_health = llm_service.get_health_status()
+        checks["llm"] = {
+            "any_available": llm_health["any_available"],
+            "providers": [
+                {"name": p["name"], "status": p["circuit_state"], "available": p["available"]}
+                for p in llm_health["providers"]
+            ],
+        }
+        if not llm_health["any_available"]:
+            status = "degraded"
+    except Exception as e:
+        checks["llm"] = f"error: {type(e).__name__}"
+        status = "degraded"
+
     return {
         "status": status,
         "checks": checks,
         "version": "1.0.0",
         "celery_enabled": settings.CELERY_ENABLED,
+        "llm_provider": settings.LLM_PROVIDER,
+        "active_model": settings.active_llm_model,
     }
 
 
 @app.post(settings.TELEGRAM_WEBHOOK_PATH)
 async def telegram_webhook(request: Request) -> JSONResponse:
-    """Handle incoming Telegram webhook updates."""
+    """Handle incoming Telegram webhook updates (AI-only відповіді)."""
     bot = get_bot()
     dp = get_cached_dispatcher()
 
@@ -177,18 +198,114 @@ async def telegram_webhook(request: Request) -> JSONResponse:
 @app.post("/webhooks/manychat")
 async def manychat_webhook(
     payload: dict[str, Any],
+    background_tasks: BackgroundTasks,
     x_manychat_token: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Handle incoming ManyChat webhook payloads."""
+    """Handle incoming ManyChat webhook payloads.
+    
+    Supports two modes:
+    - Push mode (MANYCHAT_PUSH_MODE=true): Returns 202 immediately, processes async
+    - Response mode (MANYCHAT_PUSH_MODE=false): Waits for AI, returns response
+    """
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
-    if verify_token and verify_token != x_manychat_token:
+    inbound_token = x_manychat_token
+    if not inbound_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            inbound_token = auth_value[7:].strip()
+        else:
+            inbound_token = auth_value
+
+    if verify_token and verify_token != inbound_token:
         raise HTTPException(status_code=401, detail="Invalid ManyChat token")
 
+    # Push mode: return immediately, process in background
+    if settings.MANYCHAT_PUSH_MODE:
+        from src.integrations.manychat.async_service import get_manychat_async_service
+        from src.server.dependencies import get_session_store
+        
+        try:
+            # Extract user info from payload
+            subscriber = payload.get("subscriber") or payload.get("user") or {}
+            message = payload.get("message") or payload.get("data", {}).get("message") or {}
+            
+            user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+            text = ""
+            image_url = None
+            
+            if isinstance(message, dict):
+                text = message.get("text") or message.get("content") or ""
+                # Extract image from attachments
+                for attachment in message.get("attachments", []):
+                    if attachment.get("type") == "image":
+                        image_url = attachment.get("payload", {}).get("url")
+                        break
+                if not image_url:
+                    image_url = message.get("image") or message.get("image_url")
+            
+            # Also check data.image_url
+            if not image_url:
+                data = payload.get("data", {})
+                image_url = data.get("image_url") or data.get("photo_url")
+            
+            channel = payload.get("type") or "instagram"
+            
+            if not text and not image_url:
+                raise HTTPException(status_code=400, detail="Missing message text or image")
+            
+            # Schedule background processing
+            store = get_session_store()
+            service = get_manychat_async_service(store)
+            
+            background_tasks.add_task(
+                service.process_message_async,
+                user_id=user_id,
+                text=text or "",
+                image_url=image_url,
+                channel=channel,
+            )
+            
+            logger.info("[MANYCHAT] 📨 Accepted message from %s (push mode)", user_id)
+            return {"status": "accepted"}
+            
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("[MANYCHAT] Error in push mode: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    
+    # Response mode: wait for AI and return response
     handler = get_cached_manychat_handler()
     try:
         return await handler.handle(payload)
     except ManychatPayloadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# =============================================================================
+# SNITKIX CRM WEBHOOK ENDPOINTS
+# =============================================================================
+
+@app.post("/webhooks/snitkix/order-status")
+async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
+    """Handle order status updates from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_order_status_webhook as webhook_handler
+    return await webhook_handler(request)
+
+
+@app.post("/webhooks/snitkix/payment")
+async def snitkix_payment_webhook(request: Request) -> JSONResponse:
+    """Handle payment confirmation from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_payment_webhook as webhook_handler
+    return await webhook_handler(request)
+
+
+@app.post("/webhooks/snitkix/inventory")
+async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
+    """Handle inventory updates from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_inventory_webhook as webhook_handler
+    return await webhook_handler(request)
 
 
 @app.post("/automation/mirt-summarize-prod-v1")
@@ -199,7 +316,7 @@ async def run_summarization(
     """Summarize and prune old messages for a session.
 
     Called by ManyChat after 3 days of inactivity.
-    Saves summary to mirt_users.summary and deletes messages from mirt_messages.
+    Saves summary to users.summary and deletes messages from messages table.
 
     Uses Celery if CELERY_ENABLED=true, otherwise runs synchronously.
 

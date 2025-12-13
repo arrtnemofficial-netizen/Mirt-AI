@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 class StreamEventType(str, Enum):
     """Types of streaming events."""
+
     NODE_START = "node_start"
     NODE_END = "node_end"
     LLM_TOKEN = "llm_token"

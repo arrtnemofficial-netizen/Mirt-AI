@@ -29,6 +29,34 @@ FORBIDDEN_TERMS: set[str] = {
     "героїн",
 }
 
+# Prompt injection patterns (case-insensitive)
+# IMPORTANT: Be specific to avoid false positives on normal customer questions!
+PROMPT_INJECTION_PATTERNS: list[str] = [
+    # English attacks - must be SPECIFIC injection attempts
+    r"ignore\s+(previous|all|prior)\s+instructions?",
+    r"disregard\s+(previous|all|prior)\s+instructions?",
+    r"forget\s+(previous|all|prior)\s+(instructions?|rules?)",
+    r"you\s+are\s+now\s+a\s+(different|new)",  # More specific
+    r"pretend\s+you\s+are\s+a",
+    r"new\s+instructions?\s*[:=]",
+    r"override\s+(system|prompt)",
+    r"system\s*prompt\s*[:=]",
+    r"\[system\]",
+    r"\[assistant\]",
+    r"\[inst\]",
+    r"jailbreak",
+    r"DAN\s*mode",
+    # Russian attacks - SPECIFIC language switch attempts
+    r"отвечай\s+(на\s+русском|по-русски)",
+    r"говори\s+(на\s+русском|по-русски)",
+    r"пиши\s+(на\s+русском|по-русски)",
+    r"переключись\s+на\s+русский",
+    r"игнорируй\s+(предыдущие|все)\s+инструкции",
+    # Ukrainian attacks - rare but possible
+    r"відповідай\s+російською",
+    r"ігноруй\s+(попередні|всі)\s+інструкції",
+]
+
 # Leetspeak and Cyrillic substitution map for normalization
 SUBSTITUTION_MAP = {
     # Cyrillic look-alikes
@@ -170,12 +198,31 @@ def redact_pii(text: str) -> str:
     return redacted
 
 
+def detect_prompt_injection(text: str) -> bool:
+    """Detect prompt injection attempts.
+    
+    Catches:
+    - 'ignore previous instructions'
+    - 'you are now X'
+    - 'отвечай на русском'
+    - etc.
+    """
+    text_lower = text.lower()
+    
+    for pattern in PROMPT_INJECTION_PATTERNS:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return True
+    
+    return False
+
+
 def moderate_user_message(text: str) -> ModerationResult:
     """Perform full moderation check on user message.
 
     Checks for:
-    1. Forbidden/dangerous terms (with normalization)
-    2. PII (emails, phones, cards, documents)
+    1. Prompt injection attempts (FIRST!)
+    2. Forbidden/dangerous terms (with normalization)
+    3. PII (emails, phones, cards, documents)
 
     Returns:
         ModerationResult with allowed status, redacted text, and flags
@@ -189,6 +236,15 @@ def moderate_user_message(text: str) -> ModerationResult:
         )
 
     flags: list[str] = []
+
+    # Check for prompt injection FIRST
+    if detect_prompt_injection(text):
+        return ModerationResult(
+            allowed=False,
+            redacted_text="[blocked]",
+            flags=[ModerationFlag.SAFETY, "prompt_injection"],
+            reason="Виявлено спробу маніпуляції інструкціями.",
+        )
 
     # Check for forbidden terms
     banned_hits = detect_forbidden_terms(text)

@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -55,7 +55,13 @@ class SerializableMemorySaver(MemorySaver):
         else:
             return value
 
-    def put(self, config: dict[str, Any], checkpoint: dict[str, Any], metadata: dict[str, Any], new_versions: dict[str, str]) -> dict[str, Any]:
+    def put(
+        self,
+        config: dict[str, Any],
+        checkpoint: dict[str, Any],
+        metadata: dict[str, Any],
+        new_versions: dict[str, str],
+    ) -> dict[str, Any]:
         """Override put to serialize Message objects before storage."""
         try:
             # Serialize checkpoint data to handle Message objects
@@ -70,9 +76,10 @@ class SerializableMemorySaver(MemorySaver):
 
 class CheckpointerType(str, Enum):
     """Available checkpointer backends."""
-    MEMORY = "memory"      # Development only! State lost on restart
+
+    MEMORY = "memory"  # Development only! State lost on restart
     POSTGRES = "postgres"  # Production - use this
-    REDIS = "redis"        # Alternative for high-throughput
+    REDIS = "redis"  # Alternative for high-throughput
 
 
 # =============================================================================
@@ -101,23 +108,40 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     - Store full state at every step
     - Enable time travel and forking
     """
+    settings = None
     # Try to get database URL from environment
     database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
 
     if not database_url:
+        try:
+            from src.conf.config import settings as app_settings
+
+            settings = app_settings
+            if getattr(settings, "DATABASE_URL", ""):
+                database_url = settings.DATABASE_URL
+        except Exception:
+            logger.debug("Unable to load settings for DATABASE_URL fallback", exc_info=True)
+
+    if not database_url:
         # Try to build from Supabase settings
-        from src.conf.config import settings
+        if settings is None:
+            from src.conf.config import settings as app_settings
+
+            settings = app_settings
 
         if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_API_KEY"):
             # Supabase connection string format
             supabase_url = str(settings.SUPABASE_URL)
             logger.info(f"DEBUG: Supabase URL found: {supabase_url[:20]}...")
-            logger.info(f"DEBUG: Supabase API key present: {bool(settings.SUPABASE_API_KEY.get_secret_value())}")
+            logger.info(
+                f"DEBUG: Supabase API key present: {bool(settings.SUPABASE_API_KEY.get_secret_value())}"
+            )
 
             if "supabase" in supabase_url:
                 # Extract project ref from URL
                 # https://xxx.supabase.co -> xxx
                 import re
+
                 match = re.search(r"https://([^.]+)\.supabase", supabase_url)
                 logger.info(f"DEBUG: Regex match result: {match}")
 
@@ -127,7 +151,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     # Build postgres connection string
                     # Default Supabase postgres port is 5432, password from service_role key
                     database_url = f"postgresql://postgres:{settings.SUPABASE_API_KEY.get_secret_value()}@db.{project_ref}.supabase.co:5432/postgres"
-                    logger.info(f"DEBUG: Built DATABASE_URL: postgresql://postgres:***@db.{project_ref}.supabase.co:5432/postgres")
+                    logger.info(
+                        f"DEBUG: Built DATABASE_URL: postgresql://postgres:***@db.{project_ref}.supabase.co:5432/postgres"
+                    )
 
     if not database_url:
         logger.warning(
@@ -137,31 +163,56 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         return SerializableMemorySaver()
 
     try:
-        # Create connection pool
-        from psycopg_pool import ConnectionPool
-        from langgraph.checkpoint.postgres import PostgresSaver
         import psycopg
-
-        # First, setup tables with a separate autocommit connection
-        # CREATE INDEX CONCURRENTLY requires autocommit mode
-        setup_conn = psycopg.connect(database_url, autocommit=True)
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from psycopg_pool import AsyncConnectionPool
+        
+        # Setup tables first using sync connection with prepare_threshold=None
+        # None completely disables prepared statements (vs 0 which means "after 0 uses")
+        setup_conn = psycopg.connect(database_url, autocommit=True, prepare_threshold=None)
         try:
-            setup_checkpointer = PostgresSaver(setup_conn)
-            setup_checkpointer.setup()
+            temp_checkpointer = PostgresSaver(setup_conn)
+            temp_checkpointer.setup()
         finally:
             setup_conn.close()
+        
+        # Create async pool with prepare_threshold=None
+        # CRITICAL for Supabase PgBouncer which doesn't support prepared statements
+        # None = never use prepared statements (0 still creates them after 0 uses)
+        #
+        # Also configure for Supabase connection limits:
+        # - max_idle=30: Close idle connections before Supabase does (avoids SSL errors)
+        # - check: Verify connection is alive before use
+        
+        async def check_connection(conn):
+            """Check if connection is still alive before returning from pool."""
+            try:
+                await conn.execute("SELECT 1")
+            except Exception:
+                raise  # Connection is dead, pool will discard it
+        
+        pool = AsyncConnectionPool(
+            conninfo=database_url,
+            min_size=1,
+            max_size=10,
+            max_idle=30.0,  # Close idle connections after 30s (before Supabase kills them)
+            check=check_connection,  # Verify connection health before use
+            kwargs={
+                "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
+            },
+        )
+        
+        checkpointer = AsyncPostgresSaver(pool)
 
-        # Now create the pool for actual checkpointing
-        pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=5)
-        checkpointer = PostgresSaver(pool)
-
-        logger.info("PostgreSQL checkpointer initialized successfully")
+        logger.info("AsyncPostgresSaver checkpointer initialized successfully")
         return checkpointer
 
-    except ImportError:
+    except ImportError as e:
         logger.error(
-            "langgraph-checkpoint-postgres not installed! "
-            "Run: pip install langgraph-checkpoint-postgres"
+            "langgraph-checkpoint-postgres not installed or import error: %s. "
+            "Run: pip install langgraph-checkpoint-postgres",
+            e,
         )
         return SerializableMemorySaver()
 
@@ -188,6 +239,7 @@ def get_redis_checkpointer() -> BaseCheckpointSaver:
 
     if not redis_url:
         from src.conf.config import settings
+
         redis_url = getattr(settings, "REDIS_URL", None)
 
     if not redis_url:
@@ -235,9 +287,29 @@ def get_checkpointer(
     if _checkpointer is not None and not force_new:
         return _checkpointer
 
-    # Auto-detect type if not specified
+    # Import settings for proper .env loading via pydantic_settings
+    from src.conf.config import settings as app_settings
+
+    # 1) Explicit override via LANGGRAPH_CHECKPOINTER (settings/env)
+    #    This has priority over auto-detection when checkpointer_type is not passed.
     if checkpointer_type is None:
-        if os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL"):
+        raw_choice = getattr(app_settings, "LANGGRAPH_CHECKPOINTER", "auto").lower()
+
+        if raw_choice in {"memory", "postgres", "redis"}:
+            if raw_choice == "memory":
+                checkpointer_type = CheckpointerType.MEMORY
+            elif raw_choice == "postgres":
+                checkpointer_type = CheckpointerType.POSTGRES
+            elif raw_choice == "redis":
+                checkpointer_type = CheckpointerType.REDIS
+            logger.info("Checkpointer overridden via LANGGRAPH_CHECKPOINTER=%s", raw_choice)
+
+    # 2) Auto-detect type if still not specified
+    if checkpointer_type is None:
+        # Only auto-select POSTGRES when an explicit database URL is provided.
+        # The presence of SUPABASE_URL alone is not enough in development, otherwise
+        # local runs (like Telegram polling) will break when Postgres is not ready.
+        if app_settings.DATABASE_URL or os.getenv("POSTGRES_URL"):
             checkpointer_type = CheckpointerType.POSTGRES
         elif os.getenv("REDIS_URL"):
             checkpointer_type = CheckpointerType.REDIS
@@ -264,6 +336,8 @@ def get_checkpointer(
             "Set DATABASE_URL for production persistence."
         )
         _checkpointer = SerializableMemorySaver()
+
+    logger.info("Checkpointer selected: %s", checkpointer_type)
 
     _checkpointer_type = checkpointer_type
     return _checkpointer

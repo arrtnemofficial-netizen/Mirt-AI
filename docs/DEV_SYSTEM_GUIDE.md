@@ -1,0 +1,503 @@
+# 🇺🇦 MIRT-AI: ПОВНИЙ ГАЙД РОЗРОБНИКА
+
+> **Останнє оновлення:** 9 грудня 2025  
+> **Версія:** 3.0 (Agentic update)  
+> **Статус:** ✅ 924 тести пройдено, 3 warnings (сторонні бібліотеки)
+>
+> 📚 **Центральний індекс документації:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+
+---
+
+## 📋 ЗМІСТ
+
+1. [Що це за проєкт](#1-що-це-за-проєкт)
+2. [Швидкий старт](#2-швидкий-старт)
+3. [Архітектура системи](#3-архітектура-системи)
+4. [Структура папок](#4-структура-папок)
+5. [Агенти (AI)](#5-агенти-ai)
+6. [Vision система](#6-vision-система)
+7. [Сервіси](#7-сервіси)
+8. [Тестування](#8-тестування)
+9. [Конфігурація](#9-конфігурація)
+10. [Типові помилки](#10-типові-помилки)
+11. [Команди](#11-команди)
+
+---
+
+## 1. ЩО ЦЕ ЗА ПРОЄКТ
+
+**MIRT-AI** — це AI-консультант для магазину дитячого одягу MIRT.
+
+### Що вміє:
+- 🖼️ **Розпізнавати товари по фото** (Vision Agent)
+- 💬 **Консультувати клієнтів** (Support Agent)
+- 💳 **Оформляти замовлення** (Payment Agent)
+- 📦 **Інтегруватися з CRM** (Snitkix)
+
+### Технології:
+| Компонент | Технологія |
+|-----------|------------|
+| **AI Framework** | PydanticAI 1.23+ |
+| **Оркестрація** | LangGraph |
+| **LLM** | OpenAI GPT-4o / OpenRouter (Grok) |
+| **Backend** | FastAPI + Uvicorn |
+| **База даних** | Supabase (PostgreSQL) |
+| **Черги** | Celery + Redis |
+| **Тести** | Pytest (924 тестів) |
+
+---
+
+## 2. ШВИДКИЙ СТАРТ
+
+### 2.1. Клонування та встановлення
+
+```bash
+git clone https://github.com/arrtnemofficial-netizen/Mirt-AI.git
+cd Mirt-AI
+
+# Створити віртуальне середовище
+python -m venv venv
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Linux/Mac
+
+# Встановити залежності
+pip install -e ".[dev]"
+```
+
+### 2.2. Налаштування .env
+
+```bash
+cp .env.example .env
+# Відредагуй .env — встав свої ключі API
+```
+
+**Мінімальні змінні:**
+```env
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-xxx
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+AI_MODEL=x-ai/grok-3-mini-beta
+
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_API_KEY=eyJxxx
+```
+
+### 2.3. Запуск тестів
+
+```bash
+pytest tests/ -v
+```
+
+### 2.4. Запуск сервера
+
+```bash
+uvicorn src.server.main:app --reload --port 8000
+```
+
+---
+
+## 3. АРХІТЕКТУРА СИСТЕМИ
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      TELEGRAM / MANYCHAT                     │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     FastAPI (src/server/)                    │
+│  /api/manychat/handle  │  /api/telegram/webhook              │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  LangGraph (src/agents/langgraph/)           │
+│                                                              │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐  │
+│  │ Moderat. │ → │  Intent  │ → │ Vision   │ → │  Agent   │  │
+│  └──────────┘   └──────────┘   └──────────┘   └──────────┘  │
+│                                                              │
+│  Ноди: moderation, intent, vision, agent, offer, payment,   │
+│        upsell, crm_error, validation, escalation, memory.   │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              PydanticAI Agents (src/agents/pydantic/)        │
+│                                                              │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐ │
+│  │ support_agent  │  │  vision_agent  │  │ payment_agent  │ │
+│  │ (консультації) │  │ (фото-аналіз) │  │ (замовлення)   │ │
+│  └────────────────┘  └────────────────┘  └────────────────┘ │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Services (src/services/)                   │
+│                                                              │
+│  CatalogService │ OrderService │ Observability │ Supabase   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. СТРУКТУРА ПАПОК
+
+```
+Mirt-AI/
+│
+├── src/                          # 🧠 Основний код
+│   ├── agents/                   # AI агенти
+│   │   ├── pydantic/             # PydanticAI агенти
+│   │   │   ├── support_agent.py  # Консультант "Ольга"
+│   │   │   ├── vision_agent.py   # Розпізнавання фото
+│   │   │   ├── payment_agent.py  # Оформлення замовлень
+│   │   │   ├── models.py         # Pydantic моделі відповідей (OUTPUT_CONTRACT)
+│   │   │   └── deps.py           # AgentDeps (залежності + MemoryService)
+│   │   │
+│   │   └── langgraph/            # LangGraph оркестрація
+│   │       ├── graph.py          # Головний production-граф
+│   │       ├── state.py          # ConversationState + reducers
+│   │       ├── edges.py          # master_router + routing
+│   │       ├── checkpointer.py   # Persistence (Memory/Postgres)
+│   │       ├── streaming.py      # Streaming токенів/подій
+│   │       ├── time_travel.py    # Історія станів / rollback / fork
+│   │       └── nodes/            # Ноди графа
+│   │           ├── vision.py     # vision_node
+│   │           ├── offer.py      # offer_node (Multi-Role Deliberation)
+│   │           ├── agent.py      # agent_node (text)
+│   │           ├── payment.py    # payment_node (HITL)
+│   │           ├── upsell.py     # upsell_node
+│   │           ├── crm_error.py  # crm_error_node
+│   │           ├── validation.py # validation_node
+│   │           ├── escalation.py # escalation_node
+│   │           ├── memory.py     # memory_context_node / memory_update_node
+│   │           └── utils.py      # Хелпери
+│   │
+│   ├── services/                 # Бізнес-логіка
+│   │   ├── catalog_service.py    # Робота з каталогом товарів
+│   │   ├── order_service.py      # OrderService / CRM інтеграція
+│   │   ├── supabase_client.py    # Клієнт Supabase
+│   │   ├── observability.py      # Логування та метрики
+│   │   └── product_matcher.py    # Нормалізація назв товарів
+│   │
+│   ├── core/                     # Ядро системи
+│   │   ├── prompt_registry.py    # Реєстр промптів
+│   │   ├── state_machine.py      # FSM (стани діалогу)
+│   │   └── config.py             # Налаштування
+│   │
+│   ├── server/                   # FastAPI сервер
+│   │   └── main.py               # Точка входу
+│   │
+│   └── workers/                  # Celery воркери
+│       └── tasks/                # Фонові задачі
+│
+├── data/                         # 📦 Дані
+│   ├── prompts/                  # Промпти (MD/YAML)
+│   │   ├── system/main.md        # Головний системний промпт
+│   │   └── states/               # Промпти для станів FSM
+│   │
+│   └── vision/                   # Vision система
+│       ├── products_master.yaml  # 🔑 ГОЛОВНИЙ КАТАЛОГ
+│       ├── generate.py           # Генератор артефактів
+│       ├── README.md             # Документація vision
+│       └── generated/            # Згенеровані файли
+│
+├── tests/                        # 🧪 Тести (~900+)
+│   ├── unit/                     # Юніт-тести
+│   ├── integration/              # Інтеграційні тести
+│   ├── test_vision_health.py     # Health-тести vision
+│   └── test_product_matcher.py   # Тести нормалізації назв
+│
+├── scripts/                      # 🔧 Скрипти
+│   └── generate_vision_artifacts.py  # Враппер генератора
+│
+├── docs/                         # 📚 Документація
+│
+├── pyproject.toml                # Залежності проєкту
+├── requirements.txt              # Альтернативний список залежностей
+└── .env.example                  # Приклад змінних середовища
+```
+
+---
+
+## 5. АГЕНТИ (AI)
+
+### 5.1. Support Agent (`support_agent.py`)
+
+**Роль:** AI-консультант "Ольга" — відповідає на питання клієнтів.
+
+**Вхід:** Текстове повідомлення користувача  
+**Вихід:** `SupportResponse` (messages, products, metadata)
+
+```python
+from src.agents.pydantic.support_agent import run_support
+
+response = await run_support(
+    message="Скільки коштує костюм Лагуна?",
+    deps=deps,
+)
+# response.messages = [{"type": "text", "content": "Костюм Лагуна..."}]
+```
+
+### 5.2. Vision Agent (`vision_agent.py`)
+
+**Роль:** Розпізнає товари на фото.
+
+**Вхід:** Фото (image_url) + текст  
+**Вихід:** `VisionResponse` (identified_product, confidence, reply_to_user)
+
+```python
+from src.agents.pydantic.vision_agent import run_vision
+
+deps.image_url = "https://cdn.sitniks.com/..."
+deps.has_image = True
+
+response = await run_vision(message="Що це за товар?", deps=deps)
+# response.identified_product.name = "Костюм Лагуна"
+# response.confidence = 0.95
+```
+
+### 5.3. Payment Agent (`payment_agent.py`)
+
+**Роль:** Збирає дані для замовлення.
+
+**Вхід:** Дані клієнта  
+**Вихід:** `PaymentResponse` (order_data, next_step)
+
+### 5.4. Важливі правила PydanticAI
+
+| Правило | Правильно ✅ | Неправильно ❌ |
+|---------|-------------|----------------|
+| Тип виходу | `output_type=VisionResponse` | `result_type=...` |
+| Отримання результату | `result.output` | `result.response` |
+| Таймаут | `timeout=120` | `timeout=30` |
+| Модель | `OpenAIChatModel` | `OpenAIModel` |
+
+---
+
+## 6. VISION СИСТЕМА
+
+### 6.1. Як працює
+
+```
+products_master.yaml  →  generate.py  →  generated/
+     (редагуєш)           (запускаєш)     (автоматично)
+```
+
+### 6.2. Файли
+
+| Файл | Призначення |
+|------|-------------|
+| `products_master.yaml` | 🔑 Єдине джерело правди — всі товари, кольори, ціни |
+| `generate.py` | Генератор артефактів |
+| `generated/model_rules.yaml` | Правила для промпту |
+| `generated/vision_guide.json` | Детальний гайд розпізнавання |
+| `generated/test_set.json` | Тестовий набір (29 кейсів) |
+| `generated/canonical_names.json` | Mapping назв (64 варіації) |
+
+### 6.3. Як додати новий товар
+
+1. Відкрий `data/vision/products_master.yaml`
+2. Додай новий продукт за шаблоном:
+
+```yaml
+products:
+  kostum_noviy:
+    id: 12345678
+    name: "Костюм Новий"
+    category: "костюми"
+    price_type: "uniform"
+    price: 1990
+    colors:
+      рожевий:
+        photo_url: "https://cdn.sitniks.com/..."
+        sku: "12345678-PINK"
+    visual:
+      fabric_type: "бавовна"
+      key_markers:
+        - "Унікальна ознака 1"
+        - "Унікальна ознака 2"
+    distinction:
+      confused_with: ["Костюм Схожий"]
+      critical_check: "Як відрізнити"
+```
+
+3. Запусти генератор:
+```bash
+python data/vision/generate.py
+```
+
+4. Перевір тестами:
+```bash
+pytest tests/test_vision_health.py tests/test_product_matcher.py -v
+```
+
+---
+
+## 7. СЕРВІСИ
+
+### 7.1. CatalogService (`catalog_service.py`)
+
+Робота з каталогом товарів через Supabase.
+
+```python
+from src.services.catalog_service import CatalogService
+
+catalog = CatalogService()
+products = await catalog.search_products("лагуна")
+price = CatalogService.get_price_for_size(product, size="122")
+```
+
+**Методи:**
+- `search_products(query)` — пошук товарів
+- `get_product_by_id(id)` — отримати товар по ID
+- `get_products_for_vision()` — товари для vision агента
+- `check_stock(product_id, size)` — перевірка наявності
+
+### 7.2. Observability (`observability.py`)
+
+Логування та метрики.
+
+```python
+from src.services.observability import log_agent_step, track_metric
+
+log_agent_step(
+    session_id="123",
+    state="STATE_2_VISION",
+    intent="PHOTO_IDENT",
+    event="vision_complete",
+    latency_ms=1500,
+)
+
+track_metric("vision_latency_ms", 1500, tags={"model": "grok"})
+```
+
+---
+
+## 8. ТЕСТУВАННЯ
+
+### 8.1. Запуск всіх тестів
+
+```bash
+pytest tests/ -v
+```
+
+### 8.2. Категорії тестів
+
+| Категорія | Шлях | Кількість |
+|-----------|------|-----------|
+| Unit | `tests/unit/` | ~400 |
+| Integration | `tests/integration/` | ~150 |
+| Vision Health | `tests/test_vision_health.py` | 18 |
+| Product Matcher | `tests/test_product_matcher.py` | 64 |
+| FSM | `tests/test_fsm_invariants.py` | ~20 |
+
+### 8.3. Швидка перевірка vision
+
+```bash
+pytest tests/test_vision_health.py tests/test_product_matcher.py -v
+```
+
+---
+
+## 9. КОНФІГУРАЦІЯ
+
+### 9.1. Змінні середовища (.env)
+
+```env
+# LLM Provider
+LLM_PROVIDER=openrouter          # openai | openrouter
+OPENAI_API_KEY=sk-xxx            # Для OpenAI
+OPENROUTER_API_KEY=sk-or-v1-xxx  # Для OpenRouter
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+# Моделі
+LLM_MODEL_GPT=gpt-4o             # Для OpenAI
+LLM_MODEL_GROK=x-ai/grok-3-mini-beta  # Для OpenRouter
+AI_MODEL=x-ai/grok-3-mini-beta   # Fallback
+
+# Supabase
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_API_KEY=eyJxxx
+
+# Redis (для Celery)
+REDIS_URL=redis://localhost:6379/0
+```
+
+### 9.2. Версії залежностей
+
+| Пакет | Версія |
+|-------|--------|
+| pydantic-ai | 1.23.0 |
+| openai | 2.9.0 |
+| supabase | 2.25.0 |
+| langgraph | 1.0.4 |
+| fastapi | 0.115.2 |
+| pydantic | 2.12.5 |
+
+---
+
+## 10. ТИПОВІ ПОМИЛКИ
+
+### ❌ "API Key missing"
+**Причина:** Не налаштовані ключі в `.env`  
+**Рішення:** Перевір `LLM_PROVIDER` і відповідний ключ
+
+### ❌ "Timeout"
+**Причина:** Повільна модель + малий таймаут  
+**Рішення:** Використовуй `timeout=120`
+
+### ❌ "identified_product is None"
+**Причина:** Vision не впізнав товар  
+**Рішення:** Перевір `products_master.yaml` та перегенеруй артефакти
+
+### ❌ "Supabase disabled"
+**Причина:** Немає `SUPABASE_URL` або `SUPABASE_API_KEY`  
+**Рішення:** Додай в `.env` або система працюватиме з fallback JSON
+
+---
+
+## 11. КОМАНДИ
+
+### Щоденні команди
+
+```bash
+# Запуск тестів
+pytest tests/ -v
+
+# Запуск сервера
+uvicorn src.server.main:app --reload --port 8000
+
+# Перегенерувати vision артефакти
+python data/vision/generate.py
+
+# Форматування коду
+ruff format src/
+ruff check src/ --fix
+```
+
+### Docker
+
+```bash
+# Запуск всього стеку
+docker-compose up -d
+
+# Тільки Redis
+docker-compose up -d redis
+```
+
+---
+
+## ✅ ЧЕКЛИСТ ПЕРЕД КОМІТОМ
+
+- [ ] `pytest tests/ -v` — всі тести пройшли
+- [ ] `ruff check src/` — немає помилок лінтера
+- [ ] `python data/vision/generate.py` — артефакти актуальні
+- [ ] `.env` не закомічений (є в `.gitignore`)
+
+---
+
+**Автор:** MIRT AI Team  
+**Ліцензія:** Proprietary  
+**Контакт:** @mirt_ua

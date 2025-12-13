@@ -35,6 +35,7 @@ async def moderation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Get latest user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
+
     user_content = extract_user_message(state.get("messages", []))
 
     # No message to moderate

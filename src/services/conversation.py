@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -27,6 +28,7 @@ from src.services.message_store import MessageStore, StoredMessage
 
 class TransitionResult:
     """Stub for validate_state_transition result."""
+
     def __init__(self, new_state: str, was_corrected: bool = False, reason: str | None = None):
         self.new_state = new_state
         self.was_corrected = was_corrected
@@ -203,17 +205,43 @@ class ConversationHandler:
             # Load or create session state
             state = self.session_store.get(session_id)
 
-            # Ensure state has required structure
+            # Ensure state has required structure with ALL necessary flags
             if not state or not isinstance(state, dict):
-                state = ConversationState(messages=[], metadata={"session_id": session_id})
+                state = ConversationState(
+                    messages=[],
+                    metadata={
+                        "session_id": session_id,
+                        "vision_greeted": False,
+                        "has_image": False,
+                    },
+                    current_state="STATE_0_INIT",
+                    dialog_phase="INIT",
+                    should_escalate=False,
+                    has_image=False,
+                    detected_intent=None,
+                    selected_products=[],
+                    offered_products=[],
+                    step_number=0,
+                )
             if "messages" not in state:
                 state["messages"] = []
             if "metadata" not in state:
-                state["metadata"] = {}
-            state["messages"].append({"role": "user", "content": text})
+                state["metadata"] = {"session_id": session_id, "vision_greeted": False}
+            # Ensure core identifiers are present
             state["metadata"].setdefault("session_id", session_id)
+            state["metadata"].setdefault("thread_id", state["metadata"].get("thread_id", session_id))
+            state["messages"].append({"role": "user", "content": text})
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
+                # Mirror critical flags to top-level so routers can see them
+                if "has_image" in extra_metadata:
+                    state["has_image"] = bool(extra_metadata.get("has_image"))
+                if "image_url" in extra_metadata:
+                    state["image_url"] = extra_metadata.get("image_url")
+
+            # Generate new trace_id for this request (Observability)
+            trace_id = str(uuid.uuid4())
+            state["trace_id"] = trace_id
 
             # Persist user message
             self._persist_user_message(session_id, text)
@@ -255,11 +283,13 @@ class ConversationHandler:
         """Invoke the LangGraph agent with retry logic and thread_id for persistence."""
         import asyncio
 
-        session_id = state.get("metadata", {}).get("session_id", "unknown")
+        metadata = state.get("metadata", {})
+        session_id = metadata.get("session_id", "unknown")
+        thread_id = metadata.get("thread_id", session_id)
         last_error: Exception | None = None
 
         # Use thread_id for LangGraph checkpointer persistence
-        config = {"configurable": {"thread_id": session_id}}
+        config = {"configurable": {"thread_id": thread_id}}
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -269,19 +299,21 @@ class ConversationHandler:
                 return result
             except Exception as e:
                 last_error = e
+                error_info = f"{type(e).__name__}: {e!s}" if str(e) else type(e).__name__
                 if attempt < self.max_retries:
                     logger.warning(
                         "Agent attempt %d failed for session %s: %s. Retrying...",
                         attempt + 1,
                         session_id,
-                        str(e)[:100],
+                        error_info[:200],
                     )
                     await asyncio.sleep(self.retry_delay * (attempt + 1))
                 else:
-                    logger.error(
-                        "Agent failed after %d attempts for session %s",
+                    logger.exception(
+                        "Agent failed after %d attempts for session %s: %s",
                         self.max_retries + 1,
                         session_id,
+                        error_info,
                     )
 
         raise AgentInvocationError(
@@ -337,8 +369,7 @@ class ConversationHandler:
         # Extract messages
         raw_messages = data.get("messages", [])
         messages = [
-            Message(type=m.get("type", "text"), content=m.get("content", ""))
-            for m in raw_messages
+            Message(type=m.get("type", "text"), content=m.get("content", "")) for m in raw_messages
         ]
         if not messages:
             messages = [Message(type="text", content="")]
@@ -364,17 +395,34 @@ class ConversationHandler:
 
         # Extract products (ProductMatch -> Product compatible)
         from src.core.models import Product
+
         products = []
-        for p in data.get("products", []):
-            with contextlib.suppress(Exception):
-                products.append(Product(
-                    id=p.get("id", 0),
-                    name=p.get("name", ""),
-                    size=p.get("size", ""),
-                    color=p.get("color", ""),
-                    price=p.get("price", 0),
-                    photo_url=p.get("photo_url", ""),
-                ))
+        for idx, p in enumerate(data.get("products", [])):
+            try:
+                # Some upstream agents return id=0/photo_url=""; make it display-safe
+                product_id = p.get("id") or p.get("product_id") or (idx + 1)
+                price = p.get("price") or 0
+                photo_url = p.get("photo_url") or p.get("image_url") or ""
+
+                # Fallbacks to satisfy schema (id > 0, price > 0)
+                if not product_id or int(product_id) <= 0:
+                    product_id = idx + 1
+                if price == 0:
+                    # Minimal positive price to pass validation; actual amount is in text
+                    price = 1
+
+                products.append(
+                    Product(
+                        id=int(product_id),
+                        name=p.get("name", ""),
+                        size=p.get("size", "") or "",
+                        color=p.get("color", "") or "",
+                        price=float(price),
+                        photo_url=photo_url,
+                    )
+                )
+            except Exception as exc:
+                logger.debug("Skipping product in response conversion: %s", exc)
 
         return AgentResponse(
             event=data.get("event", "simple_answer"),

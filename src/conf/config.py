@@ -22,10 +22,10 @@ class Settings(BaseSettings):
         default=SecretStr(""), description="API key for OpenRouter/Grok 4.1 fast access."
     )
     AI_MODEL: str = Field(
-        default="x-ai/grok-4.1-fast", description="Identifier of the model used for reasoning."
+        default="gpt-5.1", description="Identifier of the primary model used for reasoning."
     )
     OPENAI_API_KEY: SecretStr = Field(
-        default=SecretStr(""), description="API key for embedding generation."
+        default=SecretStr(""), description="API key for OpenAI GPT-5.1 and embeddings."
     )
     # EMBEDDING_MODEL and EMBEDDING_DIM removed - RAG disabled, using Embedded Catalog
     DEFAULT_SESSION_ID: str = Field(
@@ -43,11 +43,32 @@ class Settings(BaseSettings):
         description="Publicly reachable base URL used for webhook registration.",
     )
 
+    # Manager Notification Bot
+    MANAGER_BOT_TOKEN: SecretStr = Field(
+        default=SecretStr(""), description="Token for internal manager notification bot."
+    )
+    MANAGER_CHAT_ID: str = Field(
+        default="", description="Chat ID to send manager notifications to."
+    )
+
+    # ManyChat Integration
+    MANYCHAT_API_KEY: SecretStr = Field(
+        default=SecretStr(""),
+        description="ManyChat API key for full API access (sending messages, tags, fields).",
+    )
+    MANYCHAT_API_URL: str = Field(
+        default="https://api.manychat.com",
+        description="ManyChat API base URL.",
+    )
     MANYCHAT_VERIFY_TOKEN: str = Field(
         default="", description="Shared token to validate ManyChat webhook calls."
     )
     MANYCHAT_PAGE_ID: str = Field(
         default="", description="Optional page/app identifier for routing incoming ManyChat events."
+    )
+    MANYCHAT_PUSH_MODE: bool = Field(
+        default=True,
+        description="Use async push mode (recommended). If False, uses sync response mode.",
     )
 
     SUPABASE_URL: str = Field(
@@ -56,15 +77,19 @@ class Settings(BaseSettings):
     SUPABASE_API_KEY: SecretStr = Field(
         default=SecretStr(""), description="Service or anon key for Supabase client."
     )
+    DATABASE_URL: str = Field(
+        default="",
+        description="Primary Postgres connection string for LangGraph checkpointer (falls back to SUPABASE_* when empty).",
+    )
     SUPABASE_TABLE: str = Field(
         default="agent_sessions", description="Table name storing chat session state JSON."
     )
     SUPABASE_MESSAGES_TABLE: str = Field(
-        default="mirt_messages",
+        default="messages",  # Was: mirt_messages (dropped in migration)
         description="Table storing raw chat messages (session-scoped).",
     )
     SUPABASE_USERS_TABLE: str = Field(
-        default="mirt_users",
+        default="users",  # Was: mirt_users (dropped, profiles in mirt_profiles)
         description="Table storing user profiles and summaries.",
     )
     # RAG tables removed - using Embedded Catalog in prompt
@@ -130,12 +155,15 @@ class Settings(BaseSettings):
     # =========================================================================
     # LLM CONFIGURATION (Parameterized)
     # =========================================================================
+    # =========================================================================
+    # LLM CONFIGURATION (Parameterized)
+    # =========================================================================
     LLM_PROVIDER: str = Field(
-        default="openrouter",
+        default="openai",
         description="LLM provider: openrouter, openai, google",
     )
     LLM_MODEL_GROK: str = Field(
-        default="x-ai/grok-4.1-fast",
+        default="x-ai/grok-beta",
         description="Grok model identifier for OpenRouter",
     )
     LLM_MODEL_GPT: str = Field(
@@ -145,6 +173,14 @@ class Settings(BaseSettings):
     LLM_MODEL_GEMINI: str = Field(
         default="gemini-3-pro",
         description="Google Gemini model identifier",
+    )
+    LLM_MODEL_VISION: str = Field(
+        default="gpt-5.1",
+        description="Vision-capable model for photo analysis (must support multimodal)",
+    )
+    LLM_REASONING_EFFORT: str = Field(
+        default="medium",
+        description="Reasoning effort for reasoning models (none, low, medium, high). Medium recommended for vision.",
     )
     LLM_TEMPERATURE: float = Field(
         default=0.3,
@@ -157,6 +193,69 @@ class Settings(BaseSettings):
     PROMPT_TEMPLATE: str = Field(
         default="default",
         description="Prompt template to use: default, grok, gpt, gemini",
+    )
+
+    # =========================================================================
+    # FEATURE FLAGS
+    # =========================================================================
+    USE_OFFER_DELIBERATION: bool = Field(
+        default=True,
+        description="Enable Multi-Role Deliberation for STATE_4_OFFER (Customer/Business/Quality views)",
+    )
+    DELIBERATION_MIN_CONFIDENCE: float = Field(
+        default=0.6,
+        description="Minimum confidence for offer. Below this → fallback message",
+    )
+
+    # =========================================================================
+    # LANGGRAPH CHECKPOINTER CONFIG
+    # =========================================================================
+    LANGGRAPH_CHECKPOINTER: str = Field(
+        default="auto",
+        description=(
+            "Backend for LangGraph checkpointer: 'auto', 'memory', 'postgres', 'redis'. "
+            "Use 'memory' for local Telegram polling if Supabase/Postgres is unstable."
+        ),
+    )
+
+    # =========================================================================
+    # INTEGRATION FEATURE FLAGS
+    # =========================================================================
+    # Use these to disable heavy integrations for lightweight Telegram polling
+    
+    ENABLE_PAYMENT_HITL: bool = Field(
+        default=False,
+        description=(
+            "Enable Human-in-the-Loop for payment approval. "
+            "Requires webhook-based flow (ManyChat). "
+            "Disable for Telegram polling to avoid graph interrupts."
+        ),
+    )
+    
+    ENABLE_CRM_INTEGRATION: bool = Field(
+        default=False,
+        description=(
+            "Enable Sitniks CRM integration (order creation, status updates). "
+            "Disable for local testing or when CRM is unavailable."
+        ),
+    )
+    
+    # =========================================================================
+    # PERFORMANCE / LOAD HANDLING
+    # =========================================================================
+    
+    LLM_MAX_HISTORY_MESSAGES: int = Field(
+        default=20,
+        description=(
+            "Maximum number of messages to send to LLM. "
+            "Older messages are trimmed to prevent context overflow. "
+            "Set to 0 to disable trimming."
+        ),
+    )
+    
+    DEBOUNCER_DELAY_SECONDS: float = Field(
+        default=2.5,
+        description="Delay before processing aggregated messages in Telegram",
     )
 
     # =========================================================================

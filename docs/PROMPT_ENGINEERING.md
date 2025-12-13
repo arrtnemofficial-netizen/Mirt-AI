@@ -1,58 +1,77 @@
 # Prompt Engineering Guide
 
+> 📚 **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+
 ## Overview
 
-MIRT AI uses a **single source of truth** for system prompts, defined in YAML and loaded dynamically. This ensures consistency between the codebase and the LLM's behavior.
+MIRT AI uses a **single source of truth** for all prompts, managed by the `PromptRegistry` and stored as Markdown files under `data/prompts/`.  
+This keeps behavior of the LLM **в коді** та **в промптах** синхронізованим.
 
 ---
 
 ## 📄 Prompt Structure
 
-### 1. Master Prompt (`data/system_prompt_full.yaml`)
-This is the definitive prompt file. It contains:
-- **Identity**: Persona (Kind, professional stylist).
-- **Tools**: Definitions of available tools (Catalog, CRM).
-- **Output Contract**: Strict JSON schema for responses.
-- **Catalog**: Embedded product list (top bestsellers).
-- **Domain Knowledge**: Sizing charts, return policies, delivery info.
+### 1. Prompt Registry (`src/core/prompt_registry.py`)
 
-### 2. Prompt Loader (`src/core/prompt_loader.py`)
-Responsible for loading and formatting the prompt.
-- Reads `system_prompt_full.yaml`.
-- Converts YAML sections into a unified Markdown string.
-- Injects dynamic context (if any).
+The `PromptRegistry` loads prompts by **ключем** (`system.main`, `state.STATE_3_SIZE_COLOR`, `vision.main`) і шукає файли в `data/prompts/`:
+
+- `data/prompts/system/main.md` — головний системний промпт (роль, тон, глобальні правила).
+- `data/prompts/states/STATE_*.md` — промпти для кожного стану FSM.
+- `data/prompts/vision/vision_main.md` — спеціальний промпт для Vision Agent.
+
+Versioning:
+- у верхній частині файлу можна вказати версію: `<!-- version: 1.0 -->` або `# version: 1.0`;
+- `PromptRegistry` читає цю версію і логгує її для observability.
 
 ---
 
 ## 🛠️ Editing Prompts
 
-**DO NOT hardcode prompts in Python files.**
+**DO NOT hardcode prompts in Python files.** Всі зміни — тільки в `data/prompts/`.
 
-To change the bot's behavior:
-1. Open `data/system_prompt_full.yaml`.
-2. Edit the relevant section (e.g., `IDENTITY` or `POLICIES`).
-3. Restart the server (prompt is loaded on agent initialization).
+Щоб змінити поведінку бота:
+1. Визнач, який саме промпт потрібен:
+   - глобальні правила → `data/prompts/system/main.md`;
+   - конкретний стан FSM → `data/prompts/states/STATE_XYZ.md`;
+   - правила для vision → `data/prompts/vision/vision_main.md`.
+2. Онови текст (тон, приклади, бізнес-правила).
+3. За потреби онови версію у коментарі (`<!-- version: 1.1 -->`).
+4. Запусти тести, щоб переконатися, що нові формулювання **не зламали бізнес-контракти**.
 
 ### Example: Changing Tone
 ```yaml
-IDENTITY: |
-  You are Mirt, a helpful and stylish assistant.
-  Tone: Warm, encouraging, using emojis (🤍, ✨).
-  Language: Ukrainian (always).
+<!-- version: 1.1 -->
+
+# IDENTITY
+Ти — AI-консультант магазину дитячого одягу MIRT.
+Тон: теплий, професійний, людяний. Можна легкі емодзі (🤍, ✨), але не переборщувати.
+Мова: завжди українська.
 ```
 
 ---
 
-## 📦 Embedded Catalog
+## 📦 Product Knowledge & Vision Rules
 
-For speed and reliability, we embed the core product catalog directly into the system prompt.
-This avoids RAG latency and database dependencies for common queries.
-
-**Location**: `data/catalog.json` (source) -> `system_prompt_full.yaml` (runtime)
+- **Основні правила** (розмірна сітка, кольори, оплата) задаються в промптах у `data/prompts/`.
+- **Vision-специфічні правила** генеруються з `data/vision/products_master.yaml` →
+  - `data/vision/generated/model_rules.yaml` — короткі правила для промпта;
+  - `data/vision/generated/vision_guide.json` — детальний гайд для Vision Agent.
 
 ---
 
 ## 🧪 Testing Prompts
 
-Use the `scripts/test_real_llm.py` (legacy) or manual testing via Telegram to verify prompt changes.
-Always check that the LLM adheres to the `OUTPUT_CONTRACT` defined in the Pydantic models.
+Після кожної зміни промптів обов'язково проганяй тести:
+
+```bash
+# Перевірка базової структури промптів
+pytest tests/unit/test_prompt_basics.py -v
+
+# Перевірка бізнес-правил (оплата, розміри, кольори)
+pytest tests/unit/test_prompt_compliance.py -v
+
+# Vision-контракт (структура VisionResponse, відмінності Лагуна/Мрія/Ритм/Каприз)
+pytest tests/test_vision_contract.py -v
+```
+
+Також є `tests/data/golden_data.yaml` з "золотими" сценаріями — онови їх, якщо змінюються критичні бізнес-правила.

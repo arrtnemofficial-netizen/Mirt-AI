@@ -2,8 +2,8 @@
 
 These tasks handle:
 - Summarizing old conversations after SUMMARY_RETENTION_DAYS
-- Saving summaries to mirt_users table
-- Pruning old messages from mirt_messages
+- Saving summaries to users table
+- Pruning old messages from messages table
 """
 
 from __future__ import annotations

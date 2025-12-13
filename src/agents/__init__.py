@@ -47,7 +47,7 @@ from .langgraph import (
     get_checkpointer,
     get_postgres_checkpointer,
     get_production_graph,
-    # Time Travel
+    # Time Travel (debug/recovery)
     get_state_history,
     get_state_snapshot,
     invoke_graph,
@@ -56,8 +56,7 @@ from .langgraph import (
     # Routing
     route_after_intent,
     route_after_validation,
-    should_retry,
-    # Streaming
+    # Streaming (UX)
     stream_events,
     stream_tokens,
 )
@@ -152,10 +151,11 @@ __all__ = [
     "invoke_with_retry",
     "route_after_intent",
     "route_after_validation",
-    "should_retry",
+    # Streaming (UX) - future feature
     "stream_events",
     "stream_tokens",
     "StreamEventType",
+    # Time Travel (debug/recovery) - future feature
     "get_state_history",
     "rollback_to_step",
     "fork_from_state",
