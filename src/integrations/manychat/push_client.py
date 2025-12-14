@@ -13,9 +13,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import asyncio
+
 import httpx
 
 from src.conf.config import settings
+from src.core.human_responses import calculate_typing_delay
 
 
 logger = logging.getLogger(__name__)
@@ -151,6 +154,14 @@ class ManyChatPushClient:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
+
+        # TYPING DELAY: Simulate human typing speed (1-3 seconds)
+        total_text_length = sum(
+            len(m.get("text", "")) for m in messages if m.get("type") == "text"
+        )
+        delay = calculate_typing_delay(total_text_length)
+        logger.debug("[MANYCHAT] Typing delay: %.2fs for %d chars", delay, total_text_length)
+        await asyncio.sleep(delay)
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:

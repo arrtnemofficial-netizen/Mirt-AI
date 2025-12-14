@@ -13,6 +13,7 @@ from typing import Any
 from aiogram.types import Update
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from src.conf.config import settings
 from src.core.logging import setup_logging
@@ -24,7 +25,6 @@ from src.server.dependencies import (
     get_cached_manychat_handler,
 )
 from src.server.middleware import setup_middleware
-
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,45 @@ app = FastAPI(
 
 # Setup middleware (rate limiting, request logging)
 setup_middleware(app, enable_rate_limit=True, enable_logging=True)
+
+
+class ApiV1MessageRequest(BaseModel):
+    type: str = Field(default="instagram")
+    message: str = Field(default="", validation_alias=AliasChoices("message", "messages"))
+    client_id: str = Field(
+        validation_alias=AliasChoices("clientId", "client_id"),
+        serialization_alias="clientId",
+    )
+    client_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("clientName", "client_name"),
+        serialization_alias="clientName",
+    )
+    username: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("username", "userName", "user_name"),
+        serialization_alias="username",
+    )
+    image_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "image_url",
+            "imageUrl",
+            "photo_url",
+            "photoUrl",
+            "image",
+            "photo",
+        ),
+        serialization_alias="image_url",
+    )
+
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="ignore")
+
+    @model_validator(mode="after")
+    def validate_message_or_image(self) -> "ApiV1MessageRequest":
+        if not self.message and not self.image_url:
+            raise ValueError("Either message or image_url is required")
+        return self
 
 
 @app.get("/health")
@@ -193,6 +232,46 @@ async def telegram_webhook(request: Request) -> JSONResponse:
     update = Update.model_validate(body)
     await dp.feed_update(bot=bot, update=update)
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/v1/messages", status_code=202)
+async def api_v1_messages(
+    payload: ApiV1MessageRequest,
+    background_tasks: BackgroundTasks,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    verify_token = settings.MANYCHAT_VERIFY_TOKEN
+    inbound_token = x_api_key
+    if not inbound_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            inbound_token = auth_value[7:].strip()
+        else:
+            inbound_token = auth_value
+
+    if verify_token and verify_token != inbound_token:
+        raise HTTPException(status_code=401, detail="Invalid API token")
+
+    from src.integrations.manychat.async_service import get_manychat_async_service
+    from src.server.dependencies import get_session_store
+
+    store = get_session_store()
+    service = get_manychat_async_service(store)
+
+    user_id = str(payload.client_id)
+    channel = payload.type or "instagram"
+
+    background_tasks.add_task(
+        service.process_message_async,
+        user_id=user_id,
+        text=payload.message or "",
+        image_url=payload.image_url,
+        channel=channel,
+    )
+
+    logger.info("[API_V1_MESSAGES] 📨 Accepted message from %s", user_id)
+    return {"status": "accepted"}
 
 
 @app.post("/webhooks/manychat")

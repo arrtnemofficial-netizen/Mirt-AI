@@ -193,11 +193,17 @@ class ManyChatAsyncService:
         else:
             logger.error("[MANYCHAT:%s] ❌ Failed to push response", user_id)
 
+    @staticmethod
+    def _get_error_text() -> str:
+        """Get human-like error message."""
+        from src.core.human_responses import get_human_response
+        return get_human_response("error")
+
     async def _push_error_message(self, user_id: str, channel: str) -> None:
         """Push a friendly error message."""
         await self.push_client.send_text(
             subscriber_id=user_id,
-            text="Вибачте, сталася помилка. Спробуйте ще раз або напишіть 'менеджер' для зв'язку з оператором.",
+            text=self._get_error_text(),
             channel=channel,
         )
 

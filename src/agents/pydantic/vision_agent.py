@@ -11,6 +11,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, ImageUrl, RunContext
+
+from src.core.human_responses import get_human_response
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -90,7 +92,7 @@ async def _search_products(
     products = await ctx.deps.catalog.search_products(query, category)
 
     if not products:
-        return "На жаль, за вашим запитом нічого не знайдено."
+        return get_human_response("not_found")
 
     lines = ["Знайдені товари:"]
     for p in products:
@@ -663,26 +665,26 @@ async def run_vision(
             if parsed.scheme not in ("http", "https"):
                 logger.error("👁️ Invalid image URL scheme: %s", parsed.scheme)
                 return VisionResponse(
-                    reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                    reply_to_user=get_human_response("photo_error"),
                     confidence=0.0,
                     needs_clarification=True,
-                    clarification_question="Чи можете надіслати фото ще раз?",
+                    clarification_question="Надішліть, будь ласка, фото ще раз 📷",
                 )
             if not parsed.netloc:
                 logger.error("👁️ Invalid image URL - no host: %s", image_url[:50])
                 return VisionResponse(
-                    reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                    reply_to_user=get_human_response("photo_error"),
                     confidence=0.0,
                     needs_clarification=True,
-                    clarification_question="Чи можете надіслати фото ще раз?",
+                    clarification_question="Надішліть, будь ласка, фото ще раз 📷",
                 )
         except Exception as e:
             logger.error("👁️ URL parse error: %s", e)
             return VisionResponse(
-                reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                reply_to_user=get_human_response("photo_error"),
                 confidence=0.0,
                 needs_clarification=True,
-                clarification_question="Чи можете надіслати фото ще раз?",
+                clarification_question="Надішліть, будь ласка, фото ще раз 📷",
             )
         
         # Block potentially dangerous URLs (SSRF prevention)
@@ -690,10 +692,10 @@ async def run_vision(
         if any(parsed.netloc.startswith(h) or parsed.netloc == h.rstrip(".") for h in blocked_hosts):
             logger.warning("👁️ Blocked internal URL attempt: %s", parsed.netloc)
             return VisionResponse(
-                reply_to_user="Не вдалося завантажити фото. Спробуйте надіслати ще раз 📷",
+                reply_to_user=get_human_response("photo_error"),
                 confidence=0.0,
                 needs_clarification=True,
-                clarification_question="Чи можете надіслати фото ще раз?",
+                clarification_question="Надішліть фото ще раз 📷",
             )
         
         # Multimodal input: list of content parts
@@ -734,7 +736,7 @@ async def run_vision(
     except Exception as e:
         logger.exception("👁️ Vision agent error: %s", e)
         return VisionResponse(
-            reply_to_user="Вибачте, не вдалося проаналізувати фото. Спробуйте надіслати ще раз 🤍",
+            reply_to_user=get_human_response("photo_analysis_error"),
             confidence=0.0,
             needs_clarification=True,
             clarification_question="Чи можете надіслати фото ще раз або описати товар?",

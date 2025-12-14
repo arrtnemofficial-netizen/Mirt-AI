@@ -18,6 +18,12 @@ from src.services.observability import log_agent_step, track_metric
 logger = logging.getLogger(__name__)
 
 
+def _get_escalation_response() -> str:
+    """Get human-like escalation message."""
+    from src.core.human_responses import get_human_response
+    return get_human_response("escalation")
+
+
 async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     Handle escalation to human operator.
@@ -47,8 +53,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
         messages=[
             Message(
                 content=(
-                    "Вибачте, я передаю ваш запит колезі для перевірки. "
-                    "Менеджер зв'яжеться з вами найближчим часом 🤍"
+                    _get_escalation_response()
                 )
             )
         ],

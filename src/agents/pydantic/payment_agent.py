@@ -11,6 +11,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
+
+from src.core.human_responses import get_human_response
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -236,7 +238,7 @@ async def run_payment(
     except Exception as e:
         logger.exception("Payment agent error: %s", e)
         return PaymentResponse(
-            reply_to_user="Вибачте, сталася помилка. Менеджер зв'яжеться з вами для оформлення 🤍",
+            reply_to_user=get_human_response("payment_error"),
             missing_fields=["name", "phone", "city", "nova_poshta"],
             order_ready=False,
         )

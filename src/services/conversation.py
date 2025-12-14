@@ -173,11 +173,13 @@ class ConversationHandler:
     session_store: SessionStore
     message_store: MessageStore
     runner: GraphRunner
-    fallback_message: str = field(
-        default="Вибачте, сталася технічна помилка. Спробуйте ще раз або зверніться до підтримки."
-    )
+    fallback_message: str = field(default="")  # Will use human_responses dynamically
     max_retries: int = field(default=2)
     retry_delay: float = field(default=1.0)
+    
+    def _get_fallback(self) -> str:
+        from src.core.human_responses import get_human_response
+        return get_human_response("timeout")
 
     async def process_message(
         self,
@@ -202,6 +204,12 @@ class ConversationHandler:
         state: ConversationState | None = None
 
         try:
+            # SECURITY: Sanitize input against prompt injection
+            from src.core.input_sanitizer import process_user_message
+            text, was_sanitized = process_user_message(text)
+            if was_sanitized:
+                logger.warning("[SECURITY] Message sanitized for session %s", session_id)
+            
             # Load or create session state
             state = self.session_store.get(session_id)
 

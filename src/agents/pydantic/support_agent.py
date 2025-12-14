@@ -28,10 +28,12 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
+
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry
 
 from .deps import AgentDeps
@@ -44,6 +46,16 @@ from .models import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_timeout_response() -> str:
+    """Get human-like timeout response."""
+    return get_human_response("timeout")
+
+
+def _get_error_response() -> str:
+    """Get human-like error response."""
+    return get_human_response("error")
 
 
 # =============================================================================
@@ -328,7 +340,7 @@ async def _search_products(
     products = await ctx.deps.catalog.search_products(query, category)
 
     if not products:
-        return "На жаль, за вашим запитом нічого не знайдено."
+        return get_human_response("not_found")
 
     lines = ["Знайдені товари:"]
     for p in products:
@@ -429,7 +441,7 @@ async def run_support(
         logger.error("Support agent timeout for session %s", deps.session_id)
         return SupportResponse(
             event="escalation",
-            messages=[MessageItem(content="Вибачте, система перевантажена. Спробуйте ще раз 🤍")],
+            messages=[MessageItem(content=_get_timeout_response())],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
                 current_state=deps.current_state or "STATE_0_INIT",
@@ -444,7 +456,7 @@ async def run_support(
         return SupportResponse(
             event="escalation",
             messages=[
-                MessageItem(content="Вибачте, сталася помилка. Менеджер зв'яжеться з вами 🤍")
+                MessageItem(content=_get_error_response())
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",

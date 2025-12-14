@@ -125,7 +125,8 @@ def process_message(
                 response_text = last_msg.get("content", "")
 
         if not response_text:
-            response_text = "Вибачте, сталася помилка. Спробуйте ще раз."
+            from src.core.human_responses import get_human_response
+            response_text = get_human_response("timeout")
 
         # Store assistant response
         assistant_msg = StoredMessage(
