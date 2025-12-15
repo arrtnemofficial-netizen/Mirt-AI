@@ -154,7 +154,7 @@ def get_size_and_price_for_height(height: int, prices_by_size: dict | None = Non
         "158-164": 2390,
     }
     prices = prices_by_size or default_prices
-    
+
     # Визначаємо розмір за зростом
     if height <= 92:
         return "80-92", prices.get("80-92", 1590)

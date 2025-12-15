@@ -90,7 +90,7 @@ TYPING_PHRASES = [
 
 ResponseType = Literal[
     "timeout",
-    "error", 
+    "error",
     "photo_error",
     "photo_analysis_error",
     "payment_error",

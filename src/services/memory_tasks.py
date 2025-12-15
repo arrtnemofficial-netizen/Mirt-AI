@@ -46,28 +46,28 @@ async def apply_time_decay() -> dict[str, int]:
     """
     logger.info("🕐 Starting memory time decay...")
     start = datetime.now(UTC)
-    
+
     memory_service = MemoryService()
-    
+
     if not memory_service.enabled:
         logger.warning("Memory service disabled, skipping time decay")
         return {"affected": 0, "error": "disabled"}
-    
+
     try:
         affected = await memory_service.apply_time_decay()
-        
+
         elapsed = (datetime.now(UTC) - start).total_seconds()
         logger.info(
             "✅ Time decay complete: %d facts affected in %.2fs",
             affected, elapsed
         )
-        
+
         return {
             "affected": affected,
             "elapsed_seconds": elapsed,
             "timestamp": start.isoformat(),
         }
-        
+
     except Exception as e:
         logger.error("❌ Time decay failed: %s", e)
         return {"affected": 0, "error": str(e)}
@@ -84,28 +84,28 @@ async def cleanup_expired() -> dict[str, int]:
     """
     logger.info("🧹 Starting expired memories cleanup...")
     start = datetime.now(UTC)
-    
+
     memory_service = MemoryService()
-    
+
     if not memory_service.enabled:
         logger.warning("Memory service disabled, skipping cleanup")
         return {"cleaned": 0, "error": "disabled"}
-    
+
     try:
         cleaned = await memory_service.cleanup_expired()
-        
+
         elapsed = (datetime.now(UTC) - start).total_seconds()
         logger.info(
             "✅ Cleanup complete: %d expired facts deactivated in %.2fs",
             cleaned, elapsed
         )
-        
+
         return {
             "cleaned": cleaned,
             "elapsed_seconds": elapsed,
             "timestamp": start.isoformat(),
         }
-        
+
     except Exception as e:
         logger.error("❌ Cleanup failed: %s", e)
         return {"cleaned": 0, "error": str(e)}
@@ -124,17 +124,17 @@ async def generate_user_summary(user_id: str) -> dict[str, any]:
         Summary stats
     """
     memory_service = MemoryService()
-    
+
     if not memory_service.enabled:
         return {"error": "disabled"}
-    
+
     try:
         # Get all facts for user
         facts = await memory_service.get_facts(user_id, limit=50, min_importance=0.3)
-        
+
         if not facts:
             return {"user_id": user_id, "facts_count": 0, "summary": None}
-        
+
         # Group facts by category
         categories = {}
         for fact in facts:
@@ -142,17 +142,17 @@ async def generate_user_summary(user_id: str) -> dict[str, any]:
             if cat not in categories:
                 categories[cat] = []
             categories[cat].append(fact.content)
-        
+
         # Build summary text
         summary_parts = []
         for cat, contents in categories.items():
             summary_parts.append(f"{cat}: {'; '.join(contents[:3])}")
-        
+
         summary_text = " | ".join(summary_parts)
-        
+
         # Extract key facts (top 5 by importance)
         key_facts = [f.content for f in sorted(facts, key=lambda x: x.importance, reverse=True)[:5]]
-        
+
         # Save summary
         result = await memory_service.save_summary(
             user_id=user_id,
@@ -160,13 +160,13 @@ async def generate_user_summary(user_id: str) -> dict[str, any]:
             key_facts=key_facts,
             facts_count=len(facts),
         )
-        
+
         return {
             "user_id": user_id,
             "facts_count": len(facts),
             "summary_saved": result is not None,
         }
-        
+
     except Exception as e:
         logger.error("Failed to generate summary for user %s: %s", user_id, e)
         return {"user_id": user_id, "error": str(e)}
@@ -184,51 +184,51 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
     """
     logger.info("📝 Starting summary generation for active users (last %d days)...", days)
     start = datetime.now(UTC)
-    
+
     client = get_supabase_client()
     if not client:
         logger.warning("Supabase client not available")
         return {"processed": 0, "error": "no_client"}
-    
+
     try:
         # Get active users
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-        
+
         response = (
             client.table("mirt_profiles")
             .select("user_id")
             .gte("last_seen_at", cutoff)
             .execute()
         )
-        
+
         if not response.data:
             logger.info("No active users found")
             return {"processed": 0}
-        
+
         user_ids = [row["user_id"] for row in response.data]
         logger.info("Found %d active users", len(user_ids))
-        
+
         # Generate summaries
         results = []
         for user_id in user_ids:
             result = await generate_user_summary(user_id)
             results.append(result)
-        
+
         successful = sum(1 for r in results if r.get("summary_saved"))
         elapsed = (datetime.now(UTC) - start).total_seconds()
-        
+
         logger.info(
             "✅ Summary generation complete: %d/%d users in %.2fs",
             successful, len(user_ids), elapsed
         )
-        
+
         return {
             "processed": len(user_ids),
             "successful": successful,
             "elapsed_seconds": elapsed,
             "timestamp": start.isoformat(),
         }
-        
+
     except Exception as e:
         logger.error("❌ Summary generation failed: %s", e)
         return {"processed": 0, "error": str(e)}
@@ -248,24 +248,24 @@ async def memory_maintenance() -> dict[str, any]:
     """
     logger.info("🔧 Starting full memory maintenance cycle...")
     start = datetime.now(UTC)
-    
+
     results = {}
-    
+
     # Step 1: Time decay
     results["time_decay"] = await apply_time_decay()
-    
+
     # Step 2: Cleanup
     results["cleanup"] = await cleanup_expired()
-    
+
     # Step 3: Summaries (only for users active in last 3 days)
     results["summaries"] = await generate_summaries_for_active_users(days=3)
-    
+
     elapsed = (datetime.now(UTC) - start).total_seconds()
     results["total_elapsed_seconds"] = elapsed
     results["timestamp"] = start.isoformat()
-    
+
     logger.info("✅ Full maintenance complete in %.2fs", elapsed)
-    
+
     return results
 
 
@@ -275,29 +275,29 @@ async def memory_maintenance() -> dict[str, any]:
 
 try:
     from celery import shared_task
-    
+
     @shared_task(name="memory.apply_time_decay")
     def celery_apply_time_decay():
         """Celery task for time decay."""
         return asyncio.run(apply_time_decay())
-    
+
     @shared_task(name="memory.cleanup_expired")
     def celery_cleanup_expired():
         """Celery task for cleanup."""
         return asyncio.run(cleanup_expired())
-    
+
     @shared_task(name="memory.generate_summaries")
     def celery_generate_summaries(days: int = 7):
         """Celery task for summary generation."""
         return asyncio.run(generate_summaries_for_active_users(days))
-    
+
     @shared_task(name="memory.maintenance")
     def celery_memory_maintenance():
         """Celery task for full maintenance."""
         return asyncio.run(memory_maintenance())
-    
+
     logger.info("Celery memory tasks registered")
-    
+
 except ImportError:
     logger.debug("Celery not available, skipping task registration")
 
@@ -310,7 +310,7 @@ except ImportError:
 def run_maintenance_cli():
     """CLI entry point for running maintenance manually."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="MIRT Memory Maintenance")
     parser.add_argument(
         "--task",
@@ -324,9 +324,9 @@ def run_maintenance_cli():
         default=7,
         help="Days for active user threshold (summaries only)",
     )
-    
+
     args = parser.parse_args()
-    
+
     if args.task == "decay":
         result = asyncio.run(apply_time_decay())
     elif args.task == "cleanup":
@@ -335,7 +335,7 @@ def run_maintenance_cli():
         result = asyncio.run(generate_summaries_for_active_users(args.days))
     else:
         result = asyncio.run(memory_maintenance())
-    
+
     print(f"Result: {result}")
     return result
 

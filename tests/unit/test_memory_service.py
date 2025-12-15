@@ -36,8 +36,16 @@ from src.services.memory_service import (
 
 @pytest.fixture
 def mock_supabase():
-    """Create mock Supabase client."""
+    """Create mock Supabase client with proper chaining.
+    
+    SENIOR TIP: Supabase uses fluent interface (method chaining).
+    Each method returns a new query builder, so we need to mock
+    the entire chain properly. The key insight:
+    - .single().execute() returns data as DICT
+    - .execute() without .single() returns data as LIST
+    """
     mock = MagicMock()
+    # Chain all methods to return the same mock for fluent interface
     mock.table.return_value = mock
     mock.select.return_value = mock
     mock.insert.return_value = mock
@@ -51,6 +59,7 @@ def mock_supabase():
     mock.order.return_value = mock
     mock.limit.return_value = mock
     mock.single.return_value = mock
+    # Default: empty list (for non-.single() queries)
     mock.execute.return_value = MagicMock(data=[])
     return mock
 

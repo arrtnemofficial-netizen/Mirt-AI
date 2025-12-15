@@ -15,7 +15,7 @@ from dataclasses import dataclass
 @dataclass
 class MinimalClientData:
     """Minimal extracted client data (phone + NP only)."""
-    
+
     phone: str | None = None
     nova_poshta: str | None = None
 
@@ -30,7 +30,7 @@ def extract_phone(text: str) -> str | None:
         r"\+?380\s*\d{2}\s*\d{3}\s*\d{2}\s*\d{2}",  # +380951234567
         r"0\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",  # 095 123 45 67
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
@@ -40,7 +40,7 @@ def extract_phone(text: str) -> str | None:
                 return f"+{digits}"
             elif digits.startswith("0") and len(digits) == 10:
                 return f"+38{digits}"
-    
+
     return None
 
 
@@ -51,7 +51,7 @@ def extract_nova_poshta(text: str) -> str | None:
     Returns: Just the number (string)
     """
     text_lower = text.lower()
-    
+
     # Patterns ordered by specificity
     patterns = [
         r"(?:нп|np)\s*[№#]?\s*(\d{1,4})",  # НП 54, нп54
@@ -59,12 +59,12 @@ def extract_nova_poshta(text: str) -> str | None:
         r"(?:поштомат|почтомат)\s*[№#]?\s*(\d{1,4})",  # поштомат 100
         r"(?:нова\s*пошта|новая\s*почта)\s*[№#]?\s*(\d{1,4})",  # нова пошта 15
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, text_lower)
         if match:
             return match.group(1)
-    
+
     return None
 
 

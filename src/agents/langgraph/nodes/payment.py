@@ -24,14 +24,13 @@ from src.conf.config import settings
 from src.conf.payment_config import (
     BANK_REQUISITES,
     PAYMENT_PREPAY_AMOUNT,
-    format_requisites_multiline,
 )
 from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.observability import log_agent_step, track_metric
 
+
 # State prompts for sub-phases
-from ..state_prompts import get_payment_sub_phase, get_state_prompt
 
 
 if TYPE_CHECKING:
@@ -185,7 +184,7 @@ async def _prepare_payment_and_interrupt(
                 logger.info("[SESSION %s] Sitniks invoice_sent status set", session_id)
         except Exception as e:
             logger.warning("[SESSION %s] Sitniks invoice_sent error: %s", session_id, e)
-    
+
     # =========================================================================
     # HITL CHECK: Skip interrupt for Telegram polling (lightweight mode)
     # =========================================================================
@@ -205,7 +204,7 @@ async def _prepare_payment_and_interrupt(
             },
             goto="upsell",  # Skip interrupt, go to upsell
         )
-    
+
     # This call PAUSES the graph execution
     # It returns ONLY when someone calls graph.invoke(Command(resume=...))
     human_response = interrupt(approval_request)
@@ -307,13 +306,21 @@ async def _handle_approval_response(
             # =========================================================================
             # CREATE ORDER IN SNITKIX CRM (Async via Celery)
             # =========================================================================
+            # IDEMPOTENCY: Deterministic external_id based on session + products + price
+            # This prevents duplicate orders on retries
+            import hashlib
+            products_str = "|".join(sorted(p.get("name", "") for p in products))
+            idempotency_data = f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
+            idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
+            deterministic_external_id = f"{session_id}_{idempotency_hash}"
+
             from src.integrations.crm.crmservice import get_crm_service
 
             crm_service = get_crm_service()
             crm_order_result = await crm_service.create_order_with_persistence(
                 session_id=session_id,
                 order_data=order_data,
-                external_id=f"{session_id}_{int(time.time())}",  # Unique external ID
+                external_id=deterministic_external_id,
             )
 
             logger.info(

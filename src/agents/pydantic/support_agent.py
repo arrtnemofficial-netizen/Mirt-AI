@@ -28,7 +28,6 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
-
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -142,17 +141,17 @@ async def _add_memory_context(ctx: RunContext[AgentDeps]) -> str:
     Populated by memory_context_node before agent execution.
     """
     deps = ctx.deps
-    
+
     # Use pre-formatted memory context if available
     memory_prompt = deps.get_memory_context_prompt()
-    
+
     if memory_prompt:
         logger.debug(
             "📚 Memory context injected (%d chars)",
             len(memory_prompt),
         )
         return f"\n{memory_prompt}"
-    
+
     return ""
 
 

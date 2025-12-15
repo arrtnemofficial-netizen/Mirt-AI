@@ -43,13 +43,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PaymentFlowResult:
     """Result of payment sub-phase processing."""
-    
+
     messages: list[MessageItem]
     next_sub_phase: str
     next_state: str
     event: str
     metadata_updates: dict[str, Any]
-    
+
     # For escalation after payment complete
     should_escalate: bool = False
     escalation_reason: str | None = None
@@ -58,12 +58,12 @@ class PaymentFlowResult:
 @dataclass
 class CustomerData:
     """Extracted customer delivery data."""
-    
+
     name: str | None = None
     phone: str | None = None
     city: str | None = None
     nova_poshta: str | None = None
-    
+
     @property
     def is_complete(self) -> bool:
         """Check if all required fields are filled."""
@@ -75,12 +75,12 @@ class CustomerData:
 # =============================================================================
 
 FULL_PAYMENT_KEYWORDS = [
-    "повна", "повну", "повної", "повністю", 
+    "повна", "повну", "повної", "повністю",
     "на фоп", "фоп", "без комісії", "без комісій"
 ]
 
 PREPAY_KEYWORDS = [
-    "передплат", "частин", "залишок", 
+    "передплат", "частин", "залишок",
     "накладен", "при отриманні", "решта",
     "на нп", "оплата на нп", "решту на нп",  # "на НП" = накладений платіж
 ]
@@ -124,10 +124,10 @@ def handle_request_data(
             event="simple_answer",
             metadata_updates={},
         )
-    
+
     # All data collected - show summary and ask about payment method
     logger.info("💰 [SESSION %s] Payment FSM: REQUEST_DATA → CONFIRM_DATA", session_id)
-    
+
     return PaymentFlowResult(
         messages=[
             MessageItem(content="Записала дані 📝"),
@@ -169,27 +169,27 @@ def handle_confirm_data(
     Detect payment method choice and show requisites.
     """
     user_text_lower = user_text.lower()
-    
+
     is_full = any(kw in user_text_lower for kw in FULL_PAYMENT_KEYWORDS)
     is_prepay = any(kw in user_text_lower for kw in PREPAY_KEYWORDS)
     ask_size_chart = any(kw in user_text_lower for kw in SIZE_CHART_KEYWORDS)
-    
+
     # If price not available, use fallback
     price = product_price if product_price > 0 else PAYMENT_DEFAULT_PRICE
-    
+
     if is_full or is_prepay:
         payment_method = "full" if is_full else "prepay"
         payment_amount = price if is_full else PAYMENT_PREPAY_AMOUNT
-        
+
         requisites_text = format_requisites_multiline()
-        
+
         messages = [
             MessageItem(content=f"Супер! Сума до сплати: {payment_amount} грн 💳"),
             MessageItem(content="Реквізити для оплати:"),
             MessageItem(content=requisites_text),
             MessageItem(content="Після оплати надішліть скрін квитанції 🌸"),
         ]
-        
+
         # If user also asked for size chart
         if ask_size_chart and product_size:
             messages.append(MessageItem(
@@ -198,12 +198,12 @@ def handle_confirm_data(
                     "Ми підбираємо розмір за зростом так, щоб був невеликий запас по довжині."
                 )
             ))
-        
+
         logger.info(
             "💰 [SESSION %s] Payment FSM: CONFIRM_DATA → SHOW_PAYMENT (method=%s, amount=%d)",
             session_id, payment_method, payment_amount
         )
-        
+
         return PaymentFlowResult(
             messages=messages,
             next_sub_phase="SHOW_PAYMENT",
@@ -215,7 +215,7 @@ def handle_confirm_data(
                 "payment_amount": payment_amount,
             },
         )
-    
+
     # User said something else - clarify
     return PaymentFlowResult(
         messages=[
@@ -244,12 +244,12 @@ def handle_show_payment(
     Detect payment confirmation (text or screenshot) and complete.
     """
     user_text_lower = user_text.lower()
-    
+
     is_confirmed = any(kw in user_text_lower for kw in PAYMENT_CONFIRM_KEYWORDS)
-    
+
     if is_confirmed or has_image:
         logger.info("💰 [SESSION %s] Payment FSM: SHOW_PAYMENT → THANK_YOU", session_id)
-        
+
         return PaymentFlowResult(
             messages=[
                 MessageItem(content="Дякую за оплату! 🎉"),
@@ -268,7 +268,7 @@ def handle_show_payment(
             should_escalate=True,
             escalation_reason="ORDER_CONFIRMED_ASSIGN_MANAGER",
         )
-    
+
     # Still waiting
     return PaymentFlowResult(
         messages=[
@@ -314,13 +314,13 @@ def process_payment_subphase(
     """
     if sub_phase == "REQUEST_DATA":
         return handle_request_data(customer_data, session_id)
-    
+
     elif sub_phase == "CONFIRM_DATA":
         return handle_confirm_data(user_text, product_price, product_size, session_id)
-    
+
     elif sub_phase == "SHOW_PAYMENT":
         return handle_show_payment(user_text, has_image, session_id)
-    
+
     elif sub_phase == "THANK_YOU":
         # Already complete - shouldn't happen normally
         return PaymentFlowResult(
@@ -330,7 +330,7 @@ def process_payment_subphase(
             event="simple_answer",
             metadata_updates={},
         )
-    
+
     else:
         # Unknown sub-phase - start from beginning
         logger.warning("Unknown payment sub-phase: %s", sub_phase)
@@ -357,7 +357,7 @@ def extract_customer_data_from_state(state: dict[str, Any]) -> CustomerData:
     Checks both metadata and root-level keys.
     """
     metadata = state.get("metadata", {})
-    
+
     return CustomerData(
         name=metadata.get("customer_name") or state.get("customer_name"),
         phone=metadata.get("customer_phone") or state.get("customer_phone"),
@@ -376,11 +376,11 @@ def get_product_info_from_state(state: dict[str, Any]) -> tuple[int, str | None]
     products = state.get("selected_products", [])
     if not products:
         products = state.get("offered_products", [])
-    
+
     if products:
         first_product = products[0]
         price = first_product.get("price", 0)
         size = first_product.get("size")
         return price, size
-    
+
     return 0, None

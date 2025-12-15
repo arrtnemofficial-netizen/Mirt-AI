@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     # Snitkix CRM integration
     SNITKIX_API_URL: str = Field(default="", description="Snitkix CRM API base URL.")
     SNITKIX_API_KEY: SecretStr = Field(default=SecretStr(""), description="Snitkix CRM API key.")
+    SITNIKS_AI_MANAGER_NAME: str = Field(
+        default="Павло",
+        description="Name of AI manager in Sitniks CRM (for first touch assignment).",
+    )
+    SITNIKS_HUMAN_MANAGER_ID: int | None = Field(
+        default=None,
+        description="Explicit manager ID for escalation. If None, picks first non-AI manager.",
+    )
 
     # Celery / Redis configuration
     REDIS_URL: str = Field(
@@ -222,7 +230,7 @@ class Settings(BaseSettings):
     # INTEGRATION FEATURE FLAGS
     # =========================================================================
     # Use these to disable heavy integrations for lightweight Telegram polling
-    
+
     ENABLE_PAYMENT_HITL: bool = Field(
         default=False,
         description=(
@@ -231,7 +239,7 @@ class Settings(BaseSettings):
             "Disable for Telegram polling to avoid graph interrupts."
         ),
     )
-    
+
     ENABLE_CRM_INTEGRATION: bool = Field(
         default=False,
         description=(
@@ -239,11 +247,11 @@ class Settings(BaseSettings):
             "Disable for local testing or when CRM is unavailable."
         ),
     )
-    
+
     # =========================================================================
     # PERFORMANCE / LOAD HANDLING
     # =========================================================================
-    
+
     LLM_MAX_HISTORY_MESSAGES: int = Field(
         default=20,
         description=(
@@ -252,7 +260,7 @@ class Settings(BaseSettings):
             "Set to 0 to disable trimming."
         ),
     )
-    
+
     DEBOUNCER_DELAY_SECONDS: float = Field(
         default=2.5,
         description="Delay before processing aggregated messages in Telegram",

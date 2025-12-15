@@ -239,20 +239,20 @@ def _validate_language_ukrainian(response: dict[str, Any]) -> list[str]:
     This is CRITICAL for brand consistency and legal compliance.
     """
     import re
-    
+
     errors = []
     messages = response.get("messages", [])
-    
+
     for i, msg in enumerate(messages):
         text = msg.get("text", "") if isinstance(msg, dict) else str(msg)
-        
+
         # Check for Russian-only characters
         russian_chars_found = [c for c in text if c in RUSSIAN_ONLY_CHARS]
         if russian_chars_found:
             errors.append(
                 f"Message {i}: contains Russian characters {set(russian_chars_found)} - must be Ukrainian only"
             )
-        
+
         # Check for Russian marker words
         text_lower = text.lower()
         for pattern in RUSSIAN_MARKERS:
@@ -260,7 +260,7 @@ def _validate_language_ukrainian(response: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"Message {i}: contains Russian word '{pattern.strip(chr(92)+'b')}' - use Ukrainian equivalent"
                 )
-    
+
     return errors
 
 

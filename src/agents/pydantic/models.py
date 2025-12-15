@@ -156,7 +156,7 @@ class OfferDeliberation(BaseModel):
     - Business Owner: margin check, upsell potential
     - Quality Control: price/size/model validation against DB
     """
-    
+
     customer_view: str = Field(
         default="",
         description="Customer Advocate: Is this clear? Does it show value? No pressure?"

@@ -24,16 +24,13 @@ from src.services.supabase_client import get_supabase_client
 
 if TYPE_CHECKING:
     from supabase import Client
+
     from src.agents.pydantic.memory_models import (
-        ChildProfile,
-        CommerceInfo,
         Fact,
-        LogisticsInfo,
         MemoryContext,
         MemoryDecision,
         MemorySummary,
         NewFact,
-        StylePreferences,
         UpdateFact,
         UserProfile,
     )
@@ -106,30 +103,30 @@ class MemoryService:
     - Semantic search
     - Memory context loading
     """
-    
+
     def __init__(self, client: Client | None = None) -> None:
         self.client = client or get_supabase_client()
         self._enabled = self.client is not None
         self._models = None  # Lazy loaded
-        
+
         if not self._enabled:
             logger.warning("MemoryService disabled - Supabase client not available")
-    
+
     @property
     def models(self):
         """Lazy load memory models to avoid circular import."""
         if self._models is None:
             self._models = _get_memory_models()
         return self._models
-    
+
     @property
     def enabled(self) -> bool:
         return self._enabled
-    
+
     # =========================================================================
     # PROFILE OPERATIONS (Persistent Memory)
     # =========================================================================
-    
+
     async def get_profile(self, user_id: str) -> UserProfile | None:
         """
         Завантажити профіль користувача.
@@ -142,7 +139,7 @@ class MemoryService:
         """
         if not self._enabled:
             return None
-        
+
         try:
             response = (
                 self.client.table(TABLE_PROFILES)
@@ -151,19 +148,19 @@ class MemoryService:
                 .single()
                 .execute()
             )
-            
+
             if not response.data:
                 return None
-            
+
             return self._row_to_profile(response.data)
-            
+
         except Exception as e:
             # Handle "no rows returned" gracefully
             if "0 rows" in str(e).lower():
                 return None
             logger.error("Failed to get profile for user %s: %s", user_id, e)
             return None
-    
+
     async def get_or_create_profile(self, user_id: str) -> UserProfile:
         """
         Отримати профіль або створити новий.
@@ -177,10 +174,10 @@ class MemoryService:
         existing = await self.get_profile(user_id)
         if existing:
             return existing
-        
+
         # Create new profile
         return await self.create_profile(user_id)
-    
+
     async def create_profile(self, user_id: str) -> UserProfile:
         """
         Створити новий профіль.
@@ -192,8 +189,8 @@ class MemoryService:
             Created UserProfile
         """
         if not self._enabled:
-            return UserProfile(user_id=user_id)
-        
+            return self.models["UserProfile"](user_id=user_id)
+
         try:
             now = datetime.now(UTC).isoformat()
             data = {
@@ -206,23 +203,23 @@ class MemoryService:
                 "updated_at": now,
                 "last_seen_at": now,
             }
-            
+
             response = (
                 self.client.table(TABLE_PROFILES)
                 .insert(data)
                 .execute()
             )
-            
+
             if response.data:
                 logger.info("Created profile for user %s", user_id)
                 return self._row_to_profile(response.data[0])
-            
-            return UserProfile(user_id=user_id)
-            
+
+            return self.models["UserProfile"](user_id=user_id)
+
         except Exception as e:
             logger.error("Failed to create profile for user %s: %s", user_id, e)
-            return UserProfile(user_id=user_id)
-    
+            return self.models["UserProfile"](user_id=user_id)
+
     async def update_profile(
         self,
         user_id: str,
@@ -246,23 +243,23 @@ class MemoryService:
         """
         if not self._enabled:
             return None
-        
+
         try:
             # Get current profile
             current = await self.get_profile(user_id)
             if not current:
                 current = await self.create_profile(user_id)
-            
+
             # Merge updates
             updates: dict[str, Any] = {
                 "updated_at": datetime.now(UTC).isoformat(),
                 "last_seen_at": datetime.now(UTC).isoformat(),
             }
-            
+
             if child_profile:
                 merged = {**current.child_profile.model_dump(), **child_profile}
                 updates["child_profile"] = merged
-            
+
             if style_preferences:
                 merged = {**current.style_preferences.model_dump(), **style_preferences}
                 # Merge lists (append unique values)
@@ -272,15 +269,15 @@ class MemoryService:
                         new = style_preferences.get(key, [])
                         merged[key] = list(set(existing + new))
                 updates["style_preferences"] = merged
-            
+
             if logistics:
                 merged = {**current.logistics.model_dump(), **logistics}
                 updates["logistics"] = merged
-            
+
             if commerce:
                 merged = {**current.commerce.model_dump(), **commerce}
                 updates["commerce"] = merged
-            
+
             # Apply update
             response = (
                 self.client.table(TABLE_PROFILES)
@@ -288,47 +285,52 @@ class MemoryService:
                 .eq("user_id", user_id)
                 .execute()
             )
-            
+
             if response.data:
                 logger.info("Updated profile for user %s", user_id)
                 return self._row_to_profile(response.data[0])
-            
+
             return current
-            
+
         except Exception as e:
             logger.error("Failed to update profile for user %s: %s", user_id, e)
             return None
-    
+
     async def touch_profile(self, user_id: str) -> None:
         """Оновити last_seen_at для профілю."""
         if not self._enabled:
             return
-        
+
         try:
             self.client.table(TABLE_PROFILES).update({
                 "last_seen_at": datetime.now(UTC).isoformat()
             }).eq("user_id", user_id).execute()
         except Exception as e:
             logger.warning("Failed to touch profile for user %s: %s", user_id, e)
-    
+
     def _row_to_profile(self, row: dict) -> UserProfile:
-        """Convert DB row to UserProfile."""
-        return UserProfile(
+        """Convert DB row to UserProfile.
+        
+        SENIOR TIP: We use self.models for lazy import to avoid circular imports.
+        The models are only loaded when first accessed, not at module load time.
+        """
+        m = self.models  # Lazy load models
+        return m["UserProfile"](
             user_id=row.get("user_id", ""),
-            child_profile=ChildProfile(**row.get("child_profile", {})),
-            style_preferences=StylePreferences(**row.get("style_preferences", {})),
-            logistics=LogisticsInfo(**row.get("logistics", {})),
-            commerce=CommerceInfo(**row.get("commerce", {})),
+            child_profile=m["ChildProfile"](**row.get("child_profile", {})),
+            style_preferences=m["StylePreferences"](**row.get("style_preferences", {})),
+            logistics=m["LogisticsInfo"](**row.get("logistics", {})),
+            commerce=m["CommerceInfo"](**row.get("commerce", {})),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at"),
             last_seen_at=row.get("last_seen_at"),
             completeness_score=row.get("completeness_score", 0.0),
         )
-    
+
     # =========================================================================
     # MEMORY/FACTS OPERATIONS (Fluid Memory)
     # =========================================================================
-    
+
     async def store_fact(
         self,
         user_id: str,
@@ -366,16 +368,16 @@ class MemoryService:
                     fact.surprise, MIN_SURPRISE_TO_STORE
                 )
                 return None
-        
+
         if not self._enabled:
             return None
-        
+
         try:
             now = datetime.now(UTC)
             expires_at = None
             if fact.ttl_days:
                 expires_at = (now + timedelta(days=fact.ttl_days)).isoformat()
-            
+
             data = {
                 "user_id": user_id,
                 "session_id": session_id,
@@ -392,29 +394,29 @@ class MemoryService:
                 "expires_at": expires_at,
                 "is_active": True,
             }
-            
+
             if embedding:
                 data["embedding"] = embedding
-            
+
             response = (
                 self.client.table(TABLE_MEMORIES)
                 .insert(data)
                 .execute()
             )
-            
+
             if response.data:
                 logger.info(
                     "Stored fact for user %s: importance=%.2f, surprise=%.2f",
                     user_id, fact.importance, fact.surprise
                 )
                 return self._row_to_fact(response.data[0])
-            
+
             return None
-            
+
         except Exception as e:
             logger.error("Failed to store fact for user %s: %s", user_id, e)
             return None
-    
+
     async def update_fact(
         self,
         update: UpdateFact,
@@ -432,10 +434,10 @@ class MemoryService:
         """
         if not self._enabled:
             return None
-        
+
         try:
             now = datetime.now(UTC).isoformat()
-            
+
             data: dict[str, Any] = {
                 "content": update.new_content,
                 "importance": update.importance,
@@ -443,30 +445,30 @@ class MemoryService:
                 "updated_at": now,
                 "last_accessed_at": now,
             }
-            
+
             if embedding:
                 data["embedding"] = embedding
-            
+
             # Increment version
             data["version"] = self.client.table(TABLE_MEMORIES).select("version").eq("id", str(update.fact_id)).single().execute().data.get("version", 0) + 1
-            
+
             response = (
                 self.client.table(TABLE_MEMORIES)
                 .update(data)
                 .eq("id", str(update.fact_id))
                 .execute()
             )
-            
+
             if response.data:
                 logger.info("Updated fact %s", update.fact_id)
                 return self._row_to_fact(response.data[0])
-            
+
             return None
-            
+
         except Exception as e:
             logger.error("Failed to update fact %s: %s", update.fact_id, e)
             return None
-    
+
     async def get_facts(
         self,
         user_id: str,
@@ -488,7 +490,7 @@ class MemoryService:
         """
         if not self._enabled:
             return []
-        
+
         try:
             query = (
                 self.client.table(TABLE_MEMORIES)
@@ -499,25 +501,25 @@ class MemoryService:
                 .order("importance", desc=True)
                 .limit(min(limit, MAX_FACTS_LIMIT))
             )
-            
+
             if categories:
                 query = query.in_("category", categories)
-            
+
             response = query.execute()
-            
+
             if response.data:
                 # Update last_accessed_at for retrieved facts
                 fact_ids = [row["id"] for row in response.data]
                 await self._touch_facts(fact_ids)
-                
+
                 return [self._row_to_fact(row) for row in response.data]
-            
+
             return []
-            
+
         except Exception as e:
             logger.error("Failed to get facts for user %s: %s", user_id, e)
             return []
-    
+
     async def search_facts(
         self,
         user_id: str,
@@ -541,7 +543,7 @@ class MemoryService:
         """
         if not self._enabled:
             return []
-        
+
         try:
             # Use RPC function for vector search
             params = {
@@ -551,9 +553,9 @@ class MemoryService:
                 "p_min_importance": min_importance,
                 "p_categories": categories,
             }
-            
+
             response = self.client.rpc("search_memories", params).execute()
-            
+
             if response.data:
                 results = []
                 for row in response.data:
@@ -569,36 +571,36 @@ class MemoryService:
                     similarity = row.get("similarity", 0.0)
                     results.append((fact, similarity))
                 return results
-            
+
             return []
-            
+
         except Exception as e:
             logger.error("Failed to search facts for user %s: %s", user_id, e)
             return []
-    
+
     async def deactivate_fact(self, fact_id: UUID, reason: str | None = None) -> bool:
         """Деактивувати факт (soft delete)."""
         if not self._enabled:
             return False
-        
+
         try:
             self.client.table(TABLE_MEMORIES).update({
                 "is_active": False,
                 "updated_at": datetime.now(UTC).isoformat(),
             }).eq("id", str(fact_id)).execute()
-            
+
             logger.info("Deactivated fact %s: %s", fact_id, reason)
             return True
-            
+
         except Exception as e:
             logger.error("Failed to deactivate fact %s: %s", fact_id, e)
             return False
-    
+
     async def _touch_facts(self, fact_ids: list[str]) -> None:
         """Update last_accessed_at for facts."""
         if not self._enabled or not fact_ids:
             return
-        
+
         try:
             now = datetime.now(UTC).isoformat()
             for fact_id in fact_ids:
@@ -607,7 +609,7 @@ class MemoryService:
                 }).eq("id", fact_id).execute()
         except Exception as e:
             logger.warning("Failed to touch facts: %s", e)
-    
+
     def _row_to_fact(self, row: dict) -> Fact:
         """Convert DB row to Fact."""
         return Fact(
@@ -625,16 +627,16 @@ class MemoryService:
             last_accessed_at=row.get("last_accessed_at"),
             is_active=row.get("is_active", True),
         )
-    
+
     # =========================================================================
     # SUMMARY OPERATIONS (Compressed Memory)
     # =========================================================================
-    
+
     async def get_user_summary(self, user_id: str) -> MemorySummary | None:
         """Отримати актуальний summary для користувача."""
         if not self._enabled:
             return None
-        
+
         try:
             response = (
                 self.client.table(TABLE_SUMMARIES)
@@ -645,17 +647,17 @@ class MemoryService:
                 .single()
                 .execute()
             )
-            
+
             if response.data:
                 return self._row_to_summary(response.data)
-            
+
             return None
-            
+
         except Exception as e:
             if "0 rows" not in str(e).lower():
                 logger.error("Failed to get summary for user %s: %s", user_id, e)
             return None
-    
+
     async def save_summary(
         self,
         user_id: str,
@@ -677,14 +679,14 @@ class MemoryService:
         """
         if not self._enabled:
             return None
-        
+
         try:
             # Deactivate old summaries
             self.client.table(TABLE_SUMMARIES).update({
                 "is_current": False,
                 "updated_at": datetime.now(UTC).isoformat(),
             }).eq("user_id", user_id).eq("summary_type", "user").execute()
-            
+
             # Create new summary
             now = datetime.now(UTC).isoformat()
             data = {
@@ -697,23 +699,23 @@ class MemoryService:
                 "updated_at": now,
                 "is_current": True,
             }
-            
+
             response = (
                 self.client.table(TABLE_SUMMARIES)
                 .insert(data)
                 .execute()
             )
-            
+
             if response.data:
                 logger.info("Saved summary for user %s", user_id)
                 return self._row_to_summary(response.data[0])
-            
+
             return None
-            
+
         except Exception as e:
             logger.error("Failed to save summary for user %s: %s", user_id, e)
             return None
-    
+
     def _row_to_summary(self, row: dict) -> MemorySummary:
         """Convert DB row to MemorySummary."""
         return MemorySummary(
@@ -723,11 +725,11 @@ class MemoryService:
             facts_count=row.get("facts_count", 0),
             is_current=row.get("is_current", True),
         )
-    
+
     # =========================================================================
     # MEMORY CONTEXT (Combined Loading)
     # =========================================================================
-    
+
     async def load_memory_context(
         self,
         user_id: str,
@@ -749,7 +751,7 @@ class MemoryService:
         """
         # Load profile
         profile = await self.get_or_create_profile(user_id)
-        
+
         # Load facts (semantic search if embedding provided)
         facts: list[Fact] = []
         if query_embedding:
@@ -759,23 +761,23 @@ class MemoryService:
             facts = [f for f, _ in search_results]
         else:
             facts = await self.get_facts(user_id, limit=facts_limit)
-        
+
         # Load summary
         summary = await self.get_user_summary(user_id)
-        
+
         # Touch profile (update last_seen_at)
         await self.touch_profile(user_id)
-        
-        return MemoryContext(
+
+        return self.models["MemoryContext"](
             profile=profile,
             facts=facts,
             summary=summary,
         )
-    
+
     # =========================================================================
     # APPLY MEMORY DECISION
     # =========================================================================
-    
+
     async def apply_decision(
         self,
         user_id: str,
@@ -794,11 +796,11 @@ class MemoryService:
             Stats: {"stored": N, "updated": M, "deleted": K, "rejected": R}
         """
         stats = {"stored": 0, "updated": 0, "deleted": 0, "rejected": 0}
-        
+
         if decision.ignore_messages:
             logger.debug("Decision: ignore messages (no new info)")
             return stats
-        
+
         # Store new facts (with gating)
         for new_fact in decision.new_facts:
             result = await self.store_fact(user_id, new_fact, session_id)
@@ -806,19 +808,19 @@ class MemoryService:
                 stats["stored"] += 1
             else:
                 stats["rejected"] += 1
-        
+
         # Update existing facts
         for update in decision.updates:
             result = await self.update_fact(update)
             if result:
                 stats["updated"] += 1
-        
+
         # Delete facts
         for delete in decision.deletes:
             success = await self.deactivate_fact(delete.fact_id, delete.reason)
             if success:
                 stats["deleted"] += 1
-        
+
         # Update profile
         if decision.profile_updates:
             await self.update_profile(
@@ -828,18 +830,18 @@ class MemoryService:
                 logistics=decision.profile_updates.get("logistics"),
                 commerce=decision.profile_updates.get("commerce"),
             )
-        
+
         logger.info(
             "Applied memory decision for user %s: stored=%d, updated=%d, deleted=%d, rejected=%d",
             user_id, stats["stored"], stats["updated"], stats["deleted"], stats["rejected"]
         )
-        
+
         return stats
-    
+
     # =========================================================================
     # MAINTENANCE (Background Tasks)
     # =========================================================================
-    
+
     async def apply_time_decay(self) -> int:
         """
         Застосувати time decay до старих фактів.
@@ -849,7 +851,7 @@ class MemoryService:
         """
         if not self._enabled:
             return 0
-        
+
         try:
             response = self.client.rpc("apply_memory_decay").execute()
             affected = response.data if isinstance(response.data, int) else 0
@@ -858,7 +860,7 @@ class MemoryService:
         except Exception as e:
             logger.error("Failed to apply time decay: %s", e)
             return 0
-    
+
     async def cleanup_expired(self) -> int:
         """
         Видалити expired факти.
@@ -868,10 +870,10 @@ class MemoryService:
         """
         if not self._enabled:
             return 0
-        
+
         try:
             now = datetime.now(UTC).isoformat()
-            
+
             response = (
                 self.client.table(TABLE_MEMORIES)
                 .update({"is_active": False})
@@ -879,11 +881,11 @@ class MemoryService:
                 .eq("is_active", True)
                 .execute()
             )
-            
+
             count = len(response.data) if response.data else 0
             logger.info("Cleaned up %d expired memories", count)
             return count
-            
+
         except Exception as e:
             logger.error("Failed to cleanup expired: %s", e)
             return 0

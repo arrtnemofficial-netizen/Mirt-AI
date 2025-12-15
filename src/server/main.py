@@ -27,6 +27,7 @@ from src.server.dependencies import (
 )
 from src.server.middleware import setup_middleware
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -155,7 +156,7 @@ class ApiV1MessageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="ignore")
 
     @model_validator(mode="after")
-    def extract_image_from_message(self) -> "ApiV1MessageRequest":
+    def extract_image_from_message(self) -> ApiV1MessageRequest:
         """Extract image URL from message text if not provided separately.
         
         This handles the n8n format where message field contains the image URL.
@@ -163,28 +164,28 @@ class ApiV1MessageRequest(BaseModel):
         """
         msg = (self.message or "").strip()
         img_url = self.image_url
-        
+
         # Strip ManyChat/n8n prefix '.;' (can appear multiple times)
         while msg.startswith(".;"):
             msg = msg[2:].lstrip()
-        
+
         # Extract image URL from message text if not provided separately
         if not img_url and msg:
             match = _IMAGE_URL_PATTERN.search(msg)
             if match:
                 img_url = match.group(0)
                 logger.info("[API_V1] 📷 Extracted image URL from message: %s", img_url[:60])
-        
+
         # Remove embedded image URL from message text
         if img_url and msg:
             msg = msg.replace(img_url, "").strip()
             # Strip prefix again in case it was before the URL
             while msg.startswith(".;"):
                 msg = msg[2:].lstrip()
-        
+
         if not msg and not img_url:
             raise ValueError("Either message or image_url is required")
-        
+
         # Use object.__setattr__ for Pydantic v2 compatibility
         object.__setattr__(self, "message", msg)
         object.__setattr__(self, "image_url", img_url)
@@ -300,7 +301,7 @@ async def api_v1_messages(
     raw_body = await request.body()
     logger.info("=" * 60)
     logger.info("[API_V1] 📥 RAW PAYLOAD: %s", raw_body.decode('utf-8', errors='replace')[:500])
-    
+
     # Parse JSON manually to log before Pydantic
     import json
     try:
@@ -312,7 +313,7 @@ async def api_v1_messages(
     except json.JSONDecodeError as e:
         logger.error("[API_V1] ❌ JSON parse error: %s", e)
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
-    
+
     # === STEP 2: Validate with Pydantic ===
     try:
         payload = ApiV1MessageRequest.model_validate(raw_json)
@@ -325,7 +326,7 @@ async def api_v1_messages(
     except Exception as e:
         logger.error("[API_V1] ❌ Pydantic validation error: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     # === STEP 3: Auth check ===
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
     inbound_token = x_api_key
@@ -349,7 +350,7 @@ async def api_v1_messages(
 
     user_id = str(payload.client_id)
     channel = payload.type or "instagram"
-    
+
     logger.info("[API_V1] 🚀 Scheduling background task:")
     logger.info("[API_V1]    user_id: %s", user_id)
     logger.info("[API_V1]    text: %s", (payload.message or "")[:50])
@@ -398,16 +399,16 @@ async def manychat_webhook(
     if settings.MANYCHAT_PUSH_MODE:
         from src.integrations.manychat.async_service import get_manychat_async_service
         from src.server.dependencies import get_session_store
-        
+
         try:
             # Extract user info from payload
             subscriber = payload.get("subscriber") or payload.get("user") or {}
             message = payload.get("message") or payload.get("data", {}).get("message") or {}
-            
+
             user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
             text = ""
             image_url = None
-            
+
             if isinstance(message, dict):
                 text = message.get("text") or message.get("content") or ""
                 # Extract image from attachments
@@ -417,21 +418,21 @@ async def manychat_webhook(
                         break
                 if not image_url:
                     image_url = message.get("image") or message.get("image_url")
-            
+
             # Also check data.image_url
             if not image_url:
                 data = payload.get("data", {})
                 image_url = data.get("image_url") or data.get("photo_url")
-            
+
             channel = payload.get("type") or "instagram"
-            
+
             if not text and not image_url:
                 raise HTTPException(status_code=400, detail="Missing message text or image")
-            
+
             # Schedule background processing
             store = get_session_store()
             service = get_manychat_async_service(store)
-            
+
             background_tasks.add_task(
                 service.process_message_async,
                 user_id=user_id,
@@ -439,16 +440,16 @@ async def manychat_webhook(
                 image_url=image_url,
                 channel=channel,
             )
-            
+
             logger.info("[MANYCHAT] 📨 Accepted message from %s (push mode)", user_id)
             return {"status": "accepted"}
-            
+
         except HTTPException:
             raise
         except Exception as exc:
             logger.exception("[MANYCHAT] Error in push mode: %s", exc)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    
+
     # Response mode: wait for AI and return response
     handler = get_cached_manychat_handler()
     try:
@@ -480,6 +481,148 @@ async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
     """Handle inventory updates from Snitkix CRM."""
     from src.integrations.crm.webhooks import snitkix_inventory_webhook as webhook_handler
     return await webhook_handler(request)
+
+
+# =============================================================================
+# SITNIKS STATUS UPDATE ENDPOINT (for external JS node / n8n / ManyChat)
+# =============================================================================
+
+class SitniksUpdateRequest(BaseModel):
+    """Request for updating Sitniks chat status from external systems."""
+    stage: str = Field(
+        description="Stage: first_touch, give_requisites, escalation"
+    )
+    user_id: str = Field(
+        description="MIRT user/session ID",
+        validation_alias=AliasChoices("user_id", "userId", "session_id", "sessionId", "client_id", "clientId"),
+    )
+    instagram_username: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("instagram_username", "instagramUsername", "ig_username"),
+    )
+    telegram_username: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("telegram_username", "telegramUsername", "tg_username"),
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+@app.post("/api/v1/sitniks/update-status")
+async def sitniks_update_status(
+    payload: SitniksUpdateRequest,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Update Sitniks CRM chat status from external JS node.
+    
+    This endpoint allows ManyChat/n8n JS nodes to trigger status updates
+    after the agent response is generated.
+    
+    Stages:
+    - first_touch: Set "Взято в роботу" + assign AI Manager
+    - give_requisites: Set "Виставлено рахунок"  
+    - escalation: Set "AI Увага" + assign human manager
+    
+    Auth: X-API-Key header or Authorization: Bearer token
+    (uses MANYCHAT_VERIFY_TOKEN)
+    
+    Example JS (n8n):
+    ```javascript
+    const response = await fetch('https://your-server/api/v1/sitniks/update-status', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': 'your-token'
+        },
+        body: JSON.stringify({
+            stage: 'first_touch',
+            user_id: '12345',
+            instagram_username: 'user123'
+        })
+    });
+    ```
+    """
+    from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+
+    # Auth check (same as /api/v1/messages)
+    verify_token = settings.MANYCHAT_VERIFY_TOKEN
+    inbound_token = x_api_key
+    if not inbound_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            inbound_token = auth_value[7:].strip()
+        else:
+            inbound_token = auth_value
+
+    if verify_token and verify_token != inbound_token:
+        raise HTTPException(status_code=401, detail="Invalid API token")
+
+    service = get_sitniks_chat_service()
+
+    if not service.enabled:
+        return {
+            "success": False,
+            "error": "Sitniks integration not configured",
+            "stage": payload.stage,
+        }
+
+    stage = payload.stage.lower().replace("-", "_").replace(" ", "_")
+    user_id = payload.user_id
+
+    logger.info(
+        "[SITNIKS_API] Update status: stage=%s, user_id=%s, ig=%s",
+        stage,
+        user_id,
+        payload.instagram_username,
+    )
+
+    try:
+        if stage == "first_touch":
+            result = await service.handle_first_touch(
+                user_id=user_id,
+                instagram_username=payload.instagram_username,
+                telegram_username=payload.telegram_username,
+            )
+            return {
+                "success": result.get("success", False),
+                "stage": stage,
+                "chat_id": result.get("chat_id"),
+                "status_set": result.get("status_set", False),
+                "manager_assigned": result.get("manager_assigned", False),
+                "error": result.get("error"),
+            }
+
+        elif stage in ("give_requisites", "invoice", "invoice_sent"):
+            success = await service.handle_invoice_sent(user_id)
+            return {
+                "success": success,
+                "stage": "give_requisites",
+            }
+
+        elif stage == "escalation":
+            result = await service.handle_escalation(user_id)
+            return {
+                "success": result.get("success", False),
+                "stage": stage,
+                "chat_id": result.get("chat_id"),
+                "status_set": result.get("status_set", False),
+                "manager_assigned": result.get("manager_assigned", False),
+            }
+
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown stage: {stage}. Valid: first_touch, give_requisites, escalation",
+            }
+
+    except Exception as e:
+        logger.exception("[SITNIKS_API] Error: %s", e)
+        return {
+            "success": False,
+            "error": str(e),
+            "stage": stage,
+        }
 
 
 @app.post("/automation/mirt-summarize-prod-v1")
@@ -640,8 +783,8 @@ async def manychat_create_order(
 ) -> dict[str, Any]:
     """Create order in CRM from ManyChat data.
 
-    This endpoint is called when all customer data is collected
-    and order should be created in Snitkix CRM.
+    IDEMPOTENT: Uses deterministic external_id based on user + product + price.
+    Duplicate requests return existing order instead of creating new one.
 
     Payload expected:
     {
@@ -656,6 +799,8 @@ async def manychat_create_order(
         }
     }
     """
+    import hashlib
+
     from src.integrations.crm.snitkix import get_snitkix_client
     from src.services.order_model import (
         CustomerInfo,
@@ -664,6 +809,7 @@ async def manychat_create_order(
         build_missing_data_prompt,
         validate_order_data,
     )
+    from src.services.supabase_client import get_supabase_client
 
     # Verify token
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
@@ -705,10 +851,55 @@ async def manychat_create_order(
             ],
         }
 
+    # === IDEMPOTENCY: Create deterministic external_id ===
+    # Hash: user_id + product_name + price (normalized)
+    idempotency_data = f"{user_id}|{product_name.lower().strip()}|{int(price * 100)}"
+    idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
+    external_id = f"mc_{user_id}_{idempotency_hash}"
+
+    logger.info(
+        "[CREATE_ORDER] Idempotency key: %s (user=%s, product=%s, price=%s)",
+        external_id,
+        user_id,
+        product_name[:20],
+        price,
+    )
+
+    # === CHECK FOR EXISTING ORDER ===
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            existing = (
+                supabase.table("orders")
+                .select("id, crm_order_id, status")
+                .eq("external_id", external_id)
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                order_data = existing.data[0]
+                logger.info(
+                    "[CREATE_ORDER] Duplicate detected, returning existing order: %s",
+                    order_data.get("crm_order_id"),
+                )
+                return {
+                    "success": True,
+                    "order_id": order_data.get("crm_order_id"),
+                    "message": "Замовлення вже створено! 🎉",
+                    "duplicate": True,
+                    "set_field_values": [
+                        {"field_name": "order_status", "field_value": "created"},
+                        {"field_name": "crm_order_id", "field_value": order_data.get("crm_order_id") or ""},
+                    ],
+                    "add_tag": ["order_created"],
+                }
+        except Exception as e:
+            logger.warning("[CREATE_ORDER] Failed to check for duplicate: %s", e)
+
     # Create order
     try:
         order = Order(
-            external_id=f"mc_{user_id}",
+            external_id=external_id,
             customer=CustomerInfo(
                 full_name=full_name,
                 phone=phone,
@@ -734,6 +925,21 @@ async def manychat_create_order(
         response = await crm.create_order(order)
 
         if response.success:
+            # Save to local DB for idempotency
+            if supabase:
+                try:
+                    supabase.table("orders").upsert(
+                        {
+                            "external_id": external_id,
+                            "session_id": user_id,
+                            "crm_order_id": response.order_id,
+                            "status": "created",
+                        },
+                        on_conflict="external_id",
+                    ).execute()
+                except Exception as e:
+                    logger.warning("[CREATE_ORDER] Failed to save order: %s", e)
+
             return {
                 "success": True,
                 "order_id": response.order_id,

@@ -1,7 +1,9 @@
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -9,8 +11,8 @@ logger = logging.getLogger(__name__)
 class BufferedMessage:
     text: str = ""
     has_image: bool = False
-    image_url: Optional[str] = None
-    extra_metadata: Dict[str, Any] = field(default_factory=dict)
+    image_url: str | None = None
+    extra_metadata: dict[str, Any] = field(default_factory=dict)
     original_message: Any = None  # Aiogram Message object for replying
 
 class MessageDebouncer:
@@ -21,13 +23,13 @@ class MessageDebouncer:
     1. Callback mode (Telegram): wait for delay, then call a function.
     2. Await mode (Webhooks): await result, returns None if superseded by newer message.
     """
-    
+
     def __init__(self, delay: float = 2.0):
         self.delay = delay
-        self.buffers: Dict[str, List[BufferedMessage]] = {}
-        self.timers: Dict[str, asyncio.Task] = {}
-        self.processing_callbacks: Dict[str, Callable] = {}
-        self.active_futures: Dict[str, asyncio.Future] = {}
+        self.buffers: dict[str, list[BufferedMessage]] = {}
+        self.timers: dict[str, asyncio.Task] = {}
+        self.processing_callbacks: dict[str, Callable] = {}
+        self.active_futures: dict[str, asyncio.Future] = {}
 
     # --- Callback Mode (Telegram) ---
 
@@ -36,31 +38,31 @@ class MessageDebouncer:
         self.processing_callbacks[session_id] = callback
 
     async def add_message(
-        self, 
-        session_id: str, 
-        message: BufferedMessage, 
+        self,
+        session_id: str,
+        message: BufferedMessage,
         callback: Callable[[str, BufferedMessage], Coroutine]
     ):
         """Add a message to the buffer and reset the timer (Callback Mode)."""
-        
+
         # Register callback if not exists or update it
         self.processing_callbacks[session_id] = callback
-        
+
         # Add to buffer
         self._append_to_buffer(session_id, message)
-        
+
         # Reset timer
         self._reset_timer(session_id)
-        
+
         logger.info(f"[DEBOUNCER] {session_id}: Message buffered (Callback Mode). Timer reset to {self.delay}s.")
 
     # --- Await Mode (ManyChat/Webhooks) ---
 
     async def wait_for_debounce(
-        self, 
-        session_id: str, 
+        self,
+        session_id: str,
         message: BufferedMessage
-    ) -> Optional[BufferedMessage]:
+    ) -> BufferedMessage | None:
         """
         Add message and wait. 
         Returns aggregated message if this request triggered the processing.
@@ -68,22 +70,22 @@ class MessageDebouncer:
         """
         # Add to buffer
         self._append_to_buffer(session_id, message)
-        
+
         # Cancel previous future (tell it to return None)
         if session_id in self.active_futures:
             old_future = self.active_futures[session_id]
             if not old_future.done():
                 old_future.set_result(None)
-        
+
         # Create new future for this request
         future = asyncio.Future()
         self.active_futures[session_id] = future
-        
+
         # Reset timer
         self._reset_timer(session_id, mode='await')
-        
+
         logger.info(f"[DEBOUNCER] {session_id}: Message buffered (Await Mode). Waiting...")
-        
+
         try:
             return await future
         except asyncio.CancelledError:
@@ -100,7 +102,7 @@ class MessageDebouncer:
         # Cancel existing timer
         if session_id in self.timers:
             self.timers[session_id].cancel()
-            
+
         # Start new timer
         self.timers[session_id] = asyncio.create_task(self._timer_task(session_id, mode))
 
@@ -108,12 +110,12 @@ class MessageDebouncer:
         """Wait for delay, then trigger processing."""
         try:
             await asyncio.sleep(self.delay)
-            
+
             if mode == 'callback':
                 await self._process_callback(session_id)
             else:
                 self._process_future(session_id)
-                
+
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -128,7 +130,7 @@ class MessageDebouncer:
 
         callback = self.processing_callbacks.get(session_id)
         self._cleanup(session_id)
-        
+
         if callback:
             try:
                 await callback(session_id, aggregated)
@@ -139,18 +141,18 @@ class MessageDebouncer:
         """Aggregate messages and resolve the active future."""
         aggregated = self._aggregate_messages(session_id)
         future = self.active_futures.get(session_id)
-        
+
         self._cleanup(session_id)
-        
+
         if future and not future.done():
             future.set_result(aggregated)
 
-    def _aggregate_messages(self, session_id: str) -> Optional[BufferedMessage]:
+    def _aggregate_messages(self, session_id: str) -> BufferedMessage | None:
         if session_id not in self.buffers or not self.buffers[session_id]:
             return None
 
         messages = self.buffers[session_id]
-        
+
         full_text_parts = []
         has_image = False
         last_image_url = None
@@ -160,23 +162,23 @@ class MessageDebouncer:
         for msg in messages:
             if msg.text:
                 full_text_parts.append(msg.text)
-            
+
             if msg.has_image:
                 has_image = True
                 last_image_url = msg.image_url
-            
+
             if msg.extra_metadata:
                 merged_metadata.update(msg.extra_metadata)
-                
+
             last_original_message = msg.original_message
 
         combined_text = "\n".join(full_text_parts)
-        
+
         logger.info(
             f"[DEBOUNCER] {session_id}: Aggregated {len(messages)} messages. "
             f"Final Text: '{combined_text[:50]}...'"
         )
-        
+
         # Track metrics
         try:
             from src.services.observability import track_metric
@@ -185,7 +187,7 @@ class MessageDebouncer:
                 track_metric("debouncer_has_image", 1)
         except ImportError:
             pass  # Observability not available
-        
+
         return BufferedMessage(
             text=combined_text,
             has_image=has_image,

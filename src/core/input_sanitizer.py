@@ -90,7 +90,7 @@ def check_input(text: str) -> tuple[SanitizeResult, str | None]:
     """
     if not text:
         return ("clean", None)
-    
+
     # Check for dangerous patterns
     for pattern in _DANGEROUS_PATTERNS:
         match = pattern.search(text)
@@ -101,18 +101,18 @@ def check_input(text: str) -> tuple[SanitizeResult, str | None]:
                 matched,
             )
             return ("blocked", matched)
-    
+
     # Check for excessive special characters (encoding attack)
     special_ratio = sum(1 for c in text if not c.isalnum() and not c.isspace()) / max(len(text), 1)
     if special_ratio > 0.5 and len(text) > 20:
         logger.warning("[SECURITY] Suspicious special character ratio: %.2f", special_ratio)
         return ("suspicious", "high_special_ratio")
-    
+
     # Check for very long messages (context stuffing)
     if len(text) > 5000:
         logger.warning("[SECURITY] Unusually long message: %d chars", len(text))
         return ("suspicious", "message_too_long")
-    
+
     return ("clean", None)
 
 
@@ -128,16 +128,16 @@ def sanitize_input(text: str) -> str:
     """
     if not text:
         return text
-    
+
     result = text
-    
+
     # Remove dangerous patterns
     for pattern in _DANGEROUS_PATTERNS:
         result = pattern.sub("", result)
-    
+
     # Clean up multiple spaces
     result = re.sub(r"\s+", " ", result).strip()
-    
+
     return result
 
 
@@ -173,10 +173,10 @@ def process_user_message(text: str) -> tuple[str, bool]:
         - was_modified: True if message was changed
     """
     result, pattern = check_input(text)
-    
+
     if result == "clean":
         return (text, False)
-    
+
     if result == "blocked":
         # Remove the dangerous content
         sanitized = sanitize_input(text)
@@ -186,6 +186,6 @@ def process_user_message(text: str) -> tuple[str, bool]:
             sanitized[:50],
         )
         return (sanitized if sanitized else "Привіт", True)
-    
+
     # Suspicious but not blocked - proceed with original
     return (text, False)

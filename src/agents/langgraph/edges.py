@@ -12,9 +12,10 @@ from typing import Any, Literal
 
 from src.core.state_machine import State
 
+from .nodes.intent import INTENT_PATTERNS
+
 # Import for intent detection
 from .state_prompts import detect_simple_intent
-from .nodes.intent import INTENT_PATTERNS
 
 
 logger = logging.getLogger(__name__)
@@ -155,7 +156,7 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
                 session_id,
             )
             return "payment"
-        
+
         # Check confirmation keywords directly (да, так, ок, беру, etc.)
         confirmation_keywords = INTENT_PATTERNS.get("CONFIRMATION", [])
         msg_lower = user_message.lower() if user_message else ""
@@ -167,7 +168,7 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
                     keyword,
                 )
                 return "payment"
-        
+
         # User asks clarifying question → agent handles it
         logger.info("🔀 [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
         return "agent"
@@ -296,15 +297,15 @@ def _resolve_intent_route(
         # STATE_5: Always route to payment node for payment flow
         if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
             return "payment"
-        
+
         # STATE_4: User confirmed offer ("беру") → payment node
         if current_state == State.STATE_4_OFFER.value:
             return "payment"
-        
+
         # Has products but not yet in payment → offer
         if state.get("selected_products") or state.get("offered_products"):
             return "offer"
-        
+
         return "agent"
 
     # Size/color with products -> offer

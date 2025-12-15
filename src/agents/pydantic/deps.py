@@ -23,9 +23,10 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from .memory_models import Fact, MemoryContext, UserProfile
-    from .models import StateType
     from src.services.memory_service import MemoryService
+
+    from .memory_models import Fact, UserProfile
+    from .models import StateType
 
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ class AgentDeps:
     # Services (injected)
     db: OrderService = field(default_factory=OrderService)
     catalog: CatalogService = field(default_factory=CatalogService)
-    memory: "MemoryService | None" = None  # Lazy init to avoid circular import
+    memory: MemoryService | None = None  # Lazy init to avoid circular import
 
     # Environment
     env: str = "production"
@@ -112,13 +113,13 @@ class AgentDeps:
     # MEMORY SYSTEM (Titans-like)
     # ==========================================================================
     # These are populated by memory_context_node before agent execution
-    
+
     # Persistent Memory - user profile (always loaded)
     profile: UserProfile | None = None
-    
+
     # Fluid Memory - relevant facts (top-K by importance)
     facts: list[Fact] = field(default_factory=list)
-    
+
     # Pre-formatted memory context for prompt injection
     memory_context_prompt: str | None = None
 
@@ -149,7 +150,7 @@ class AgentDeps:
                 self.selected_products,
             ]
         )
-    
+
     def get_memory_context_prompt(self) -> str:
         """
         Get formatted memory context for prompt injection.
@@ -159,13 +160,13 @@ class AgentDeps:
         # Use pre-formatted if available (set by memory_context_node)
         if self.memory_context_prompt:
             return self.memory_context_prompt
-        
+
         # Generate from profile and facts
         lines = []
-        
+
         if self.profile:
             p = self.profile
-            
+
             # Child info
             if hasattr(p, 'child_profile') and p.child_profile:
                 child = p.child_profile
@@ -180,30 +181,30 @@ class AgentDeps:
                     child_info.append(f"стать: {child.gender}")
                 if child_info:
                     lines.append(f"Дитина: {', '.join(child_info)}")
-            
+
             # Logistics from profile
             if hasattr(p, 'logistics') and p.logistics:
                 if hasattr(p.logistics, 'city') and p.logistics.city:
                     lines.append(f"Місто: {p.logistics.city}")
                 if hasattr(p.logistics, 'favorite_branch') and p.logistics.favorite_branch:
                     lines.append(f"НП: {p.logistics.favorite_branch}")
-            
+
             # Style preferences
             if hasattr(p, 'style_preferences') and p.style_preferences:
                 if hasattr(p.style_preferences, 'favorite_models') and p.style_preferences.favorite_models:
                     lines.append(f"Улюблені моделі: {', '.join(p.style_preferences.favorite_models)}")
-        
+
         # Add facts
         if self.facts:
             fact_lines = [f"- {f.content}" for f in self.facts[:5]]
             if fact_lines:
                 lines.append("Факти: " + "; ".join(f.content for f in self.facts[:5]))
-        
+
         if not lines:
             return ""
-        
+
         return "### ЩО МИ ЗНАЄМО ПРО КЛІЄНТА:\n" + "\n".join(lines)
-    
+
     def has_memory_context(self) -> bool:
         """Check if any memory context is available."""
         return bool(self.profile or self.facts or self.memory_context_prompt)
@@ -275,17 +276,17 @@ async def create_deps_with_memory(
         AgentDeps with profile and facts loaded
     """
     deps = create_deps_from_state(state)
-    
+
     if not deps.user_id:
         return deps
-    
+
     # Get or create memory service
     if memory_service is None:
         memory_service = MemoryService()
-    
+
     if not memory_service.enabled:
         return deps
-    
+
     # Load memory context
     try:
         context = await memory_service.load_memory_context(deps.user_id)
@@ -294,5 +295,5 @@ async def create_deps_with_memory(
         deps.memory_context_prompt = context.to_prompt_block()
     except Exception as e:
         logger.warning("Failed to load memory context for user %s: %s", deps.user_id, e)
-    
+
     return deps

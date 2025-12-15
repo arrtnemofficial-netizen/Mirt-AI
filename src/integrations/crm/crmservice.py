@@ -13,12 +13,13 @@ This service provides:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from src.conf.config import settings
 from src.services.supabase_client import get_supabase_client
 from src.workers.tasks.crm import create_crm_order, sync_order_status
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class CRMService:
         self,
         session_id: str,
         order_data: dict[str, Any],
-        external_id: Optional[str] = None,
+        external_id: str | None = None,
     ) -> dict[str, Any]:
         """Create order in CRM with persistence and idempotency.
         
@@ -50,8 +51,18 @@ class CRMService:
             return {"status": "skipped", "reason": "crm_not_configured"}
 
         # Generate external_id if not provided
+        # WARNING: This fallback is non-deterministic! Prefer passing deterministic external_id
         if not external_id:
-            external_id = f"{session_id}_{int(datetime.now(timezone.utc).timestamp())}"
+            import hashlib
+            # Use session_id + current day as fallback (still not ideal, but better than timestamp)
+            day_key = datetime.now(UTC).strftime('%Y-%m-%d')
+            fallback_hash = hashlib.sha256(f"{session_id}|{day_key}".encode()).hexdigest()[:16]
+            external_id = f"{session_id}_{fallback_hash}"
+            logger.warning(
+                "[CRM:SERVICE] Using non-deterministic fallback external_id=%s. "
+                "Pass explicit external_id for idempotency!",
+                external_id,
+            )
 
         # Check for existing order to prevent duplicates
         existing = await self._get_existing_order(external_id)
@@ -149,7 +160,7 @@ class CRMService:
         self,
         crm_order_id: str,
         new_status: str,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Handle status update from CRM webhook.
         
@@ -215,10 +226,10 @@ class CRMService:
 
     async def get_order_status(
         self,
-        session_id: Optional[str] = None,
-        external_id: Optional[str] = None,
-        crm_order_id: Optional[str] = None,
-    ) -> Optional[dict[str, Any]]:
+        session_id: str | None = None,
+        external_id: str | None = None,
+        crm_order_id: str | None = None,
+    ) -> dict[str, Any] | None:
         """Get order status by any identifier."""
         try:
             if external_id:
@@ -258,7 +269,7 @@ class CRMService:
         self,
         session_id: str,
         external_id: str,
-        crm_order_id: Optional[str],
+        crm_order_id: str | None,
         status: str,
         order_data: dict[str, Any],
     ) -> None:
@@ -269,8 +280,8 @@ class CRMService:
             "crm_order_id": crm_order_id,
             "status": status,
             "order_data": order_data,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }).execute()
 
     async def _update_order_mapping(
@@ -283,19 +294,19 @@ class CRMService:
         self.supabase.table("crm_orders").update({
             "crm_order_id": crm_order_id,
             "status": status,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }).eq("external_id", external_id).execute()
 
     async def _update_order_status(
         self,
         external_id: str,
         status: str,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Update order status."""
         update_data = {
             "status": status,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
         if metadata:
             update_data["metadata"] = metadata
@@ -304,7 +315,7 @@ class CRMService:
             "external_id", external_id
         ).execute()
 
-    async def _get_existing_order(self, external_id: str) -> Optional[dict[str, Any]]:
+    async def _get_existing_order(self, external_id: str) -> dict[str, Any] | None:
         """Get existing order by external ID."""
         try:
             response = (
@@ -318,7 +329,7 @@ class CRMService:
         except Exception:
             return None
 
-    async def _get_order_by_crm_id(self, crm_order_id: str) -> Optional[dict[str, Any]]:
+    async def _get_order_by_crm_id(self, crm_order_id: str) -> dict[str, Any] | None:
         """Get order by CRM order ID."""
         try:
             response = (
@@ -332,7 +343,7 @@ class CRMService:
         except Exception:
             return None
 
-    async def _get_latest_order_by_session(self, session_id: str) -> Optional[dict[str, Any]]:
+    async def _get_latest_order_by_session(self, session_id: str) -> dict[str, Any] | None:
         """Get latest order for session."""
         try:
             response = (
@@ -350,7 +361,7 @@ class CRMService:
 
 
 # Global service instance
-_crm_service: Optional[CRMService] = None
+_crm_service: CRMService | None = None
 
 
 def get_crm_service() -> CRMService:

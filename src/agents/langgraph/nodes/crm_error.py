@@ -16,10 +16,10 @@ from langgraph.types import Command
 
 from src.integrations.crm.error_handler import (
     get_crm_error_handler,
-    handle_crm_error_in_state,
     retry_crm_order_in_state,
 )
 from src.services.observability import log_agent_step, track_metric
+
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ async def _analyze_and_present_error(
 
     # Build user message
     user_message = error_result.get("message", "❌ Сталася помилка CRM")
-    
+
     # Add retry options if available
     if error_result.get("can_retry"):
         user_message += "\n\nВідповідаючи, ви можете:\n"
@@ -178,11 +178,11 @@ async def _handle_retry_choice(
 
     # Perform retry
     retry_result = await retry_crm_order_in_state(state)
-    
+
     if retry_result.get("crm_retry_result", {}).get("success"):
         # Retry successful - proceed to upsell
         success_message = "✅ Замовлення успішно відправлено до CRM! Продовжуємо оформлення..."
-        
+
         return Command(
             update={
                 "messages": [{"role": "assistant", "content": success_message}],
@@ -199,7 +199,7 @@ async def _handle_retry_choice(
     else:
         # Retry failed - show error again
         error_message = retry_result.get("crm_retry_result", {}).get("message", "❌ Повторна спроба не вдалася")
-        
+
         return Command(
             update={
                 "messages": [{"role": "assistant", "content": error_message}],
@@ -224,7 +224,7 @@ async def _handle_escalate_choice(
     error_handler = get_crm_error_handler()
     crm_external_id = state.get("crm_external_id", "")
     crm_error_result = state.get("crm_error_result", {})
-    
+
     escalate_result = await error_handler.escalate_to_operator(
         session_id=session_id,
         external_id=crm_external_id,
@@ -232,7 +232,7 @@ async def _handle_escalate_choice(
     )
 
     escalation_message = escalate_result.get("message", "📞 Замовлення передано оператору")
-    
+
     track_metric("crm_error_escalated", 1, {"session_id": session_id})
 
     return Command(
@@ -258,7 +258,7 @@ async def _handle_back_choice(
     logger.info("[CRM:ERROR] User chose back for session %s", session_id)
 
     back_message = "🔙 Повертаємось до оформлення замовлення..."
-    
+
     return Command(
         update={
             "messages": [{"role": "assistant", "content": back_message}],
@@ -286,7 +286,7 @@ async def _show_options_again(
         "• 'оператор' або 'escalate' - для передачі оператору\n"
         "• 'назад' - для повернення до оформлення"
     )
-    
+
     return Command(
         update={
             "messages": [{"role": "assistant", "content": options_message}],
@@ -305,9 +305,9 @@ def _parse_user_intent(message: str) -> str:
     """Parse user intent from message."""
     if not message:
         return "unknown"
-    
+
     message_lower = message.lower().strip()
-    
+
     if any(word in message_lower for word in ["повторити", "retry", "знову", "спробувати"]):
         return "retry"
     elif any(word in message_lower for word in ["оператор", "escalate", "людина", "допомога"]):

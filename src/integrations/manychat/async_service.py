@@ -12,11 +12,13 @@ Flow:
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph
+from src.core.fallbacks import FallbackType, get_fallback_response
+from src.core.rate_limiter import check_rate_limit
 from src.services.conversation import create_conversation_handler
 from src.services.debouncer import BufferedMessage, MessageDebouncer
 from src.services.message_store import MessageStore, create_message_store
@@ -87,12 +89,22 @@ class ManyChatAsyncService:
             image_url: Optional image URL
             channel: Channel type (instagram, facebook, etc.)
         """
+        start_time = time.time()
         logger.info("=" * 50)
         logger.info("[MANYCHAT:%s] 🔥 PROCESS_MESSAGE_ASYNC STARTED", user_id)
         logger.info("[MANYCHAT:%s]    text: '%s'", user_id, text[:100] if text else "(empty)")
         logger.info("[MANYCHAT:%s]    image_url: %s", user_id, image_url)
         logger.info("[MANYCHAT:%s]    channel: %s", user_id, channel)
-        
+
+        # RATE LIMITING: Захист від спаму/abuse
+        if not check_rate_limit(user_id):
+            logger.warning("[MANYCHAT:%s] ⚠️ RATE LIMITED - too many requests", user_id)
+            fallback = get_fallback_response(FallbackType.RATE_LIMITED)
+            await self.push_client.send_text(
+                user_id, fallback["text"], channel=channel
+            )
+            return
+
         try:
             # Handle commands BEFORE debouncing
             raw_text = (text or "").strip()
@@ -169,7 +181,7 @@ class ManyChatAsyncService:
         channel: str,
     ) -> None:
         """Convert AgentResponse to ManyChat format and push."""
-        
+
         # Build messages
         text_chunks = render_agent_response_text(agent_response)
         messages: list[dict[str, Any]] = [
@@ -233,14 +245,14 @@ class ManyChatAsyncService:
         """Handle /restart command - clear session and confirm."""
         # Delete session from store
         deleted = self.store.delete(user_id)
-        
+
         if deleted:
             logger.info("[MANYCHAT:%s] 🔄 Session cleared via /restart", user_id)
             response_text = "Сесія очищена! ✨\nНапишіть мені що-небудь, і ми почнемо спочатку 💬"
         else:
             logger.info("[MANYCHAT:%s] 🔄 /restart called but no session existed", user_id)
             response_text = "Сесія очищена! ✨\nНапишіть мені що-небудь, щоб почати 💬"
-        
+
         # Push confirmation
         await self.push_client.send_text(
             subscriber_id=user_id,

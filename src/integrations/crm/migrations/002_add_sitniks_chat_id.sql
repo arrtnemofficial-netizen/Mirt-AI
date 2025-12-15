@@ -21,7 +21,7 @@ ADD COLUMN IF NOT EXISTS user_nickname TEXT;
 -- 5. Create a dedicated table for Sitniks chat mappings (alternative approach)
 CREATE TABLE IF NOT EXISTS sitniks_chat_mappings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL UNIQUE,  -- UNIQUE: один клієнт = один запис
     instagram_username TEXT,
     telegram_username TEXT,
     sitniks_chat_id TEXT UNIQUE,
@@ -32,7 +32,11 @@ CREATE TABLE IF NOT EXISTS sitniks_chat_mappings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- user_id вже UNIQUE, але індекс корисний для швидкого пошу|
 CREATE INDEX IF NOT EXISTS idx_sitniks_mappings_user_id ON sitniks_chat_mappings(user_id);
+
+-- ВАЖЛИВО: Якщо таблиця вже існує без UNIQUE на user_id, виконай:
+-- ALTER TABLE sitniks_chat_mappings ADD CONSTRAINT sitniks_chat_mappings_user_id_key UNIQUE (user_id);
 CREATE INDEX IF NOT EXISTS idx_sitniks_mappings_instagram ON sitniks_chat_mappings(instagram_username);
 CREATE INDEX IF NOT EXISTS idx_sitniks_mappings_telegram ON sitniks_chat_mappings(telegram_username);
 

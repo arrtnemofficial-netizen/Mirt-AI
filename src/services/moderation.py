@@ -208,11 +208,11 @@ def detect_prompt_injection(text: str) -> bool:
     - etc.
     """
     text_lower = text.lower()
-    
+
     for pattern in PROMPT_INJECTION_PATTERNS:
         if re.search(pattern, text_lower, re.IGNORECASE):
             return True
-    
+
     return False
 
 

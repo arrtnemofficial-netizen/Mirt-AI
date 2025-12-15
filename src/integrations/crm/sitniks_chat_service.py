@@ -12,7 +12,7 @@ Statuses flow:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -34,10 +34,7 @@ class SitniksStatus:
     ORDER_FORMED = "Оформлено замовлення"
 
 
-# Manager IDs - will be fetched from API once available
-# For now using placeholder
-AI_MANAGER_NAME = "Павло"
-AI_MANAGER_ID: int | None = None  # Will be set after fetching from API
+# Manager configuration loaded from settings
 
 
 class SitniksChatService:
@@ -98,7 +95,7 @@ class SitniksChatService:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 # Calculate time range
-                end_date = datetime.now(timezone.utc)
+                end_date = datetime.now(UTC)
                 start_date = end_date - timedelta(minutes=lookback_minutes)
 
                 params = {
@@ -219,14 +216,14 @@ class SitniksChatService:
                 if response.status_code == 200:
                     data = response.json()
                     managers = data.get("data", [])
-                    
+
                     # Cache managers by name
                     for m in managers:
                         user = m.get("user", {})
                         name = user.get("fullname", "")
                         if name:
                             self._managers_cache[name.lower()] = m.get("id")
-                    
+
                     return managers
                 else:
                     logger.error(
@@ -242,13 +239,13 @@ class SitniksChatService:
     async def get_manager_id_by_name(self, name: str) -> int | None:
         """Get manager ID by name (case-insensitive)."""
         name_lower = name.lower()
-        
+
         if name_lower in self._managers_cache:
             return self._managers_cache[name_lower]
 
         # Fetch managers if cache is empty
         await self.get_managers()
-        
+
         return self._managers_cache.get(name_lower)
 
     async def assign_manager(
@@ -348,14 +345,15 @@ class SitniksChatService:
         result["status_set"] = status_ok
 
         # 4. Assign AI manager
-        ai_manager_id = await self.get_manager_id_by_name(AI_MANAGER_NAME)
+        ai_manager_name = settings.SITNIKS_AI_MANAGER_NAME
+        ai_manager_id = await self.get_manager_id_by_name(ai_manager_name)
         if ai_manager_id:
             manager_ok = await self.assign_manager(chat_id, ai_manager_id)
             result["manager_assigned"] = manager_ok
         else:
             logger.warning(
                 "[SITNIKS] AI manager '%s' not found in CRM",
-                AI_MANAGER_NAME,
+                ai_manager_name,
             )
 
         result["success"] = status_ok
@@ -394,19 +392,24 @@ class SitniksChatService:
         status_ok = await self.update_chat_status(chat_id, SitniksStatus.AI_ATTENTION)
         result["status_set"] = status_ok
 
-        # 2. Assign to a human manager (first available)
-        managers = await self.get_managers()
-        human_manager = None
-        for m in managers:
-            user = m.get("user", {})
-            name = user.get("fullname", "").lower()
-            if name != AI_MANAGER_NAME.lower():
-                human_manager = m
-                break
+        # 2. Assign to a human manager
+        human_manager_id = settings.SITNIKS_HUMAN_MANAGER_ID
 
-        if human_manager:
-            manager_ok = await self.assign_manager(chat_id, human_manager["id"])
+        if human_manager_id:
+            # Use configured manager ID
+            manager_ok = await self.assign_manager(chat_id, human_manager_id)
             result["manager_assigned"] = manager_ok
+        else:
+            # Fallback: pick first non-AI manager from API
+            managers = await self.get_managers()
+            ai_name = settings.SITNIKS_AI_MANAGER_NAME.lower()
+            for m in managers:
+                user = m.get("user", {})
+                name = user.get("fullname", "").lower()
+                if name != ai_name:
+                    manager_ok = await self.assign_manager(chat_id, m["id"])
+                    result["manager_assigned"] = manager_ok
+                    break
 
         result["success"] = status_ok
         return result
@@ -429,10 +432,10 @@ class SitniksChatService:
                     "sitniks_chat_id": chat_id,
                     "instagram_username": instagram_username,
                     "telegram_username": telegram_username,
-                    "first_touch_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "first_touch_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 },
-                on_conflict="sitniks_chat_id",
+                on_conflict="user_id",
             ).execute()
         except Exception as e:
             logger.error("[SITNIKS] Failed to save chat mapping: %s", e)

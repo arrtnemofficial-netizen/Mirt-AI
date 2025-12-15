@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from langgraph.graph.message import add_messages  # noqa: TCH002 - required at runtime
+from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from src.core.state_machine import State

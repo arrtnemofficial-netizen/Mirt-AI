@@ -40,7 +40,7 @@ class OrderService:
             raise ServiceUnavailableError("database", "Cannot save order - database unavailable")
 
         session_id = order_data.get("external_id")
-        
+
         try:
             # 0. IDEMPOTENCY CHECK - prevent duplicate orders
             if session_id:
@@ -59,7 +59,7 @@ class OrderService:
                         existing_id,
                     )
                     return str(existing_id)  # Return existing order ID
-            
+
             # 1. Prepare Order Payload
             customer = order_data.get("customer", {})
             totals = order_data.get("totals", {})

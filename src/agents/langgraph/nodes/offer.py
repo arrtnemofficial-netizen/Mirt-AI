@@ -91,12 +91,12 @@ async def offer_node(
     # =========================================================================
     validated_products = selected_products.copy()
     price_validation_passed = True
-    
+
     if settings.USE_OFFER_DELIBERATION and selected_products:
         validated_products, price_validation_passed = await _validate_prices_from_db(
             selected_products, session_id
         )
-    
+
     # Create deps with offer context + validated prices
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_4_OFFER.value
@@ -138,10 +138,10 @@ async def offer_node(
         # =========================================================================
         use_fallback = False
         fallback_reason = ""
-        
+
         if settings.USE_OFFER_DELIBERATION and response.deliberation:
             delib = response.deliberation
-            
+
             # Log deliberation
             logger.info(
                 "🎯 [SESSION %s] Deliberation: confidence=%.2f, flags=%s",
@@ -155,7 +155,7 @@ async def offer_node(
                 (delib.business_view or "-")[:40],
                 (delib.quality_view or "-")[:40],
             )
-            
+
             # CHECK: Price mismatch → CRITICAL, use fallback
             if "price_mismatch" in delib.flags:
                 use_fallback = True
@@ -165,7 +165,7 @@ async def offer_node(
                     session_id,
                 )
                 track_metric("deliberation_price_mismatch", 1)
-            
+
             # CHECK: Low confidence → use fallback
             elif delib.confidence < settings.DELIBERATION_MIN_CONFIDENCE:
                 use_fallback = True
@@ -177,14 +177,14 @@ async def offer_node(
                     settings.DELIBERATION_MIN_CONFIDENCE,
                 )
                 track_metric("deliberation_low_confidence", 1)
-            
+
             # CHECK: Size unavailable (warning only, no fallback)
             if "size_unavailable" in delib.flags:
                 logger.warning(
                     "⚠️ [SESSION %s] SIZE UNAVAILABLE flag (no fallback)",
                     session_id,
                 )
-        
+
         # =========================================================================
         # STEP 4: BUILD RESPONSE (normal or fallback)
         # =========================================================================
@@ -194,9 +194,9 @@ async def offer_node(
                 fallback_text = FALLBACK_PRICE_MISMATCH
             else:
                 fallback_text = FALLBACK_LOW_CONFIDENCE
-            
+
             assistant_messages = [{"role": "assistant", "content": fallback_text}]
-            
+
             # Stay in SIZE_COLOR to re-try with correct data
             return {
                 "current_state": State.STATE_3_SIZE_COLOR.value,  # Go back!
@@ -207,7 +207,7 @@ async def offer_node(
                 "step_number": state.get("step_number", 0) + 1,
                 "last_error": None,
             }
-        
+
         # Normal flow: use LLM response
         assistant_messages = [
             {"role": "assistant", "content": m.content} for m in response.messages
@@ -251,7 +251,7 @@ async def offer_node(
 
 
 async def _validate_prices_from_db(
-    products: list[dict[str, Any]], 
+    products: list[dict[str, Any]],
     session_id: str
 ) -> tuple[list[dict[str, Any]], bool]:
     """
@@ -265,19 +265,19 @@ async def _validate_prices_from_db(
     catalog = CatalogService()
     validated = []
     all_correct = True
-    
+
     for product in products:
         product_name = product.get("name", "")
         claimed_price = product.get("price", 0)
         size = product.get("size")
-        
+
         # Lookup in DB
         try:
             results = await catalog.search_products(query=product_name, limit=1)
             if results:
                 db_product = results[0]
                 db_price = CatalogService.get_price_for_size(db_product, size)
-                
+
                 # Check if prices match (allow 5% tolerance for rounding)
                 if claimed_price > 0 and abs(db_price - claimed_price) > claimed_price * 0.05:
                     logger.warning(
@@ -297,9 +297,9 @@ async def _validate_prices_from_db(
                     )
         except Exception as e:
             logger.warning("DB lookup failed for '%s': %s", product_name, e)
-        
+
         validated.append(product)
-    
+
     return validated, all_correct
 
 

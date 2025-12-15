@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.services.conversation import create_conversation_handler
+from src.services.debouncer import BufferedMessage, MessageDebouncer
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
-from src.services.debouncer import MessageDebouncer, BufferedMessage
 
 
 if TYPE_CHECKING:
@@ -98,7 +98,7 @@ class ManychatWebhook:
             extra_metadata=extra_metadata
         )
 
-        # Wait for aggregation. 
+        # Wait for aggregation.
         # Returns None if this request is superseded by a newer one.
         aggregated_msg = await self.debouncer.wait_for_debounce(user_id, buffered_msg)
 
@@ -145,13 +145,13 @@ class ManychatWebhook:
         """
         subscriber = payload.get("subscriber") or payload.get("user")
         message = payload.get("message") or payload.get("data", {}).get("message")
-        
+
         text = None
         image_url = None
-        
+
         if isinstance(message, dict):
             text = message.get("text") or message.get("content") or ""
-            
+
             # Extract image from attachments (Instagram format)
             attachments = message.get("attachments", [])
             for attachment in attachments:
@@ -159,23 +159,23 @@ class ManychatWebhook:
                     payload_data = attachment.get("payload", {})
                     image_url = payload_data.get("url")
                     break
-            
+
             # Fallback: direct image field
             if not image_url:
                 image_url = message.get("image") or message.get("image_url")
-        
+
         # Also check data.image_url (for custom ManyChat flows)
         if not image_url:
             data = payload.get("data", {})
             image_url = data.get("image_url") or data.get("photo_url")
-        
+
         if not subscriber:
             raise ManychatPayloadError("Missing subscriber in payload")
-        
+
         # Allow empty text if image is present
         if not text and not image_url:
             raise ManychatPayloadError("Missing message text or image in payload")
-        
+
         user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
         return user_id, text or "", image_url
 

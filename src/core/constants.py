@@ -70,12 +70,12 @@ class DBTable:
     MESSAGES = "messages"  # Was: mirt_messages (dropped, use 'messages')
     SESSIONS = "agent_sessions"
     LLM_USAGE = "llm_usage"
-    
+
     # Memory System (Titans-like)
     PROFILES = "mirt_profiles"
     MEMORIES = "mirt_memories"
     MEMORY_SUMMARIES = "mirt_memory_summaries"
-    
+
     # CRM Integration
     CRM_ORDERS = "crm_orders"
     SITNIKS_MAPPINGS = "sitniks_chat_mappings"

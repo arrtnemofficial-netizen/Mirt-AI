@@ -52,21 +52,21 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
     """
     try:
         catalog = CatalogService()
-        
+
         # Якщо колір вже в назві (наприклад "Костюм Ритм (рожевий)") - не дублюємо
         search_query = product_name
         if color and f"({color})" not in product_name.lower() and color.lower() not in product_name.lower():
             # Спробуємо знайти точний match з кольором
             search_query = f"{product_name} ({color})"
-        
+
         results = await catalog.search_products(query=search_query, limit=5)
-        
+
         # Якщо не знайшли з повною назвою - спробуємо базову назву без кольору
         if not results and "(" in product_name:
             base_name = product_name.split("(")[0].strip()
             logger.debug("Retry search with base name: '%s'", base_name)
             results = await catalog.search_products(query=base_name, limit=5)
-        
+
         # Якщо є колір - шукаємо товар з цим кольором
         product = None
         if color and results:
@@ -75,24 +75,24 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
                 if color.lower() in p_name:
                     product = p
                     break
-        
+
         # Якщо не знайшли з кольором - беремо перший
         if not product and results:
             product = results[0]
-        
+
         if product:
             price_display = CatalogService.format_price_display(product)
             # Try multiple possible column names for photo URL
             photo_url = (
-                product.get("photo_url") 
-                or product.get("image_url") 
-                or product.get("photo") 
+                product.get("photo_url")
+                or product.get("image_url")
+                or product.get("photo")
                 or product.get("image")
                 or ""
             )
             logger.info(
                 "📦 Enriched from DB: %s (color=%s) -> %s, photo=%s",
-                product_name, color, price_display, 
+                product_name, color, price_display,
                 photo_url[:50] if photo_url else "<no photo>"
             )
             return {
@@ -126,14 +126,14 @@ def _extract_products(
 
     if response.identified_product:
         products = [response.identified_product.model_dump()]
-        logger.info("Vision identified: %s (confidence=%.0f%%)", 
+        logger.info("Vision identified: %s (confidence=%.0f%%)",
                    response.identified_product.name, confidence * 100)
 
     # Only show alternatives if NOT confident enough
     # High confidence = we know what it is, no need to confuse user with options
     if response.alternative_products and confidence < 0.85:
         products.extend([p.model_dump() for p in response.alternative_products])
-        logger.info("Vision alternatives: %d (showing because confidence < 85%%)", 
+        logger.info("Vision alternatives: %d (showing because confidence < 85%%)",
                    len(response.alternative_products))
     elif response.alternative_products:
         logger.info("Vision: skipping %d alternatives (confidence=%.0f%% >= 85%%)",
@@ -173,14 +173,14 @@ def _build_vision_messages(
         # БАБЛА 2: Назва товару + колір (БЕЗ ЦІНИ!)
         # Ціна буде показана тільки після того як клієнт вкаже зріст
         product_name = product.name
-        
+
         # Check if color is already in the name (e.g., "Костюм Ритм (рожевий)")
         # to avoid duplication like "Костюм Ритм (рожевий) у кольорі рожевий"
         color_already_in_name = (
-            product.color and 
+            product.color and
             product.color.lower() in product_name.lower()
         )
-        
+
         if color_already_in_name:
             # Color is in name - just use the name
             message_text = f"Це наш {product_name} 💛"
@@ -190,9 +190,9 @@ def _build_vision_messages(
         else:
             # No color info at all
             message_text = f"Це наш {product_name} 💛"
-        
+
         messages.append(text_msg(message_text))
-        
+
         # БАБЛА 3: Якщо зріст вже в тексті (фото + текст разом) - показуємо ціну одразу!
         # Інакше питаємо зріст, і agent_node обробить відповідь
         height = extract_height_from_text(user_message)
@@ -286,7 +286,7 @@ async def vision_node(
             # Передаємо колір для точного match в БД!
             vision_color = response.identified_product.color
             enriched = await _enrich_product_from_db(
-                response.identified_product.name, 
+                response.identified_product.name,
                 color=vision_color
             )
             if enriched:
@@ -382,7 +382,7 @@ async def vision_node(
         # =====================================================
         # Перевіряємо чи зріст вже є в тексті
         height_in_text = extract_height_from_text(user_message)
-        
+
         if selected_products:
             if height_in_text:
                 # Зріст вже є - готові до оформлення!

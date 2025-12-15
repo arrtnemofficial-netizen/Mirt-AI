@@ -17,17 +17,16 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
+
 # PydanticAI imports
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
-from src.agents.pydantic.models import MessageItem
-from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, log_trace, track_metric
 
 # State prompts and transition logic
 from ..state_prompts import (
-    detect_simple_intent,
     determine_next_dialog_phase,
     get_payment_sub_phase,
     get_state_prompt,
@@ -76,10 +75,10 @@ def _extract_size_from_response(messages: list) -> str | None:
     Looks for patterns like "раджу 146-152" or "розмір 122-128".
     """
     import re
-    
+
     for msg in messages:
         content = msg.content if hasattr(msg, "content") else str(msg)
-        
+
         for pattern in _SIZE_PATTERNS:
             # Use re.IGNORECASE for proper Unicode handling
             match = re.search(pattern, content, re.IGNORECASE)
@@ -89,7 +88,7 @@ def _extract_size_from_response(messages: list) -> str | None:
                 size = size.replace("–", "-")
                 logger.debug("Extracted size '%s' from: %s", size, content[:50])
                 return size
-    
+
     return None
 
 
@@ -131,14 +130,14 @@ async def agent_node(
     # HISTORY TRIMMING: Prevent LLM context overflow
     # =========================================================================
     from src.services.history_trimmer import trim_message_history
-    
+
     original_messages = state.get("messages", [])
     trimmed_messages = trim_message_history(original_messages)
-    
+
     # Update state with trimmed messages for this LLM call
     # (doesn't affect persisted state, only this invocation)
     state_for_llm = {**state, "messages": trimmed_messages}
-    
+
     # Create deps from state (proper DI!)
     deps = create_deps_from_state(state_for_llm)
 
@@ -148,7 +147,7 @@ async def agent_node(
     # Додаємо детальні інструкції для поточного стейту
     dialog_phase = state.get("dialog_phase", "INIT")
     state_prompt = get_state_prompt(current_state)
-    
+
     # Для payment додаємо sub-phase prompt
     if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
         payment_sub = get_payment_sub_phase(state)
@@ -239,7 +238,7 @@ async def agent_node(
         if response.products:
             selected_products = [p.model_dump() for p in response.products]
             logger.info("Agent found products: %s", [p.name for p in response.products])
-        
+
         # =====================================================================
         # FALLBACK: Extract size from LLM response if not in products
         # This prevents dead loop when LLM says "раджу 146-152" but forgets
@@ -309,35 +308,34 @@ async def agent_node(
         # =====================================================================
         if new_state_str == State.STATE_5_PAYMENT_DELIVERY.value:
             from .payment_flow import (
-                process_payment_subphase,
-                extract_customer_data_from_state,
-                get_product_info_from_state,
                 CustomerData,
+                get_product_info_from_state,
+                process_payment_subphase,
             )
-            
+
             user_text = user_message if isinstance(user_message, str) else str(user_message)
             user_text_lower = user_text.lower()
-            
+
             # Get ORIGINAL sub-phase BEFORE parsing new data
             # This is critical to avoid skipping REQUEST_DATA → CONFIRM_DATA in one turn
             original_sub_phase = get_payment_sub_phase(state)
-            
+
             # Parse phone and NP from message (regex-reliable fallback)
             from src.services.client_data_parser_minimal import parse_minimal
             parsed = parse_minimal(user_text)
-            
+
             if parsed.phone and not metadata_update.get("customer_phone"):
                 metadata_update["customer_phone"] = parsed.phone
                 logger.info("📝 [SESSION %s] Parsed phone: %s", session_id, parsed.phone)
             if parsed.nova_poshta and not metadata_update.get("customer_nova_poshta"):
                 metadata_update["customer_nova_poshta"] = parsed.nova_poshta
                 logger.info("📝 [SESSION %s] Parsed NP: %s", session_id, parsed.nova_poshta)
-            
+
             # Use ORIGINAL sub-phase for flow decision
             # This ensures we don't skip showing "Як зручніше оплатити?" question
             payment_sub_phase = original_sub_phase
             logger.info("💰 [SESSION %s] Payment sub-phase: %s", session_id, payment_sub_phase)
-            
+
             # Build customer data from metadata_update (includes just-parsed data)
             customer_data = CustomerData(
                 name=metadata_update.get("customer_name"),
@@ -345,13 +343,13 @@ async def agent_node(
                 city=metadata_update.get("customer_city"),
                 nova_poshta=metadata_update.get("customer_nova_poshta"),
             )
-            
+
             # Get product info
             product_price, product_size = get_product_info_from_state(state)
-            
+
             # Check for image in current message
             has_image_now = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
-            
+
             # =========== DELEGATED TO payment_flow.py ===========
             # Only process if we have complete data OR we're past REQUEST_DATA
             if customer_data.is_complete or payment_sub_phase != "REQUEST_DATA":
@@ -364,13 +362,13 @@ async def agent_node(
                     product_size=product_size,
                     session_id=session_id,
                 )
-                
+
                 # Apply results from payment flow
                 response.messages = flow_result.messages
                 response.event = flow_result.event
                 new_state_str = flow_result.next_state
                 metadata_update.update(flow_result.metadata_updates)
-                
+
                 # Handle escalation if payment complete
                 if flow_result.should_escalate:
                     response.escalation = {
@@ -492,7 +490,7 @@ def _determine_dialog_phase(
 
     # Отримуємо дані для визначення фази
     has_products = bool(selected_products)
-    
+
     # Перевіряємо чи є розмір і колір
     has_size = False
     has_color = False
@@ -500,7 +498,7 @@ def _determine_dialog_phase(
         first_product = selected_products[0]
         has_size = bool(first_product.get("size"))
         has_color = bool(first_product.get("color"))
-        
+
         # FALLBACK: Color may be embedded in product name like "Сукня Анна (червона клітинка)"
         # If color field is empty but name contains color in parentheses, treat as has_color=True
         if not has_color:

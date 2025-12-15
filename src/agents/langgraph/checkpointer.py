@@ -167,7 +167,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         from langgraph.checkpoint.postgres import PostgresSaver
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         from psycopg_pool import AsyncConnectionPool
-        
+
         # Setup tables first using sync connection with prepare_threshold=None
         # None completely disables prepared statements (vs 0 which means "after 0 uses")
         setup_conn = psycopg.connect(database_url, autocommit=True, prepare_threshold=None)
@@ -176,7 +176,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             temp_checkpointer.setup()
         finally:
             setup_conn.close()
-        
+
         # Create async pool with prepare_threshold=None
         # CRITICAL for Supabase PgBouncer which doesn't support prepared statements
         # None = never use prepared statements (0 still creates them after 0 uses)
@@ -184,14 +184,14 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         # Also configure for Supabase connection limits:
         # - max_idle=30: Close idle connections before Supabase does (avoids SSL errors)
         # - check: Verify connection is alive before use
-        
+
         async def check_connection(conn):
             """Check if connection is still alive before returning from pool."""
             try:
                 await conn.execute("SELECT 1")
             except Exception:
                 raise  # Connection is dead, pool will discard it
-        
+
         pool = AsyncConnectionPool(
             conninfo=database_url,
             min_size=1,
@@ -202,7 +202,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
             },
         )
-        
+
         checkpointer = AsyncPostgresSaver(pool)
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")

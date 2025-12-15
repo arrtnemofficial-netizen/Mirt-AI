@@ -11,12 +11,11 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
-
-from src.core.human_responses import get_human_response
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.core.human_responses import get_human_response
 
 from .deps import AgentDeps
 from .models import PaymentResponse

@@ -364,7 +364,7 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
     This allows editing prompts via .md files without code changes.
     """
     from src.core.prompt_registry import registry
-    
+
     # Handle payment sub-phases specially
     if sub_phase and state_name == "STATE_5_PAYMENT_DELIVERY":
         key = PAYMENT_SUB_PHASES.get(sub_phase)
@@ -375,14 +375,14 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
                 return prompt_config.content
             except (FileNotFoundError, ValueError):
                 return STATE_PROMPTS.get(key, "")
-    
+
     # PRIORITY 1: Try PromptRegistry (data/prompts/states/*.md)
     try:
         prompt_config = registry.get(f"state.{state_name}")
         return prompt_config.content
     except (FileNotFoundError, ValueError):
         pass
-    
+
     # PRIORITY 2: Fallback to hardcoded STATE_PROMPTS
     return STATE_PROMPTS.get(state_name, "")
 
@@ -398,21 +398,21 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
     - Has payment proof → THANK_YOU
     """
     metadata = state.get("metadata", {})
-    
+
     # Check if we have customer data
     has_name = bool(metadata.get("customer_name"))
     has_phone = bool(metadata.get("customer_phone"))
     has_city = bool(metadata.get("customer_city"))
     has_np = bool(metadata.get("customer_nova_poshta"))
-    
+
     has_customer_data = has_name and has_phone and has_city and has_np
-    
+
     # Check if data is confirmed
     data_confirmed = metadata.get("delivery_data_confirmed", False)
-    
+
     # Check if payment proof received
     payment_proof = metadata.get("payment_proof_received", False)
-    
+
     if payment_proof:
         return "THANK_YOU"
     elif data_confirmed:
@@ -439,9 +439,7 @@ def determine_next_dialog_phase(
     """
     # STATE_0_INIT transitions
     if current_state == "STATE_0_INIT":
-        if intent == "GREETING_ONLY":
-            return "DISCOVERY"
-        elif intent == "DISCOVERY_OR_QUESTION":
+        if intent == "GREETING_ONLY" or intent == "DISCOVERY_OR_QUESTION":
             return "DISCOVERY"
         elif intent == "PHOTO_IDENT":
             return "VISION_DONE"
@@ -457,7 +455,7 @@ def determine_next_dialog_phase(
             return "OUT_OF_DOMAIN"
         else:
             return "DISCOVERY"
-    
+
     # STATE_1_DISCOVERY transitions
     if current_state == "STATE_1_DISCOVERY":
         if has_products and has_size:
@@ -473,7 +471,7 @@ def determine_next_dialog_phase(
             return "COMPLETED"
         else:
             return "DISCOVERY"  # Stay in discovery until we have products
-    
+
     # STATE_2_VISION transitions
     if current_state == "STATE_2_VISION":
         if has_products:
@@ -482,7 +480,7 @@ def determine_next_dialog_phase(
         # instead of staying in VISION_DONE which causes dead loop
         else:
             return "DISCOVERY"  # Let agent ask clarifying questions
-    
+
     # STATE_3_SIZE_COLOR transitions
     if current_state == "STATE_3_SIZE_COLOR":
         if has_products and has_size and has_color:
@@ -491,14 +489,14 @@ def determine_next_dialog_phase(
             return "WAITING_FOR_COLOR"
         else:
             return "WAITING_FOR_SIZE"
-    
+
     # STATE_4_OFFER transitions
     if current_state == "STATE_4_OFFER":
         if user_confirmed or intent == "PAYMENT_DELIVERY":
             return "WAITING_FOR_DELIVERY_DATA"
         else:
             return "OFFER_MADE"
-    
+
     # STATE_5_PAYMENT_DELIVERY transitions
     if current_state == "STATE_5_PAYMENT_DELIVERY":
         if payment_sub_phase == "THANK_YOU":
@@ -509,23 +507,23 @@ def determine_next_dialog_phase(
             return "WAITING_FOR_PAYMENT_METHOD"
         else:
             return "WAITING_FOR_DELIVERY_DATA"
-    
+
     # STATE_6_UPSELL transitions
     if current_state == "STATE_6_UPSELL":
         return "COMPLETED"
-    
+
     # STATE_7_END
     if current_state == "STATE_7_END":
         return "COMPLETED"
-    
+
     # STATE_8_COMPLAINT
     if current_state == "STATE_8_COMPLAINT":
         return "COMPLETED"
-    
+
     # STATE_9_OOD
     if current_state == "STATE_9_OOD":
         return "COMPLETED"
-    
+
     # Default
     return "INIT"
 
@@ -560,25 +558,25 @@ def detect_simple_intent(message: str) -> str | None:
     """
     patterns = _get_intent_patterns()
     message_lower = message.lower()
-    
+
     # Check priority intents from INTENT_PATTERNS
     # ORDER MATTERS! Higher priority first.
     priority_intents = [
         "PAYMENT_DELIVERY",
-        "COMPLAINT", 
+        "COMPLAINT",
         "SIZE_HELP",
         "COLOR_HELP",
         "REQUEST_PHOTO",     # Before THANKYOU to catch "покажи фото"
         "PRODUCT_CATEGORY",
         "THANKYOU_SMALLTALK",  # Last - catch "дякую", "ок" at end
     ]
-    
+
     for intent in priority_intents:
         keywords = patterns.get(intent, [])
         for keyword in keywords:
             if keyword in message_lower:
                 return intent
-    
+
     return None
 
 

@@ -329,7 +329,7 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     # Check for image FIRST - photo identification has highest priority
     metadata = state.get("metadata", {})
     has_image_early = state.get("has_image", False) or metadata.get("has_image", False)
-    
+
     if has_image_early:
         # Photo always goes to vision, ignore old escalation flags
         logger.info("Intent: PHOTO_IDENT (has_image=True, overrides escalation)")
@@ -340,7 +340,7 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
             "metadata": {**metadata, "has_image": True},
             "step_number": state.get("step_number", 0) + 1,
         }
-    
+
     # Skip if already escalating (only for non-photo messages)
     if state.get("should_escalate"):
         return {

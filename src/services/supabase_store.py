@@ -123,7 +123,7 @@ class SupabaseSessionStore:
         """Delete session state. Returns True if session existed."""
         # Delete from fallback store first
         existed_in_fallback = self._fallback_store.delete(session_id)
-        
+
         client = get_supabase_client()
         if not client:
             logger.warning(
@@ -131,7 +131,7 @@ class SupabaseSessionStore:
                 session_id,
             )
             return existed_in_fallback
-        
+
         try:
             response = (
                 client.table(self.table_name)

@@ -10,7 +10,6 @@ Features:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -20,12 +19,11 @@ from aiogram.types import Message
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
-from src.core.state_machine import normalize_state
 from src.services.conversation import ConversationHandler, create_conversation_handler
+from src.services.debouncer import BufferedMessage, MessageDebouncer
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore, SessionStore
-from src.services.debouncer import MessageDebouncer, BufferedMessage
 
 
 if TYPE_CHECKING:
@@ -185,7 +183,7 @@ async def _process_incoming_debounced(
         username = message.from_user.username
     if username:
         extra_metadata["user_nickname"] = username
-    
+
     # We don't construct full image_meta here, the debouncer handles merging.
     # But we pass the raw ingredients via BufferedMessage fields.
 
@@ -211,7 +209,7 @@ async def _execute_aggregated_logic(
     handler: ConversationHandler
 ) -> None:
     """Actual processing logic executed after debounce delay."""
-    
+
     text = aggregated_msg.text
     has_image = aggregated_msg.has_image
     image_url = aggregated_msg.image_url

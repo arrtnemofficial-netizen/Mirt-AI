@@ -6,7 +6,6 @@ by providing a single ConversationHandler that manages the full message lifecycl
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import uuid
@@ -176,7 +175,7 @@ class ConversationHandler:
     fallback_message: str = field(default="")  # Will use human_responses dynamically
     max_retries: int = field(default=2)
     retry_delay: float = field(default=1.0)
-    
+
     def _get_fallback(self) -> str:
         from src.core.human_responses import get_human_response
         return get_human_response("timeout")
@@ -209,7 +208,7 @@ class ConversationHandler:
             text, was_sanitized = process_user_message(text)
             if was_sanitized:
                 logger.warning("[SECURITY] Message sanitized for session %s", session_id)
-            
+
             # Load or create session state
             state = self.session_store.get(session_id)
 
@@ -239,12 +238,20 @@ class ConversationHandler:
             state["metadata"].setdefault("session_id", session_id)
             state["metadata"].setdefault("thread_id", state["metadata"].get("thread_id", session_id))
             state["messages"].append({"role": "user", "content": text})
+            
+            # CRITICAL: Reset image flags at start of EVERY new message
+            # This prevents stale image_url from previous messages affecting routing
+            # See: https://github.com/... routing bug where text messages went to vision
+            state["has_image"] = False
+            state["image_url"] = None
+            state["metadata"]["has_image"] = False
+            state["metadata"]["image_url"] = None
+            
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
                 # Mirror critical flags to top-level so routers can see them
-                if "has_image" in extra_metadata:
-                    state["has_image"] = bool(extra_metadata.get("has_image"))
-                if "image_url" in extra_metadata:
+                if extra_metadata.get("has_image"):
+                    state["has_image"] = True
                     state["image_url"] = extra_metadata.get("image_url")
 
             # Generate new trace_id for this request (Observability)

@@ -30,14 +30,14 @@ def _build_crm_status_message(state: dict[str, Any]) -> str:
     """Build CRM status message for user display."""
     crm_order_result = state.get("crm_order_result", {})
     crm_external_id = state.get("crm_external_id", "")
-    
+
     if not crm_order_result:
         return ""
-    
+
     status = crm_order_result.get("status", "unknown")
     crm_order_id = crm_order_result.get("crm_order_id")
     task_id = crm_order_result.get("task_id")
-    
+
     if status == "queued":
         message = "🔄 Замовлення відправлено до CRM системи"
         if task_id:
@@ -56,7 +56,7 @@ def _build_crm_status_message(state: dict[str, Any]) -> str:
         message = f"⚠️ Проблема з створенням замовлення в CRM: {error}"
     else:
         message = f"📋 Статус замовлення в CRM: {status}"
-    
+
     return message
 
 
@@ -121,7 +121,7 @@ async def upsell_node(
 
         # Build assistant message from response
         assistant_content = "\n".join(m.content for m in response.messages)
-        
+
         # Prepend CRM status message if available
         if crm_status_message:
             assistant_content = f"{crm_status_message}\n\n{assistant_content}"

@@ -17,13 +17,14 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
-from fastapi import HTTPException, Request, Response, status
+from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from src.conf.config import settings
 from src.integrations.crm.crmservice import get_crm_service
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,8 @@ class SnitkixWebhookHandler:
         return True
 
     async def handle_order_status_update(
-        self, request: Request, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, request: Request, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """Handle order status update from Snitkix CRM.
         
         Expected payload format:
@@ -83,7 +84,7 @@ class SnitkixWebhookHandler:
 
             # Validate status
             valid_statuses = {
-                "pending", "queued", "created", "processing", 
+                "pending", "queued", "created", "processing",
                 "shipped", "delivered", "cancelled", "failed"
             }
             if new_status not in valid_statuses:
@@ -121,8 +122,8 @@ class SnitkixWebhookHandler:
             }
 
     async def handle_payment_confirmation(
-        self, request: Request, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, request: Request, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """Handle payment confirmation from Snitkix CRM.
         
         Expected payload format:
@@ -190,8 +191,8 @@ class SnitkixWebhookHandler:
             }
 
     async def handle_inventory_update(
-        self, request: Request, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, request: Request, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """Handle inventory/stock updates from Snitkix CRM.
         
         Expected payload format:
@@ -209,7 +210,7 @@ class SnitkixWebhookHandler:
         """
         try:
             products = payload.get("products", [])
-            
+
             logger.info(
                 "[WEBHOOK:SNITKIX] Inventory update for %d products",
                 len(products),
@@ -217,19 +218,19 @@ class SnitkixWebhookHandler:
 
             # TODO: Update product inventory in local database
             # This could trigger stock alerts, update product availability, etc.
-            
+
             for product in products:
                 product_id = product.get("product_id")
                 stock_qty = product.get("stock_quantity")
                 stock_status = product.get("status")
-                
+
                 logger.debug(
                     "[WEBHOOK:SNITKIX] Product %s: %d units, status %s",
                     product_id,
                     stock_qty,
                     stock_status,
                 )
-                
+
                 # Update local product database
                 # await self.product_service.update_stock(product_id, stock_qty, stock_status)
 
@@ -251,7 +252,7 @@ class SnitkixWebhookHandler:
 
 
 # Global handler instance
-_webhook_handler: Optional[SnitkixWebhookHandler] = None
+_webhook_handler: SnitkixWebhookHandler | None = None
 
 
 def get_webhook_handler() -> SnitkixWebhookHandler:
@@ -273,7 +274,7 @@ async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
         )
 
     handler = get_webhook_handler()
-    
+
     # Verify authentication
     if not await handler.verify_webhook_signature(request):
         raise HTTPException(
@@ -290,7 +291,7 @@ async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
         )
 
     result = await handler.handle_order_status_update(request, payload)
-    
+
     status_code = status.HTTP_200_OK if result.get("success") else status.HTTP_400_BAD_REQUEST
     return JSONResponse(content=result, status_code=status_code)
 
@@ -304,7 +305,7 @@ async def snitkix_payment_webhook(request: Request) -> JSONResponse:
         )
 
     handler = get_webhook_handler()
-    
+
     # Verify authentication
     if not await handler.verify_webhook_signature(request):
         raise HTTPException(
@@ -321,7 +322,7 @@ async def snitkix_payment_webhook(request: Request) -> JSONResponse:
         )
 
     result = await handler.handle_payment_confirmation(request, payload)
-    
+
     status_code = status.HTTP_200_OK if result.get("success") else status.HTTP_400_BAD_REQUEST
     return JSONResponse(content=result, status_code=status_code)
 
@@ -335,7 +336,7 @@ async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
         )
 
     handler = get_webhook_handler()
-    
+
     # Verify authentication
     if not await handler.verify_webhook_signature(request):
         raise HTTPException(
@@ -352,6 +353,6 @@ async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
         )
 
     result = await handler.handle_inventory_update(request, payload)
-    
+
     status_code = status.HTTP_200_OK if result.get("success") else status.HTTP_400_BAD_REQUEST
     return JSONResponse(content=result, status_code=status_code)
