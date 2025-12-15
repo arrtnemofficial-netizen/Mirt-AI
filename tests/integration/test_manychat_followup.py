@@ -9,6 +9,8 @@ from src.server.main import _generate_followup_text, app
 
 
 # Mock settings to disable token verification in tests
+pytestmark = [pytest.mark.manychat, pytest.mark.integration]
+
 @pytest.fixture(autouse=True)
 def mock_settings():
     with patch("src.server.main.settings") as mock:

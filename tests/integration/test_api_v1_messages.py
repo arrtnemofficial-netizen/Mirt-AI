@@ -10,6 +10,9 @@ from src.server.main import app
 from src.services.session_store import InMemorySessionStore
 
 
+pytestmark = [pytest.mark.manychat, pytest.mark.integration]
+
+
 @pytest.fixture(autouse=True)
 def disable_telegram_webhook(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(main.settings, "TELEGRAM_BOT_TOKEN", SecretStr(""))
@@ -169,7 +172,74 @@ def test_api_v1_messages_accepts_image_only(client, monkeypatch: pytest.MonkeyPa
     )
 
 
-def test_api_v1_messages_missing_message_and_image_returns_422(client, monkeypatch: pytest.MonkeyPatch):
+def test_api_v1_messages_strips_manychat_prefix_dot_semicolon(client, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "secret")
+
+    process_message_async = AsyncMock(return_value=None)
+    dummy_service = SimpleNamespace(process_message_async=process_message_async)
+
+    with patch(
+        "src.integrations.manychat.async_service.get_manychat_async_service",
+        return_value=dummy_service,
+    ), patch(
+        "src.server.dependencies.get_session_store",
+        return_value=InMemorySessionStore(),
+    ):
+        response = client.post(
+            "/api/v1/messages",
+            headers={"X-API-Key": "secret"},
+            json={
+                "clientId": "123",
+                "message": ".; /restart",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "accepted"}
+
+    process_message_async.assert_awaited_once_with(
+        user_id="123",
+        text="/restart",
+        image_url=None,
+        channel="instagram",
+    )
+
+
+def test_api_v1_messages_removes_embedded_image_url_from_text(client, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "secret")
+
+    process_message_async = AsyncMock(return_value=None)
+    dummy_service = SimpleNamespace(process_message_async=process_message_async)
+
+    with patch(
+        "src.integrations.manychat.async_service.get_manychat_async_service",
+        return_value=dummy_service,
+    ), patch(
+        "src.server.dependencies.get_session_store",
+        return_value=InMemorySessionStore(),
+    ):
+        response = client.post(
+            "/api/v1/messages",
+            headers={"X-API-Key": "secret"},
+            json={
+                "clientId": "123",
+                "message": ".; https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1&signature=abc; Хочу",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "accepted"}
+
+    process_message_async.assert_awaited_once()
+    kwargs = process_message_async.await_args.kwargs
+    assert kwargs["user_id"] == "123"
+    assert kwargs["channel"] == "instagram"
+    assert kwargs["image_url"] is not None
+    assert "lookaside.fbsbx.com" in kwargs["image_url"]
+    assert "lookaside.fbsbx.com" not in kwargs["text"].lower()
+
+
+def test_api_v1_messages_missing_message_and_image_returns_400(client, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "")
 
     response = client.post(
@@ -179,4 +249,4 @@ def test_api_v1_messages_missing_message_and_image_returns_422(client, monkeypat
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400

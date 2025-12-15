@@ -199,13 +199,10 @@ class ManychatWebhook:
         if agent_response.metadata.intent == "PHOTO_IDENT":
             for product in agent_response.products:
                 if product.photo_url:
-                    messages.append(
-                        {
-                            "type": "image",
-                            "url": product.photo_url,
-                            "caption": "",  # без дублювання тексту/ціни
-                        }
-                    )
+                    messages.append({
+                        "type": "image",
+                        "url": product.photo_url,
+                    })
 
         # Build Custom Field values
         field_values = self._build_field_values(agent_response)
@@ -243,13 +240,14 @@ class ManychatWebhook:
     @staticmethod
     def _build_field_values(
         agent_response: AgentResponse,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """Build Custom Field values from AgentResponse.
         
         Note: Customer data (name, phone, city, NP) is now stored in session state
         by LLM and accessed via conversation.py, not parsed here.
+        Values preserve their types (str, int, float) for ManyChat compatibility.
         """
-        fields = [
+        fields: list[dict[str, Any]] = [
             {"field_name": FIELD_AI_STATE, "field_value": agent_response.metadata.current_state},
             {"field_name": FIELD_AI_INTENT, "field_value": agent_response.metadata.intent},
         ]
@@ -259,9 +257,8 @@ class ManychatWebhook:
             last_product = agent_response.products[-1]
             fields.append({"field_name": FIELD_LAST_PRODUCT, "field_value": last_product.name})
             if last_product.price:
-                fields.append(
-                    {"field_name": FIELD_ORDER_SUM, "field_value": str(last_product.price)}
-                )
+                # Keep as number for ManyChat Number field compatibility
+                fields.append({"field_name": FIELD_ORDER_SUM, "field_value": last_product.price})
 
         return fields
 

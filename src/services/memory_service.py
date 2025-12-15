@@ -19,24 +19,24 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from src.agents.pydantic.memory_models import (
-    ChildProfile,
-    CommerceInfo,
-    Fact,
-    LogisticsInfo,
-    MemoryContext,
-    MemoryDecision,
-    MemorySummary,
-    NewFact,
-    StylePreferences,
-    UpdateFact,
-    UserProfile,
-)
 from src.services.supabase_client import get_supabase_client
 
 
 if TYPE_CHECKING:
     from supabase import Client
+    from src.agents.pydantic.memory_models import (
+        ChildProfile,
+        CommerceInfo,
+        Fact,
+        LogisticsInfo,
+        MemoryContext,
+        MemoryDecision,
+        MemorySummary,
+        NewFact,
+        StylePreferences,
+        UpdateFact,
+        UserProfile,
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,36 @@ TABLE_SUMMARIES = "mirt_memory_summaries"
 # =============================================================================
 
 
+def _get_memory_models():
+    """Lazy import memory models to avoid circular import."""
+    from src.agents.pydantic.memory_models import (
+        ChildProfile,
+        CommerceInfo,
+        Fact,
+        LogisticsInfo,
+        MemoryContext,
+        MemoryDecision,
+        MemorySummary,
+        NewFact,
+        StylePreferences,
+        UpdateFact,
+        UserProfile,
+    )
+    return {
+        "ChildProfile": ChildProfile,
+        "CommerceInfo": CommerceInfo,
+        "Fact": Fact,
+        "LogisticsInfo": LogisticsInfo,
+        "MemoryContext": MemoryContext,
+        "MemoryDecision": MemoryDecision,
+        "MemorySummary": MemorySummary,
+        "NewFact": NewFact,
+        "StylePreferences": StylePreferences,
+        "UpdateFact": UpdateFact,
+        "UserProfile": UserProfile,
+    }
+
+
 class MemoryService:
     """
     Service для роботи з Titans-like памʼяттю.
@@ -80,9 +110,17 @@ class MemoryService:
     def __init__(self, client: Client | None = None) -> None:
         self.client = client or get_supabase_client()
         self._enabled = self.client is not None
+        self._models = None  # Lazy loaded
         
         if not self._enabled:
             logger.warning("MemoryService disabled - Supabase client not available")
+    
+    @property
+    def models(self):
+        """Lazy load memory models to avoid circular import."""
+        if self._models is None:
+            self._models = _get_memory_models()
+        return self._models
     
     @property
     def enabled(self) -> bool:

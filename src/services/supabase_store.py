@@ -119,6 +119,38 @@ class SupabaseSessionStore:
         except Exception as e:
             logger.error("Failed to save session %s to Supabase: %s", session_id, e)
 
+    def delete(self, session_id: str) -> bool:
+        """Delete session state. Returns True if session existed."""
+        # Delete from fallback store first
+        existed_in_fallback = self._fallback_store.delete(session_id)
+        
+        client = get_supabase_client()
+        if not client:
+            logger.warning(
+                "Supabase client not available, only deleted from fallback for session %s",
+                session_id,
+            )
+            return existed_in_fallback
+        
+        try:
+            response = (
+                client.table(self.table_name)
+                .delete()
+                .eq("session_id", session_id)
+                .execute()
+            )
+            # Check if any rows were deleted
+            existed_in_supabase = bool(response.data and len(response.data) > 0)
+            logger.info(
+                "Deleted session %s from Supabase (existed=%s)",
+                session_id,
+                existed_in_supabase,
+            )
+            return existed_in_fallback or existed_in_supabase
+        except Exception as e:
+            logger.error("Failed to delete session %s from Supabase: %s", session_id, e)
+            return existed_in_fallback
+
     def _create_empty_state(self, session_id: str) -> ConversationState:
         """Create a fresh empty state."""
         return ConversationState(

@@ -14,6 +14,7 @@ import pytest
 class TestWebhookVerification:
     """Verify webhook authentication works."""
 
+    @pytest.mark.telegram
     def test_telegram_webhook_has_token_path(self):
         """Telegram webhook should use token in path for verification."""
         import os
@@ -25,6 +26,7 @@ class TestWebhookVerification:
         assert webhook_path is not None
         assert len(webhook_path) > 0
 
+    @pytest.mark.manychat
     def test_manychat_verify_token_configured(self):
         """ManyChat should have verify token configured."""
         import os

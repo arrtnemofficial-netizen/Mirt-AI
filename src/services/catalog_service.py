@@ -59,8 +59,29 @@ class CatalogService:
         price_by_size = product.get("price_by_size")
 
         if price_by_size and isinstance(price_by_size, dict):
-            if size and size in price_by_size:
-                return float(price_by_size[size])
+            if size:
+                size_clean = str(size).strip().replace("–", "-").replace("—", "-")
+                size_clean = " ".join(size_clean.split())
+
+                if size_clean in price_by_size:
+                    return float(price_by_size[size_clean])
+
+                size_no_spaces = size_clean.replace(" ", "")
+                if size_no_spaces in price_by_size:
+                    return float(price_by_size[size_no_spaces])
+
+                if size_no_spaces.isdigit():
+                    size_num = int(size_no_spaces)
+                    for k, v in price_by_size.items():
+                        key = str(k).strip().replace("–", "-").replace("—", "-")
+                        key = key.replace(" ", "")
+                        if "-" not in key:
+                            continue
+                        start_s, end_s = key.split("-", 1)
+                        if not (start_s.isdigit() and end_s.isdigit()):
+                            continue
+                        if int(start_s) <= size_num <= int(end_s):
+                            return float(v)
             # Якщо розмір не вказано — повертаємо діапазон як мін ціну
             prices = list(price_by_size.values())
             return float(min(prices)) if prices else 0.0

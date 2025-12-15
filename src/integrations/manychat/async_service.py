@@ -77,13 +77,34 @@ class ManyChatAsyncService:
         This method is designed to be run in a background task.
         It handles debouncing, AI processing, and push delivery.
         
+        Commands:
+            /restart - Clear session and respond "Сесія очищена!"
+            /start - Same as /restart (alias)
+        
         Args:
             user_id: ManyChat subscriber ID
             text: Message text
             image_url: Optional image URL
             channel: Channel type (instagram, facebook, etc.)
         """
+        logger.info("=" * 50)
+        logger.info("[MANYCHAT:%s] 🔥 PROCESS_MESSAGE_ASYNC STARTED", user_id)
+        logger.info("[MANYCHAT:%s]    text: '%s'", user_id, text[:100] if text else "(empty)")
+        logger.info("[MANYCHAT:%s]    image_url: %s", user_id, image_url)
+        logger.info("[MANYCHAT:%s]    channel: %s", user_id, channel)
+        
         try:
+            # Handle commands BEFORE debouncing
+            raw_text = (text or "").strip()
+            if raw_text.startswith(".;"):
+                raw_text = raw_text[2:].lstrip()
+            clean_text = raw_text.lower()
+            first_token = clean_text.split(maxsplit=1)[0] if clean_text else ""
+            if first_token in ("/restart", "/start", "restart", "start"):
+                logger.info("[MANYCHAT:%s] 🔄 Detected RESTART command", user_id)
+                await self._handle_restart_command(user_id, channel)
+                return
+
             # Build metadata for images
             extra_metadata = {}
             if image_url:
@@ -91,7 +112,9 @@ class ManyChatAsyncService:
                     "has_image": True,
                     "image_url": image_url,
                 }
-                logger.info("[MANYCHAT:%s] 📷 Image received: %s", user_id, image_url[:80])
+                logger.info("[MANYCHAT:%s] 📷 Image URL set in metadata: %s", user_id, image_url[:80])
+            else:
+                logger.info("[MANYCHAT:%s] ⚠️ NO image_url provided", user_id)
 
             # Debouncing: aggregate rapid messages
             buffered_msg = BufferedMessage(
@@ -153,15 +176,14 @@ class ManyChatAsyncService:
             {"type": "text", "text": chunk} for chunk in text_chunks
         ]
 
-        # Add product images for PHOTO_IDENT
-        if agent_response.metadata.intent == "PHOTO_IDENT":
-            for product in agent_response.products:
-                if product.photo_url:
-                    messages.append({
-                        "type": "image",
-                        "url": product.photo_url,
-                        "caption": "",
-                    })
+        # Add product images (always, not just for PHOTO_IDENT)
+        for product in agent_response.products:
+            if product.photo_url:
+                messages.append({
+                    "type": "image",
+                    "url": product.photo_url,
+                })
+                logger.info("[MANYCHAT:%s] 📷 Adding product image: %s", user_id, product.photo_url[:60])
 
         # Build custom field values
         field_values = self._build_field_values(agent_response)
@@ -207,10 +229,33 @@ class ManyChatAsyncService:
             channel=channel,
         )
 
+    async def _handle_restart_command(self, user_id: str, channel: str) -> None:
+        """Handle /restart command - clear session and confirm."""
+        # Delete session from store
+        deleted = self.store.delete(user_id)
+        
+        if deleted:
+            logger.info("[MANYCHAT:%s] 🔄 Session cleared via /restart", user_id)
+            response_text = "Сесія очищена! ✨\nНапишіть мені що-небудь, і ми почнемо спочатку 💬"
+        else:
+            logger.info("[MANYCHAT:%s] 🔄 /restart called but no session existed", user_id)
+            response_text = "Сесія очищена! ✨\nНапишіть мені що-небудь, щоб почати 💬"
+        
+        # Push confirmation
+        await self.push_client.send_text(
+            subscriber_id=user_id,
+            text=response_text,
+            channel=channel,
+        )
+
     @staticmethod
-    def _build_field_values(agent_response: AgentResponse) -> list[dict[str, str]]:
-        """Build Custom Field values from AgentResponse."""
-        fields = [
+    def _build_field_values(agent_response: AgentResponse) -> list[dict[str, Any]]:
+        """Build Custom Field values from AgentResponse.
+        
+        Note: Values preserve their types (str, int, float) for ManyChat compatibility.
+        ManyChat Number fields require numeric values, not strings.
+        """
+        fields: list[dict[str, Any]] = [
             {"field_name": FIELD_AI_STATE, "field_value": agent_response.metadata.current_state},
             {"field_name": FIELD_AI_INTENT, "field_value": agent_response.metadata.intent},
         ]
@@ -219,7 +264,8 @@ class ManyChatAsyncService:
             last_product = agent_response.products[-1]
             fields.append({"field_name": FIELD_LAST_PRODUCT, "field_value": last_product.name})
             if last_product.price:
-                fields.append({"field_name": FIELD_ORDER_SUM, "field_value": str(last_product.price)})
+                # Keep as number for ManyChat Number field compatibility
+                fields.append({"field_name": FIELD_ORDER_SUM, "field_value": last_product.price})
 
         return fields
 
@@ -248,37 +294,17 @@ class ManyChatAsyncService:
 
     @staticmethod
     def _build_quick_replies(agent_response: AgentResponse) -> list[dict[str, str]]:
-        """Build Quick Reply buttons based on current state."""
-        current_state = agent_response.metadata.current_state
-        replies: list[dict[str, str]] = []
-
-        if current_state in ("STATE_0_INIT", "STATE_1_DISCOVERY"):
-            replies = [
-                {"type": "text", "caption": "👗 Сукні"},
-                {"type": "text", "caption": "👔 Костюми"},
-                {"type": "text", "caption": "🧥 Тренчі"},
-            ]
-        elif current_state == "STATE_3_SIZE_COLOR":
-            replies = [
-                {"type": "text", "caption": "📏 Розмірна сітка"},
-                {"type": "text", "caption": "🎨 Інші кольори"},
-            ]
-        elif current_state == "STATE_4_OFFER":
-            replies = [
-                {"type": "text", "caption": "✅ Беру!"},
-                {"type": "text", "caption": "🎨 Інший колір"},
-                {"type": "text", "caption": "📏 Інший розмір"},
-            ]
-        elif current_state == "STATE_5_PAYMENT_DELIVERY":
-            replies = [
-                {"type": "text", "caption": "💳 Повна оплата"},
-                {"type": "text", "caption": "💵 Передплата 200 грн"},
-            ]
-
-        if agent_response.metadata.escalation_level != "NONE":
-            replies = [{"type": "text", "caption": "👩 Зв'язок з менеджером"}]
-
-        return replies
+        """Build Quick Reply buttons based on current state.
+        
+        NOTE: ManyChat sendContent API does NOT support quick_replies for Instagram.
+        The 'type: text' format causes "Unsupported quick reply type" error.
+        Returning empty list until proper format is determined.
+        
+        For now, users will type responses manually (which works fine).
+        """
+        # DISABLED: ManyChat sendContent rejects quick_replies with type='text'
+        # TODO: Investigate proper format for Instagram quick replies via API
+        return []
 
 
 # Singleton

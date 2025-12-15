@@ -85,6 +85,14 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "contract: contract/schema tests",
+    "critical: critical-path tests",
+    "e2e: end-to-end tests",
+    "regression: regression tests",
+    "security: security tests",
+    "smoke: smoke tests",
+    "manychat: ManyChat-related tests",
+    "telegram: Telegram-related tests",
 ]
 
 [tool.ruff]

@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, START, StateGraph
 
+from src.conf.config import settings
+
 from .checkpointer import get_checkpointer
 from .edges import (
     get_agent_routes,
@@ -265,7 +267,7 @@ def build_production_graph(
     # Without this, the graph won't pause before payment!
     compiled = graph.compile(
         checkpointer=checkpointer,
-        interrupt_before=["payment"],  # HITL: pause before payment node
+        interrupt_before=["payment"] if settings.ENABLE_PAYMENT_HITL else [],
     )
     logger.info("Production graph built with HITL interrupt_before=['payment']")
 

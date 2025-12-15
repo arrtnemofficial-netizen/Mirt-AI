@@ -25,13 +25,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .memory_models import Fact, MemoryContext, UserProfile
     from .models import StateType
+    from src.services.memory_service import MemoryService
 
 
 logger = logging.getLogger(__name__)
 
 
 from src.services.catalog_service import CatalogService
-from src.services.memory_service import MemoryService
 from src.services.order_service import OrderService
 
 
@@ -99,7 +99,7 @@ class AgentDeps:
     # Services (injected)
     db: OrderService = field(default_factory=OrderService)
     catalog: CatalogService = field(default_factory=CatalogService)
-    memory: MemoryService = field(default_factory=MemoryService)
+    memory: "MemoryService | None" = None  # Lazy init to avoid circular import
 
     # Environment
     env: str = "production"

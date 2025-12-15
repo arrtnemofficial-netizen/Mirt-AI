@@ -10,6 +10,7 @@ import pytest
 
 @pytest.mark.contract
 @pytest.mark.critical
+@pytest.mark.telegram
 class TestTelegramWebhookContract:
     """Verify Telegram webhook payload handling."""
 
@@ -65,6 +66,7 @@ class TestTelegramWebhookContract:
 
 @pytest.mark.contract
 @pytest.mark.critical
+@pytest.mark.manychat
 class TestManyChatWebhookContract:
     """Verify ManyChat webhook payload handling."""
 
