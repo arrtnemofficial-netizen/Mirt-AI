@@ -39,7 +39,7 @@ class TestPaymentNode:
 
     @pytest.mark.asyncio
     async def test_hitl_disabled_skips_interrupt(self, base_state):
-        """When ENABLE_PAYMENT_HITL=False, skips interrupt."""
+        """When ENABLE_PAYMENT_HITL=False, waits for delivery data (goto=end)."""
         from src.agents.langgraph.nodes.payment import payment_node
         
         mock_settings = MagicMock()
@@ -55,9 +55,10 @@ class TestPaymentNode:
                     with patch("src.agents.langgraph.nodes.payment.track_metric"):
                         result = await payment_node(base_state)
         
-        # Should go to upsell, not interrupt
-        assert result.goto == "upsell"
+        # Should wait for delivery data (end), not skip to upsell
+        assert result.goto == "end"
         assert result.update["awaiting_human_approval"] is False
+        assert result.update["dialog_phase"] == "WAITING_FOR_PAYMENT_PROOF"
 
     @pytest.mark.asyncio
     async def test_hitl_enabled_triggers_interrupt(self, base_state):
@@ -102,9 +103,98 @@ class TestPaymentNode:
                         result = await payment_node(base_state)
         
         # Should still return valid Command with fallback message
-        assert result.goto == "upsell"
+        assert result.goto == "end"  # Wait for delivery data
         # Fallback message asks for delivery data
         assert "оформлення" in result.update["messages"][0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_waiting_for_payment_proof_confirmation_without_image_does_not_crash(self, base_state):
+        """In WAITING_FOR_PAYMENT_PROOF, 'Да' without image should not crash and should keep waiting."""
+        from src.agents.langgraph.nodes.payment import payment_node
+
+        state = {
+            **base_state,
+            "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+            "messages": [{"role": "user", "content": "Да"}],
+            "metadata": {"session_id": "sess_123"},
+        }
+
+        mock_settings = MagicMock()
+        mock_settings.ENABLE_PAYMENT_HITL = False
+        mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
+        mock_settings.DEBUG_TRACE_LOGS = False
+
+        mock_response = MagicMock()
+        mock_response.reply_to_user = "Ок"  # should be overridden to ask for missing fields/screenshot
+        mock_response.payment_details_sent = True
+        mock_response.awaiting_payment_confirmation = True
+
+        with patch("src.agents.langgraph.nodes.payment.settings", mock_settings):
+            with patch(
+                "src.agents.langgraph.nodes.payment.run_payment",
+                new_callable=AsyncMock,
+                return_value=mock_response,
+            ):
+                with patch("src.agents.langgraph.nodes.payment.log_agent_step"):
+                    with patch("src.agents.langgraph.nodes.payment.track_metric"):
+                        result = await payment_node(state)
+
+        assert result.goto == "end"
+        assert result.update["dialog_phase"] == "WAITING_FOR_PAYMENT_PROOF"
+        # Should ask for either missing delivery data or screenshot
+        content = result.update["messages"][0]["content"].lower()
+        assert ("піб" in content) or ("скрін" in content) or ("квитанц" in content)
+
+    @pytest.mark.asyncio
+    async def test_waiting_for_payment_proof_with_image_and_full_data_goes_to_upsell(self, base_state):
+        """When delivery data is complete and image proof is present, payment should proceed to upsell."""
+        from src.agents.langgraph.nodes.payment import payment_node
+
+        state = {
+            **base_state,
+            "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+            "has_image": True,
+            "messages": [{"role": "user", "content": ""}],
+            "metadata": {
+                "session_id": "sess_123",
+                "customer_name": "Іван Петренко",
+                "customer_phone": "0501234567",
+                "customer_city": "Київ",
+                "customer_nova_poshta": "54",
+                "has_image": True,
+            },
+        }
+
+        mock_settings = MagicMock()
+        mock_settings.ENABLE_PAYMENT_HITL = False
+        mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
+        mock_settings.DEBUG_TRACE_LOGS = False
+
+        mock_response = MagicMock()
+        mock_response.reply_to_user = "Дякую, бачу оплату"  # should pass through
+        mock_response.payment_details_sent = True
+        mock_response.awaiting_payment_confirmation = True
+
+        async def _run_payment_side_effect(*args, **kwargs):
+            deps = kwargs.get("deps")
+            deps.customer_name = deps.customer_name or state["metadata"]["customer_name"]
+            deps.customer_phone = deps.customer_phone or state["metadata"]["customer_phone"]
+            deps.customer_city = deps.customer_city or state["metadata"]["customer_city"]
+            deps.customer_nova_poshta = deps.customer_nova_poshta or state["metadata"]["customer_nova_poshta"]
+            return mock_response
+
+        with patch("src.agents.langgraph.nodes.payment.settings", mock_settings):
+            with patch(
+                "src.agents.langgraph.nodes.payment.run_payment",
+                new_callable=AsyncMock,
+                side_effect=_run_payment_side_effect,
+            ):
+                with patch("src.agents.langgraph.nodes.payment.log_agent_step"):
+                    with patch("src.agents.langgraph.nodes.payment.track_metric"):
+                        result = await payment_node(state)
+
+        assert result.goto == "upsell"
+        assert result.update["dialog_phase"] == "UPSELL_OFFERED"
 
 
 # =============================================================================

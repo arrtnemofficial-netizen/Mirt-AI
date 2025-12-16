@@ -225,3 +225,36 @@ def test_webhooks_manychat_response_mode_payload_error_returns_400(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "bad"
+
+
+def test_webhooks_manychat_push_mode_dedupes_by_message_id(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "")
+    monkeypatch.setattr(main.settings, "MANYCHAT_PUSH_MODE", True)
+
+    process_message_async = AsyncMock(return_value=None)
+    dummy_service = SimpleNamespace(process_message_async=process_message_async)
+
+    payload = {
+        "subscriber": {"id": "123"},
+        "message": {"id": "m1", "text": "hi"},
+    }
+
+    with patch(
+        "src.integrations.manychat.async_service.get_manychat_async_service",
+        return_value=dummy_service,
+    ), patch(
+        "src.server.dependencies.get_session_store",
+        return_value=InMemorySessionStore(),
+    ):
+        r1 = client.post("/webhooks/manychat", json=payload)
+        r2 = client.post("/webhooks/manychat", json=payload)
+
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.json() == {"status": "accepted"}
+    assert r2.json() == {"status": "accepted"}
+
+    process_message_async.assert_awaited_once()

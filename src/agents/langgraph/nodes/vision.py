@@ -161,6 +161,7 @@ def _build_vision_messages(
     - Clarification question from LLM or fallback
     """
     messages: list[dict[str, str]] = []
+    confidence = response.confidence or 0.0
 
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
     if not vision_greeted:
@@ -181,15 +182,19 @@ def _build_vision_messages(
             product.color.lower() in product_name.lower()
         )
 
+        prefix = "Це наш"
+        if confidence < 0.5:
+            prefix = "Схоже, це наш"
+
         if color_already_in_name:
             # Color is in name - just use the name
-            message_text = f"Це наш {product_name} 💛"
+            message_text = f"{prefix} {product_name} 💛"
         elif product.color:
             # Color NOT in name - add it
-            message_text = f"Це наш {product_name} у кольорі {product.color} 💛"
+            message_text = f"{prefix} {product_name} у кольорі {product.color} 💛"
         else:
             # No color info at all
-            message_text = f"Це наш {product_name} 💛"
+            message_text = f"{prefix} {product_name} 💛"
 
         messages.append(text_msg(message_text))
 
@@ -215,6 +220,15 @@ def _build_vision_messages(
         messages.append(text_msg(response.clarification_question.strip()))
     elif response.needs_clarification:
         messages.append(text_msg("Не можу точно визначити модель. Підкажіть, будь ласка, що це за товар? 🤍"))
+
+    # If we still have no product and no clarification, add a neutral salesperson-style fallback.
+    # (No explicit "уточніть" questions to avoid exposing AI behavior.)
+    if (not response.identified_product) and (not response.clarification_question) and (not response.needs_clarification):
+        messages.append(
+            text_msg(
+                "Підкажу ціну та розмір після зросту 👌 Напишіть, будь ласка, зріст дитини (см)."
+            )
+        )
 
     # 5. Fallback
     if not messages:

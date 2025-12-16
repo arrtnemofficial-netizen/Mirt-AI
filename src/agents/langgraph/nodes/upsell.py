@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
+from src.conf.config import settings
+from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
 
@@ -97,6 +99,18 @@ async def upsell_node(
     deps.current_state = State.STATE_6_UPSELL.value
     deps.selected_products = ordered_products
 
+    if settings.DEBUG_TRACE_LOGS:
+        debug_log.node_entry(
+            session_id=session_id,
+            node_name="upsell",
+            phase=state.get("dialog_phase", "?"),
+            state_name=State.STATE_6_UPSELL.value,
+            extra={
+                "products": str(len(ordered_products)),
+                "msg": user_message,
+            },
+        )
+
     logger.info("Upsell node for session %s", session_id)
 
     try:
@@ -134,6 +148,14 @@ async def upsell_node(
         # Після upsell встановлюємо COMPLETED
         # - Діалог завершено, подяка за замовлення
         # =====================================================
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.node_exit(
+                session_id=session_id,
+                node_name="upsell",
+                goto="memory_update",
+                new_phase="COMPLETED",
+                response_preview=assistant_content,
+            )
         return {
             "current_state": State.STATE_7_END.value,
             "messages": [{"role": "assistant", "content": assistant_content}],
@@ -146,6 +168,13 @@ async def upsell_node(
 
     except Exception as e:
         logger.exception("Upsell node failed for session %s: %s", session_id, e)
+
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.error(
+                session_id=session_id,
+                error_type=type(e).__name__,
+                message=str(e) or type(e).__name__,
+            )
 
         # Non-critical - just skip upsell on error
         return {

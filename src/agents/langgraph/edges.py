@@ -17,8 +17,35 @@ from .nodes.intent import INTENT_PATTERNS
 # Import for intent detection
 from .state_prompts import detect_simple_intent
 
+from src.core.debug_logger import debug_log
+from src.conf.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _route_debug(
+    *,
+    session_id: str,
+    current_phase: str,
+    detected_intent: str | None,
+    destination: str,
+    reason: str,
+) -> None:
+    if settings.DEBUG_TRACE_LOGS:
+        debug_log.routing_decision(
+            session_id=session_id,
+            current_phase=current_phase,
+            detected_intent=detected_intent,
+            destination=destination,
+            reason=reason,
+        )
+    else:
+        logger.info(
+            "🔀 [SESSION %s] → %s (%s)",
+            session_id,
+            destination,
+            reason,
+        )
 
 
 # Type aliases for routing destinations
@@ -97,16 +124,34 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     # SPECIAL CASES (highest priority)
     # =========================================================================
     if has_image:
-        logger.info(" [SESSION %s] → moderation (new image)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="moderation",
+            reason="new image detected",
+        )
         return "moderation"
 
     if detected_intent == "COMPLAINT":
-        logger.info(" [SESSION %s] → escalation (COMPLAINT detected)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="escalation",
+            reason="COMPLAINT detected in message",
+        )
         return "escalation"
 
     # CRM ERROR HANDLING - route to crm_error node
     if dialog_phase == "CRM_ERROR_HANDLING":
-        logger.info(" [SESSION %s] → crm_error (CRM_ERROR_HANDLING)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="crm_error",
+            reason="CRM_ERROR_HANDLING",
+        )
         return "crm_error"
 
     # =========================================================================
@@ -115,34 +160,76 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
     # STATE_1: Discovery - збір контексту (зріст, тип речі)
     if dialog_phase == "DISCOVERY":
-        logger.info("🔀 [SESSION %s] → agent (DISCOVERY)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="agent",
+            reason="DISCOVERY",
+        )
         return "agent"
 
     # STATE_2→3: Vision done - потрібно уточнення
     if dialog_phase == "VISION_DONE":
-        logger.info("🔀 [SESSION %s] → agent (VISION_DONE)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="agent",
+            reason="VISION_DONE",
+        )
         return "agent"
 
     # STATE_3: Waiting for size
     if dialog_phase == "WAITING_FOR_SIZE":
         # Якщо юзер каже "беру" замість розміру - йдемо в payment
         if detected_intent == "PAYMENT_DELIVERY":
-            logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_SIZE but got 'беру')", session_id)
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="payment",
+                reason="WAITING_FOR_SIZE but got confirmation",
+            )
             return "payment"
-        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_SIZE)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="agent",
+            reason="WAITING_FOR_SIZE",
+        )
         return "agent"
 
     # STATE_3: Waiting for color
     if dialog_phase == "WAITING_FOR_COLOR":
         if detected_intent == "PAYMENT_DELIVERY":
-            logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_COLOR but got 'беру')", session_id)
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="payment",
+                reason="WAITING_FOR_COLOR but got confirmation",
+            )
             return "payment"
-        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_COLOR)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="agent",
+            reason="WAITING_FOR_COLOR",
+        )
         return "agent"
 
     # STATE_3→4: Size and color ready
     if dialog_phase == "SIZE_COLOR_DONE":
-        logger.info(" [SESSION %s] → offer (SIZE_COLOR_DONE)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="offer",
+            reason="SIZE_COLOR_DONE",
+        )
         return "offer"
 
     # STATE_4: Offer made - чекаємо "Беру" або підтвердження
@@ -151,9 +238,12 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
         # User confirms order ("беру", "да", "так") → payment flow
         if detected_intent == "PAYMENT_DELIVERY":
-            logger.info(
-                "🔀 [SESSION %s] → payment (OFFER_MADE + PAYMENT_DELIVERY)",
-                session_id,
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="payment",
+                reason="OFFER_MADE + PAYMENT_DELIVERY",
             )
             return "payment"
 
@@ -162,10 +252,12 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
         msg_lower = user_message.lower() if user_message else ""
         for keyword in confirmation_keywords:
             if keyword in msg_lower:
-                logger.info(
-                    "🔀 [SESSION %s] → payment (OFFER_MADE + confirmation: '%s')",
-                    session_id,
-                    keyword,
+                _route_debug(
+                    session_id=session_id,
+                    current_phase=dialog_phase,
+                    detected_intent=detected_intent,
+                    destination="payment",
+                    reason=f"OFFER_MADE + confirmation: '{keyword}'",
                 )
                 return "payment"
 
@@ -176,33 +268,69 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     # STATE_5: Collecting delivery data → use AGENT to extract name/phone/city
     # Payment node uses interrupt() for HITL which blocks - only use it after data is collected
     if dialog_phase == "WAITING_FOR_DELIVERY_DATA":
-        logger.info("🔀 [SESSION %s] → agent (WAITING_FOR_DELIVERY_DATA - collecting data)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="agent",
+            reason="WAITING_FOR_DELIVERY_DATA (collecting data)",
+        )
         return "agent"
 
     # STATE_5: Waiting for payment method
     if dialog_phase == "WAITING_FOR_PAYMENT_METHOD":
         # Payment sub-flow: спосіб оплати обробляється в payment node
-        logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_PAYMENT_METHOD)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="payment",
+            reason="WAITING_FOR_PAYMENT_METHOD",
+        )
         return "payment"
 
     # STATE_5: Waiting for payment proof
     if dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
         # Payment sub-flow: підтвердження оплати обробляється в payment node
-        logger.info("🔀 [SESSION %s] → payment (WAITING_FOR_PAYMENT_PROOF)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="payment",
+            reason="WAITING_FOR_PAYMENT_PROOF",
+        )
         return "payment"
 
     # STATE_6: Upsell offered
     if dialog_phase == "UPSELL_OFFERED":
-        logger.info("🔀 [SESSION %s] → upsell (UPSELL_OFFERED)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="upsell",
+            reason="UPSELL_OFFERED",
+        )
         return "upsell"
 
     # STATE_7: Completed - but user wrote again
     if dialog_phase == "COMPLETED":
         # QUALITY: Якщо юзер пише після COMPLETED - новий діалог
         if detected_intent == "THANKYOU_SMALLTALK":
-            logger.info("🔀 [SESSION %s] → end (COMPLETED + thanks)", session_id)
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="end",
+                reason="COMPLETED + thanks",
+            )
             return "end"
-        logger.info("🔀 [SESSION %s] → moderation (COMPLETED but new query)", session_id)
+        _route_debug(
+            session_id=session_id,
+            current_phase=dialog_phase,
+            detected_intent=detected_intent,
+            destination="moderation",
+            reason="COMPLETED but new query",
+        )
         return "moderation"
 
     # STATE_8: Complaint
@@ -426,17 +554,13 @@ def route_after_vision(state: dict[str, Any]) -> Literal["offer", "agent", "vali
     ми повертаємо END (віддаємо повідомлення користувачу) замість offer/agent.
     Offer буде після того як користувач відповість і ми зберемо розмір.
     """
-    # Found products -> END (return multi-bubble response to user)
-    # Vision вже питає про розмір, offer буде пізніше
-    if state.get("selected_products"):
-        return "end"
-
     # Error -> validate
     if state.get("last_error"):
         return "validation"
 
-    # No products found -> agent for clarification
-    return "agent"
+    # Always end after vision to deliver vision-built messages to the user.
+    # Next turn will continue based on dialog_phase (VISION_DONE / WAITING_FOR_SIZE / INIT).
+    return "end"
 
 
 def route_after_payment(state: dict[str, Any]) -> Literal["upsell", "end", "validation"]:

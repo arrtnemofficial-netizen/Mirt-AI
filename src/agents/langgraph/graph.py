@@ -241,8 +241,10 @@ def build_production_graph(
     graph.add_edge("offer", "memory_update")
 
     # Payment uses Command for routing (handled internally)
-    # But we need edges for the graph structure
-    graph.add_edge("payment", "upsell")  # Default path
+    # IMPORTANT: Do NOT add static edge here!
+    # payment_node returns Command(goto="end"|"upsell"|"payment") which controls routing.
+    # A static edge would override Command.goto and cause step_number conflicts.
+    # See: InvalidUpdateError when both payment and upsell update step_number in same tick.
 
     # Upsell -> memory_update -> end
     graph.add_edge("upsell", "memory_update")

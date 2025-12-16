@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+import hashlib
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -17,6 +19,9 @@ from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
 from src.services.message_store import MessageStore, StoredMessage
+from src.core.debug_logger import debug_log
+from src.conf.config import settings
+from src.services.observability import track_metric
 
 
 # =============================================================================
@@ -61,8 +66,9 @@ def parse_llm_output(
         messages_data = parsed.get("messages", [])
         messages = []
         for msg in messages_data:
-            if msg.get("type") == "text" and msg.get("content"):
-                messages.append(Message(type="text", content=msg["content"]))
+            content_value = msg.get("content") or msg.get("text")
+            if msg.get("type") == "text" and content_value:
+                messages.append(Message(type="text", content=content_value))
 
         # Extract products array
         products_data = parsed.get("products", [])
@@ -117,6 +123,212 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+_ALLOWED_DIALOG_PHASES: set[str] = {
+    "INIT",
+    "DISCOVERY",
+    "VISION_DONE",
+    "WAITING_FOR_SIZE",
+    "WAITING_FOR_COLOR",
+    "SIZE_COLOR_DONE",
+    "OFFER_MADE",
+    "WAITING_FOR_DELIVERY_DATA",
+    "WAITING_FOR_PAYMENT_METHOD",
+    "WAITING_FOR_PAYMENT_PROOF",
+    "UPSELL_OFFERED",
+    "CRM_ERROR_HANDLING",
+    "ESCALATED",
+    "COMPLAINT",
+    "OUT_OF_DOMAIN",
+    "COMPLETED",
+}
+
+
+def _safe_hash(value: str) -> str:
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _guard_progress_fingerprint(state: ConversationState) -> str:
+    meta = state.get("metadata", {}) or {}
+    payload = {
+        "current_state": state.get("current_state"),
+        "dialog_phase": state.get("dialog_phase"),
+        "detected_intent": state.get("detected_intent"),
+        "selected_products": [
+            (p.get("id"), p.get("name"), p.get("size"), p.get("color"))
+            for p in (state.get("selected_products") or [])
+            if isinstance(p, dict)
+        ],
+        "offered_products": [
+            (p.get("id"), p.get("name"), p.get("size"), p.get("color"))
+            for p in (state.get("offered_products") or [])
+            if isinstance(p, dict)
+        ],
+        "customer": {
+            "name": meta.get("customer_name"),
+            "phone": meta.get("customer_phone"),
+            "city": meta.get("customer_city"),
+            "nova_poshta": meta.get("customer_nova_poshta"),
+        },
+        "payment": {
+            "payment_details_sent": meta.get("payment_details_sent"),
+            "awaiting_payment_confirmation": meta.get("awaiting_payment_confirmation"),
+            "payment_confirmed": meta.get("payment_confirmed"),
+            "payment_proof_received": meta.get("payment_proof_received"),
+        },
+        "crm": {
+            "crm_external_id": state.get("crm_external_id"),
+            "crm_retry_count": state.get("crm_retry_count"),
+            "crm_status": (state.get("crm_order_result") or {}).get("status"),
+        },
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return _safe_hash(raw)
+
+
+def _apply_transition_guardrails(
+    *,
+    session_id: str,
+    before_state: ConversationState,
+    after_state: ConversationState,
+    user_text: str,
+) -> ConversationState:
+    from src.core.state_machine import State
+
+    meta = after_state.get("metadata")
+    if not isinstance(meta, dict):
+        meta = {}
+        after_state["metadata"] = meta
+
+    dialog_phase = after_state.get("dialog_phase", "INIT")
+    if not dialog_phase or not isinstance(dialog_phase, str) or dialog_phase not in _ALLOWED_DIALOG_PHASES:
+        logger.error(
+            "[SESSION %s] Guardrail: invalid dialog_phase=%r -> INIT",
+            session_id,
+            dialog_phase,
+        )
+        after_state["dialog_phase"] = "INIT"
+
+    current_state = after_state.get("current_state", State.STATE_0_INIT.value)
+    normalized_state = State.from_string(str(current_state)).value
+    if current_state != normalized_state:
+        logger.error(
+            "[SESSION %s] Guardrail: invalid current_state=%r -> %s",
+            session_id,
+            current_state,
+            normalized_state,
+        )
+        after_state["current_state"] = normalized_state
+
+    guard = meta.get("_guard")
+    if not isinstance(guard, dict):
+        guard = {}
+
+    before_fp = _guard_progress_fingerprint(before_state)
+    after_fp = _guard_progress_fingerprint(after_state)
+    prev_count = int(guard.get("count") or 0)
+
+    stagnant_this_turn = before_fp == after_fp
+    count = (prev_count + 1) if stagnant_this_turn else 0
+
+    guard["fp"] = after_fp
+    guard["count"] = count
+    guard["last_user_hash"] = _safe_hash(user_text.strip().lower())
+    guard["before_fp"] = before_fp
+    meta["_guard"] = guard
+
+    if count == 5:
+        track_metric(
+            "loop_guard_warn",
+            1,
+            {
+                "phase": str(after_state.get("dialog_phase") or ""),
+                "state": str(after_state.get("current_state") or ""),
+            },
+        )
+        logger.warning(
+            "[SESSION %s] Guardrail: potential loop (count=%d, phase=%s, state=%s)",
+            session_id,
+            count,
+            after_state.get("dialog_phase"),
+            after_state.get("current_state"),
+        )
+
+    if count == 10:
+        track_metric(
+            "loop_guard_soft_recovery",
+            1,
+            {
+                "phase": str(after_state.get("dialog_phase") or ""),
+                "state": str(after_state.get("current_state") or ""),
+            },
+        )
+        logger.error(
+            "[SESSION %s] Guardrail: loop detected -> soft recovery to INIT (count=%d)",
+            session_id,
+            count,
+        )
+        after_state["dialog_phase"] = "INIT"
+        after_state["current_state"] = State.STATE_0_INIT.value
+        after_state["detected_intent"] = None
+        after_state["last_error"] = "loop_guard_soft_recovery"
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.error(
+                session_id=session_id,
+                error_type="LoopGuard",
+                message=f"Soft recovery to INIT (count={count})",
+            )
+
+    if count >= 20:
+        track_metric(
+            "loop_guard_escalation",
+            1,
+            {
+                "phase": str(after_state.get("dialog_phase") or ""),
+                "state": str(after_state.get("current_state") or ""),
+            },
+        )
+        logger.error(
+            "[SESSION %s] Guardrail: loop detected -> escalation (count=%d)",
+            session_id,
+            count,
+        )
+        after_state["dialog_phase"] = "COMPLAINT"
+        after_state["current_state"] = State.STATE_8_COMPLAINT.value
+        after_state["detected_intent"] = "COMPLAINT"
+        after_state["escalation_reason"] = "Loop guard: too many repeated turns"
+        after_state["should_escalate"] = True
+        after_state["last_error"] = "loop_guard_escalation"
+        try:
+            from src.core.human_responses import get_human_response
+
+            after_state["agent_response"] = {
+                "event": "escalation",
+                "messages": [{"type": "text", "content": get_human_response("escalation")}],
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_8_COMPLAINT.value,
+                    "intent": "COMPLAINT",
+                    "escalation_level": "L1",
+                },
+                "escalation": {
+                    "reason": after_state.get("escalation_reason") or "Loop guard",
+                    "target": "human_operator",
+                },
+            }
+        except Exception:
+            pass
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.error(
+                session_id=session_id,
+                error_type="LoopGuard",
+                message=f"Escalation (count={count})",
+            )
+
+    return after_state
 
 
 class ConversationError(Exception):
@@ -258,11 +470,28 @@ class ConversationHandler:
             trace_id = str(uuid.uuid4())
             state["trace_id"] = trace_id
 
+            # DEBUG: Log request start
+            if settings.DEBUG_TRACE_LOGS:
+                debug_log.request_start(
+                    session_id=session_id,
+                    user_message=text,
+                    has_image=state.get("has_image", False),
+                    metadata=state.get("metadata"),
+                )
+
             # Persist user message
             self._persist_user_message(session_id, text)
 
             # Invoke the agent
+            before_invoke_state = deepcopy(state)
             result_state = await self._invoke_agent(state)
+
+            result_state = _apply_transition_guardrails(
+                session_id=session_id,
+                before_state=before_invoke_state,
+                after_state=result_state,
+                user_text=text,
+            )
 
             # Parse response
             agent_response = self._parse_response(result_state, session_id)
@@ -272,6 +501,17 @@ class ConversationHandler:
 
             # Save updated state
             self.session_store.save(session_id, result_state)
+
+            # DEBUG: Log request end
+            if settings.DEBUG_TRACE_LOGS:
+                debug_log.request_end(
+                    session_id=session_id,
+                    response_preview=agent_response
+                    if isinstance(agent_response, str)
+                    else str(agent_response)[:100],
+                    final_phase=result_state.get("dialog_phase", "?"),
+                    final_state=result_state.get("current_state", "?"),
+                )
 
             return ConversationResult(
                 response=agent_response,
@@ -384,7 +624,11 @@ class ConversationHandler:
         # Extract messages
         raw_messages = data.get("messages", [])
         messages = [
-            Message(type=m.get("type", "text"), content=m.get("content", "")) for m in raw_messages
+            Message(
+                type=m.get("type", "text"),
+                content=m.get("content") or m.get("text") or "",
+            )
+            for m in raw_messages
         ]
         if not messages:
             messages = [Message(type="text", content="")]

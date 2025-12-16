@@ -206,6 +206,10 @@ class Settings(BaseSettings):
     # =========================================================================
     # FEATURE FLAGS
     # =========================================================================
+    DEBUG_TRACE_LOGS: bool = Field(
+        default=False,
+        description="Enable pretty debug trace logs (request/routing/node entry/exit) for ManyChat testing.",
+    )
     USE_OFFER_DELIBERATION: bool = Field(
         default=True,
         description="Enable Multi-Role Deliberation for STATE_4_OFFER (Customer/Business/Quality views)",

@@ -19,6 +19,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from src.conf.config import settings
 from src.core.logging import setup_logging
 from src.integrations.manychat.webhook import ManychatPayloadError
+from src.services.dedupe_cache import InMemoryDedupeCache
 from src.server.dependencies import (
     MessageStoreDep,
     get_bot,
@@ -29,6 +30,25 @@ from src.server.middleware import setup_middleware
 
 
 logger = logging.getLogger(__name__)
+
+
+_manychat_dedupe_cache = InMemoryDedupeCache()
+
+
+def _extract_manychat_message_id(payload: dict[str, Any], message: dict[str, Any]) -> str | None:
+    # Prefer explicit message ids if present. If absent, we do NOT dedupe
+    # to avoid false positives on repeated user texts.
+    for key in ("id", "message_id", "messageId"):
+        value = message.get(key)
+        if value:
+            return str(value)
+
+    for key in ("message_id", "messageId", "event_id", "eventId", "update_id", "updateId"):
+        value = payload.get(key)
+        if value:
+            return str(value)
+
+    return None
 
 
 def _init_sentry():
@@ -428,6 +448,24 @@ async def manychat_webhook(
 
             if not text and not image_url:
                 raise HTTPException(status_code=400, detail="Missing message text or image")
+
+            # -----------------------------------------------------------------
+            # IDEMPOTENCY (Variant A: in-memory, best-effort)
+            # -----------------------------------------------------------------
+            message_id = None
+            if isinstance(message, dict):
+                message_id = _extract_manychat_message_id(payload, message)
+
+            if message_id:
+                dedupe_key = f"manychat:{user_id}:{message_id}"
+                is_duplicate = _manychat_dedupe_cache.check_and_mark(dedupe_key, ttl_seconds=120)
+                if is_duplicate:
+                    logger.info(
+                        "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
+                        user_id,
+                        message_id,
+                    )
+                    return {"status": "accepted"}
 
             # Schedule background processing
             store = get_session_store()

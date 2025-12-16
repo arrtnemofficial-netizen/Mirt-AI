@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.conf.config import settings
+from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.services.catalog_service import CatalogService
 from src.services.observability import log_agent_step, track_metric
@@ -85,6 +86,18 @@ async def offer_node(
 
     # Get products to offer
     selected_products = state.get("selected_products", [])
+
+    if settings.DEBUG_TRACE_LOGS:
+        debug_log.node_entry(
+            session_id=session_id,
+            node_name="offer",
+            phase=state.get("dialog_phase", "?"),
+            state_name=State.STATE_4_OFFER.value,
+            extra={
+                "products": str(len(selected_products)),
+                "msg": user_message,
+            },
+        )
 
     # =========================================================================
     # STEP 1: PRE-VALIDATION (перевірка цін по БД ДО LLM виклику)
@@ -222,6 +235,15 @@ async def offer_node(
         # =====================================================
         # DIALOG PHASE (Turn-Based State Machine)
         # =====================================================
+        if settings.DEBUG_TRACE_LOGS:
+            preview_text = assistant_messages[0].get("content", "") if assistant_messages else ""
+            debug_log.node_exit(
+                session_id=session_id,
+                node_name="offer",
+                goto="memory_update",
+                new_phase="OFFER_MADE",
+                response_preview=preview_text,
+            )
         return {
             "current_state": State.STATE_4_OFFER.value,
             "messages": assistant_messages,
@@ -236,6 +258,13 @@ async def offer_node(
 
     except Exception as e:
         logger.exception("Offer node failed for session %s: %s", session_id, e)
+
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.error(
+                session_id=session_id,
+                error_type=type(e).__name__,
+                message=str(e) or type(e).__name__,
+            )
 
         return {
             "last_error": str(e),

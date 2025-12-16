@@ -21,6 +21,7 @@ from langgraph.types import Command, interrupt
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
 from src.conf.config import settings
+from src.core.debug_logger import debug_log
 from src.conf.payment_config import (
     BANK_REQUISITES,
     PAYMENT_PREPAY_AMOUNT,
@@ -94,10 +95,27 @@ async def payment_node(
         Command for next node based on approval
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    dialog_phase = state.get("dialog_phase", "")
 
-    # Check if we're resuming from interrupt
+    if settings.DEBUG_TRACE_LOGS:
+        debug_log.node_entry(
+            session_id=session_id,
+            node_name="payment",
+            phase=dialog_phase or "?",
+            state_name=state.get("current_state", "?"),
+            extra={
+                "awaiting": str(bool(state.get("awaiting_human_approval"))),
+            },
+        )
+
+    # Check if we're resuming from interrupt (HITL enabled)
     if state.get("awaiting_human_approval"):
         return await _handle_approval_response(state, session_id)
+
+    # Check if we're in WAITING_FOR_PAYMENT_PROOF phase (HITL disabled mode)
+    # User has sent delivery data or payment proof - process and go to upsell
+    if dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
+        return await _handle_delivery_data(state, runner, session_id)
 
     # First entry - prepare payment and request approval
     return await _prepare_payment_and_interrupt(state, runner, session_id)
@@ -189,21 +207,43 @@ async def _prepare_payment_and_interrupt(
     # HITL CHECK: Skip interrupt for Telegram polling (lightweight mode)
     # =========================================================================
     if not settings.ENABLE_PAYMENT_HITL:
-        # Lightweight mode: skip human approval, go directly to upsell
+        # Lightweight mode: skip human approval interrupt, but WAIT for delivery data
+        # User must provide: ПІБ, телефон, адреса НП
+        # THEN we go to upsell (after they send payment proof)
         logger.info(
-            "[SESSION %s] HITL disabled - skipping payment interrupt, proceeding to upsell",
+            "[SESSION %s] HITL disabled - waiting for delivery data (ПІБ, адреса, НП)",
             session_id,
         )
-        return Command(
+        cmd = Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
                 "messages": [{"role": "assistant", "content": response_text}],
+                "agent_response": {
+                    "event": "simple_answer",
+                    "messages": [{"type": "text", "content": response_text}],
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                        "intent": "PAYMENT_DELIVERY",
+                        "escalation_level": "NONE",
+                    },
+                },
                 "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
                 "awaiting_human_approval": False,
                 "step_number": state.get("step_number", 0) + 1,
             },
-            goto="upsell",  # Skip interrupt, go to upsell
+            goto="end",  # WAIT for user to send delivery data, don't skip to upsell!
         )
+
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.node_exit(
+                session_id=session_id,
+                node_name="payment",
+                goto=cmd.goto,
+                new_phase="WAITING_FOR_PAYMENT_PROOF",
+                response_preview=response_text,
+            )
+        return cmd
 
     # This call PAUSES the graph execution
     # It returns ONLY when someone calls graph.invoke(Command(resume=...))
@@ -214,10 +254,20 @@ async def _prepare_payment_and_interrupt(
     #
     # DIALOG PHASE: WAITING_FOR_PAYMENT_PROOF
     # - Показали реквізити, чекаємо скрін оплати
-    return Command(
+    cmd = Command(
         update={
             "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
             "messages": [{"role": "assistant", "content": response_text}],
+            "agent_response": {
+                "event": "simple_answer",
+                "messages": [{"type": "text", "content": response_text}],
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "intent": "PAYMENT_DELIVERY",
+                    "escalation_level": "NONE",
+                },
+            },
             "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
             "awaiting_human_approval": True,
             "approval_type": "payment",
@@ -227,6 +277,220 @@ async def _prepare_payment_and_interrupt(
         },
         goto="payment",  # Loop back to process approval
     )
+
+    if settings.DEBUG_TRACE_LOGS:
+        debug_log.node_exit(
+            session_id=session_id,
+            node_name="payment",
+            goto=cmd.goto,
+            new_phase="WAITING_FOR_PAYMENT_PROOF",
+            response_preview=response_text,
+        )
+    return cmd
+
+
+async def _handle_delivery_data(
+    state: dict[str, Any],
+    runner: Callable[..., Any] | None,
+    session_id: str,
+) -> Command[Literal["upsell", "end", "agent"]]:
+    """
+    Handle delivery data when HITL is disabled.
+    
+    User has sent their delivery info (ПІБ, phone, НП address).
+    We process it through the agent to extract and confirm, then go to upsell.
+    """
+    from .utils import extract_user_message
+    
+    user_message = extract_user_message(state.get("messages", []))
+    products = state.get("selected_products", []) or state.get("offered_products", [])
+    total_price = sum(p.get("price", 0) for p in products)
+
+    has_image_now = bool(state.get("has_image", False) or state.get("metadata", {}).get("has_image", False))
+    
+    logger.info(
+        "[SESSION %s] Processing delivery data: '%s'",
+        session_id,
+        user_message[:50] if user_message else "(empty)",
+    )
+    
+    # Create deps for agent
+    deps = create_deps_from_state(state)
+    deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
+    deps.selected_products = products
+    
+    try:
+        # Use payment agent to process delivery data
+        response = await run_payment(
+            message=user_message,
+            deps=deps,
+            message_history=None,
+        )
+        response_text = response.reply_to_user
+
+        metadata_update = state.get("metadata", {}).copy()
+        if deps.customer_name:
+            metadata_update["customer_name"] = deps.customer_name
+        if deps.customer_phone:
+            metadata_update["customer_phone"] = deps.customer_phone
+        if deps.customer_city:
+            metadata_update["customer_city"] = deps.customer_city
+        if deps.customer_nova_poshta:
+            metadata_update["customer_nova_poshta"] = deps.customer_nova_poshta
+        metadata_update["payment_details_sent"] = bool(
+            getattr(response, "payment_details_sent", False)
+        )
+        metadata_update["awaiting_payment_confirmation"] = bool(
+            getattr(response, "awaiting_payment_confirmation", False)
+        )
+
+        user_text = user_message if isinstance(user_message, str) else str(user_message)
+        user_text_lower = user_text.lower()
+
+        has_delivery_data = bool(
+            deps.customer_name
+            and deps.customer_phone
+            and deps.customer_city
+            and deps.customer_nova_poshta
+        )
+
+        payment_confirm_keywords = (
+            "оплатила",
+            "оплатив",
+            "оплачено",
+            "переказала",
+            "переказав",
+            "відправила скрін",
+            "відправив скрін",
+            "квитанц",
+            "скрін",
+            "скрин",
+        )
+        has_payment_proof = has_image_now or any(k in user_text_lower for k in payment_confirm_keywords)
+
+        confirmation_only_keywords = (
+            "да",
+            "так",
+            "ок",
+            "okay",
+            "согласен",
+            "згоден",
+            "беру",
+        )
+
+        if user_text_lower.strip() in confirmation_only_keywords and not has_payment_proof:
+            missing = []
+            if not metadata_update.get("customer_name"):
+                missing.append("📝 ПІБ")
+            if not metadata_update.get("customer_phone"):
+                missing.append("📱 Телефон")
+            if not metadata_update.get("customer_city"):
+                missing.append("🏙️ Місто")
+            if not metadata_update.get("customer_nova_poshta"):
+                missing.append("📍 Відділення Нової пошти")
+
+            if missing:
+                response_text = "Будь ласка, надішліть:\n" + "\n".join(missing)
+            else:
+                response_text = "Надішліть, будь ласка, скрін квитанції після оплати 🤍"
+
+        if has_delivery_data and has_payment_proof:
+            logger.info("[SESSION %s] Delivery data + payment proof received, proceeding to upsell", session_id)
+            cmd = Command(
+                update={
+                    "current_state": State.STATE_6_UPSELL.value,
+                    "messages": [{"role": "assistant", "content": response_text}],
+                    "agent_response": {
+                        "event": "simple_answer",
+                        "messages": [{"type": "text", "content": response_text}],
+                        "metadata": {
+                            "session_id": session_id,
+                            "current_state": State.STATE_6_UPSELL.value,
+                            "intent": "PAYMENT_DELIVERY",
+                            "escalation_level": "NONE",
+                        },
+                    },
+                    "metadata": metadata_update,
+                    "dialog_phase": "UPSELL_OFFERED",
+                    "step_number": state.get("step_number", 0) + 1,
+                },
+                goto="upsell",
+            )
+            if settings.DEBUG_TRACE_LOGS:
+                debug_log.node_exit(
+                    session_id=session_id,
+                    node_name="payment",
+                    goto=cmd.goto,
+                    new_phase="UPSELL_OFFERED",
+                    response_preview=response_text,
+                )
+            return cmd
+
+        cmd = Command(
+            update={
+                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                "messages": [{"role": "assistant", "content": response_text}],
+                "agent_response": {
+                    "event": "simple_answer",
+                    "messages": [{"type": "text", "content": response_text}],
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                        "intent": "PAYMENT_DELIVERY",
+                        "escalation_level": "NONE",
+                    },
+                },
+                "metadata": metadata_update,
+                "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                "step_number": state.get("step_number", 0) + 1,
+            },
+            goto="end",
+        )
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.node_exit(
+                session_id=session_id,
+                node_name="payment",
+                goto=cmd.goto,
+                new_phase="WAITING_FOR_PAYMENT_PROOF",
+                response_preview=response_text,
+            )
+        return cmd
+            
+    except Exception as e:
+        logger.error("[SESSION %s] Delivery data processing error: %s", session_id, e)
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.error(
+                session_id=session_id,
+                error_type=type(e).__name__,
+                message=str(e) or type(e).__name__,
+            )
+        # Fallback - ask for data again
+        return Command(
+            update={
+                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                "messages": [{"role": "assistant", "content": 
+                    "Будь ласка, надішліть:\n📝 ПІБ\n📱 Телефон\n🏙️ Місто та відділення НП"
+                }],
+                "agent_response": {
+                    "event": "simple_answer",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "content": "Будь ласка, надішліть:\n📝 ПІБ\n📱 Телефон\n🏙️ Місто та відділення НП",
+                        }
+                    ],
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                        "intent": "PAYMENT_DELIVERY",
+                        "escalation_level": "NONE",
+                    },
+                },
+                "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                "step_number": state.get("step_number", 0) + 1,
+            },
+            goto="end",
+        )
 
 
 async def _handle_approval_response(

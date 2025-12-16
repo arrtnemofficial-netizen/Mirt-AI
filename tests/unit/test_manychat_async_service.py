@@ -2,6 +2,7 @@ import pytest
 
 from src.core.models import AgentResponse, Message, Metadata, Product
 from src.integrations.manychat.async_service import ManyChatAsyncService
+from src.integrations.manychat.webhook import ManychatWebhook
 from src.services.session_store import InMemorySessionStore
 
 
@@ -181,3 +182,52 @@ async def test_process_message_async_superseded_request_is_silent(monkeypatch: p
     await svc.process_message_async(user_id="u4", text="hi", image_url=None, channel="instagram")
 
     assert push_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_sync_and_async_manychat_builders_do_not_drift_on_fields_tags_and_text():
+    store = InMemorySessionStore()
+
+    agent_response = AgentResponse(
+        event="simple_answer",
+        messages=[Message(content="Hello")],
+        products=[
+            Product.from_legacy(
+                {
+                    "product_id": 1,
+                    "name": "Сукня",
+                    "price": 100,
+                    "photo_url": "https://example.com/p.jpg",
+                }
+            )
+        ],
+        metadata=Metadata(current_state="STATE_4_OFFER", intent="DISCOVERY_OR_QUESTION"),
+    )
+
+    # Sync (response mode)
+    sync = ManychatWebhook(store)
+    sync_payload = sync._to_manychat_response(agent_response)
+
+    # Async (push mode)
+    push_client = DummyPushClient()
+    async_svc = ManyChatAsyncService(store, runner=object(), push_client=push_client)
+    await async_svc._push_response("u1", agent_response, "instagram")
+    assert len(push_client.calls) == 1
+    async_call = push_client.calls[0]
+
+    # TEXT must match (first text chunk)
+    assert sync_payload["content"]["messages"][0]["type"] == "text"
+    assert async_call["messages"][0]["type"] == "text"
+    assert sync_payload["content"]["messages"][0]["text"] == async_call["messages"][0]["text"]
+
+    # Fields must match
+    assert sync_payload["set_field_values"] == async_call["set_field_values"]
+
+    # Tags must match
+    assert sync_payload["add_tag"] == async_call["add_tags"]
+    assert sync_payload["remove_tag"] == async_call["remove_tags"]
+
+    # Intentional allowed drift:
+    # - Sync mode may omit product images except PHOTO_IDENT
+    # - Async mode may include product images
+    # - Async quick replies disabled

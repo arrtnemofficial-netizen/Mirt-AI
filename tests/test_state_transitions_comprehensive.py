@@ -616,11 +616,11 @@ class TestRouteAfterVision:
         assert result == "validation", f"Error should route to validation, got {result}"
     
     def test_no_products_routes_to_agent(self):
-        """No products → agent (уточнення)"""
+        """No products → end (повертаємо повідомлення від vision з уточненням)"""
         state = {"selected_products": []}
         
         result = route_after_vision(state)
-        assert result == "agent", f"No products should route to agent, got {result}"
+        assert result == "end", f"No products should route to end, got {result}"
 
 
 # =============================================================================

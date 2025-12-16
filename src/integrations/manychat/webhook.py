@@ -20,6 +20,26 @@ from src.services.debouncer import BufferedMessage, MessageDebouncer
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
 
+from .constants import (
+    FIELD_AI_INTENT,
+    FIELD_AI_STATE,
+    FIELD_CLIENT_CITY,
+    FIELD_CLIENT_NAME,
+    FIELD_CLIENT_NP,
+    FIELD_CLIENT_PHONE,
+    FIELD_LAST_PRODUCT,
+    FIELD_ORDER_SUM,
+    TAG_AI_RESPONDED,
+    TAG_NEEDS_HUMAN,
+    TAG_ORDER_PAID,
+    TAG_ORDER_STARTED,
+)
+from .response_builder import (
+    build_manychat_field_values,
+    build_manychat_tags,
+    build_manychat_v2_response,
+)
+
 
 if TYPE_CHECKING:
     from src.core.models import AgentResponse
@@ -32,22 +52,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # ManyChat Custom Field Names (повинні співпадати з твоїм ManyChat)
 # ---------------------------------------------------------------------------
-FIELD_AI_STATE = "ai_state"  # Поточний стан AI (STATE_1_DISCOVERY, etc.)
-FIELD_AI_INTENT = "ai_intent"  # Intent останнього повідомлення
-FIELD_LAST_PRODUCT = "last_product"  # Назва останнього товару
-FIELD_ORDER_SUM = "order_sum"  # Сума замовлення
-FIELD_CLIENT_NAME = "client_name"  # ПІБ клієнта
-FIELD_CLIENT_PHONE = "client_phone"  # Телефон клієнта
-FIELD_CLIENT_CITY = "client_city"  # Місто клієнта
-FIELD_CLIENT_NP = "client_nova_poshta"  # Відділення НП
 
 # ---------------------------------------------------------------------------
 # ManyChat Tags
 # ---------------------------------------------------------------------------
-TAG_AI_RESPONDED = "ai_responded"  # AI відповів
-TAG_NEEDS_HUMAN = "needs_human"  # Потрібен живий менеджер
-TAG_ORDER_STARTED = "order_started"  # Почав оформлення
-TAG_ORDER_PAID = "order_paid"  # Оплатив
 
 
 class ManychatPayloadError(Exception):
@@ -191,51 +199,18 @@ class ManychatWebhook:
         - tags: Tags to add/remove
         - quick_replies: Quick reply buttons (optional)
         """
-        # Build messages
-        text_chunks = render_agent_response_text(agent_response)
-        messages: list[dict[str, Any]] = [{"type": "text", "text": chunk} for chunk in text_chunks]
-
         # Add product images only для PHOTO_IDENT, щоб не дублювати фото в подальших стейтах
-        if agent_response.metadata.intent == "PHOTO_IDENT":
-            for product in agent_response.products:
-                if product.photo_url:
-                    messages.append({
-                        "type": "image",
-                        "url": product.photo_url,
-                    })
-
-        # Build Custom Field values
-        field_values = self._build_field_values(agent_response)
-
-        # Build tags
-        tags_to_add, tags_to_remove = self._build_tags(agent_response)
+        include_product_images = agent_response.metadata.intent == "PHOTO_IDENT"
 
         # Build quick replies based on state
         quick_replies = self._build_quick_replies(agent_response)
 
-        response: dict[str, Any] = {
-            "version": "v2",
-            "content": {
-                "messages": messages,
-                "actions": [],
-                "quick_replies": quick_replies,
-            },
-            "set_field_values": field_values,
-            "add_tag": tags_to_add,
-            "remove_tag": tags_to_remove,
-        }
-
-        # Add metadata for debugging
-        response["_debug"] = {
-            "event": agent_response.event,
-            "current_state": agent_response.metadata.current_state,
-            "intent": agent_response.metadata.intent,
-            "escalation": agent_response.escalation.model_dump()
-            if agent_response.escalation
-            else None,
-        }
-
-        return response
+        return build_manychat_v2_response(
+            agent_response,
+            include_product_images=include_product_images,
+            quick_replies=quick_replies,
+            include_debug=True,
+        )
 
     @staticmethod
     def _build_field_values(
@@ -247,46 +222,12 @@ class ManychatWebhook:
         by LLM and accessed via conversation.py, not parsed here.
         Values preserve their types (str, int, float) for ManyChat compatibility.
         """
-        fields: list[dict[str, Any]] = [
-            {"field_name": FIELD_AI_STATE, "field_value": agent_response.metadata.current_state},
-            {"field_name": FIELD_AI_INTENT, "field_value": agent_response.metadata.intent},
-        ]
-
-        # Add last product info if available
-        if agent_response.products:
-            last_product = agent_response.products[-1]
-            fields.append({"field_name": FIELD_LAST_PRODUCT, "field_value": last_product.name})
-            if last_product.price:
-                # Keep as number for ManyChat Number field compatibility
-                fields.append({"field_name": FIELD_ORDER_SUM, "field_value": last_product.price})
-
-        return fields
+        return build_manychat_field_values(agent_response)
 
     @staticmethod
     def _build_tags(agent_response: AgentResponse) -> tuple[list[str], list[str]]:
         """Build tags to add/remove based on AgentResponse."""
-        add_tags = [TAG_AI_RESPONDED]
-        remove_tags: list[str] = []
-
-        # Add escalation tag if needed
-        if agent_response.metadata.escalation_level != "NONE":
-            add_tags.append(TAG_NEEDS_HUMAN)
-        else:
-            remove_tags.append(TAG_NEEDS_HUMAN)
-
-        # Add order tags based on state
-        current_state = agent_response.metadata.current_state
-        if current_state in ("STATE_5_PAYMENT_DELIVERY", "STATE_6_UPSELL"):
-            add_tags.append(TAG_ORDER_STARTED)
-
-        if current_state == "STATE_7_END" and agent_response.event == "escalation":
-            # Order completed with payment confirmation
-            if agent_response.escalation and "ORDER_CONFIRMED" in (
-                agent_response.escalation.reason or ""
-            ):
-                add_tags.append(TAG_ORDER_PAID)
-
-        return add_tags, remove_tags
+        return build_manychat_tags(agent_response)
 
     @staticmethod
     def _build_quick_replies(agent_response: AgentResponse) -> list[dict[str, str]]:

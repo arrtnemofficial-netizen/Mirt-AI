@@ -151,6 +151,76 @@ class ManyChatPushClient:
 
         return actions
 
+    @staticmethod
+    def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        """Redact and truncate payload for safe logging.
+
+        NOTE: Avoid logging PII or long message bodies.
+        """
+        try:
+            redacted = {
+                "subscriber_id": payload.get("subscriber_id"),
+                "message_tag": payload.get("message_tag"),
+                "data": {
+                    "version": (payload.get("data") or {}).get("version"),
+                    "content": {},
+                },
+            }
+
+            content = ((payload.get("data") or {}).get("content") or {})
+            redacted_content: dict[str, Any] = {
+                "type": content.get("type"),
+                "messages": [],
+                "actions": [],
+            }
+
+            # Messages: truncate text and urls
+            for msg in content.get("messages") or []:
+                msg_type = msg.get("type")
+                if msg_type == "text":
+                    text = str(msg.get("text") or "")
+                    if len(text) > 200:
+                        text = text[:200] + "…"
+                    redacted_content["messages"].append({"type": "text", "text": text})
+                elif msg_type == "image":
+                    url = str(msg.get("url") or "")
+                    if len(url) > 120:
+                        url = url[:120] + "…"
+                    redacted_content["messages"].append({"type": "image", "url": url})
+                else:
+                    redacted_content["messages"].append({"type": msg_type or "unknown"})
+
+            # Actions: keep only action kind + field/tag names (values are redacted)
+            for act in content.get("actions") or []:
+                action_type = act.get("action")
+                if action_type == "set_field_value":
+                    field_name = str(act.get("field_name") or "")
+                    redacted_content["actions"].append(
+                        {
+                            "action": "set_field_value",
+                            "field_name": field_name,
+                            "value": "<redacted>",
+                        }
+                    )
+                elif action_type in ("add_tag", "remove_tag"):
+                    redacted_content["actions"].append(
+                        {
+                            "action": action_type,
+                            "tag_name": act.get("tag_name"),
+                        }
+                    )
+                else:
+                    redacted_content["actions"].append({"action": action_type or "unknown"})
+
+            # Quick replies (if present)
+            if content.get("quick_replies"):
+                redacted_content["quick_replies_count"] = len(content.get("quick_replies") or [])
+
+            redacted["data"]["content"] = redacted_content
+            return redacted
+        except Exception:
+            return {"_redact_failed": True}
+
     async def _do_send(
         self,
         subscriber_id: str,
@@ -256,8 +326,31 @@ class ManyChatPushClient:
             logger.warning("[MANYCHAT] No valid messages to send")
             return False
 
+        safe_mode_instagram = bool(getattr(settings, "MANYCHAT_SAFE_MODE_INSTAGRAM", True))
+
+        allowed_fields_raw = str(
+            getattr(settings, "MANYCHAT_INSTAGRAM_ALLOWED_FIELDS", "ai_state,ai_intent")
+        )
+        allowed_fields = {
+            f.strip() for f in allowed_fields_raw.split(",") if f and f.strip()
+        }
+
+        # Instagram sendContent is strict and frequently rejects actions/quick replies.
+        # Default to safe mode: no quick replies; actions are restricted to a minimal allowlist.
+        effective_quick_replies = quick_replies
+        if channel == "instagram" and safe_mode_instagram:
+            effective_quick_replies = None
+
         # Build actions (may be empty)
-        actions = self._build_actions(set_field_values, add_tags, remove_tags)
+        if channel == "instagram" and safe_mode_instagram:
+            filtered_fields = [
+                fv
+                for fv in (set_field_values or [])
+                if str(fv.get("field_name") or "").strip() in allowed_fields
+            ]
+            actions = self._build_actions(filtered_fields, add_tags=None, remove_tags=None)
+        else:
+            actions = self._build_actions(set_field_values, add_tags, remove_tags)
 
         # Build content structure
         content: dict[str, Any] = {
@@ -265,8 +358,8 @@ class ManyChatPushClient:
             "messages": clean_messages,
             "actions": actions,
         }
-        if quick_replies:
-            content["quick_replies"] = quick_replies
+        if effective_quick_replies:
+            content["quick_replies"] = effective_quick_replies
 
         # Build payload
         sub_id = int(subscriber_id) if subscriber_id.isdigit() else subscriber_id
@@ -314,6 +407,15 @@ class ManyChatPushClient:
             )
             return True
 
+        # Log payload (redacted) for debugging client-side 4xx issues.
+        if status_code and status_code < 500:
+            logger.warning(
+                "[MANYCHAT] ❌ Push rejected: %d %s | payload=%s",
+                status_code,
+                response_text[:200],
+                self._redact_payload(payload),
+            )
+
         # Check if error is due to missing Custom Fields → retry without actions
         if status_code == 400 and actions and self._is_field_error(response_text):
             logger.warning(
@@ -327,8 +429,8 @@ class ManyChatPushClient:
                 "messages": clean_messages,
                 "actions": [],  # Empty actions
             }
-            if quick_replies:
-                content_no_actions["quick_replies"] = quick_replies
+            if effective_quick_replies:
+                content_no_actions["quick_replies"] = effective_quick_replies
 
             payload_retry: dict[str, Any] = {
                 "subscriber_id": sub_id,

@@ -24,6 +24,8 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, log_trace, track_metric
+from src.conf.config import settings
+from src.core.debug_logger import debug_log
 
 # State prompts and transition logic
 from ..state_prompts import (
@@ -126,6 +128,18 @@ async def agent_node(
             "step_number": state.get("step_number", 0) + 1,
         }
 
+    if settings.DEBUG_TRACE_LOGS:
+        debug_log.node_entry(
+            session_id=session_id,
+            node_name="agent",
+            phase=state.get("dialog_phase", "?"),
+            state_name=current_state,
+            extra={
+                "intent": state.get("detected_intent"),
+                "msg": user_message,
+            },
+        )
+
     # =========================================================================
     # HISTORY TRIMMING: Prevent LLM context overflow
     # =========================================================================
@@ -162,6 +176,17 @@ async def agent_node(
     if state_prompt:
         deps.state_specific_prompt = state_prompt
         logger.debug("Injected state prompt for %s (%d chars)", current_state, len(state_prompt))
+
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.prompt_debug(
+                session_id=session_id,
+                prompt_name=f"state.{current_state}",
+                prompt_content=state_prompt,
+                variables={
+                    "dialog_phase": dialog_phase,
+                    "trace_id": trace_id,
+                },
+            )
 
     try:
         # Call PydanticAI agent with proper DI
@@ -433,6 +458,18 @@ async def agent_node(
             new_state_str,
         )
 
+        if settings.DEBUG_TRACE_LOGS:
+            preview_text = ""
+            if response.messages:
+                preview_text = response.messages[0].content
+            debug_log.node_exit(
+                session_id=session_id,
+                node_name="agent",
+                goto="route_after_agent",
+                new_phase=dialog_phase,
+                response_preview=preview_text,
+            )
+
         return {
             "current_state": new_state_str,
             "detected_intent": intent,
@@ -449,6 +486,13 @@ async def agent_node(
 
     except Exception as e:
         logger.error("Agent node failed for session %s: %s", session_id, e)
+
+        if settings.DEBUG_TRACE_LOGS:
+            debug_log.error(
+                session_id=session_id,
+                error_type=type(e).__name__,
+                message=str(e) or type(e).__name__,
+            )
 
         # Async Trace Logging (Error)
         await log_trace(

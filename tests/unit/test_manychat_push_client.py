@@ -74,8 +74,10 @@ async def test_send_content_retries_without_actions_on_field_error(monkeypatch: 
     assert ok is True
     assert len(calls) == 2
 
-    # First call includes actions
+    # First call includes ONLY allowed field actions in Instagram safe mode
     assert calls[0]["data"]["content"]["actions"]
+    assert all(a.get("action") == "set_field_value" for a in calls[0]["data"]["content"]["actions"])
+    assert {a.get("field_name") for a in calls[0]["data"]["content"]["actions"]} == {"ai_state"}
 
     # Retry must remove actions
     assert calls[1]["data"]["content"]["actions"] == []

@@ -126,7 +126,7 @@ class ConversationState(TypedDict, total=False):
     # Time travel support (prefixed to avoid LangGraph reserved names)
     saved_checkpoint_id: str | None
     saved_parent_checkpoint_id: str | None
-    step_number: int
+    step_number: Annotated[int, replace_value]
 
     # ==========================================================================
     # MEMORY SYSTEM (Titans-like)
