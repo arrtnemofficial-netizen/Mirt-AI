@@ -53,6 +53,15 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
     try:
         catalog = CatalogService()
 
+        def _norm(s: str) -> str:
+            return " ".join((s or "").lower().strip().split())
+
+        def _base_name(s: str) -> str:
+            s = (s or "").strip()
+            if "(" in s:
+                return s.split("(")[0].strip()
+            return s
+
         # Якщо колір вже в назві (наприклад "Костюм Ритм (рожевий)") - не дублюємо
         search_query = product_name
         if color and f"({color})" not in product_name.lower() and color.lower() not in product_name.lower():
@@ -60,6 +69,32 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
             search_query = f"{product_name} ({color})"
 
         results = await catalog.search_products(query=search_query, limit=5)
+
+        if not results:
+            all_rows = await catalog.get_products_for_vision()
+            target = _norm(product_name)
+            target_base = _norm(_base_name(product_name))
+            color_norm = _norm(color or "")
+
+            scored: list[tuple[int, dict[str, Any]]] = []
+            for row in all_rows or []:
+                name = str(row.get("name") or "")
+                n = _norm(name)
+                nb = _norm(_base_name(name))
+                score = 0
+                if n == target or nb == target_base:
+                    score += 50
+                if target and (target in n or n in target):
+                    score += 15
+                if target_base and (target_base in nb or nb in target_base):
+                    score += 10
+                if color_norm and color_norm in n:
+                    score += 5
+                if score > 0:
+                    scored.append((score, row))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            results = [row for _score, row in scored[:5]]
 
         # Якщо не знайшли з повною назвою - спробуємо базову назву без кольору
         if not results and "(" in product_name:
@@ -105,6 +140,7 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
                 else product.get("colors", ""),
                 "photo_url": photo_url,
                 "description": product.get("description", ""),
+                "_catalog_row": product,
             }
     except Exception as e:
         logger.warning("DB enrichment failed: %s", e)
@@ -147,6 +183,7 @@ def _build_vision_messages(
     previous_messages: list[Any],
     vision_greeted: bool,
     user_message: str = "",
+    catalog_product: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """
     Build multi-bubble assistant response from VisionResponse.
@@ -204,6 +241,11 @@ def _build_vision_messages(
         if height:
             # Зріст є в тексті разом з фото - показуємо ціну одразу!
             size_label, price = get_size_and_price_for_height(height)
+            if catalog_product:
+                try:
+                    price = int(CatalogService.get_price_for_size(catalog_product, size_label))
+                except Exception:
+                    pass
             messages.append(text_msg(f"На {height} см підійде розмір {size_label}"))
             messages.append(text_msg(f"Ціна {price} грн"))
             messages.append(text_msg("Оформлюємо? 🌸"))
@@ -291,26 +333,41 @@ async def vision_node(
         # Call vision agent
         response = await run_vision(message=user_message, deps=deps)
 
+        catalog_row: dict[str, Any] | None = None
+        if response.identified_product:
+            try:
+                catalog = CatalogService()
+                enriched_row = await _enrich_product_from_db(
+                    response.identified_product.name,
+                    color=response.identified_product.color,
+                )
+                if enriched_row and isinstance(enriched_row.get("_catalog_row"), dict):
+                    catalog_row = enriched_row.get("_catalog_row")
+            except Exception:
+                catalog_row = None
+
         # Enrich product from DB if Vision returned partial data (missing id/photo/price)
         if response.identified_product and (
             response.identified_product.price == 0
             or not response.identified_product.photo_url
             or not response.identified_product.id
         ):
-            # Передаємо колір для точного match в БД!
             vision_color = response.identified_product.color
             enriched = await _enrich_product_from_db(
                 response.identified_product.name,
-                color=vision_color
+                color=vision_color,
             )
             if enriched:
-                # Update identified_product with DB data (DB = єдине джерело правди)
-                response.identified_product.price = enriched.get("price", 0)
-                response.identified_product.photo_url = enriched.get("photo_url", "")
-                # Зберігаємо колір від vision якщо він є, інакше беремо з БД
-                if not vision_color:
+                if response.identified_product.price == 0:
+                    response.identified_product.price = enriched.get("price", 0)
+                if not response.identified_product.photo_url:
+                    response.identified_product.photo_url = enriched.get("photo_url", "")
+                if not response.identified_product.id:
+                    response.identified_product.id = enriched.get("id", 0)
+                if (not vision_color) and enriched.get("color"):
                     response.identified_product.color = enriched.get("color", "")
-                response.identified_product.id = enriched.get("id", 0)
+                if (not catalog_row) and isinstance(enriched.get("_catalog_row"), dict):
+                    catalog_row = enriched.get("_catalog_row")
 
                 # НЕ генеруємо reply з ціною тут!
                 # Ціна залежить від розміру, тому питаємо розмір спочатку.
@@ -362,7 +419,42 @@ async def vision_node(
             messages,
             vision_greeted=vision_greeted_before,
             user_message=user_message,  # Передаємо текст для витягування зросту!
+            catalog_product=catalog_row,
         )
+
+        height_in_text = extract_height_from_text(user_message)
+        if response.identified_product and height_in_text:
+            size_label, _ = get_size_and_price_for_height(height_in_text)
+            response.identified_product.size = size_label
+            if catalog_row:
+                try:
+                    response.identified_product.price = CatalogService.get_price_for_size(
+                        catalog_row,
+                        size_label,
+                    )
+                except Exception:
+                    pass
+
+            if selected_products:
+                first = dict(selected_products[0])
+                first["size"] = size_label
+                if catalog_row:
+                    try:
+                        first["price"] = CatalogService.get_price_for_size(catalog_row, size_label)
+                    except Exception:
+                        pass
+                    if not first.get("photo_url"):
+                        first["photo_url"] = (
+                            catalog_row.get("photo_url")
+                            or catalog_row.get("image_url")
+                            or catalog_row.get("photo")
+                            or catalog_row.get("image")
+                            or first.get("photo_url")
+                            or ""
+                        )
+                    if not first.get("id"):
+                        first["id"] = catalog_row.get("id") or first.get("id")
+                selected_products[0] = first
 
         # Metrics
         latency_ms = (time.perf_counter() - start_time) * 1000
@@ -394,9 +486,6 @@ async def vision_node(
         # 3. needs_clarification → VISION_DONE
         #    - Vision не впевнений, питає уточнення
         # =====================================================
-        # Перевіряємо чи зріст вже є в тексті
-        height_in_text = extract_height_from_text(user_message)
-
         if selected_products:
             if height_in_text:
                 # Зріст вже є - готові до оформлення!

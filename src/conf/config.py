@@ -71,6 +71,37 @@ class Settings(BaseSettings):
         description="Use async push mode (recommended). If False, uses sync response mode.",
     )
 
+    MANYCHAT_SAFE_MODE_INSTAGRAM: bool = Field(
+        default=True,
+        description=(
+            "Enable strict safe mode for Instagram ManyChat sendContent: disables quick replies and restricts actions."
+        ),
+    )
+    MANYCHAT_INSTAGRAM_DISABLE_ACTIONS: bool = Field(
+        default=True,
+        description=(
+            "Disable ALL actions (fields/tags) for Instagram sendContent to maximize delivery reliability."
+        ),
+    )
+    MANYCHAT_INSTAGRAM_ALLOWED_FIELDS: str = Field(
+        default="ai_state,ai_intent",
+        description=(
+            "Comma-separated allowlist of Custom Fields allowed for Instagram when actions are enabled."
+        ),
+    )
+    MANYCHAT_INSTAGRAM_SPLIT_SEND: bool = Field(
+        default=True,
+        description=(
+            "Send each message bubble as a separate Instagram sendContent call with an inter-bubble delay."
+        ),
+    )
+    MANYCHAT_INSTAGRAM_BUBBLE_DELAY_SECONDS: float = Field(
+        default=5.0,
+        description=(
+            "Delay in seconds between Instagram bubbles when MANYCHAT_INSTAGRAM_SPLIT_SEND is enabled."
+        ),
+    )
+
     SUPABASE_URL: str = Field(
         default="", description="Supabase project URL for session persistence."
     )

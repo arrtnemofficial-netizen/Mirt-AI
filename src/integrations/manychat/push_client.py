@@ -327,6 +327,13 @@ class ManyChatPushClient:
             return False
 
         safe_mode_instagram = bool(getattr(settings, "MANYCHAT_SAFE_MODE_INSTAGRAM", True))
+        disable_actions_instagram = bool(
+            getattr(settings, "MANYCHAT_INSTAGRAM_DISABLE_ACTIONS", True)
+        )
+        split_send_instagram = bool(getattr(settings, "MANYCHAT_INSTAGRAM_SPLIT_SEND", True))
+        bubble_delay_seconds = float(
+            getattr(settings, "MANYCHAT_INSTAGRAM_BUBBLE_DELAY_SECONDS", 5.0)
+        )
 
         allowed_fields_raw = str(
             getattr(settings, "MANYCHAT_INSTAGRAM_ALLOWED_FIELDS", "ai_state,ai_intent")
@@ -342,7 +349,9 @@ class ManyChatPushClient:
             effective_quick_replies = None
 
         # Build actions (may be empty)
-        if channel == "instagram" and safe_mode_instagram:
+        if channel == "instagram" and disable_actions_instagram:
+            actions = []
+        elif channel == "instagram" and safe_mode_instagram:
             filtered_fields = [
                 fv
                 for fv in (set_field_values or [])
@@ -377,7 +386,140 @@ class ManyChatPushClient:
             "Content-Type": "application/json",
         }
 
-        # TYPING DELAY: Simulate human typing speed
+        async def _send_with_retry(
+            *,
+            payload_to_send: dict[str, Any],
+            had_actions: bool,
+        ) -> bool:
+            """Send payload and, on field-related 400, retry once without actions."""
+            did_retry_without_actions = False
+            try:
+                success_local, response_text_local, status_code_local = await self._do_send(
+                    subscriber_id, payload_to_send, headers
+                )
+            except CircuitOpenError:
+                logger.error(
+                    "[MANYCHAT] ❌ Circuit breaker OPEN - cannot send to %s",
+                    subscriber_id,
+                )
+                return False
+
+            if success_local:
+                return True
+
+            if status_code_local and status_code_local < 500:
+                logger.warning(
+                    "[MANYCHAT] ❌ Push rejected: %d %s | payload=%s",
+                    status_code_local,
+                    response_text_local[:200],
+                    self._redact_payload(payload_to_send),
+                )
+
+            if (
+                status_code_local == 400
+                and had_actions
+                and self._is_field_error(response_text_local)
+            ):
+                logger.warning(
+                    "[MANYCHAT] ⚠️ Field error detected, retrying WITHOUT actions: %s",
+                    response_text_local[:100],
+                )
+
+                content_retry = dict((payload_to_send.get("data") or {}).get("content") or {})
+                content_retry["actions"] = []
+
+                payload_retry = {
+                    **payload_to_send,
+                    "data": {
+                        **(payload_to_send.get("data") or {}),
+                        "content": content_retry,
+                    },
+                }
+
+                try:
+                    success_retry, response_retry, status_retry = await self._do_send(
+                        subscriber_id, payload_retry, headers
+                    )
+                except CircuitOpenError:
+                    logger.error("[MANYCHAT] ❌ Circuit opened during retry")
+                    return False
+
+                if success_retry:
+                    did_retry_without_actions = True
+                    logger.info(
+                        "[MANYCHAT] ✅ Pushed %d messages to %s (retry without actions)",
+                        len(((payload_retry.get("data") or {}).get("content") or {}).get("messages") or []),
+                        subscriber_id,
+                    )
+                    return True
+
+                if status_retry and status_retry < 500:
+                    logger.warning(
+                        "[MANYCHAT] ❌ Retry rejected: %d %s | payload=%s",
+                        status_retry,
+                        str(response_retry)[:200],
+                        self._redact_payload(payload_retry),
+                    )
+                return False
+
+            return False
+
+        # Instagram split-send mode: send each bubble as its own sendContent call.
+        # This improves UI (separate bubbles) and allows a real inter-bubble delay.
+        if channel == "instagram" and split_send_instagram and len(clean_messages) > 1:
+            first_text_len = 0
+            if clean_messages and clean_messages[0].get("type") == "text":
+                first_text_len = len(str(clean_messages[0].get("text") or ""))
+            delay = calculate_typing_delay(first_text_len)
+            logger.debug(
+                "[MANYCHAT] Typing delay (split): %.2fs for %d chars",
+                delay,
+                first_text_len,
+            )
+            await asyncio.sleep(delay)
+
+            for idx, msg in enumerate(clean_messages):
+                is_last = idx == (len(clean_messages) - 1)
+                actions_for_msg = []
+                if not disable_actions_instagram:
+                    actions_for_msg = actions if idx == 0 else []
+
+                content_one: dict[str, Any] = {
+                    "type": channel,
+                    "messages": [msg],
+                    "actions": actions_for_msg,
+                }
+                # Only attach quick replies to the last bubble (and only if allowed).
+                if is_last and effective_quick_replies:
+                    content_one["quick_replies"] = effective_quick_replies
+
+                payload_one: dict[str, Any] = {
+                    "subscriber_id": sub_id,
+                    "data": {
+                        "version": "v2",
+                        "content": content_one,
+                    },
+                    "message_tag": message_tag,
+                }
+
+                ok_one = await _send_with_retry(
+                    payload_to_send=payload_one,
+                    had_actions=bool(actions_for_msg),
+                )
+                if not ok_one:
+                    return False
+
+                if not is_last and bubble_delay_seconds > 0:
+                    await asyncio.sleep(bubble_delay_seconds)
+
+            logger.info(
+                "[MANYCHAT] ✅ Pushed %d messages to %s (split-send)",
+                len(clean_messages),
+                subscriber_id,
+            )
+            return True
+
+        # Default mode: one sendContent call with all messages.
         total_text_length = sum(
             len(m.get("text", "")) for m in clean_messages if m.get("type") == "text"
         )
@@ -385,91 +527,17 @@ class ManyChatPushClient:
         logger.debug("[MANYCHAT] Typing delay: %.2fs for %d chars", delay, total_text_length)
         await asyncio.sleep(delay)
 
-        # First attempt with actions (with circuit breaker protection)
-        try:
-            success, response_text, status_code = await self._do_send(
-                subscriber_id, payload, headers
-            )
-        except CircuitOpenError:
-            # Circuit is open - ManyChat is down, fail gracefully
-            logger.error(
-                "[MANYCHAT] ❌ Circuit breaker OPEN - cannot send to %s",
-                subscriber_id,
-            )
-            return False
-
-        if success:
+        ok = await _send_with_retry(payload_to_send=payload, had_actions=bool(actions))
+        if ok:
             logger.info(
-                "[MANYCHAT] ✅ Pushed %d messages to %s (with %d actions)",
+                "[MANYCHAT] ✅ Pushed %d messages to %s (actions=%d, ig_actions_disabled=%s)",
                 len(clean_messages),
                 subscriber_id,
                 len(actions),
+                str(bool(channel == "instagram" and disable_actions_instagram)).lower(),
             )
             return True
 
-        # Log payload (redacted) for debugging client-side 4xx issues.
-        if status_code and status_code < 500:
-            logger.warning(
-                "[MANYCHAT] ❌ Push rejected: %d %s | payload=%s",
-                status_code,
-                response_text[:200],
-                self._redact_payload(payload),
-            )
-
-        # Check if error is due to missing Custom Fields → retry without actions
-        if status_code == 400 and actions and self._is_field_error(response_text):
-            logger.warning(
-                "[MANYCHAT] ⚠️ Field error detected, retrying WITHOUT actions: %s",
-                response_text[:100],
-            )
-
-            # Rebuild payload without actions
-            content_no_actions: dict[str, Any] = {
-                "type": channel,
-                "messages": clean_messages,
-                "actions": [],  # Empty actions
-            }
-            if effective_quick_replies:
-                content_no_actions["quick_replies"] = effective_quick_replies
-
-            payload_retry: dict[str, Any] = {
-                "subscriber_id": sub_id,
-                "data": {
-                    "version": "v2",
-                    "content": content_no_actions,
-                },
-                "message_tag": message_tag,
-            }
-
-            try:
-                success_retry, response_retry, status_retry = await self._do_send(
-                    subscriber_id, payload_retry, headers
-                )
-            except CircuitOpenError:
-                logger.error("[MANYCHAT] ❌ Circuit opened during retry")
-                return False
-
-            if success_retry:
-                logger.info(
-                    "[MANYCHAT] ✅ Pushed %d messages to %s (retry without actions)",
-                    len(clean_messages),
-                    subscriber_id,
-                )
-                return True
-            else:
-                logger.error(
-                    "[MANYCHAT] ❌ Retry also failed: %d %s",
-                    status_retry,
-                    response_retry[:200],
-                )
-                return False
-
-        # Other error - log and fail
-        logger.error(
-            "[MANYCHAT] ❌ Push failed: %d %s",
-            status_code,
-            response_text[:200],
-        )
         return False
 
     async def send_text(
