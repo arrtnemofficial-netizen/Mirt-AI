@@ -257,6 +257,35 @@ class ManyChatAsyncService:
 
     async def _handle_restart_command(self, user_id: str, channel: str) -> None:
         """Handle /restart command - clear session and confirm."""
+        # Clear any pending debouncer buffers/timers so no stale aggregated message
+        # is processed after restart.
+        try:
+            self.debouncer.clear_session(user_id)
+        except Exception:
+            logger.debug("[MANYCHAT:%s] Failed to clear debouncer session", user_id, exc_info=True)
+
+        # CRITICAL: Also reset LangGraph checkpointer state for this thread.
+        # Otherwise, persistent checkpointers (Postgres) will restore an old dialog_phase
+        # (e.g., WAITING_FOR_PAYMENT_PROOF) even after SessionStore is cleared.
+        try:
+            from src.agents.langgraph.state import create_initial_state
+
+            reset_state = create_initial_state(
+                session_id=user_id,
+                metadata={"channel": channel},
+            )
+            await self.runner.aupdate_state(
+                {"configurable": {"thread_id": user_id}},
+                reset_state,
+            )
+            logger.info("[MANYCHAT:%s] 🔄 LangGraph state reset via /restart", user_id)
+        except Exception:
+            logger.debug(
+                "[MANYCHAT:%s] Failed to reset LangGraph state via /restart",
+                user_id,
+                exc_info=True,
+            )
+
         # Delete session from store
         deleted = self.store.delete(user_id)
 

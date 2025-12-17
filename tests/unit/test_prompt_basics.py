@@ -24,7 +24,7 @@ class TestSystemPromptBasics:
     def test_has_identity_section(self, prompt_content):
         """Prompt should define AI identity."""
         assert "# Роль" in prompt_content or "IDENTITY" in prompt_content
-        assert "Ольга" in prompt_content
+        assert "Софія" in prompt_content
         assert "MIRT" in prompt_content
 
     def test_has_do_and_do_not(self, prompt_content):

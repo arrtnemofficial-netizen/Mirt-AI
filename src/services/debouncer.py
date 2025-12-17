@@ -203,3 +203,9 @@ class MessageDebouncer:
         self.active_futures.pop(session_id, None)
         # Note: we don't clear processing_callbacks to allow reuse
 
+    def clear_session(self, session_id: str) -> None:
+        """Clear any buffered/queued debounce state for a session."""
+        if session_id in self.timers:
+            self.timers[session_id].cancel()
+        self._cleanup(session_id)
+
