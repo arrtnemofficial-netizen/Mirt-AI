@@ -11,7 +11,14 @@ Tests cover:
 
 import pytest
 
-from src.agents.langgraph.nodes.payment_flow import (
+
+pytest.importorskip(
+    "src.agents.langgraph.nodes.payment_flow",
+    reason="payment_flow module was removed after consolidating payment logic into payment.py + payment_agent.py",
+)
+
+
+from src.agents.langgraph.nodes.payment_flow import (  # noqa: E402
     CustomerData,
     PaymentFlowResult,
     FULL_PAYMENT_KEYWORDS,
@@ -24,7 +31,7 @@ from src.agents.langgraph.nodes.payment_flow import (
     extract_customer_data_from_state,
     get_product_info_from_state,
 )
-from src.core.state_machine import State
+from src.core.state_machine import State  # noqa: E402
 
 
 # =============================================================================

@@ -93,7 +93,7 @@ def test_snippets_file_has_sections(snippets: list[Snippet]) -> None:
     "title,body,rule_id",
     [],
 )
-def test_snippets_cases_placeholder() -> None:
+def test_snippets_cases_placeholder(title: str, body: str, rule_id: str) -> None:
     # This test is replaced at import-time below.
     raise RuntimeError("Parametrization placeholder should not run")
 

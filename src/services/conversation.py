@@ -353,15 +353,19 @@ def _apply_transition_guardrails(
                 before_step = int(before_state.get("step_number") or 0)
                 before_current = str(before_state.get("current_state") or "")
 
-                if before_step <= 1 and before_current == State.STATE_0_INIT.value:
-                    if "соф" not in first_content.lower() and "менеджер" not in first_content.lower():
-                        first["content"] = "Вітаю 🎀\n---\nЗ вами MIRT_UA, менеджер Софія)"
+                # TODO: Review this guardrail - it overwrites LLM responses even when using snippets
+                # DISABLED for now to allow snippet-based responses
+                # if before_step <= 1 and before_current == State.STATE_0_INIT.value:
+                #     if "соф" not in first_content.lower() and "менеджер" not in first_content.lower():
+                #         first["content"] = "Вітаю 🎀\n---\nЗ вами MIRT_UA, менеджер Софія)"
 
-                if before_step >= 1 and not user_is_greeting:
-                    lowered_first = first_content.strip().lower()
-                    if lowered_first.startswith("вітаю") or lowered_first.startswith("вітаємо") or lowered_first.startswith("доброго"):
-                        if len(messages) > 1:
-                            messages.remove(first)
+                # TODO: Review this guardrail - it removes messages even when using snippets
+                # DISABLED for now to allow snippet-based responses
+                # if before_step >= 1 and not user_is_greeting:
+                #     lowered_first = first_content.strip().lower()
+                #     if lowered_first.startswith("вітаю") or lowered_first.startswith("вітаємо") or lowered_first.startswith("доброго"):
+                #         if len(messages) > 1:
+                #             messages.remove(first)
 
     return after_state
 
@@ -533,6 +537,14 @@ class ConversationHandler:
 
             # Parse response
             agent_response = self._parse_response(result_state, session_id)
+
+            # Log outgoing message for snippet verification
+            logger.info(
+                "📤 Outgoing message (state=%s, intent=%s): %s",
+                agent_response.metadata.current_state,
+                agent_response.metadata.intent,
+                agent_response.text[:200] + "..." if len(agent_response.text) > 200 else agent_response.text,
+            )
 
             # Persist assistant response
             self._persist_assistant_message(session_id, agent_response)

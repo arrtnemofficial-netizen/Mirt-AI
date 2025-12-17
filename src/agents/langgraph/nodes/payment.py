@@ -22,10 +22,6 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
-from src.conf.payment_config import (
-    BANK_REQUISITES,
-    PAYMENT_PREPAY_AMOUNT,
-)
 from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.catalog_service import CatalogService
@@ -86,31 +82,7 @@ async def _ensure_prices_from_catalog(
     return updated
 
 
-# =============================================================================
-# PAYMENT SUB-PHASE TEMPLATES (from n8n prompt)
-# =============================================================================
-
-# Build SHOW_PAYMENT template dynamically from centralized config
-_SHOW_PAYMENT_TEMPLATE = f"""Сума до сплати зараз: {{amount}} грн.
-
-Отримувач: {BANK_REQUISITES.fop_name}
-IBAN: {BANK_REQUISITES.iban}
-ІПН/ЄДРПОУ: {BANK_REQUISITES.tax_id}
-Призначення платежу: {BANK_REQUISITES.payment_purpose}
-
-Надішліть, будь ласка, скрін квитанції після оплати, щоб ми одразу сформували ваше замовлення 🤍"""
-
 PAYMENT_TEMPLATES = {
-    "REQUEST_DATA": f"""Щоб одразу зарезервувати для вас замовлення, напишіть, будь ласка:
-📍Місто та відділення Нової пошти
-📍ПІБ та номер телефону
-
-Як вам зручніше оплатити - повна оплата на рахунок ФОП (без додаткових комісій) чи передплата {PAYMENT_PREPAY_AMOUNT} грн, а решту при отриманні (але тоді Нова пошта додатково нараховує комісію за післяплату) 🤍""",
-
-    "CONFIRM_DATA": "Підтверджую дані замовлення: {product_name} - {color} - розмір {size} - {price} грн. Отримувач: {name}, телефон {phone}, місто {city}, НП {nova_poshta}. Перевірте, будь ласка, чи все вірно.",
-
-    "SHOW_PAYMENT": _SHOW_PAYMENT_TEMPLATE,
-
     "THANK_YOU": """Дякуємо за замовлення🥰
 
 Гарного вам дня та мирного неба 🕊""",
@@ -191,6 +163,12 @@ async def _prepare_payment_and_interrupt(
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
     deps.selected_products = products
+    try:
+        from src.agents.langgraph.state_prompts import get_payment_sub_phase
+
+        deps.payment_sub_phase = get_payment_sub_phase(state)
+    except Exception:
+        deps.payment_sub_phase = deps.payment_sub_phase
 
     try:
         # Call payment agent DIRECTLY
@@ -354,6 +332,26 @@ async def _handle_delivery_data(
     total_price = sum(p.get("price", 0) for p in products)
 
     has_image_now = bool(state.get("has_image", False) or state.get("metadata", {}).get("has_image", False))
+
+    user_text_for_proof = user_message if isinstance(user_message, str) else str(user_message)
+    user_text_lower_for_proof = user_text_for_proof.lower()
+    payment_confirm_keywords = (
+        "оплатила",
+        "оплатив",
+        "оплачено",
+        "переказала",
+        "переказав",
+        "відправила скрін",
+        "відправив скрін",
+        "квитанц",
+        "скрін",
+        "скрин",
+        "готово",
+    )
+    has_payment_url = ("http://" in user_text_lower_for_proof) or ("https://" in user_text_lower_for_proof)
+    has_payment_proof_pre = has_image_now or has_payment_url or any(
+        k in user_text_lower_for_proof for k in payment_confirm_keywords
+    )
     
     logger.info(
         "[SESSION %s] Processing delivery data: '%s'",
@@ -365,6 +363,16 @@ async def _handle_delivery_data(
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
     deps.selected_products = products
+    try:
+        from src.agents.langgraph.state_prompts import get_payment_sub_phase
+
+        deps.payment_sub_phase = get_payment_sub_phase(state)
+        # If we already detect payment proof in this message, force THANK_YOU prompt
+        # so the LLM uses STATE_5_PAYMENT_DELIVERY_THANKS (md) as SSOT.
+        if has_payment_proof_pre and deps.payment_sub_phase != "THANK_YOU":
+            deps.payment_sub_phase = "THANK_YOU"
+    except Exception:
+        deps.payment_sub_phase = deps.payment_sub_phase
     
     try:
         # Use payment agent to process delivery data
@@ -411,23 +419,7 @@ async def _handle_delivery_data(
             )
         )
 
-        payment_confirm_keywords = (
-            "оплатила",
-            "оплатив",
-            "оплачено",
-            "переказала",
-            "переказав",
-            "відправила скрін",
-            "відправив скрін",
-            "квитанц",
-            "скрін",
-            "скрин",
-            "готово",
-        )
-        has_payment_url = ("http://" in user_text_lower) or ("https://" in user_text_lower)
-        has_payment_proof = has_image_now or has_payment_url or any(
-            k in user_text_lower for k in payment_confirm_keywords
-        )
+        has_payment_proof = has_payment_proof_pre
 
         confirmation_only_keywords = (
             "да",
@@ -471,10 +463,20 @@ async def _handle_delivery_data(
             cmd = Command(
                 update={
                     "current_state": State.STATE_7_END.value,
-                    "messages": [{"role": "assistant", "content": PAYMENT_TEMPLATES["THANK_YOU"]}],
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": response_text or PAYMENT_TEMPLATES["THANK_YOU"],
+                        }
+                    ],
                     "agent_response": {
                         "event": "escalation",
-                        "messages": [{"type": "text", "content": PAYMENT_TEMPLATES["THANK_YOU"]}],
+                        "messages": [
+                            {
+                                "type": "text",
+                                "content": response_text or PAYMENT_TEMPLATES["THANK_YOU"],
+                            }
+                        ],
                         "metadata": {
                             "session_id": session_id,
                             "current_state": State.STATE_7_END.value,
@@ -504,7 +506,7 @@ async def _handle_delivery_data(
                     node_name="payment",
                     goto=cmd.goto,
                     new_phase="COMPLETED",
-                    response_preview=PAYMENT_TEMPLATES["THANK_YOU"],
+                    response_preview=response_text or PAYMENT_TEMPLATES["THANK_YOU"],
                 )
             return cmd
 
@@ -575,6 +577,93 @@ async def _handle_delivery_data(
         )
 
 
+async def _persist_order_and_queue_crm(
+    *,
+    state: dict[str, Any],
+    session_id: str,
+    approval_data: dict[str, Any],
+) -> dict[str, Any] | None:
+    crm_order_result = None
+    try:
+        deps = create_deps_from_state(state)
+
+        # Construct order payload
+        products = state.get("selected_products", [])
+        products = await _ensure_prices_from_catalog(products, session_id=session_id)
+        order_items = []
+        for p in products:
+            order_items.append(
+                {
+                    "product_id": p.get("id"),
+                    "name": p.get("name"),
+                    "price": p.get("price"),
+                    "size": p.get("size"),
+                    "color": p.get("color"),
+                    "quantity": 1,
+                }
+            )
+
+        order_data = {
+            "external_id": session_id,
+            "source_id": deps.user_id,
+            "user_nickname": deps.user_nickname,
+            "customer": {
+                "full_name": deps.customer_name,
+                "phone": deps.customer_phone,
+                "city": deps.customer_city,
+                "nova_poshta_branch": deps.customer_nova_poshta,
+                "telegram_id": session_id if "telegram" in str(deps.user_id) else None,
+                "manychat_id": session_id if "manychat" in str(deps.user_id) else None,
+                "username": deps.user_nickname,
+            },
+            "items": order_items,
+            "totals": {"total": approval_data.get("total_price", 0)},
+            "status": "new",
+            "delivery_method": "nova_poshta",
+            "notes": "Created via Mirt-AI Agent",
+            "source": "telegram" if "telegram" in str(deps.user_id) else "manychat",
+        }
+
+        order_id = await deps.db.create_order(order_data)
+        if order_id:
+            logger.info("Order successfully saved to Supabase: ID %s", order_id)
+        else:
+            logger.error("Failed to save order to Supabase (returned None)")
+
+        # =========================================================================
+        # CREATE ORDER IN SNITKIX CRM (Async via Celery)
+        # =========================================================================
+        # IDEMPOTENCY: Deterministic external_id based on session + products + price
+        # This prevents duplicate orders on retries
+        import hashlib
+
+        products_str = "|".join(sorted(p.get("name", "") for p in products))
+        idempotency_data = f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
+        idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
+        deterministic_external_id = f"{session_id}_{idempotency_hash}"
+
+        from src.integrations.crm.crmservice import get_crm_service
+
+        crm_service = get_crm_service()
+        crm_order_result = await crm_service.create_order_with_persistence(
+            session_id=session_id,
+            order_data=order_data,
+            external_id=deterministic_external_id,
+        )
+
+        logger.info(
+            "CRM order creation result for session %s: %s",
+            session_id,
+            crm_order_result.get("status", "unknown"),
+        )
+
+    except Exception as e:
+        logger.exception("CRITICAL: Failed to save order to DB or queue CRM: %s", e)
+        crm_order_result = {"status": "failed", "error": str(e)}
+
+    return crm_order_result
+
+
 async def _handle_approval_response(
     state: dict[str, Any],
     session_id: str,
@@ -605,82 +694,11 @@ async def _handle_approval_response(
         # =========================================================================
         # SAVE ORDER TO DB (Persistence)
         # =========================================================================
-        crm_order_result = None
-        try:
-            deps = create_deps_from_state(state)
-
-            # Construct order payload
-            products = state.get("selected_products", [])
-            products = await _ensure_prices_from_catalog(products, session_id=session_id)
-            order_items = []
-            for p in products:
-                order_items.append(
-                    {
-                        "product_id": p.get("id"),
-                        "name": p.get("name"),
-                        "price": p.get("price"),
-                        "size": p.get("size"),
-                        "color": p.get("color"),
-                        "quantity": 1,
-                    }
-                )
-
-            order_data = {
-                "external_id": session_id,
-                "source_id": deps.user_id,
-                "user_nickname": deps.user_nickname,
-                "customer": {
-                    "full_name": deps.customer_name,
-                    "phone": deps.customer_phone,
-                    "city": deps.customer_city,
-                    "nova_poshta_branch": deps.customer_nova_poshta,
-                    "telegram_id": session_id if "telegram" in str(deps.user_id) else None,
-                    "manychat_id": session_id if "manychat" in str(deps.user_id) else None,
-                    "username": deps.user_nickname,
-                },
-                "items": order_items,
-                "totals": {"total": approval_data.get("total_price", 0)},
-                "status": "new",
-                "delivery_method": "nova_poshta",
-                "notes": "Created via Mirt-AI Agent",
-                "source": "telegram" if "telegram" in str(deps.user_id) else "manychat",
-            }
-
-            order_id = await deps.db.create_order(order_data)
-            if order_id:
-                logger.info("Order successfully saved to Supabase: ID %s", order_id)
-            else:
-                logger.error("Failed to save order to Supabase (returned None)")
-
-            # =========================================================================
-            # CREATE ORDER IN SNITKIX CRM (Async via Celery)
-            # =========================================================================
-            # IDEMPOTENCY: Deterministic external_id based on session + products + price
-            # This prevents duplicate orders on retries
-            import hashlib
-            products_str = "|".join(sorted(p.get("name", "") for p in products))
-            idempotency_data = f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
-            idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
-            deterministic_external_id = f"{session_id}_{idempotency_hash}"
-
-            from src.integrations.crm.crmservice import get_crm_service
-
-            crm_service = get_crm_service()
-            crm_order_result = await crm_service.create_order_with_persistence(
-                session_id=session_id,
-                order_data=order_data,
-                external_id=deterministic_external_id,
-            )
-
-            logger.info(
-                "CRM order creation result for session %s: %s",
-                session_id,
-                crm_order_result.get("status", "unknown"),
-            )
-
-        except Exception as e:
-            logger.exception("CRITICAL: Failed to save order to DB or queue CRM: %s", e)
-            crm_order_result = {"status": "failed", "error": str(e)}
+        crm_order_result = await _persist_order_and_queue_crm(
+            state=state,
+            session_id=session_id,
+            approval_data=approval_data,
+        )
 
         # DIALOG PHASE: UPSELL_OFFERED (STATE_6)
         # - Оплата підтверджена, пропонуємо допродаж

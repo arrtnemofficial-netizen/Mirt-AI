@@ -109,8 +109,15 @@ def _get_base_prompt() -> str:
 async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:
     """Inject manager canned templates (editable via prompt file)."""
     try:
-        return "\n--- ШАБЛОНИ МЕНЕДЖЕРА ---\n" + registry.get("system.snippets").content
-    except (FileNotFoundError, ValueError):
+        content = registry.get("system.snippets").content
+        logger.info(
+            "📋 Manager snippets injected (%d chars, version=%s)",
+            len(content),
+            registry.get("system.snippets").metadata.get("version", "unknown"),
+        )
+        return "\n--- ШАБЛОНИ МЕНЕДЖЕРА ---\n" + content
+    except (FileNotFoundError, ValueError) as e:
+        logger.warning("Manager snippets not found: %s", e)
         return ""
 
 

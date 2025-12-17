@@ -97,6 +97,9 @@ class AgentDeps:
     customer_city: str | None = None
     customer_nova_poshta: str | None = None
 
+    # Payment flow (STATE_5_PAYMENT_DELIVERY) sub-phase hint for prompt injection
+    payment_sub_phase: str | None = None
+
     # Services (injected)
     db: OrderService = field(default_factory=OrderService)
     catalog: CatalogService = field(default_factory=CatalogService)
@@ -226,6 +229,15 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
     """
     metadata = state.get("metadata", {})
 
+    payment_sub_phase: str | None = None
+    try:
+        if state.get("current_state") == "STATE_5_PAYMENT_DELIVERY":
+            from src.agents.langgraph.state_prompts import get_payment_sub_phase
+
+            payment_sub_phase = get_payment_sub_phase(state)
+    except Exception:
+        payment_sub_phase = None
+
     return AgentDeps(
         session_id=state.get("session_id", metadata.get("session_id", "")),
         trace_id=state.get("trace_id", ""),  # Must be populated by graph
@@ -241,6 +253,7 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
         customer_phone=metadata.get("customer_phone"),
         customer_city=metadata.get("customer_city"),
         customer_nova_poshta=metadata.get("customer_nova_poshta"),
+        payment_sub_phase=payment_sub_phase,
         # Memory system fields (populated by memory_context_node)
         profile=state.get("memory_profile"),
         facts=state.get("memory_facts", []),

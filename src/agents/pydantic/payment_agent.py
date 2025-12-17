@@ -15,7 +15,9 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.conf.payment_config import PAYMENT_PREPAY_AMOUNT, format_requisites_multiline
 from src.core.human_responses import get_human_response
+from src.agents.langgraph.state_prompts import get_state_prompt
 
 from .deps import AgentDeps
 from .models import PaymentResponse
@@ -59,7 +61,7 @@ def _build_model() -> OpenAIChatModel:
 # =============================================================================
 
 
-_payment_prompt = """
+_payment_prompt = f"""
 Ти спеціаліст з оформлення замовлень MIRT_UA.
 
 ТВОЯ ЗАДАЧА:
@@ -74,9 +76,8 @@ _payment_prompt = """
 - Номер відділення Нової Пошти
 
 РЕКВІЗИТИ ДЛЯ ОПЛАТИ:
-ФОП Крупка Ганна Михайлівна
-ПриватБанк: 5168 7520 0123 4567
-Призначення: "За дитячий одяг"
+- Використовувати тільки реквізити з SSOT-блоку
+- Пріоритет оплати: {PAYMENT_PREPAY_AMOUNT} грн
 
 ВАЖЛИВО:
 - Витягуй дані з повідомлень автоматично
@@ -136,6 +137,21 @@ async def _add_order_context(ctx: RunContext[AgentDeps]) -> str:
     return "\n".join(lines)
 
 
+async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
+    """Inject canonical payment requisites to avoid hallucinations."""
+    return "\n--- РЕКВІЗИТИ ДЛЯ ОПЛАТИ (SSOT) ---\n" + format_requisites_multiline()
+
+
+async def _add_payment_subphase_prompt(ctx: RunContext[AgentDeps]) -> str:
+    """Inject payment sub-phase instructions from markdown prompts (SSOT)."""
+    sub_phase = getattr(ctx.deps, "payment_sub_phase", None) or "REQUEST_DATA"
+    try:
+        prompt = get_state_prompt("STATE_5_PAYMENT_DELIVERY", sub_phase=sub_phase)
+        return "\n--- PAYMENT SUB-PHASE PROMPT (SSOT) ---\n" + prompt
+    except Exception:
+        return ""
+
+
 async def _extract_customer_data(
     ctx: RunContext[AgentDeps],
     name: str | None = None,
@@ -193,6 +209,8 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
             retries=2,
         )
         _payment_agent.system_prompt(_add_order_context)
+        _payment_agent.system_prompt(_add_payment_requisites)
+        _payment_agent.system_prompt(_add_payment_subphase_prompt)
         # Register tools - use decorator syntax
         _payment_agent.tool(name="extract_customer_data")(_extract_customer_data)
         _payment_agent.tool(name="check_order_ready")(_check_order_ready)
