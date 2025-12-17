@@ -11,6 +11,7 @@ Uses sync_utils to properly call async CRM client.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from celery import shared_task
@@ -122,6 +123,30 @@ def create_crm_order(
                 "[WORKER:CRM] Order created successfully: %s",
                 response.order_id,
             )
+            
+            # Update CRM order status in database
+            try:
+                from src.services.supabase_client import get_supabase_client
+                supabase = get_supabase_client()
+                
+                supabase.table("crm_orders").update({
+                    "status": "created",
+                    "crm_order_id": response.order_id,
+                    "error_message": None,
+                    "updated_at": datetime.now().isoformat(),
+                }).eq("external_id", external_id).execute()
+                
+                logger.info(
+                    "[WORKER:CRM] Updated crm_orders status to 'created' for external_id=%s",
+                    external_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "[WORKER:CRM] Failed to update crm_orders status for external_id=%s: %s",
+                    external_id,
+                    e,
+                )
+            
             return {
                 "status": "created",
                 "order_id": response.order_id,
@@ -132,6 +157,29 @@ def create_crm_order(
                 "[WORKER:CRM] Order creation failed: %s",
                 response.error,
             )
+            
+            # Update CRM order with failed status
+            try:
+                from src.services.supabase_client import get_supabase_client
+                supabase = get_supabase_client()
+                
+                supabase.table("crm_orders").update({
+                    "status": "failed",
+                    "error_message": f"CRM rejected order: {response.error}",
+                    "updated_at": datetime.now().isoformat(),
+                }).eq("external_id", external_id).execute()
+                
+                logger.info(
+                    "[WORKER:CRM] Updated crm_orders status to 'failed' for external_id=%s",
+                    external_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "[WORKER:CRM] Failed to update crm_orders failed status for external_id=%s: %s",
+                    external_id,
+                    e,
+                )
+            
             # Business logic error - don't retry
             raise PermanentError(f"CRM rejected order: {response.error}", error_code="CRM_REJECTED")
 

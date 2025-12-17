@@ -97,6 +97,14 @@ class CRMService:
                 }
             )
 
+            # Update to queued status with task_id
+            await self._update_order_status(
+                external_id=external_id,
+                status="queued",
+                task_id=task_result.id,
+                error_message=None
+            )
+
             logger.info(
                 "[CRM:SERVICE] Order creation task queued external_id=%s task_id=%s",
                 external_id,
@@ -301,13 +309,19 @@ class CRMService:
         self,
         external_id: str,
         status: str,
+        task_id: str | None = None,
+        error_message: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Update order status."""
+        """Update order status with optional task_id and error_message."""
         update_data = {
             "status": status,
             "updated_at": datetime.now(UTC).isoformat(),
         }
+        if task_id:
+            update_data["task_id"] = task_id
+        if error_message:
+            update_data["error_message"] = error_message
         if metadata:
             update_data["metadata"] = metadata
 

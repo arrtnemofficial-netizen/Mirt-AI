@@ -74,10 +74,12 @@ class ManyChatAsyncService:
 
     async def process_message_async(
         self,
+        *,
         user_id: str,
         text: str,
         image_url: str | None = None,
         channel: str = "instagram",
+        subscriber_data: dict[str, Any] | None = None,
     ) -> None:
         """Process message and push response to ManyChat.
         
@@ -122,16 +124,32 @@ class ManyChatAsyncService:
                 await self._handle_restart_command(user_id, channel)
                 return
 
-            # Build metadata for images
+            # Build metadata including username info
             extra_metadata = {}
+            
+            # Add image info
             if image_url:
-                extra_metadata = {
+                extra_metadata.update({
                     "has_image": True,
                     "image_url": image_url,
-                }
+                })
                 logger.info("[MANYCHAT:%s] 📷 Image URL set in metadata: %s", user_id, image_url[:80])
             else:
                 logger.info("[MANYCHAT:%s] ⚠️ NO image_url provided", user_id)
+            
+            # Add username info from subscriber data
+            if subscriber_data:
+                # Instagram username
+                instagram_username = subscriber_data.get("instagram_username") or subscriber_data.get("username")
+                if instagram_username:
+                    extra_metadata["instagram_username"] = instagram_username
+                    logger.info("[MANYCHAT:%s] 📝 Instagram username: %s", user_id, instagram_username)
+                
+                # Name/nickname
+                name = subscriber_data.get("name") or subscriber_data.get("full_name") or subscriber_data.get("first_name")
+                if name:
+                    extra_metadata["user_nickname"] = name
+                    logger.info("[MANYCHAT:%s] 👤 User name: %s", user_id, name)
 
             # Debouncing: aggregate rapid messages
             buffered_msg = BufferedMessage(

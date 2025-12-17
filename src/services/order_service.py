@@ -42,24 +42,6 @@ class OrderService:
         session_id = order_data.get("external_id")
 
         try:
-            # 0. IDEMPOTENCY CHECK - prevent duplicate orders
-            if session_id:
-                existing = (
-                    self.client.table("orders")
-                    .select("id")
-                    .eq("session_id", session_id)
-                    .limit(1)
-                    .execute()
-                )
-                if existing.data:
-                    existing_id = existing.data[0]["id"]
-                    logger.warning(
-                        "[ORDER] Duplicate order attempt for session %s, existing order: %s",
-                        session_id,
-                        existing_id,
-                    )
-                    return str(existing_id)  # Return existing order ID
-
             # 1. Prepare Order Payload
             customer = order_data.get("customer", {})
             totals = order_data.get("totals", {})
@@ -81,36 +63,41 @@ class OrderService:
                 "user_nickname": order_data.get("user_nickname") or customer.get("username"),
             }
 
-            # 2. Insert Order
-            response = self.client.table("orders").insert(order_payload).execute()
+            # 2. Upsert Order (handles duplicates atomically)
+            response = self.client.table("orders").upsert(
+                order_payload,
+                on_conflict="session_id"
+            ).execute()
 
             if not response.data:
-                logger.error("Failed to insert order, no data returned")
+                logger.error("Failed to upsert order, no data returned")
                 return None
 
             new_order = response.data[0]
             order_id = new_order["id"]
 
-            # 3. Insert Order Items
-            items = order_data.get("items", [])
-            if items:
-                items_payload = []
-                for item in items:
-                    items_payload.append(
-                        {
-                            "order_id": order_id,
-                            "product_id": item.get("product_id"),
-                            "product_name": item.get("name"),
-                            "quantity": item.get("quantity", 1),
-                            "price_at_purchase": item.get("price", 0),
-                            "selected_size": item.get("size"),
-                            "selected_color": item.get("color"),
-                        }
-                    )
+            # 3. Insert Order Items (only if this is a new order)
+            # Check if order was just created or updated
+            if new_order.get("created_at") == new_order.get("updated_at"):
+                items = order_data.get("items", [])
+                if items:
+                    items_payload = []
+                    for item in items:
+                        items_payload.append(
+                            {
+                                "order_id": order_id,
+                                "product_id": item.get("product_id"),
+                                "product_name": item.get("name"),
+                                "quantity": item.get("quantity", 1),
+                                "price_at_purchase": item.get("price", 0),
+                                "selected_size": item.get("size"),
+                                "selected_color": item.get("color"),
+                            }
+                        )
 
-                self.client.table("order_items").insert(items_payload).execute()
+                    self.client.table("order_items").insert(items_payload).execute()
 
-            logger.info("Order created successfully: ID %s", order_id)
+            logger.info("Order upserted successfully: ID %s", order_id)
             return str(order_id)
 
         except Exception as e:

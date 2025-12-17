@@ -19,7 +19,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from src.conf.config import settings
 from src.core.logging import setup_logging
 from src.integrations.manychat.webhook import ManychatPayloadError
-from src.services.dedupe_cache import InMemoryDedupeCache
+from src.services.webhook_dedupe import WebhookDedupeStore
 from src.server.dependencies import (
     MessageStoreDep,
     get_bot,
@@ -32,7 +32,7 @@ from src.server.middleware import setup_middleware
 logger = logging.getLogger(__name__)
 
 
-_manychat_dedupe_cache = InMemoryDedupeCache()
+# Will be initialized in webhook handler
 
 
 def _extract_manychat_message_id(payload: dict[str, Any], message: dict[str, Any]) -> str | None:
@@ -450,34 +450,72 @@ async def manychat_webhook(
                 raise HTTPException(status_code=400, detail="Missing message text or image")
 
             # -----------------------------------------------------------------
-            # IDEMPOTENCY (Variant A: in-memory, best-effort)
+            # IDEMPOTENCY (DB-backed, 24h TTL)
             # -----------------------------------------------------------------
+            from src.server.dependencies import get_supabase
+            
+            db = get_supabase()
+            dedupe_store = WebhookDedupeStore(db, ttl_hours=24)
+            
             message_id = None
             if isinstance(message, dict):
                 message_id = _extract_manychat_message_id(payload, message)
 
-            if message_id:
-                dedupe_key = f"manychat:{user_id}:{message_id}"
-                is_duplicate = _manychat_dedupe_cache.check_and_mark(dedupe_key, ttl_seconds=120)
-                if is_duplicate:
-                    logger.info(
-                        "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
-                        user_id,
-                        message_id,
-                    )
-                    return {"status": "accepted"}
-
-            # Schedule background processing
-            store = get_session_store()
-            service = get_manychat_async_service(store)
-
-            background_tasks.add_task(
-                service.process_message_async,
+            # Check for duplicates using DB store
+            is_duplicate = dedupe_store.check_and_mark(
                 user_id=user_id,
-                text=text or "",
-                image_url=image_url,
-                channel=channel,
+                message_id=message_id,
+                text=text,
+                image_url=image_url
             )
+            
+            if is_duplicate:
+                logger.info(
+                    "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
+                    user_id,
+                    message_id or "hash_fallback",
+                )
+                return {"status": "accepted"}
+
+            # -----------------------------------------------------------------
+            # DURABLE PROCESSING (Celery or BackgroundTasks fallback)
+            # -----------------------------------------------------------------
+            if settings.CELERY_ENABLED:
+                # Use durable Celery task
+                from src.workers.tasks.manychat import process_manychat_message
+                
+                task = process_manychat_message.delay(
+                    user_id=user_id,
+                    text=text or "",
+                    image_url=image_url,
+                    channel=channel,
+                )
+                
+                logger.info(
+                    "[MANYCHAT] Queued Celery task %s for user=%s",
+                    task.id,
+                    user_id,
+                )
+                
+                return {"status": "accepted"}
+            else:
+                # Fallback to BackgroundTasks (not durable)
+                store = get_session_store()
+                service = get_manychat_async_service(store)
+
+                background_tasks.add_task(
+                    service.process_message_async,
+                    user_id=user_id,
+                    text=text or "",
+                    image_url=image_url,
+                    channel=channel,
+                    subscriber_data=subscriber,  # Pass subscriber data for username
+                )
+                
+                logger.info(
+                    "[MANYCHAT] Scheduled BackgroundTask for user=%s (non-durable)",
+                    user_id,
+                )
 
             logger.info("[MANYCHAT] 📨 Accepted message from %s (push mode)", user_id)
             return {"status": "accepted"}
@@ -823,6 +861,7 @@ async def manychat_create_order(
 
     IDEMPOTENT: Uses deterministic external_id based on user + product + price.
     Duplicate requests return existing order instead of creating new one.
+    Uses CRMService and crm_orders table for proper persistence.
 
     Payload expected:
     {
@@ -839,7 +878,7 @@ async def manychat_create_order(
     """
     import hashlib
 
-    from src.integrations.crm.snitkix import get_snitkix_client
+    from src.integrations.crm.crmservice import CRMService
     from src.services.order_model import (
         CustomerInfo,
         Order,
@@ -903,13 +942,13 @@ async def manychat_create_order(
         price,
     )
 
-    # === CHECK FOR EXISTING ORDER ===
+    # === CHECK FOR EXISTING ORDER IN crm_orders ===
     supabase = get_supabase_client()
     if supabase:
         try:
             existing = (
-                supabase.table("orders")
-                .select("id, crm_order_id, status")
+                supabase.table("crm_orders")
+                .select("id, crm_order_id, status, task_id")
                 .eq("external_id", external_id)
                 .limit(1)
                 .execute()
@@ -923,86 +962,96 @@ async def manychat_create_order(
                 return {
                     "success": True,
                     "order_id": order_data.get("crm_order_id"),
+                    "status": order_data.get("status"),
+                    "task_id": order_data.get("task_id"),
                     "message": "Замовлення вже створено! 🎉",
                     "duplicate": True,
                     "set_field_values": [
-                        {"field_name": "order_status", "field_value": "created"},
+                        {"field_name": "order_status", "field_value": order_data.get("status", "created")},
+                        {"field_name": "crm_external_id", "field_value": external_id},
                         {"field_name": "crm_order_id", "field_value": order_data.get("crm_order_id") or ""},
                     ],
-                    "add_tag": ["order_created"],
+                    "add_tag": ["order_created"] if order_data.get("status") == "created" else ["order_queued"],
                 }
         except Exception as e:
             logger.warning("[CREATE_ORDER] Failed to check for duplicate: %s", e)
 
-    # Create order
+    # Create order using CRMService
     try:
-        order = Order(
+        # Initialize CRMService
+        crm_service = CRMService()
+        
+        # Prepare order data
+        order_data = {
+            "customer": {
+                "full_name": full_name,
+                "phone": phone,
+                "city": city,
+                "nova_poshta_branch": nova_poshta,
+                "manychat_id": user_id,
+            },
+            "items": [{
+                "product_id": 1,
+                "product_name": product_name,
+                "size": "",
+                "color": "",
+                "price": price,
+            }],
+            "source": "manychat",
+            "source_id": user_id,
+        }
+        
+        # Create order with persistence
+        result = await crm_service.create_order_with_persistence(
+            session_id=user_id,
             external_id=external_id,
-            customer=CustomerInfo(
-                full_name=full_name,
-                phone=phone,
-                city=city,
-                nova_poshta_branch=nova_poshta,
-                manychat_id=user_id,
-            ),
-            items=[
-                OrderItem(
-                    product_id=1,
-                    product_name=product_name,
-                    size="",
-                    color="",
-                    price=price,
-                ),
-            ],
-            source="manychat",
-            source_id=user_id,
+            order_data=order_data
         )
-
-        # Send to CRM
-        crm = get_snitkix_client()
-        response = await crm.create_order(order)
-
-        if response.success:
-            # Save to local DB for idempotency
-            if supabase:
-                try:
-                    supabase.table("orders").upsert(
-                        {
-                            "external_id": external_id,
-                            "session_id": user_id,
-                            "crm_order_id": response.order_id,
-                            "status": "created",
-                        },
-                        on_conflict="external_id",
-                    ).execute()
-                except Exception as e:
-                    logger.warning("[CREATE_ORDER] Failed to save order: %s", e)
-
+        
+        if result.get("status") in ["queued", "created"]:
+            logger.info(
+                "[CREATE_ORDER] Order created successfully: %s",
+                result.get("crm_order_id"),
+            )
+            
             return {
                 "success": True,
-                "order_id": response.order_id,
-                "message": "Замовлення створено! 🎉",
+                "order_id": result.get("crm_order_id"),
+                "status": result.get("status"),
+                "task_id": result.get("task_id"),
+                "external_id": external_id,
+                "message": "Замовлення успішно створено! 🎉",
                 "set_field_values": [
-                    {"field_name": "order_status", "field_value": "created"},
-                    {"field_name": "crm_order_id", "field_value": response.order_id or ""},
+                    {"field_name": "order_status", "field_value": result.get("status")},
+                    {"field_name": "crm_external_id", "field_value": external_id},
+                    {"field_name": "crm_order_id", "field_value": result.get("crm_order_id") or ""},
+                    {"field_name": "crm_task_id", "field_value": result.get("task_id") or ""},
                 ],
-                "add_tag": ["order_created"],
+                "add_tag": ["order_created"] if result.get("status") == "created" else ["order_queued"],
             }
         else:
-            logger.error("CRM order creation failed: %s", response.error)
+            logger.error(
+                "[CREATE_ORDER] Order creation failed: %s",
+                result.get("error"),
+            )
             return {
                 "success": False,
-                "error": response.error,
+                "error": result.get("error", "Unknown error"),
+                "message": "Не вдалося створити замовлення. Спробуйте ще раз.",
                 "set_field_values": [
-                    {"field_name": "order_status", "field_value": "crm_error"},
+                    {"field_name": "order_status", "field_value": "failed"},
                 ],
             }
-
+            
     except Exception as e:
-        logger.exception("Order creation error: %s", e)
+        logger.exception("[CREATE_ORDER] Failed to create order: %s", e)
         return {
             "success": False,
             "error": str(e),
+            "message": "Сталася помилка при створенні замовлення",
+            "set_field_values": [
+                {"field_name": "order_status", "field_value": "error"},
+            ],
         }
 
 

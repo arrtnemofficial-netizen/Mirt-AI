@@ -36,7 +36,16 @@ class RateLimitConfig:
     enabled: bool = True
 
     # Paths excluded from rate limiting
-    excluded_paths: list[str] = field(default_factory=lambda: ["/health", "/docs", "/openapi.json"])
+    excluded_paths: list[str] = field(default_factory=lambda: [
+        "/health", 
+        "/docs", 
+        "/openapi.json",
+        "/webhooks/manychat",
+        "/webhooks/manychat/",
+        "/webhooks/snitkix",
+        "/webhooks/snitkix/",
+        "/api/v1/messages"
+    ])
 
 
 @dataclass
