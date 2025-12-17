@@ -621,7 +621,7 @@ def _get_instructions_for_intent(intent: str, state: dict[str, Any]) -> str:
 
     instructions = {
         "GREETING_ONLY": (
-            "Привітай клієнта тепло, як MIRT_UA менеджер Ольга. "
+            "Привітай клієнта тепло, як MIRT_UA менеджер Софія. "
             "Запитай чим можеш допомогти. "
             "Не перевантажуй інформацією - будь лаконічною."
         ),

@@ -149,7 +149,7 @@ Mirt-AI/
 ├── src/                          # 🧠 Основний код
 │   ├── agents/                   # AI агенти
 │   │   ├── pydantic/             # PydanticAI агенти
-│   │   │   ├── support_agent.py  # Консультант "Ольга"
+│   │   │   ├── support_agent.py  # Консультант "Софія"
 │   │   │   ├── vision_agent.py   # Розпізнавання фото
 │   │   │   ├── payment_agent.py  # Оформлення замовлень
 │   │   │   ├── models.py         # Pydantic моделі відповідей (OUTPUT_CONTRACT)
@@ -225,7 +225,7 @@ Mirt-AI/
 
 ### 5.1. Support Agent (`support_agent.py`)
 
-**Роль:** AI-консультант "Ольга" — відповідає на питання клієнтів.
+**Роль:** AI-консультант "Софія" — відповідає на питання клієнтів.
 
 **Вхід:** Текстове повідомлення користувача  
 **Вихід:** `SupportResponse` (messages, products, metadata)

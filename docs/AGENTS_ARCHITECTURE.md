@@ -67,7 +67,7 @@ DI-контейнер:
 
 | Агент | Файл | Роль |
 |-------|------|------|
-| Support | `support_agent.py` | Консультант "Ольга" |
+| Support | `support_agent.py` | Консультант "Софія" |
 | Vision | `vision_agent.py` | Розпізнавання фото |
 | Payment | `payment_agent.py` | Оформлення замовлень |
 | Memory | `memory_agent.py` | Класифікація фактів |

@@ -328,6 +328,41 @@ def _apply_transition_guardrails(
                 message=f"Escalation (count={count})",
             )
 
+    agent_response = after_state.get("agent_response")
+    if isinstance(agent_response, dict):
+        messages = agent_response.get("messages")
+        if isinstance(messages, list):
+            text_messages = [m for m in messages if isinstance(m, dict) and (m.get("type") in (None, "text"))]
+            first = text_messages[0] if text_messages else None
+            first_content = first.get("content") if isinstance(first, dict) else None
+            if isinstance(first_content, str):
+                normalized_user = (user_text or "").strip().lower()
+                user_is_greeting = any(
+                    kw in normalized_user
+                    for kw in (
+                        "привіт",
+                        "вітаю",
+                        "вітаю",
+                        "доброго дня",
+                        "добрий день",
+                        "hello",
+                        "hi",
+                    )
+                )
+
+                before_step = int(before_state.get("step_number") or 0)
+                before_current = str(before_state.get("current_state") or "")
+
+                if before_step <= 1 and before_current == State.STATE_0_INIT.value:
+                    if "соф" not in first_content.lower() and "менеджер" not in first_content.lower():
+                        first["content"] = "Вітаю 🎀\n---\nЗ вами MIRT_UA, менеджер Софія)"
+
+                if before_step >= 1 and not user_is_greeting:
+                    lowered_first = first_content.strip().lower()
+                    if lowered_first.startswith("вітаю") or lowered_first.startswith("вітаємо") or lowered_first.startswith("доброго"):
+                        if len(messages) > 1:
+                            messages.remove(first)
+
     return after_state
 
 

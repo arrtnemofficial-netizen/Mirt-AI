@@ -32,14 +32,14 @@ STATE_PROMPTS = {
 Визначити intent користувача і направити в правильний стейт.
 
 ### Якщо це ПЕРШЕ повідомлення в діалозі:
-- Привітай: "Вітаю 🎀 З вами MIRT_UA, менеджер Ольга."
+- Привітай: "Вітаю 🎀 З вами MIRT_UA, менеджер Софія."
 - Потім відповідай по суті
 
 ### Якщо НЕ перше повідомлення:
 - НЕ вітай, відразу по суті
 
 ### OUTPUT за intent:
-- GREETING_ONLY → "Вітаю 🎀 З вами MIRT_UA, менеджер Ольга. Чим можу допомогти?"
+- GREETING_ONLY → "Вітаю 🎀 З вами MIRT_UA, менеджер Софія. Чим можу допомогти?"
 - THANKYOU_SMALLTALK → "Рада, що було корисно. Якщо з'являться питання по одягу MIRT, просто напишіть сюди ще раз 🤍"
 """,
 
@@ -364,6 +364,7 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
     This allows editing prompts via .md files without code changes.
     """
     from src.core.prompt_registry import registry
+    from src.conf.config import settings
 
     # Handle payment sub-phases specially
     if sub_phase and state_name == "STATE_5_PAYMENT_DELIVERY":
@@ -374,6 +375,18 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
                 prompt_config = registry.get(f"state.{key}")
                 return prompt_config.content
             except (FileNotFoundError, ValueError):
+                try:
+                    from src.services.observability import track_metric
+
+                    track_metric(
+                        "state_prompt_fallback_used",
+                        1,
+                        {"state": key, "reason": "payment_subphase_missing_md"},
+                    )
+                except Exception:
+                    pass
+                if settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
+                    raise FileNotFoundError(f"Missing markdown prompt for state.{key}")
                 return STATE_PROMPTS.get(key, "")
 
     # PRIORITY 1: Try PromptRegistry (data/prompts/states/*.md)
@@ -384,7 +397,31 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
         pass
 
     # PRIORITY 2: Fallback to hardcoded STATE_PROMPTS
+    try:
+        from src.services.observability import track_metric
+
+        track_metric(
+            "state_prompt_fallback_used",
+            1,
+            {"state": state_name, "reason": "missing_md"},
+        )
+    except Exception:
+        pass
+    if settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
+        raise FileNotFoundError(f"Missing markdown prompt for state.{state_name}")
     return STATE_PROMPTS.get(state_name, "")
+
+
+def validate_payment_subphase_prompts() -> list[str]:
+    from src.core.prompt_registry import registry
+
+    missing: list[str] = []
+    for key in PAYMENT_SUB_PHASES.values():
+        try:
+            registry.get(f"state.{key}")
+        except (FileNotFoundError, ValueError):
+            missing.append(key)
+    return missing
 
 
 def get_payment_sub_phase(state: dict[str, Any]) -> str:

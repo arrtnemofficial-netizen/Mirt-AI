@@ -62,7 +62,7 @@
 │  │  src/agents/pydantic/                                             │  │
 │  │  ├── deps.py           # AgentDeps (Dependency Injection)         │  │
 │  │  ├── models.py         # OUTPUT_CONTRACT Models (Typed!)          │  │
-│  │  ├── support_agent.py  # Main Sales Agent "Ольга"                 │  │
+│  │  ├── support_agent.py  # Main Sales Agent "Софія"                 │  │
 │  │  ├── vision_agent.py   # Photo Recognition Specialist             │  │
 │  │  ├── payment_agent.py  # Payment Flow Specialist                  │  │
 │  │  └── observability.py  # Logfire Integration                      │  │
@@ -284,7 +284,7 @@ src/agents/
 │   ├── __init__.py              # Експорт PydanticAI API
 │   ├── deps.py                  # AgentDeps (DI Container)
 │   ├── models.py                # OUTPUT_CONTRACT Models
-│   ├── support_agent.py         # Agent "Ольга" (main)
+│   ├── support_agent.py         # Agent "Софія" (main)
 │   ├── vision_agent.py          # Vision specialist
 │   ├── payment_agent.py         # Payment specialist
 │   └── observability.py         # Logfire integration

@@ -129,6 +129,14 @@ class Settings(BaseSettings):
         default=3,
         description="Days after which conversations are summarized and pruned.",
     )
+
+    DISABLE_CODE_STATE_PROMPTS_FALLBACK: bool = Field(
+        default=False,
+        description=(
+            "If True, state prompts must be loaded from data/prompts/states/*.md; "
+            "code fallback prompts are not allowed."
+        ),
+    )
     FOLLOWUP_DELAYS_HOURS: str = Field(
         default="24,72",
         description=(

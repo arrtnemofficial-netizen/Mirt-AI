@@ -1,7 +1,7 @@
 """
 Human-like Response Generator.
 ==============================
-Makes AI responses indistinguishable from real human (Ольга).
+Makes AI responses indistinguishable from real human (Софія).
 
 Key principles:
 1. VARIABILITY - never same phrase twice

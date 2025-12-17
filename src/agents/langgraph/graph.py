@@ -306,6 +306,15 @@ def get_production_graph(
         if missing:
             logger.warning("Graph starting with missing state prompts: %s", missing)
 
+        try:
+            from src.agents.langgraph.state_prompts import validate_payment_subphase_prompts
+
+            missing_payment = validate_payment_subphase_prompts()
+            if missing_payment:
+                logger.warning("Graph starting with missing payment sub-phase prompts: %s", missing_payment)
+        except Exception:
+            logger.debug("Unable to validate payment sub-phase prompts", exc_info=True)
+
         from src.agents.pydantic.support_agent import run_support
 
         # Create a wrapper that matches the runner signature
