@@ -32,6 +32,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.conf.payment_config import format_requisites_multiline
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry
 
@@ -103,6 +104,19 @@ def _get_model() -> OpenAIChatModel:
 def _get_base_prompt() -> str:
     """Get system prompt (lazy load)."""
     return registry.get("system.main").content
+
+
+async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:
+    """Inject manager canned templates (editable via prompt file)."""
+    try:
+        return "\n--- ШАБЛОНИ МЕНЕДЖЕРА ---\n" + registry.get("system.snippets").content
+    except (FileNotFoundError, ValueError):
+        return ""
+
+
+async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
+    """Inject canonical payment requisites to avoid LLM hallucinations."""
+    return "\n--- РЕКВІЗИТИ ДЛЯ ОПЛАТИ (SSOT) ---\n" + format_requisites_multiline()
 
 
 # =============================================================================
@@ -359,6 +373,8 @@ async def _search_products(
 
 def _register_dynamic_prompts(agent: Agent[AgentDeps, SupportResponse]) -> None:
     """Register dynamic system prompts with the agent."""
+    agent.system_prompt(_add_manager_snippets)
+    agent.system_prompt(_add_payment_requisites)
     agent.system_prompt(_add_state_context)
     agent.system_prompt(_add_memory_context)  # Titans-like memory context
     agent.system_prompt(_add_image_context)

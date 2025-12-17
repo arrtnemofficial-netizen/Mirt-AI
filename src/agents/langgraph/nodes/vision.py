@@ -202,7 +202,7 @@ def _build_vision_messages(
 
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
     if not vision_greeted:
-        messages.append(text_msg("Вітаю 🎀 З вами MIRT_UA, менеджер Ольга."))
+        messages.append(text_msg("Вітаю 🎀 З вами MIRT_UA, менеджер Софія."))
 
     # 2. Product highlight БЕЗ ЦІНИ (ціна тільки після зросту!)
     # НЕ використовуємо reply_to_user від LLM - будуємо відповідь самі з точними даними з БД
@@ -234,6 +234,30 @@ def _build_vision_messages(
             message_text = f"{prefix} {product_name} 💛"
 
         messages.append(text_msg(message_text))
+
+        if catalog_product:
+            description = str(catalog_product.get("description") or "").strip()
+            if description:
+                description = " ".join(description.split())
+                first_line = description.split("\n", 1)[0].strip()
+                snippet_src = first_line or description
+
+                sentences: list[str] = []
+                buf = snippet_src
+                for sep in (".", "!", "?"):
+                    if sep in buf:
+                        parts = [p.strip() for p in buf.split(sep) if p.strip()]
+                        if parts:
+                            sentences = parts
+                            break
+
+                if sentences:
+                    snippet = ". ".join(sentences[:2]).strip() + "."
+                else:
+                    snippet = snippet_src[:180].rstrip()
+
+                if snippet:
+                    messages.append(text_msg(snippet))
 
         # БАБЛА 3: Якщо зріст вже в тексті (фото + текст разом) - показуємо ціну одразу!
         # Інакше питаємо зріст, і agent_node обробить відповідь
