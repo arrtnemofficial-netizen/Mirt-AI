@@ -452,30 +452,38 @@ async def manychat_webhook(
             # -----------------------------------------------------------------
             # IDEMPOTENCY (DB-backed, 24h TTL)
             # -----------------------------------------------------------------
-            from src.server.dependencies import get_supabase
-            
-            db = get_supabase()
-            dedupe_store = WebhookDedupeStore(db, ttl_hours=24)
-            
             message_id = None
             if isinstance(message, dict):
                 message_id = _extract_manychat_message_id(payload, message)
 
-            # Check for duplicates using DB store
-            is_duplicate = dedupe_store.check_and_mark(
-                user_id=user_id,
-                message_id=message_id,
-                text=text,
-                image_url=image_url
-            )
-            
-            if is_duplicate:
-                logger.info(
-                    "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
-                    user_id,
-                    message_id or "hash_fallback",
-                )
-                return {"status": "accepted"}
+            if message_id:
+                from src.services.supabase_client import get_supabase_client
+
+                db = get_supabase_client()
+                if db:
+                    dedupe_store = WebhookDedupeStore(db, ttl_hours=24)
+
+                    # Check for duplicates using DB store
+                    is_duplicate = dedupe_store.check_and_mark(
+                        user_id=user_id,
+                        message_id=message_id,
+                        text=text,
+                        image_url=image_url,
+                    )
+
+                    if is_duplicate:
+                        logger.info(
+                            "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
+                            user_id,
+                            message_id,
+                        )
+                        return {"status": "accepted"}
+                else:
+                    logger.warning(
+                        "[MANYCHAT] Supabase disabled, skipping dedupe (push mode) user=%s message_id=%s",
+                        user_id,
+                        message_id,
+                    )
 
             # -----------------------------------------------------------------
             # DURABLE PROCESSING (Celery or BackgroundTasks fallback)
@@ -489,6 +497,7 @@ async def manychat_webhook(
                     text=text or "",
                     image_url=image_url,
                     channel=channel,
+                    subscriber_data=subscriber,
                 )
                 
                 logger.info(

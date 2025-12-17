@@ -310,6 +310,7 @@ async def vision_node(
     """
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    trace_id = state.get("trace_id", "")
     messages = state.get("messages", [])
 
     # Extract user message
@@ -465,6 +466,7 @@ async def vision_node(
             event="vision_complete",
             latency_ms=latency_ms,
             extra={
+                "trace_id": trace_id,
                 "products_count": len(selected_products),
                 "confidence": response.confidence,
             },

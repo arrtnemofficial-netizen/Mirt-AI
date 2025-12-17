@@ -449,6 +449,9 @@ class ConversationHandler:
             # Ensure core identifiers are present
             state["metadata"].setdefault("session_id", session_id)
             state["metadata"].setdefault("thread_id", state["metadata"].get("thread_id", session_id))
+
+            # Ensure top-level session_id is always present (some routers read it directly)
+            state.setdefault("session_id", session_id)
             state["messages"].append({"role": "user", "content": text})
             
             # CRITICAL: Reset image flags at start of EVERY new message
@@ -501,6 +504,58 @@ class ConversationHandler:
 
             # Save updated state
             self.session_store.save(session_id, result_state)
+
+            # Notify manager for ANY escalation-like outcome.
+            # This covers cases where the graph finishes with goto="end" (e.g. payment proof)
+            # and therefore does not pass through escalation_node.
+            try:
+                is_escalation = bool(
+                    agent_response.escalation
+                    or (agent_response.metadata.escalation_level not in (None, "", "NONE"))
+                    or bool(result_state.get("should_escalate"))
+                )
+                if is_escalation:
+                    from src.services.notification_service import NotificationService
+
+                    reason = ""
+                    if agent_response.escalation and agent_response.escalation.reason:
+                        reason = str(agent_response.escalation.reason)
+                    elif result_state.get("escalation_reason"):
+                        reason = str(result_state.get("escalation_reason") or "")
+                    else:
+                        reason = "ESCALATION"
+
+                    meta = result_state.get("metadata", {})
+                    if not isinstance(meta, dict):
+                        meta = {}
+
+                    details: dict[str, Any] = {
+                        "trace_id": result_state.get("trace_id"),
+                        "dialog_phase": result_state.get("dialog_phase"),
+                        "current_state": agent_response.metadata.current_state,
+                        "intent": agent_response.metadata.intent,
+                        **meta,
+                    }
+
+                    # Provide product summary (for manager context)
+                    try:
+                        details["products"] = [p.model_dump() for p in (agent_response.products or [])]
+                    except Exception:
+                        details["products"] = []
+
+                    notifier = NotificationService()
+                    await notifier.send_escalation_alert(
+                        session_id=session_id,
+                        reason=reason,
+                        user_context=text,
+                        details=details,
+                    )
+            except Exception as notify_exc:
+                logger.warning(
+                    "Manager notification failed for session %s: %s",
+                    session_id,
+                    str(notify_exc)[:200],
+                )
 
             # DEBUG: Log request end
             if settings.DEBUG_TRACE_LOGS:

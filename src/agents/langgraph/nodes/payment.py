@@ -28,6 +28,7 @@ from src.conf.payment_config import (
 )
 from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+from src.services.catalog_service import CatalogService
 from src.services.observability import log_agent_step, track_metric
 
 
@@ -39,6 +40,50 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _ensure_prices_from_catalog(
+    products: list[dict[str, Any]],
+    *,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    if not products:
+        return products
+
+    catalog = CatalogService()
+    cache: dict[str, dict[str, Any]] = {}
+    updated: list[dict[str, Any]] = []
+
+    for p in products:
+        try:
+            price = p.get("price", 0)
+            if isinstance(price, (int, float)) and price > 0:
+                updated.append(p)
+                continue
+
+            name = str(p.get("name") or "").strip()
+            size = p.get("size")
+            if not name:
+                updated.append(p)
+                continue
+
+            if name in cache:
+                db_product = cache[name]
+            else:
+                results = await catalog.search_products(query=name, limit=1)
+                db_product = results[0] if results else {}
+                cache[name] = db_product
+
+            if db_product:
+                db_price = CatalogService.get_price_for_size(db_product, size)
+                if db_price and db_price > 0:
+                    p = {**p, "price": db_price}
+        except Exception as e:
+            logger.debug("[SESSION %s] Price hydration skipped: %s", session_id, str(e)[:120])
+
+        updated.append(p)
+
+    return updated
 
 
 # =============================================================================
@@ -131,6 +176,7 @@ async def _prepare_payment_and_interrupt(
 
     # Get products for payment
     products = state.get("selected_products", []) or state.get("offered_products", [])
+    products = await _ensure_prices_from_catalog(products, session_id=session_id)
     total_price = sum(p.get("price", 0) for p in products)
     product_names = [p.get("name", "Товар") for p in products]
 
@@ -304,6 +350,7 @@ async def _handle_delivery_data(
     
     user_message = extract_user_message(state.get("messages", []))
     products = state.get("selected_products", []) or state.get("offered_products", [])
+    products = await _ensure_prices_from_catalog(products, session_id=session_id)
     total_price = sum(p.get("price", 0) for p in products)
 
     has_image_now = bool(state.get("has_image", False) or state.get("metadata", {}).get("has_image", False))
@@ -347,11 +394,21 @@ async def _handle_delivery_data(
         user_text = user_message if isinstance(user_message, str) else str(user_message)
         user_text_lower = user_text.lower()
 
+        existing_delivery_data = bool(
+            metadata_update.get("customer_name")
+            and metadata_update.get("customer_phone")
+            and metadata_update.get("customer_city")
+            and metadata_update.get("customer_nova_poshta")
+        )
+
         has_delivery_data = bool(
-            deps.customer_name
-            and deps.customer_phone
-            and deps.customer_city
-            and deps.customer_nova_poshta
+            existing_delivery_data
+            or (
+                deps.customer_name
+                and deps.customer_phone
+                and deps.customer_city
+                and deps.customer_nova_poshta
+            )
         )
 
         payment_confirm_keywords = (
@@ -365,8 +422,12 @@ async def _handle_delivery_data(
             "квитанц",
             "скрін",
             "скрин",
+            "готово",
         )
-        has_payment_proof = has_image_now or any(k in user_text_lower for k in payment_confirm_keywords)
+        has_payment_url = ("http://" in user_text_lower) or ("https://" in user_text_lower)
+        has_payment_proof = has_image_now or has_payment_url or any(
+            k in user_text_lower for k in payment_confirm_keywords
+        )
 
         confirmation_only_keywords = (
             "да",
@@ -395,34 +456,55 @@ async def _handle_delivery_data(
                 response_text = "Надішліть, будь ласка, скрін квитанції після оплати 🤍"
 
         if has_delivery_data and has_payment_proof:
-            logger.info("[SESSION %s] Delivery data + payment proof received, proceeding to upsell", session_id)
+            trace_id = state.get("trace_id", "")
+            log_agent_step(
+                session_id=session_id,
+                state=State.STATE_7_END.value,
+                intent="PAYMENT_DELIVERY",
+                event="payment_proof_received",
+                extra={
+                    "trace_id": trace_id,
+                    "payment_proof_received": True,
+                    "payment_proof_via": "image" if has_image_now else ("url" if has_payment_url else "text"),
+                },
+            )
             cmd = Command(
                 update={
-                    "current_state": State.STATE_6_UPSELL.value,
-                    "messages": [{"role": "assistant", "content": response_text}],
+                    "current_state": State.STATE_7_END.value,
+                    "messages": [{"role": "assistant", "content": PAYMENT_TEMPLATES["THANK_YOU"]}],
                     "agent_response": {
-                        "event": "simple_answer",
-                        "messages": [{"type": "text", "content": response_text}],
+                        "event": "escalation",
+                        "messages": [{"type": "text", "content": PAYMENT_TEMPLATES["THANK_YOU"]}],
                         "metadata": {
                             "session_id": session_id,
-                            "current_state": State.STATE_6_UPSELL.value,
+                            "current_state": State.STATE_7_END.value,
                             "intent": "PAYMENT_DELIVERY",
-                            "escalation_level": "NONE",
+                            "escalation_level": "L1",
+                        },
+                        "escalation": {
+                            "reason": "ORDER_CONFIRMED_ASSIGN_MANAGER",
+                            "target": "order_manager",
                         },
                     },
-                    "metadata": metadata_update,
-                    "dialog_phase": "UPSELL_OFFERED",
+                    "metadata": {
+                        **metadata_update,
+                        "payment_proof_received": True,
+                        "payment_confirmed": True,
+                    },
+                    "dialog_phase": "COMPLETED",
+                    "should_escalate": True,
+                    "escalation_reason": "ORDER_CONFIRMED_ASSIGN_MANAGER",
                     "step_number": state.get("step_number", 0) + 1,
                 },
-                goto="upsell",
+                goto="end",
             )
             if settings.DEBUG_TRACE_LOGS:
                 debug_log.node_exit(
                     session_id=session_id,
                     node_name="payment",
                     goto=cmd.goto,
-                    new_phase="UPSELL_OFFERED",
-                    response_preview=response_text,
+                    new_phase="COMPLETED",
+                    response_preview=PAYMENT_TEMPLATES["THANK_YOU"],
                 )
             return cmd
 
@@ -501,6 +583,7 @@ async def _handle_approval_response(
 
     approved = state.get("human_approved")
     approval_data = state.get("approval_data", {})
+    trace_id = state.get("trace_id", "")
 
     log_agent_step(
         session_id=session_id,
@@ -508,6 +591,7 @@ async def _handle_approval_response(
         intent="PAYMENT_DELIVERY",
         event="payment_approval",
         extra={
+            "trace_id": trace_id,
             "approved": approved,
             "total_price": approval_data.get("total_price"),
         },
@@ -527,6 +611,7 @@ async def _handle_approval_response(
 
             # Construct order payload
             products = state.get("selected_products", [])
+            products = await _ensure_prices_from_catalog(products, session_id=session_id)
             order_items = []
             for p in products:
                 order_items.append(

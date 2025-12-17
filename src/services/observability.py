@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+
+from src.conf.config import settings
 
 
 logger = logging.getLogger("mirt.observability")
@@ -279,8 +282,17 @@ class AsyncTracingService:
     """
 
     def __init__(self):
-        # Disabled by default - enable when llm_usage table is properly configured
-        self._enabled = False
+        self._enabled = bool(getattr(settings, "ENABLE_OBSERVABILITY", True))
+
+    @staticmethod
+    def _normalize_trace_id(value: str) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            return str(uuid.uuid4())
+        try:
+            return str(uuid.UUID(raw))
+        except Exception:
+            return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
 
     async def log_trace(
         self,
@@ -297,6 +309,9 @@ class AsyncTracingService:
         error_category: str | None = None,  # SCHEMA, BUSINESS, SAFETY, SYSTEM
         error_message: str | None = None,
         latency_ms: float = 0,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        cost: float | None = None,
         model_name: str | None = None,
     ) -> None:
         """Log a trace record to Supabase."""
@@ -312,7 +327,7 @@ class AsyncTracingService:
 
             payload = {
                 "session_id": session_id,
-                "trace_id": trace_id,
+                "trace_id": self._normalize_trace_id(trace_id),
                 "node_name": node_name,
                 "status": status,
                 "state_name": state_name,
@@ -324,6 +339,9 @@ class AsyncTracingService:
                 "error_category": error_category,
                 "error_message": error_message,
                 "latency_ms": latency_ms,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost": cost,
                 "model_name": model_name,
                 "created_at": datetime.now(UTC).isoformat(),
             }
@@ -331,11 +349,10 @@ class AsyncTracingService:
             # Remove None values to let DB defaults work or avoid null issues
             payload = {k: v for k, v in payload.items() if v is not None}
 
-            # Fire and forget - using simple await here but in production
-            # this should be offloaded to a true background task if high volume.
-            # For now, Supabase HTTP call is fast enough for < 100 concurrent users.
-            # llm_traces table doesn't exist, use llm_usage instead
-            await client.table("llm_usage").insert(payload).execute()
+            try:
+                await client.table("llm_traces").insert(payload).execute()
+            except Exception:
+                await client.table("llm_usage").insert(payload).execute()
 
         except Exception as e:
             # Observability shouldn't crash the app - use debug level to avoid spam

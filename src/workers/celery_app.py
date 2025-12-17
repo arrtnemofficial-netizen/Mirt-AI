@@ -81,6 +81,7 @@ celery_app = Celery(
         "src.workers.tasks.followups",
         "src.workers.tasks.crm",
         "src.workers.tasks.health",
+        "src.workers.tasks.manychat",
         "src.workers.tasks.messages",  # THE MAIN TASK!
         "src.workers.tasks.llm_usage",  # Token usage tracking
     ],
@@ -158,6 +159,7 @@ celery_app.conf.task_routes = {
     "src.workers.tasks.summarization.*": {"queue": "summarization"},
     "src.workers.tasks.followups.*": {"queue": "followups"},
     "src.workers.tasks.crm.*": {"queue": "crm"},
+    "src.workers.tasks.manychat.*": {"queue": "llm"},
     "src.workers.tasks.messages.process_message": {"queue": "llm"},
     "src.workers.tasks.messages.process_and_respond": {"queue": "llm"},
     "src.workers.tasks.messages.send_response": {"queue": "webhooks"},

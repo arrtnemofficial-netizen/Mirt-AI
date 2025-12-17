@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+import uuid
 from src.services.observability import AsyncTracingService
 
 @pytest.fixture
@@ -27,13 +28,14 @@ async def test_log_trace_success(mock_supabase):
         latency_ms=100.5
     )
     
-    # Verify insert called with correct payload (table is llm_usage, not llm_traces)
-    mock_supabase.table.assert_called_with("llm_usage")
+    # Verify insert called with correct payload (table is llm_traces)
+    mock_supabase.table.assert_called_with("llm_traces")
     mock_supabase.table().insert.assert_called_once()
     
     call_args = mock_supabase.table().insert.call_args[0][0]
     assert call_args["session_id"] == "sess_123"
-    assert call_args["trace_id"] == "trace_abc"
+    # trace_id is normalized to a UUID string
+    uuid.UUID(call_args["trace_id"])
     assert call_args["status"] == "SUCCESS"
     assert call_args["latency_ms"] == 100.5
     assert "created_at" in call_args

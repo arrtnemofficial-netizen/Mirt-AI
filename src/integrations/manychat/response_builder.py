@@ -23,7 +23,15 @@ def build_manychat_messages(
     include_product_images: bool,
 ) -> list[dict[str, Any]]:
     text_chunks = render_agent_response_text(agent_response)
-    messages: list[dict[str, Any]] = [{"type": "text", "text": chunk} for chunk in text_chunks]
+    messages: list[dict[str, Any]] = []
+    for chunk in text_chunks:
+        # Split into separate bubbles by blank lines to simulate human-style messaging.
+        # This is intentionally ManyChat-specific (does not affect Telegram renderer).
+        parts = [p.strip() for p in str(chunk).split("\n\n") if p and p.strip()]
+        if not parts:
+            continue
+        for part in parts:
+            messages.append({"type": "text", "text": part})
 
     if include_product_images:
         for product in agent_response.products:

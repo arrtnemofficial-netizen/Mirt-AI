@@ -234,21 +234,17 @@ class TestCreateOrderIdempotency:
 
     @pytest.fixture
     def mock_crm(self):
-        """Mock Snitkix CRM client.
-        
-        SENIOR TIP: Patch where the function is IMPORTED, not where it's DEFINED.
-        Since main.py does `from src.integrations.crm.snitkix import get_snitkix_client`
-        inside the endpoint function, we need to patch the source module.
-        """
-        with patch("src.integrations.crm.snitkix.get_snitkix_client") as mock_get:
-            crm = MagicMock()
-            crm.create_order = AsyncMock(return_value=MagicMock(
-                success=True,
-                order_id="crm_order_456",
-                error=None,
-            ))
-            mock_get.return_value = crm
-            yield crm
+        """Mock CRMService used by /webhooks/manychat/create-order."""
+        with patch("src.integrations.crm.crmservice.CRMService") as mock_cls:
+            service = MagicMock()
+            service.create_order_with_persistence = AsyncMock(return_value={
+                "status": "created",
+                "crm_order_id": "crm_order_456",
+                "task_id": None,
+                "external_id": "ext",
+            })
+            mock_cls.return_value = service
+            yield service
 
     @pytest.fixture
     def mock_supabase(self):
@@ -295,8 +291,8 @@ class TestCreateOrderIdempotency:
         assert data["order_id"] == "crm_order_456"
         assert "duplicate" not in data or data["duplicate"] is False
         
-        # Verify CRM was called
-        mock_crm.create_order.assert_called_once()
+        # Verify CRMService was called
+        mock_crm.create_order_with_persistence.assert_called_once()
 
     def test_duplicate_order_detected(self, client, mock_settings, mock_crm, mock_supabase, mock_validation):
         """Test that duplicate order returns existing order."""
@@ -332,7 +328,7 @@ class TestCreateOrderIdempotency:
         assert data["order_id"] == "existing_crm_123"
         
         # Verify CRM was NOT called (duplicate detected)
-        mock_crm.create_order.assert_not_called()
+        mock_crm.create_order_with_persistence.assert_not_called()
 
     def test_idempotency_key_deterministic(self, client, mock_settings, mock_crm, mock_supabase, mock_validation):
         """Test that same input produces same idempotency key."""

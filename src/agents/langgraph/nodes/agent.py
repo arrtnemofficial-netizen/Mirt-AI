@@ -258,11 +258,47 @@ async def agent_node(
                     intent = "PAYMENT_DELIVERY"
                     response.metadata.intent = "PAYMENT_DELIVERY"
 
-        # Extract products (already typed from CATALOG!)
         selected_products = state.get("selected_products", [])
         if response.products:
-            selected_products = [p.model_dump() for p in response.products]
-            logger.info("Agent found products: %s", [p.name for p in response.products])
+            new_products = [p.model_dump() for p in response.products]
+            user_text = user_message if isinstance(user_message, str) else str(user_message)
+            user_text_lower = user_text.lower()
+            add_keywords = (
+                "ще",
+                "додай",
+                "добав",
+                "також",
+                "і ще",
+                "ще один",
+                "ще одну",
+                "другий",
+                "другу",
+                "+",
+            )
+            should_append = bool(selected_products) and any(k in user_text_lower for k in add_keywords)
+
+            if should_append:
+                merged: list[dict[str, Any]] = []
+                seen: set[str] = set()
+                for item in [*selected_products, *new_products]:
+                    pid = item.get("id")
+                    name = str(item.get("name") or "").strip().lower()
+                    size = str(item.get("size") or "").strip().lower()
+                    color = str(item.get("color") or "").strip().lower()
+                    key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(item)
+                selected_products = merged
+                logger.info(
+                    "Agent appended products to cart: now=%d (added=%d)",
+                    len(selected_products),
+                    len(new_products),
+                )
+            else:
+                selected_products = new_products
+                logger.info("Agent found products: %s", [p.name for p in response.products])
 
         # =====================================================================
         # FALLBACK: Extract size from LLM response if not in products
@@ -300,6 +336,7 @@ async def agent_node(
             event=response.event,
             latency_ms=latency_ms,
             extra={
+                "trace_id": trace_id,
                 "old_state": current_state,
                 "products_count": len(selected_products),
             },

@@ -5,13 +5,22 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.conf.config import settings
+from celery import shared_task
+
 from src.workers.sync_utils import run_sync
 
 logger = logging.getLogger(__name__)
 
 
+@shared_task(
+    bind=True,
+    name="src.workers.tasks.manychat.process_manychat_message",
+    soft_time_limit=110,
+    time_limit=120,
+    queue="llm",
+)
 def process_manychat_message(
+    self,
     user_id: str,
     text: str,
     image_url: str | None = None,
@@ -26,6 +35,12 @@ def process_manychat_message(
     from src.server.dependencies import get_session_store
 
     try:
+        logger.info(
+            "[WORKER:MANYCHAT] Processing message user=%s channel=%s attempt=%d",
+            user_id,
+            channel,
+            self.request.retries + 1,
+        )
         # Get services
         store = get_session_store()
         service = get_manychat_async_service(store)

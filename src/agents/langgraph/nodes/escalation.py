@@ -36,6 +36,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
     current_state = state.get("current_state", State.STATE_0_INIT.value)
+    trace_id = state.get("trace_id", "")
 
     # Determine escalation reason
     reason = state.get("escalation_reason")
@@ -79,7 +80,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
         intent="COMPLAINT",
         event="escalation",
         escalation_level="L1",
-        extra={"reason": reason},
+        extra={"trace_id": trace_id, "reason": reason},
     )
     track_metric(
         "escalation_triggered",

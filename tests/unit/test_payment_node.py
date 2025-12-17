@@ -147,7 +147,7 @@ class TestPaymentNode:
 
     @pytest.mark.asyncio
     async def test_waiting_for_payment_proof_with_image_and_full_data_goes_to_upsell(self, base_state):
-        """When delivery data is complete and image proof is present, payment should proceed to upsell."""
+        """When delivery data is complete and image proof is present, payment should complete the order."""
         from src.agents.langgraph.nodes.payment import payment_node
 
         state = {
@@ -193,8 +193,8 @@ class TestPaymentNode:
                     with patch("src.agents.langgraph.nodes.payment.track_metric"):
                         result = await payment_node(state)
 
-        assert result.goto == "upsell"
-        assert result.update["dialog_phase"] == "UPSELL_OFFERED"
+        assert result.goto == "end"
+        assert result.update["dialog_phase"] == "COMPLETED"
 
 
 # =============================================================================

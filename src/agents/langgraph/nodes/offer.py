@@ -75,6 +75,7 @@ async def offer_node(
     """
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    trace_id = state.get("trace_id", "")
 
     # Get user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
@@ -142,7 +143,7 @@ async def offer_node(
             intent=response.metadata.intent,
             event=response.event,
             latency_ms=latency_ms,
-            extra={"offered_products": len(offered_products)},
+            extra={"trace_id": trace_id, "offered_products": len(offered_products)},
         )
         track_metric("offer_node_latency_ms", latency_ms)
 
@@ -307,8 +308,20 @@ async def _validate_prices_from_db(
                 db_product = results[0]
                 db_price = CatalogService.get_price_for_size(db_product, size)
 
+                # Always ensure a usable price is present.
+                # This is critical when the DB schema relies on price_by_size and may not have products.price.
+                if not claimed_price or claimed_price <= 0:
+                    all_correct = False
+                    product = {**product, "price": db_price}
+                    logger.info(
+                        "💰 [SESSION %s] Filled missing price for '%s' (size=%s): DB=%s",
+                        session_id,
+                        product_name,
+                        size,
+                        db_price,
+                    )
                 # Check if prices match (allow 5% tolerance for rounding)
-                if claimed_price > 0 and abs(db_price - claimed_price) > claimed_price * 0.05:
+                elif abs(db_price - claimed_price) > claimed_price * 0.05:
                     logger.warning(
                         "💰 [SESSION %s] Price mismatch for '%s': claimed=%s, DB=%s → CORRECTING",
                         session_id,

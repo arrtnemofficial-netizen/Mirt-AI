@@ -103,17 +103,20 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     - Правильно маршрутизує на основі контексту
     """
     dialog_phase = state.get("dialog_phase", "INIT")
-    session_id = state.get("session_id", "?")
+    metadata = state.get("metadata", {}) or {}
+    session_id = state.get("session_id") or metadata.get("session_id") or "?"
+    trace_id = state.get("trace_id") or metadata.get("trace_id") or ""
     # Prefer top-level flag, but fall back to metadata (photo handler writes there)
-    has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+    has_image = state.get("has_image", False) or metadata.get("has_image", False)
 
     # QUALITY: Отримуємо останнє повідомлення для аналізу intent
     user_message = _extract_user_message(state)
     detected_intent = detect_simple_intent(user_message) if user_message else None
 
     logger.info(
-        " [SESSION %s] Master router: phase=%s, has_image=%s, intent=%s, msg='%s'",
+        " [SESSION %s] Master router: trace_id=%s phase=%s has_image=%s intent=%s msg='%s'",
         session_id,
+        trace_id,
         dialog_phase,
         has_image,
         detected_intent,

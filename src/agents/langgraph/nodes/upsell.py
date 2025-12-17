@@ -80,6 +80,7 @@ async def upsell_node(
     """
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    trace_id = state.get("trace_id", "")
 
     # Get user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
@@ -121,6 +122,24 @@ async def upsell_node(
             message_history=None,
         )
 
+        updated_cart = ordered_products
+        if response.products:
+            merged: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for item in [*ordered_products, *[p.model_dump() for p in response.products]]:
+                if not isinstance(item, dict):
+                    continue
+                pid = item.get("id")
+                name = str(item.get("name") or "").strip().lower()
+                size = str(item.get("size") or "").strip().lower()
+                color = str(item.get("color") or "").strip().lower()
+                key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+            updated_cart = merged
+
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         log_agent_step(
@@ -129,6 +148,7 @@ async def upsell_node(
             intent=response.metadata.intent,
             event=response.event,
             latency_ms=latency_ms,
+            extra={"trace_id": trace_id},
         )
         track_metric("upsell_node_latency_ms", latency_ms)
         track_metric("upsell_offered", 1, {"session_id": session_id})
@@ -161,6 +181,8 @@ async def upsell_node(
             "messages": [{"role": "assistant", "content": assistant_content}],
             "metadata": response.metadata.model_dump(),
             "agent_response": response.model_dump(),
+            "selected_products": updated_cart,
+            "offered_products": updated_cart,
             "dialog_phase": "COMPLETED",
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,

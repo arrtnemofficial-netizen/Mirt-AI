@@ -43,6 +43,7 @@ async def crm_error_node(
         Command for next node based on error handling outcome
     """
     session_id = state.get("session_id", "")
+    trace_id = state.get("trace_id", "")
     crm_order_result = state.get("crm_order_result", {})
     crm_external_id = state.get("crm_external_id", "")
     crm_retry_count = state.get("crm_retry_count", 0)
@@ -60,12 +61,13 @@ async def crm_error_node(
         return await _handle_user_choice(state, session_id)
 
     # First entry - analyze error and show options
-    return await _analyze_and_present_error(state, session_id)
+    return await _analyze_and_present_error(state, session_id, trace_id)
 
 
 async def _analyze_and_present_error(
     state: dict[str, Any],
     session_id: str,
+    trace_id: str = "",
 ) -> Command[Literal["crm_error"]]:
     """Analyze CRM error and present user with options."""
     crm_order_result = state.get("crm_order_result", {})
@@ -92,6 +94,7 @@ async def _analyze_and_present_error(
         intent="CRM_ERROR",
         event="error_analyzed",
         extra={
+            "trace_id": trace_id,
             "error_strategy": error_result.get("strategy"),
             "can_retry": error_result.get("can_retry"),
             "retry_count": crm_retry_count,

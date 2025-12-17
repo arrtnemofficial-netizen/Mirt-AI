@@ -316,6 +316,91 @@ async def test_offer_node_with_products():
     assert len(output["offered_products"]) == 1
 
 
+@pytest.mark.asyncio
+async def test_agent_node_appends_products_to_cart_on_add_keywords():
+    from unittest.mock import patch
+
+    from src.agents.langgraph.nodes.agent import agent_node
+    from src.core.state_machine import State
+
+    state = create_minimal_state("test_cart_merge")
+    state["messages"] = [{"role": "user", "content": "Додай ще"}]
+    state["current_state"] = State.STATE_1_DISCOVERY.value
+    state["dialog_phase"] = "DISCOVERY"
+    state["selected_products"] = [
+        {"id": 1, "name": "Товар 1", "price": 1000, "size": "122", "color": "чорний"}
+    ]
+
+    async def mock_run_support(message, deps, message_history):
+        from src.agents.pydantic.models import MessageItem, ProductMatch, ResponseMetadata, SupportResponse
+
+        return SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(type="text", content="Ок")],
+            products=[
+                ProductMatch(id=2, name="Товар 2", price=900, size="122", color="білий", photo_url="https://x/y.jpg")
+            ],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id,
+                current_state=State.STATE_1_DISCOVERY.value,
+                intent="DISCOVERY_OR_QUESTION",
+                escalation_level="NONE",
+            ),
+        )
+
+    with patch("src.agents.langgraph.nodes.agent.run_support", mock_run_support):
+        output = await agent_node(state)
+
+    assert "selected_products" in output
+    assert len(output["selected_products"]) == 2
+    ids = {p.get("id") for p in output["selected_products"]}
+    assert ids == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_upsell_node_merges_products_into_cart_dedup():
+    from unittest.mock import patch
+
+    from src.agents.langgraph.nodes.upsell import upsell_node
+    from src.core.state_machine import State
+
+    state = create_minimal_state("test_upsell_merge")
+    state["messages"] = [{"role": "user", "content": "Так, додавай"}]
+    state["current_state"] = State.STATE_6_UPSELL.value
+    state["dialog_phase"] = "UPSELL_OFFERED"
+    state["selected_products"] = [
+        {"id": 1, "name": "Товар 1", "price": 1000, "size": "122", "color": "чорний"}
+    ]
+    state["offered_products"] = state["selected_products"]
+
+    async def mock_run_support(message, deps, message_history):
+        from src.agents.pydantic.models import MessageItem, ProductMatch, ResponseMetadata, SupportResponse
+
+        return SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(type="text", content="Додала")],
+            products=[
+                ProductMatch(id=1, name="Товар 1", price=1000, size="122", color="чорний", photo_url="https://x/1.jpg"),
+                ProductMatch(id=3, name="Товар 3", price=500, size="128", color="сірий", photo_url="https://x/3.jpg"),
+            ],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id,
+                current_state=State.STATE_6_UPSELL.value,
+                intent="DISCOVERY_OR_QUESTION",
+                escalation_level="NONE",
+            ),
+        )
+
+    with patch("src.agents.langgraph.nodes.upsell.run_support", mock_run_support):
+        output = await upsell_node(state)
+
+    assert output.get("dialog_phase") == "COMPLETED"
+    assert "selected_products" in output
+    assert len(output["selected_products"]) == 2
+    ids = {p.get("id") for p in output["selected_products"]}
+    assert ids == {1, 3}
+
+
 # =============================================================================
 # FULL FLOW TEST
 # =============================================================================

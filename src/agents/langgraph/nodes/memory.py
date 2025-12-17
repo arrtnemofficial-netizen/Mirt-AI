@@ -57,12 +57,15 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
     start_time = time.perf_counter()
     session_id = state.get("session_id", "")
     user_id = state.get("metadata", {}).get("user_id", "")
+    trace_id = state.get("trace_id", "")
+    current_state = state.get("current_state", "")
 
     log_agent_step(
-        "memory_context",
-        session_id,
-        "start",
-        {"user_id": user_id},
+        session_id=session_id,
+        state=current_state or "UNKNOWN",
+        intent="memory",
+        event="memory_context.start",
+        extra={"trace_id": trace_id, "user_id": user_id},
     )
 
     # Skip if no user_id
@@ -96,10 +99,12 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
         track_metric("memory_context_load_ms", elapsed)
 
         log_agent_step(
-            "memory_context",
-            session_id,
-            "complete",
-            {
+            session_id=session_id,
+            state=current_state or "UNKNOWN",
+            intent="memory",
+            event="memory_context.complete",
+            extra={
+                "trace_id": trace_id,
                 "has_profile": context.profile is not None,
                 "facts_count": len(context.facts),
                 "elapsed_ms": elapsed,
@@ -197,12 +202,18 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
     user_id = state.get("metadata", {}).get("user_id", "")
     dialog_phase = state.get("dialog_phase", "")
     current_state = state.get("current_state", "")
+    trace_id = state.get("trace_id", "")
 
     log_agent_step(
-        "memory_update",
-        session_id,
-        "start",
-        {"user_id": user_id, "phase": dialog_phase, "state": current_state},
+        session_id=session_id,
+        state=current_state or "UNKNOWN",
+        intent="memory",
+        event="memory_update.start",
+        extra={
+            "trace_id": trace_id,
+            "user_id": user_id,
+            "phase": dialog_phase,
+        },
     )
 
     # Skip if no user_id
@@ -334,10 +345,11 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
             )
 
         log_agent_step(
-            "memory_update",
-            session_id,
-            "complete",
-            {"elapsed_ms": elapsed},
+            session_id=session_id,
+            state=current_state or "UNKNOWN",
+            intent="memory",
+            event="memory_update.complete",
+            extra={"trace_id": trace_id, "elapsed_ms": elapsed},
         )
 
         return {"step_number": state.get("step_number", 0) + 1}

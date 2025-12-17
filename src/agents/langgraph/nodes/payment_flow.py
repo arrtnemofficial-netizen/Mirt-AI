@@ -379,7 +379,17 @@ def get_product_info_from_state(state: dict[str, Any]) -> tuple[int, str | None]
 
     if products:
         first_product = products[0]
-        price = first_product.get("price", 0)
+        price = 0
+        try:
+            price = int(
+                sum(
+                    float(p.get("price", 0) or 0)
+                    for p in products
+                    if isinstance(p, dict)
+                )
+            )
+        except Exception:
+            price = int(float(first_product.get("price", 0) or 0))
         size = first_product.get("size")
         return price, size
 
