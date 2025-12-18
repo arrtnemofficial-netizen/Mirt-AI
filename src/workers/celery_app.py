@@ -152,6 +152,22 @@ celery_app.conf.update(
 )
 
 # =============================================================================
+# SIGNALS - Lifecycle hooks
+# =============================================================================
+
+@signals.setup_logging.connect
+def setup_celery_logging(**kwargs):
+    from src.core.logging import setup_logging
+
+    is_production = os.getenv("PUBLIC_BASE_URL", "").strip() != "http://localhost:8000"
+    is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"))
+    setup_logging(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        json_format=bool(is_production or is_railway),
+        service_name="mirt-ai-worker",
+    )
+
+# =============================================================================
 # TASK ROUTING
 # =============================================================================
 

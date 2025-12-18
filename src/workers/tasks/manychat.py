@@ -26,6 +26,7 @@ def process_manychat_message(
     image_url: str | None = None,
     channel: str = "instagram",
     subscriber_data: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> dict[str, Any]:
     """Process ManyChat message through AI and push response.
     
@@ -52,6 +53,7 @@ def process_manychat_message(
             image_url=image_url,
             channel=channel,
             subscriber_data=subscriber_data,
+            trace_id=trace_id,
         )
         result = run_sync(coro)
         

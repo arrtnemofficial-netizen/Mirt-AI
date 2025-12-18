@@ -7,7 +7,9 @@ instead of global singletons.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -33,6 +35,27 @@ logger = logging.getLogger(__name__)
 
 
 # Will be initialized in webhook handler
+
+
+def _get_build_info() -> dict[str, str]:
+    sha = (
+        os.environ.get("GIT_SHA")
+        or os.environ.get("COMMIT_SHA")
+        or os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("RENDER_GIT_COMMIT")
+        or os.environ.get("SOURCE_VERSION")
+        or os.environ.get("GITHUB_SHA")
+        or "unknown"
+    )
+    build_id = (
+        os.environ.get("BUILD_ID")
+        or os.environ.get("RAILWAY_DEPLOYMENT_ID")
+        or os.environ.get("RENDER_INSTANCE_ID")
+        or os.environ.get("DYNO")
+        or os.environ.get("HOSTNAME")
+        or "unknown"
+    )
+    return {"git_sha": sha, "build_id": build_id}
 
 
 def _extract_manychat_message_id(payload: dict[str, Any], message: dict[str, Any]) -> str | None:
@@ -94,6 +117,12 @@ async def lifespan(app: FastAPI):
 
     # Startup
     logger.info("Starting MIRT AI Webhooks server")
+    build_info = _get_build_info()
+    logger.info(
+        "Build info: git_sha=%s build_id=%s",
+        build_info.get("git_sha"),
+        build_info.get("build_id"),
+    )
 
     # Telegram webhook: реєструємо, якщо є token і публічна адреса
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
@@ -285,6 +314,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": status,
         "checks": checks,
+        **_get_build_info(),
         "version": "1.0.0",
         "celery_enabled": settings.CELERY_ENABLED,
         "llm_provider": settings.LLM_PROVIDER,
@@ -317,32 +347,40 @@ async def api_v1_messages(
     - {type, clientId, message, image_url}
     - {sessionId, name, message} (n8n format)
     """
-    # === STEP 1: Log RAW payload ===
     raw_body = await request.body()
-    logger.info("=" * 60)
-    logger.info("[API_V1] 📥 RAW PAYLOAD: %s", raw_body.decode('utf-8', errors='replace')[:500])
+    log_event(
+        logger,
+        event="api_v1_payload_received",
+        text_len=len(raw_body or b""),
+        text_preview=safe_preview(raw_body.decode("utf-8", errors="replace"), 200),
+    )
 
-    # Parse JSON manually to log before Pydantic
     import json
     try:
         raw_json = json.loads(raw_body)
-        logger.info("[API_V1] 📋 PARSED JSON keys: %s", list(raw_json.keys()))
-        logger.info("[API_V1] 📋 clientId/sessionId: %s", raw_json.get('clientId') or raw_json.get('sessionId'))
-        logger.info("[API_V1] 📋 message: %s", str(raw_json.get('message', ''))[:100])
-        logger.info("[API_V1] 📋 image_url field: %s", raw_json.get('image_url'))
+        logger.debug("[API_V1] RAW keys=%s", list(raw_json.keys()))
     except json.JSONDecodeError as e:
-        logger.error("[API_V1] ❌ JSON parse error: %s", e)
+        log_event(
+            logger,
+            event="api_v1_payload_parsed",
+            level="warning",
+            root_cause="INVALID_JSON",
+            error=safe_preview(e, 200),
+        )
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
-    # === STEP 2: Validate with Pydantic ===
     try:
         payload = ApiV1MessageRequest.model_validate(raw_json)
-        logger.info("[API_V1] ✅ Pydantic parsed:")
-        logger.info("[API_V1]    client_id: %s", payload.client_id)
-        logger.info("[API_V1]    client_name: %s", payload.client_name)
-        logger.info("[API_V1]    message: %s", payload.message[:100] if payload.message else "(empty)")
-        logger.info("[API_V1]    image_url: %s", payload.image_url)
-        logger.info("[API_V1]    type: %s", payload.type)
+        log_event(
+            logger,
+            event="api_v1_payload_parsed",
+            user_id=str(payload.client_id),
+            channel=payload.type or "instagram",
+            text_len=len(payload.message or ""),
+            text_preview=safe_preview(payload.message, 160),
+            has_image=bool(payload.image_url),
+            image_url_preview=safe_preview(payload.image_url, 100),
+        )
     except Exception as e:
         logger.error("[API_V1] ❌ Pydantic validation error: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
@@ -371,11 +409,19 @@ async def api_v1_messages(
     user_id = str(payload.client_id)
     channel = payload.type or "instagram"
 
-    logger.info("[API_V1] 🚀 Scheduling background task:")
-    logger.info("[API_V1]    user_id: %s", user_id)
-    logger.info("[API_V1]    text: %s", (payload.message or "")[:50])
-    logger.info("[API_V1]    image_url: %s", payload.image_url)
-    logger.info("[API_V1]    channel: %s", channel)
+    trace_id = str(uuid.uuid4())
+
+    log_event(
+        logger,
+        event="api_v1_task_scheduled",
+        trace_id=trace_id,
+        user_id=user_id,
+        channel=channel,
+        text_len=len(payload.message or ""),
+        text_preview=safe_preview(payload.message, 160),
+        has_image=bool(payload.image_url),
+        image_url_preview=safe_preview(payload.image_url, 100),
+    )
 
     background_tasks.add_task(
         service.process_message_async,
@@ -383,10 +429,10 @@ async def api_v1_messages(
         text=payload.message or "",
         image_url=payload.image_url,
         channel=channel,
+        trace_id=trace_id,
     )
 
-    logger.info("[API_V1] ✅ Task scheduled, returning 202")
-    logger.info("=" * 60)
+    logger.debug("[API_V1] returning 202")
     return {"status": "accepted"}
 
 
@@ -421,6 +467,8 @@ async def manychat_webhook(
         from src.server.dependencies import get_session_store
 
         try:
+            trace_id = str(uuid.uuid4())
+
             # Extract user info from payload
             subscriber = payload.get("subscriber") or payload.get("user") or {}
             message = payload.get("message") or payload.get("data", {}).get("message") or {}
@@ -498,12 +546,16 @@ async def manychat_webhook(
                     image_url=image_url,
                     channel=channel,
                     subscriber_data=subscriber,
+                    trace_id=trace_id,
                 )
                 
-                logger.info(
-                    "[MANYCHAT] Queued Celery task %s for user=%s",
-                    task.id,
-                    user_id,
+                log_event(
+                    logger,
+                    event="manychat_task_scheduled",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    task_id=task.id,
                 )
                 
                 return {"status": "accepted"}
@@ -519,14 +571,25 @@ async def manychat_webhook(
                     image_url=image_url,
                     channel=channel,
                     subscriber_data=subscriber,  # Pass subscriber data for username
+                    trace_id=trace_id,
                 )
                 
-                logger.info(
-                    "[MANYCHAT] Scheduled BackgroundTask for user=%s (non-durable)",
-                    user_id,
+                log_event(
+                    logger,
+                    event="manychat_task_scheduled",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    status="background_tasks",
                 )
 
-            logger.info("[MANYCHAT] 📨 Accepted message from %s (push mode)", user_id)
+            log_event(
+                logger,
+                event="manychat_message_accepted",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+            )
             return {"status": "accepted"}
 
         except HTTPException:

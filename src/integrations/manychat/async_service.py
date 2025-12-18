@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph
@@ -23,6 +24,7 @@ from src.services.conversation import create_conversation_handler
 from src.services.debouncer import BufferedMessage, MessageDebouncer
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
+from src.core.logging import classify_root_cause, log_event, safe_preview
 
 from .push_client import ManyChatPushClient, get_manychat_push_client
 from .constants import (
@@ -35,6 +37,7 @@ from .constants import (
     TAG_ORDER_PAID,
     TAG_ORDER_STARTED,
 )
+
 from .response_builder import (
     build_manychat_field_values,
     build_manychat_messages,
@@ -80,6 +83,7 @@ class ManyChatAsyncService:
         image_url: str | None = None,
         channel: str = "instagram",
         subscriber_data: dict[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> None:
         """Process message and push response to ManyChat.
         
@@ -97,18 +101,35 @@ class ManyChatAsyncService:
             channel: Channel type (instagram, facebook, etc.)
         """
         start_time = time.time()
-        logger.info("=" * 50)
-        logger.info("[MANYCHAT:%s] 🔥 PROCESS_MESSAGE_ASYNC STARTED", user_id)
-        logger.info("[MANYCHAT:%s]    text: '%s'", user_id, text[:100] if text else "(empty)")
-        logger.info("[MANYCHAT:%s]    image_url: %s", user_id, image_url)
-        logger.info("[MANYCHAT:%s]    channel: %s", user_id, channel)
+        trace_id = trace_id or str(uuid.uuid4())
+        log_event(
+            logger,
+            event="manychat_process_start",
+            trace_id=trace_id,
+            user_id=user_id,
+            channel=channel,
+            text_len=len(text or ""),
+            text_preview=safe_preview(text, 160),
+            has_image=bool(image_url),
+            image_url_preview=safe_preview(image_url, 100),
+        )
 
         # RATE LIMITING: Захист від спаму/abuse
         if not check_rate_limit(user_id):
-            logger.warning("[MANYCHAT:%s] ⚠️ RATE LIMITED - too many requests", user_id)
+            log_event(
+                logger,
+                event="manychat_rate_limited",
+                level="warning",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+            )
             fallback = get_fallback_response(FallbackType.RATE_LIMITED)
             await self.push_client.send_text(
-                user_id, fallback["text"], channel=channel
+                user_id,
+                fallback["text"],
+                channel=channel,
+                trace_id=trace_id,
             )
             return
 
@@ -120,7 +141,13 @@ class ManyChatAsyncService:
             clean_text = raw_text.lower()
             first_token = clean_text.split(maxsplit=1)[0] if clean_text else ""
             if first_token in ("/restart", "/start", "restart", "start"):
-                logger.info("[MANYCHAT:%s] 🔄 Detected RESTART command", user_id)
+                log_event(
+                    logger,
+                    event="manychat_restart_command",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                )
                 await self._handle_restart_command(user_id, channel)
                 return
 
@@ -133,9 +160,15 @@ class ManyChatAsyncService:
                     "has_image": True,
                     "image_url": image_url,
                 })
-                logger.info("[MANYCHAT:%s] 📷 Image URL set in metadata: %s", user_id, image_url[:80])
-            else:
-                logger.info("[MANYCHAT:%s] ⚠️ NO image_url provided", user_id)
+                log_event(
+                    logger,
+                    event="manychat_image_attached",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    has_image=True,
+                    image_url_preview=safe_preview(image_url, 100),
+                )
             
             # Add username info from subscriber data
             if subscriber_data:
@@ -143,13 +176,25 @@ class ManyChatAsyncService:
                 instagram_username = subscriber_data.get("instagram_username") or subscriber_data.get("username")
                 if instagram_username:
                     extra_metadata["instagram_username"] = instagram_username
-                    logger.info("[MANYCHAT:%s] 📝 Instagram username: %s", user_id, instagram_username)
+                    log_event(
+                        logger,
+                        event="manychat_subscriber_username",
+                        trace_id=trace_id,
+                        user_id=user_id,
+                        channel=channel,
+                    )
                 
                 # Name/nickname
                 name = subscriber_data.get("name") or subscriber_data.get("full_name") or subscriber_data.get("first_name")
                 if name:
                     extra_metadata["user_nickname"] = name
-                    logger.info("[MANYCHAT:%s] 👤 User name: %s", user_id, name)
+                    log_event(
+                        logger,
+                        event="manychat_subscriber_name",
+                        trace_id=trace_id,
+                        user_id=user_id,
+                        channel=channel,
+                    )
 
             # Debouncing: aggregate rapid messages
             buffered_msg = BufferedMessage(
@@ -163,19 +208,32 @@ class ManyChatAsyncService:
 
             if aggregated_msg is None:
                 # Superseded by newer message
-                logger.info("[MANYCHAT:%s] Request superseded, skipping", user_id)
+                log_event(
+                    logger,
+                    event="manychat_debounce_superseded",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                )
                 return
 
             final_text = aggregated_msg.text
             final_metadata = aggregated_msg.extra_metadata
 
-            logger.info(
-                "[MANYCHAT:%s] Processing AGGREGATED: text='%s'",
-                user_id,
-                final_text[:50] if final_text else "(empty)",
+            log_event(
+                logger,
+                event="manychat_debounce_aggregated",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                text_len=len(final_text or ""),
+                text_preview=safe_preview(final_text, 160),
+                has_image=bool(final_metadata.get("has_image")),
             )
 
             # Process through conversation handler
+            if isinstance(final_metadata, dict):
+                final_metadata = {**final_metadata, "trace_id": trace_id, "channel": channel}
             result = await self._handler.process_message(
                 user_id,
                 final_text,
@@ -183,25 +241,62 @@ class ManyChatAsyncService:
             )
 
             if result.is_fallback:
-                logger.warning(
-                    "[MANYCHAT:%s] Fallback response: %s",
-                    user_id,
+                root_cause = classify_root_cause(
                     result.error,
+                    current_state=getattr(result.response.metadata, "current_state", None),
+                    intent=getattr(result.response.metadata, "intent", None),
+                    channel=channel,
+                )
+                log_event(
+                    logger,
+                    event="manychat_fallback_triggered",
+                    level="warning",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    root_cause=root_cause,
+                    error=safe_preview(result.error, 200),
                 )
 
             # Push response to ManyChat
-            await self._push_response(user_id, result.response, channel)
+            await self._push_response(user_id, result.response, channel, trace_id=trace_id)
+
+            log_event(
+                logger,
+                event="manychat_process_done",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                latency_ms=round((time.time() - start_time) * 1000, 2),
+                intent=getattr(result.response.metadata, "intent", None),
+                current_state=getattr(result.response.metadata, "current_state", None),
+                messages_count=len(getattr(result.response, "messages", []) or []),
+                products_count=len(getattr(result.response, "products", []) or []),
+            )
 
         except Exception as e:
-            logger.exception("[MANYCHAT:%s] Processing error: %s", user_id, e)
+            root_cause = classify_root_cause(e, channel=channel)
+            log_event(
+                logger,
+                event="manychat_processing_error",
+                level="exception",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                root_cause=root_cause,
+                error_type=type(e).__name__,
+                error=safe_preview(e, 200),
+            )
             # Try to send error message
-            await self._push_error_message(user_id, channel)
+            await self._push_error_message(user_id, channel, trace_id=trace_id)
 
     async def _push_response(
         self,
         user_id: str,
         agent_response: AgentResponse,
         channel: str,
+        *,
+        trace_id: str,
     ) -> None:
         """Convert AgentResponse to ManyChat format and push."""
 
@@ -209,7 +304,14 @@ class ManyChatAsyncService:
         # but keep logic centralized.
         messages = build_manychat_messages(agent_response, include_product_images=True)
         if any(m.get("type") == "image" for m in messages):
-            logger.info("[MANYCHAT:%s] 📷 Including product images (%d total messages)", user_id, len(messages))
+            log_event(
+                logger,
+                event="manychat_including_images",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                messages_count=len(messages),
+            )
 
         # Build custom field values
         field_values = build_manychat_field_values(agent_response)
@@ -221,6 +323,15 @@ class ManyChatAsyncService:
         quick_replies = self._build_quick_replies(agent_response)
 
         # Push to ManyChat
+        log_event(
+            logger,
+            event="manychat_push_attempt",
+            trace_id=trace_id,
+            user_id=user_id,
+            channel=channel,
+            messages_count=len(messages),
+        )
+
         success = await self.push_client.send_content(
             subscriber_id=user_id,
             messages=messages,
@@ -229,17 +340,30 @@ class ManyChatAsyncService:
             set_field_values=field_values,
             add_tags=add_tags,
             remove_tags=remove_tags,
+            trace_id=trace_id,
         )
 
         if success:
-            logger.info(
-                "[MANYCHAT:%s] ✅ Response pushed: %d messages, state=%s",
-                user_id,
-                len(messages),
-                agent_response.metadata.current_state,
+            log_event(
+                logger,
+                event="manychat_push_ok",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                messages_count=len(messages),
+                current_state=agent_response.metadata.current_state,
+                intent=agent_response.metadata.intent,
+                escalation_level=agent_response.metadata.escalation_level,
             )
         else:
-            logger.error("[MANYCHAT:%s] ❌ Failed to push response", user_id)
+            log_event(
+                logger,
+                event="manychat_push_failed",
+                level="error",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+            )
 
     @staticmethod
     def _get_error_text() -> str:
@@ -247,12 +371,13 @@ class ManyChatAsyncService:
         from src.core.human_responses import get_human_response
         return get_human_response("error")
 
-    async def _push_error_message(self, user_id: str, channel: str) -> None:
+    async def _push_error_message(self, user_id: str, channel: str, *, trace_id: str) -> None:
         """Push a friendly error message."""
         await self.push_client.send_text(
             subscriber_id=user_id,
             text=self._get_error_text(),
             channel=channel,
+            trace_id=trace_id,
         )
 
     async def _handle_restart_command(self, user_id: str, channel: str) -> None:

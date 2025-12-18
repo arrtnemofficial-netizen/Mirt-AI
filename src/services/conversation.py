@@ -508,8 +508,12 @@ class ConversationHandler:
                     state["has_image"] = True
                     state["image_url"] = extra_metadata.get("image_url")
 
-            # Generate new trace_id for this request (Observability)
-            trace_id = str(uuid.uuid4())
+            # Generate or reuse trace_id for this request (Observability)
+            trace_id = None
+            if extra_metadata and isinstance(extra_metadata, dict):
+                trace_id = str(extra_metadata.get("trace_id") or "").strip() or None
+            if not trace_id:
+                trace_id = str(uuid.uuid4())
             state["trace_id"] = trace_id
 
             # DEBUG: Log request start
@@ -539,11 +543,22 @@ class ConversationHandler:
             agent_response = self._parse_response(result_state, session_id)
 
             # Log outgoing message for snippet verification
+            preview_text = ""
+            try:
+                preview_text = "\n".join(
+                    [
+                        m.content
+                        for m in (agent_response.messages or [])
+                        if getattr(m, "content", None)
+                    ]
+                )
+            except Exception:
+                preview_text = ""
             logger.info(
                 "📤 Outgoing message (state=%s, intent=%s): %s",
                 agent_response.metadata.current_state,
                 agent_response.metadata.intent,
-                agent_response.text[:200] + "..." if len(agent_response.text) > 200 else agent_response.text,
+                preview_text[:200] + "..." if len(preview_text) > 200 else preview_text,
             )
 
             # Persist assistant response
@@ -836,13 +851,15 @@ class ConversationHandler:
         if state:
             current_state = state.get("current_state", StateEnum.default())
 
+        fallback_text = self.fallback_message or self._get_fallback()
         fallback_response = AgentResponse(
             event="escalation",
-            messages=[Message(content=self.fallback_message)],
+            messages=[Message(content=fallback_text)],
             products=[],
             metadata=Metadata(
                 session_id=session_id,
                 current_state=current_state,
+                escalation_level="L2",
                 event_trigger="error_fallback",
                 notes=f"Error: {error_message[:200]}",
             ),
