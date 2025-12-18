@@ -128,6 +128,18 @@ async def lifespan(app: FastAPI):
         build_info.get("build_id"),
     )
 
+    # ==========================================================================
+    # WARMUP: Pre-initialize the graph to avoid 20+ second delay on first request
+    # This is CRITICAL for ManyChat timeout compliance
+    # ==========================================================================
+    try:
+        from src.agents.langgraph import get_production_graph
+        logger.info("Warming up LangGraph (this may take 10-20 seconds on first deploy)...")
+        _graph = get_production_graph()
+        logger.info("LangGraph warmed up successfully!")
+    except Exception as e:
+        logger.warning("Failed to warm up LangGraph: %s (will initialize on first request)", e)
+
     # Telegram webhook: реєструємо, якщо є token і публічна адреса
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
