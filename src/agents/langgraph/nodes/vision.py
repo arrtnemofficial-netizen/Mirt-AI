@@ -16,6 +16,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from src.conf.config import settings
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.vision_agent import run_vision
 from src.core.state_machine import State
@@ -305,6 +306,18 @@ def _build_vision_messages(
             message_text = f"{prefix} {product_name} 💛"
 
         messages.append(text_msg(message_text))
+
+        # Optional vibe override for a specific product (per-client tuning via env)
+        try:
+            vibe_anna = str(getattr(settings, "VISION_VIBE_TEXT_ANNA", "") or "").strip()
+        except Exception:
+            vibe_anna = ""
+        if vibe_anna:
+            pn = str(product_name or "").lower()
+            if ("анна" in pn) and ("сук" in pn):
+                parts = [p.strip() for p in vibe_anna.split("||") if p and p.strip()]
+                for p in parts[:3]:
+                    messages.append(text_msg(p))
 
         if catalog_product:
             description = str(catalog_product.get("description") or "").strip()

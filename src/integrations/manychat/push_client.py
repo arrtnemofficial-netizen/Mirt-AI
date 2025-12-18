@@ -18,6 +18,7 @@ import asyncio
 import logging
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -76,6 +77,17 @@ class ManyChatPushClient:
             elif msg_type == "image":
                 url = msg.get("url", "").strip()
                 if url:
+                    proxy_enabled = bool(getattr(settings, "MANYCHAT_IMAGE_PROXY_ENABLED", False))
+                    media_proxy_enabled = bool(getattr(settings, "MEDIA_PROXY_ENABLED", False))
+                    public_base_url = str(getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/")
+
+                    if proxy_enabled and media_proxy_enabled and public_base_url.startswith("https://"):
+                        token = str(getattr(settings, "MEDIA_PROXY_TOKEN", "") or "").strip()
+                        proxy_url = f"{public_base_url}/media/proxy?url={quote(url, safe='')}"
+                        if token:
+                            proxy_url += f"&token={quote(token, safe='')}"
+                        url = proxy_url
+
                     # ManyChat sendContent does NOT support caption for images
                     sanitized.append({"type": "image", "url": url})
             else:

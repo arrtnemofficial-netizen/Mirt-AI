@@ -43,6 +43,23 @@ class Settings(BaseSettings):
         description="Publicly reachable base URL used for webhook registration.",
     )
 
+    MEDIA_PROXY_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable media proxy endpoint for serving external images from this service domain (helps Instagram/ManyChat image delivery)."
+        ),
+    )
+    MEDIA_PROXY_ALLOWED_HOSTS: str = Field(
+        default="cdn.sitniks.com",
+        description="Comma-separated allowlist of hosts that /media/proxy is allowed to fetch.",
+    )
+    MEDIA_PROXY_TOKEN: str = Field(
+        default="",
+        description=(
+            "Optional token for /media/proxy. If set, requests must include ?token=... (recommended to prevent open proxy abuse)."
+        ),
+    )
+
     # Manager Notification Bot
     MANAGER_BOT_TOKEN: SecretStr = Field(
         default=SecretStr(""), description="Token for internal manager notification bot."
@@ -79,6 +96,13 @@ class Settings(BaseSettings):
         ),
     )
 
+    MANYCHAT_IMAGE_PROXY_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "If True, image messages sent to ManyChat will be rewritten to use /media/proxy on this service (requires MEDIA_PROXY_ENABLED and HTTPS PUBLIC_BASE_URL)."
+        ),
+    )
+
     MANYCHAT_DEBOUNCE_SECONDS: float = Field(
         default=1.0,
         description="Debounce window (seconds) for aggregating rapid ManyChat messages.",
@@ -99,6 +123,14 @@ class Settings(BaseSettings):
     MANYCHAT_INTERIM_TEXT_WITH_IMAGE: str = Field(
         default="Дякую, бачу фото. Зараз перегляну та відповім.",
         description="Short interim message for image processing when response is taking longer than expected.",
+    )
+
+    VISION_VIBE_TEXT_ANNA: str = Field(
+        default="",
+        description=(
+            "Optional override for Vision first-touch vibe text when the identified product is 'Сукня Анна'. "
+            "Use '||' to split into multiple bubbles. Leave empty to use catalog description only."
+        ),
     )
 
     MANYCHAT_TEXT_TIME_BUDGET_SECONDS: float = Field(
