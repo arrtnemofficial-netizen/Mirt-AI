@@ -317,7 +317,9 @@ class ManyChatAsyncService:
             final_text = aggregated_msg.text
             final_metadata = aggregated_msg.extra_metadata
 
-            has_image_final = bool(isinstance(final_metadata, dict) and final_metadata.get("has_image"))
+            # CRITICAL: Use aggregated_msg.has_image, NOT metadata!
+            # The debouncer sets has_image on BufferedMessage, not in extra_metadata
+            has_image_final = aggregated_msg.has_image
 
             # Enforce time budget per message. Also push an interim message if we exceed a smaller threshold.
             # Vision processing can take 20-30 seconds, so we need a larger budget
