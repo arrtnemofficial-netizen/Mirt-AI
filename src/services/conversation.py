@@ -6,6 +6,7 @@ by providing a single ConversationHandler that manages the full message lifecycl
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -461,7 +462,9 @@ class ConversationHandler:
                 logger.warning("[SECURITY] Message sanitized for session %s", session_id)
 
             # Load or create session state
-            state = self.session_store.get(session_id)
+            # CRITICAL: Use to_thread() to avoid blocking event loop!
+            # Supabase client is synchronous and blocks the entire async loop
+            state = await asyncio.to_thread(self.session_store.get, session_id)
 
             # Ensure state has required structure with ALL necessary flags
             if not state or not isinstance(state, dict):
@@ -565,7 +568,8 @@ class ConversationHandler:
             self._persist_assistant_message(session_id, agent_response)
 
             # Save updated state
-            self.session_store.save(session_id, result_state)
+            # CRITICAL: Use to_thread() to avoid blocking event loop!
+            await asyncio.to_thread(self.session_store.save, session_id, result_state)
 
             # Notify manager for ANY escalation-like outcome.
             # This covers cases where the graph finishes with goto="end" (e.g. payment proof)
