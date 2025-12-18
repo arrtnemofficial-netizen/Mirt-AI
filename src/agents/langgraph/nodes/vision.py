@@ -120,7 +120,7 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
             return []
 
         color_options: list[str] = []
-        if (not color) and results:
+        if results:
             seen: set[str] = set()
             for r in results:
                 for c in _extract_colors(r):
@@ -233,8 +233,26 @@ def _build_vision_messages(
     messages: list[dict[str, str]] = []
     confidence = response.confidence or 0.0
 
+    def _history_has_greeting(prev: list[Any]) -> bool:
+        try:
+            for m in prev or []:
+                if isinstance(m, dict):
+                    content = str(m.get("content") or "")
+                    if "менеджер соф" in content.lower():
+                        return True
+        except Exception:
+            return False
+        return False
+
+    def _norm_color(s: str) -> str:
+        return " ".join((s or "").lower().strip().split())
+
+    def _is_ambiguous_color(s: str) -> bool:
+        ss = _norm_color(s)
+        return ("/" in ss) or (" або " in ss)
+
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
-    if not vision_greeted:
+    if (not vision_greeted) or (not _history_has_greeting(previous_messages)):
         messages.append(text_msg("Вітаю 🎀 З вами MIRT_UA, менеджер Софія."))
 
     # 2. Product highlight БЕЗ ЦІНИ (ціна тільки після зросту!)
@@ -256,10 +274,30 @@ def _build_vision_messages(
         if confidence < 0.5:
             prefix = "Схоже, це наш"
 
+        color_options: list[str] = []
+        try:
+            if catalog_product and isinstance(catalog_product.get("_color_options"), list):
+                color_options = [str(x) for x in (catalog_product.get("_color_options") or []) if str(x).strip()]
+        except Exception:
+            color_options = []
+
+        option_norms = {_norm_color(c) for c in color_options}
+        needs_color_confirmation = bool(
+            (len(color_options) >= 2)
+            and (
+                (not product.color)
+                or _is_ambiguous_color(product.color)
+                or (
+                    option_norms
+                    and (_norm_color(product.color) not in option_norms)
+                )
+            )
+        )
+
         if color_already_in_name:
             # Color is in name - just use the name
             message_text = f"{prefix} {product_name} 💛"
-        elif product.color:
+        elif product.color and (not needs_color_confirmation):
             # Color NOT in name - add it
             message_text = f"{prefix} {product_name} у кольорі {product.color} 💛"
         else:
@@ -292,14 +330,7 @@ def _build_vision_messages(
                 if snippet:
                     messages.append(text_msg(snippet))
 
-        color_options = []
-        try:
-            if catalog_product and isinstance(catalog_product.get("_color_options"), list):
-                color_options = [str(x) for x in (catalog_product.get("_color_options") or []) if str(x).strip()]
-        except Exception:
-            color_options = []
-
-        if (not product.color) and len(color_options) >= 2:
+        if needs_color_confirmation:
             options_text = ", ".join(color_options[:5])
             messages.append(text_msg(f"Підкажіть, будь ласка, який колір обираєте: {options_text}? 🤍"))
 
@@ -321,7 +352,7 @@ def _build_vision_messages(
             # Тільки фото без зросту - питаємо
             messages.append(text_msg("На який зріст підказати? 🌸"))
 
-        if product.photo_url and (product.color or len(color_options) < 2):
+        if product.photo_url and (not needs_color_confirmation):
             messages.append(image_msg(product.photo_url))
 
     # 4. Clarification (тільки якщо НЕ впізнали товар)
@@ -411,6 +442,13 @@ async def vision_node(
                 )
                 if enriched_row and isinstance(enriched_row.get("_catalog_row"), dict):
                     catalog_row = enriched_row.get("_catalog_row")
+                    try:
+                        if isinstance(enriched_row.get("_color_options"), list):
+                            catalog_row["_color_options"] = enriched_row.get("_color_options")
+                        if "_ambiguous_color" in enriched_row:
+                            catalog_row["_ambiguous_color"] = enriched_row.get("_ambiguous_color")
+                    except Exception:
+                        pass
             except Exception:
                 catalog_row = None
 
@@ -420,7 +458,14 @@ async def vision_node(
             or not response.identified_product.photo_url
             or not response.identified_product.id
         ):
-            vision_color = response.identified_product.color
+            vision_color_raw = response.identified_product.color
+            vision_color = vision_color_raw
+            try:
+                if vision_color_raw and ("/" in vision_color_raw or " або " in vision_color_raw.lower()):
+                    vision_color = ""
+                    response.identified_product.color = ""
+            except Exception:
+                vision_color = vision_color_raw
             enriched = await _enrich_product_from_db(
                 response.identified_product.name,
                 color=vision_color,
@@ -436,6 +481,11 @@ async def vision_node(
                     response.identified_product.color = enriched.get("color", "")
                 if (not catalog_row) and isinstance(enriched.get("_catalog_row"), dict):
                     catalog_row = enriched.get("_catalog_row")
+                if catalog_row and isinstance(catalog_row, dict):
+                    if isinstance(enriched.get("_color_options"), list):
+                        catalog_row["_color_options"] = enriched.get("_color_options")
+                    if "_ambiguous_color" in enriched:
+                        catalog_row["_ambiguous_color"] = enriched.get("_ambiguous_color")
 
                 # НЕ генеруємо reply з ціною тут!
                 # Ціна залежить від розміру, тому питаємо розмір спочатку.
@@ -489,6 +539,32 @@ async def vision_node(
             user_message=user_message,  # Передаємо текст для витягування зросту!
             catalog_product=catalog_row,
         )
+
+        available_colors: list[str] = []
+        try:
+            if isinstance(catalog_row, dict):
+                if isinstance(catalog_row.get("_color_options"), list):
+                    available_colors = [
+                        str(x).strip()
+                        for x in (catalog_row.get("_color_options") or [])
+                        if str(x).strip()
+                    ]
+                elif isinstance(catalog_row.get("colors"), list):
+                    available_colors = [
+                        str(x).strip()
+                        for x in (catalog_row.get("colors") or [])
+                        if str(x).strip()
+                    ]
+                elif isinstance(catalog_row.get("colors"), str):
+                    s = str(catalog_row.get("colors") or "").strip()
+                    if s:
+                        available_colors = [s]
+                elif isinstance(catalog_row.get("color"), str):
+                    s = str(catalog_row.get("color") or "").strip()
+                    if s:
+                        available_colors = [s]
+        except Exception:
+            available_colors = []
 
         height_in_text = extract_height_from_text(user_message)
         if response.identified_product and height_in_text:
@@ -585,6 +661,7 @@ async def vision_node(
                 "needs_clarification": response.needs_clarification,
                 "has_image": False,  # Також в metadata
                 "vision_greeted": True,  # greeting уже відправлено
+                "available_colors": available_colors,
             },
             # Lightweight agent_response so renderers (Telegram/ManyChat) можуть показати фото/текст
             "agent_response": {

@@ -26,6 +26,7 @@ from src.core.state_machine import State
 from src.services.observability import log_agent_step, log_trace, track_metric
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
+from src.services.product_matcher import extract_requested_color
 
 # State prompts and transition logic
 from ..state_prompts import (
@@ -127,6 +128,83 @@ async def agent_node(
         return {
             "step_number": state.get("step_number", 0) + 1,
         }
+
+    if current_state == State.STATE_3_SIZE_COLOR.value:
+        try:
+            available_colors = state.get("metadata", {}).get("available_colors")
+            if isinstance(available_colors, list) and available_colors:
+                requested = extract_requested_color(user_message)
+                if requested:
+                    def _norm(s: str) -> str:
+                        return " ".join((s or "").lower().strip().split())
+
+                    options = [str(c).strip() for c in available_colors if str(c).strip()]
+                    option_norms = {_norm(c) for c in options}
+                    if option_norms and (_norm(requested) not in option_norms):
+                        session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+                        trace_id = state.get("trace_id", "")
+
+                        options_text = ", ".join(options[:8])
+                        reply_text = (
+                            f"Такого кольору цієї моделі у нас немає. Є в наявності: {options_text}. 🤍\n"
+                            "Який колір обираєте?"
+                        )
+
+                        agent_response_payload = {
+                            "event": "simple_answer",
+                            "messages": [{"type": "text", "content": reply_text}],
+                            "products": state.get("selected_products", []) or [],
+                            "metadata": {
+                                "session_id": session_id,
+                                "current_state": current_state,
+                                "intent": "COLOR_HELP",
+                                "escalation_level": "NONE",
+                            },
+                        }
+
+                        metadata_update = state.get("metadata", {}).copy()
+                        metadata_update["current_state"] = current_state
+                        metadata_update["intent"] = "COLOR_HELP"
+
+                        assistant_content = {
+                            "event": "simple_answer",
+                            "messages": [{"type": "text", "content": reply_text}],
+                            "products": [],
+                            "metadata": {
+                                "session_id": session_id,
+                                "current_state": current_state,
+                                "intent": "COLOR_HELP",
+                                "escalation_level": "NONE",
+                            },
+                        }
+
+                        try:
+                            log_agent_step(
+                                session_id=session_id,
+                                state=current_state,
+                                intent="COLOR_HELP",
+                                event="simple_answer",
+                                latency_ms=0.0,
+                                extra={"trace_id": trace_id, "blocked_color": requested},
+                            )
+                        except Exception:
+                            pass
+
+                        return {
+                            "current_state": current_state,
+                            "detected_intent": "COLOR_HELP",
+                            "dialog_phase": "WAITING_FOR_COLOR",
+                            "messages": [{"role": "assistant", "content": str(assistant_content)}],
+                            "metadata": metadata_update,
+                            "selected_products": state.get("selected_products", []) or [],
+                            "should_escalate": False,
+                            "escalation_reason": None,
+                            "step_number": state.get("step_number", 0) + 1,
+                            "last_error": None,
+                            "agent_response": agent_response_payload,
+                        }
+        except Exception:
+            pass
 
     if settings.DEBUG_TRACE_LOGS:
         debug_log.node_entry(

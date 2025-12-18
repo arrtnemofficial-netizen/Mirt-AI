@@ -23,6 +23,8 @@ from src.services.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
+_GLOBAL_CACHE: dict[str, Any] = {}
+
 
 # Flag to control error propagation vs silent failure (for backward compatibility)
 RAISE_ON_CATALOG_ERROR = True
@@ -41,7 +43,7 @@ class CatalogService:
 
     def __init__(self) -> None:
         self.client = get_supabase_client()
-        self._cache: dict[str, Any] = {}  # Simple in-memory cache
+        self._cache = _GLOBAL_CACHE
 
     # =========================================================================
     # PRICE HELPERS
@@ -271,6 +273,17 @@ class CatalogService:
         """
         tool_name = "catalog.get_products_for_vision"
 
+        cache_key = f"vision_products:{category or ''}"
+        try:
+            cached = self._cache.get(cache_key)
+            if isinstance(cached, dict):
+                cached_ts = float(cached.get("ts") or 0.0)
+                cached_data = cached.get("data")
+                if cached_data is not None and (time.time() - cached_ts) < 60.0:
+                    return list(cached_data)
+        except Exception:
+            pass
+
         if not self.client:
             log_tool_execution(
                 tool_name,
@@ -293,6 +306,10 @@ class CatalogService:
             success = True
             result_count = len(products)
             logger.info("Loaded %d products from DB for vision", len(products))
+            try:
+                self._cache[cache_key] = {"ts": time.time(), "data": list(products)}
+            except Exception:
+                pass
             return products
 
         except Exception as e:
