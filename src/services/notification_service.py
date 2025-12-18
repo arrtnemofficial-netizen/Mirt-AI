@@ -161,25 +161,37 @@ class NotificationService:
     async def _send_telegram_message(self, text: str) -> bool:
         """Send raw message to Telegram."""
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-        }
+        
+        # Try with Markdown first, fallback to plain text if parsing fails
+        for parse_mode in ["Markdown", None]:
+            payload = {
+                "chat_id": self.chat_id,
+                "text": text,
+            }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as response:
-                    if response.status == 200:
-                        logger.info("Manager notification sent successfully")
-                        return True
-                    else:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload) as response:
+                        if response.status == 200:
+                            logger.info("Manager notification sent successfully")
+                            return True
+                        
+                        # If Markdown parsing failed, try without it
+                        resp_text = await response.text()
+                        if parse_mode == "Markdown" and "parse entities" in resp_text:
+                            logger.warning("Markdown parsing failed, retrying without parse_mode")
+                            continue
+                        
                         logger.error(
                             "Failed to send notification: %s %s",
                             response.status,
-                            await response.text(),
+                            resp_text,
                         )
                         return False
-        except Exception as e:
-            logger.error("Notification error: %s", e)
-            return False
+            except Exception as e:
+                logger.error("Notification error: %s", e)
+                return False
+        
+        return False

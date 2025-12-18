@@ -12,6 +12,7 @@ REFACTORED for clarity:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -643,27 +644,33 @@ async def vision_node(
                 {"type": "text", "content": "Секундочку, уточню інформацію по цьому товару 🙌🏻"},
             ]
             
-            # Send Telegram notification to manager
-            try:
-                from src.services.notification_service import NotificationService
-                notification = NotificationService()
-                await notification.send_escalation_alert(
-                    session_id=session_id or "unknown",
-                    reason="Товар не знайдено в каталозі (можливо з іншого магазину)",
-                    user_context=user_message,
-                    details={
-                        "trace_id": trace_id,
-                        "dialog_phase": "ESCALATED",
-                        "current_state": State.STATE_0_INIT.value,
-                        "intent": "PHOTO_IDENT",
-                        "claimed_product": response.identified_product.name if response.identified_product else "<none>",
-                        "confidence": (response.confidence or 0.0) * 100,
-                        "image_url": deps.image_url if deps else None,
-                    },
-                )
-                logger.info("📲 [SESSION %s] Telegram notification sent to manager", session_id)
-            except Exception as notif_err:
-                logger.warning("Failed to send Telegram notification: %s", notif_err)
+            # Send Telegram notification to manager in background (fire-and-forget)
+            # This must NOT block the response to the customer!
+            async def _send_notification_background():
+                try:
+                    from src.services.notification_service import NotificationService
+                    notification = NotificationService()
+                    await notification.send_escalation_alert(
+                        session_id=session_id or "unknown",
+                        reason="Товар не знайдено в каталозі (можливо з іншого магазину)",
+                        user_context=user_message,
+                        details={
+                            "trace_id": trace_id,
+                            "dialog_phase": "ESCALATED",
+                            "current_state": State.STATE_0_INIT.value,
+                            "intent": "PHOTO_IDENT",
+                            "confidence": confidence * 100,
+                            "image_url": deps.image_url if deps else None,
+                        },
+                    )
+                    logger.info("📲 [SESSION %s] Telegram notification sent to manager", session_id)
+                except Exception as notif_err:
+                    logger.warning("Failed to send Telegram notification: %s", notif_err)
+            
+            # Fire and forget - don't await, just schedule
+            asyncio.create_task(_send_notification_background())
+            
+            # Return IMMEDIATELY to customer - don't wait for notification
             return {
                 "current_state": State.STATE_0_INIT.value,
                 "messages": escalation_messages,
