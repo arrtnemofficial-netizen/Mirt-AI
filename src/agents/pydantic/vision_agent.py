@@ -468,7 +468,7 @@ def _get_base_vision_prompt() -> str:
 
     # Add snippets for beautiful descriptions
     try:
-        snippets = registry.get("snippets").content
+        snippets = registry.get("system.snippets").content
         parts.append("\n---\n# ШАБЛОНИ КРАСИВИХ ОПИСІВ (SNIPPETS)\n")
         parts.append(snippets)
     except Exception as e:

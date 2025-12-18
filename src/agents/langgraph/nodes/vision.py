@@ -596,6 +596,88 @@ async def vision_node(
             except Exception:
                 catalog_row = None
 
+        # =====================================================
+        # CRITICAL: PRODUCT NOT IN CATALOG = HARD ESCALATION!
+        # =====================================================
+        # If Vision "identified" a product but it's NOT in our DB,
+        # this means either:
+        # 1. Product is from another store (competitor)
+        # 2. AI hallucinated a product name
+        # In both cases: DO NOT show fake product, ESCALATE!
+        # =====================================================
+        product_not_in_catalog = (
+            response.identified_product is not None
+            and catalog_row is None
+        )
+        low_confidence = (response.confidence or 0.0) < 0.5
+        
+        if product_not_in_catalog or (response.identified_product and low_confidence and catalog_row is None):
+            logger.warning(
+                "🚨 [SESSION %s] ESCALATION: Product not in catalog or low confidence! "
+                "claimed='%s' confidence=%.0f%% catalog_found=%s",
+                session_id,
+                response.identified_product.name if response.identified_product else "<none>",
+                (response.confidence or 0.0) * 100,
+                catalog_row is not None,
+            )
+            # Clear the fake product - don't show it to user!
+            response.identified_product = None
+            response.needs_clarification = False  # Don't ask clarification, escalate!
+            # Force escalation message - HUMAN STYLE (no AI mentions!)
+            escalation_messages = [
+                {"type": "text", "content": "Вітаю 🎀"},
+                {"type": "text", "content": "Секундочку, уточню інформацію по цьому товару 🙌🏻"},
+            ]
+            
+            # Send Telegram notification to manager
+            try:
+                from src.services.notification_service import NotificationService
+                notification = NotificationService()
+                await notification.send_escalation_alert(
+                    session_id=session_id or "unknown",
+                    reason="Товар не знайдено в каталозі (можливо з іншого магазину)",
+                    user_context=user_message,
+                    details={
+                        "trace_id": trace_id,
+                        "dialog_phase": "ESCALATED",
+                        "current_state": State.STATE_0_INIT.value,
+                        "intent": "PHOTO_IDENT",
+                        "claimed_product": response.identified_product.name if response.identified_product else "<none>",
+                        "confidence": (response.confidence or 0.0) * 100,
+                        "image_url": deps.image_url if deps else None,
+                    },
+                )
+                logger.info("📲 [SESSION %s] Telegram notification sent to manager", session_id)
+            except Exception as notif_err:
+                logger.warning("Failed to send Telegram notification: %s", notif_err)
+            return {
+                "current_state": State.STATE_0_INIT.value,
+                "messages": escalation_messages,
+                "selected_products": [],
+                "dialog_phase": "ESCALATED",
+                "has_image": False,
+                "escalation_level": "HARD",  # HARD escalation - manager MUST respond!
+                "metadata": {
+                    **state.get("metadata", {}),
+                    "vision_confidence": response.confidence,
+                    "needs_clarification": False,
+                    "has_image": False,
+                    "vision_greeted": True,
+                    "escalation_level": "HARD",
+                    "escalation_reason": "product_not_in_catalog",
+                },
+                "agent_response": {
+                    "messages": escalation_messages,
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": State.STATE_0_INIT.value,
+                        "intent": "PHOTO_IDENT",
+                        "escalation_level": "HARD",
+                    },
+                },
+                "step_number": state.get("step_number", 0) + 1,
+            }
+
         # Enrich product from DB if Vision returned partial data (missing id/photo/price)
         if response.identified_product and (
             response.identified_product.price == 0
