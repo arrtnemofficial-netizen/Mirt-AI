@@ -530,6 +530,9 @@ class ManyChatAsyncService:
 
     async def _handle_restart_command(self, user_id: str, channel: str) -> None:
         """Handle /restart command - clear session and confirm."""
+        import time as _time
+        _restart_start = _time.time()
+        
         # Clear any pending debouncer buffers/timers so no stale aggregated message
         # is processed after restart.
         try:
@@ -540,6 +543,7 @@ class ManyChatAsyncService:
         # CRITICAL: Also reset LangGraph checkpointer state for this thread.
         # Otherwise, persistent checkpointers (Postgres) will restore an old dialog_phase
         # (e.g., WAITING_FOR_PAYMENT_PROOF) even after SessionStore is cleared.
+        # NOTE: This is OPTIONAL - skip if it takes too long (>5 sec timeout)
         try:
             from src.agents.langgraph.state import create_initial_state
 
@@ -547,11 +551,25 @@ class ManyChatAsyncService:
                 session_id=user_id,
                 metadata={"channel": channel},
             )
-            await self.runner.aupdate_state(
-                {"configurable": {"thread_id": user_id}},
-                reset_state,
+            _lg_start = _time.time()
+            # Use timeout to prevent blocking - checkpointer reset is optional
+            await asyncio.wait_for(
+                self.runner.aupdate_state(
+                    {"configurable": {"thread_id": user_id}},
+                    reset_state,
+                ),
+                timeout=5.0,  # Max 5 seconds for checkpointer reset
             )
-            logger.info("[MANYCHAT:%s] 🔄 LangGraph state reset via /restart", user_id)
+            logger.info(
+                "[MANYCHAT:%s] 🔄 LangGraph state reset via /restart (%.2fs)",
+                user_id,
+                _time.time() - _lg_start,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[MANYCHAT:%s] LangGraph state reset timed out (>5s), skipping",
+                user_id,
+            )
         except Exception:
             logger.debug(
                 "[MANYCHAT:%s] Failed to reset LangGraph state via /restart",
@@ -560,7 +578,10 @@ class ManyChatAsyncService:
             )
 
         # Delete session from store
-        deleted = self.store.delete(user_id)
+        # CRITICAL: Use to_thread() to avoid blocking event loop!
+        _del_start = _time.time()
+        deleted = await asyncio.to_thread(self.store.delete, user_id)
+        logger.info("[MANYCHAT:%s] 🗑️ store.delete took %.2fs", user_id, _time.time() - _del_start)
 
         if deleted:
             logger.info("[MANYCHAT:%s] 🔄 Session cleared via /restart", user_id)

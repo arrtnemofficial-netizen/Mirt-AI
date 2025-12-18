@@ -453,6 +453,8 @@ class ConversationHandler:
         caught and converted to graceful fallback responses.
         """
         state: ConversationState | None = None
+        import time as _time
+        _proc_start = _time.time()
 
         try:
             # SECURITY: Sanitize input against prompt injection
@@ -464,7 +466,23 @@ class ConversationHandler:
             # Load or create session state
             # CRITICAL: Use to_thread() to avoid blocking event loop!
             # Supabase client is synchronous and blocks the entire async loop
-            state = await asyncio.to_thread(self.session_store.get, session_id)
+            _get_start = _time.time()
+            try:
+                state = await asyncio.wait_for(
+                    asyncio.to_thread(self.session_store.get, session_id),
+                    timeout=2.5,
+                )
+                logger.info(
+                    "[SESSION %s] ⏱️ session_store.get took %.2fs",
+                    session_id,
+                    _time.time() - _get_start,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[SESSION %s] session_store.get timed out (>2.5s); continuing with empty state",
+                    session_id,
+                )
+                state = None
 
             # Ensure state has required structure with ALL necessary flags
             if not state or not isinstance(state, dict):
@@ -532,8 +550,11 @@ class ConversationHandler:
             self._persist_user_message(session_id, text)
 
             # Invoke the agent
+            logger.info("[SESSION %s] ⏱️ Starting _invoke_agent (%.2fs since process_message start)", session_id, _time.time() - _proc_start)
             before_invoke_state = deepcopy(state)
+            _invoke_start = _time.time()
             result_state = await self._invoke_agent(state)
+            logger.info("[SESSION %s] ⏱️ _invoke_agent took %.2fs", session_id, _time.time() - _invoke_start)
 
             result_state = _apply_transition_guardrails(
                 session_id=session_id,
@@ -814,35 +835,66 @@ class ConversationHandler:
 
     def _persist_user_message(self, session_id: str, text: str) -> None:
         """Store the user message in the message store."""
+        msg = StoredMessage(session_id=session_id, role="user", content=text)
         try:
-            self.message_store.append(
-                StoredMessage(session_id=session_id, role="user", content=text)
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to persist user message for session %s: %s",
-                session_id,
-                e,
-            )
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                self.message_store.append(msg)
+            except Exception as e:
+                logger.warning(
+                    "Failed to persist user message for session %s: %s",
+                    session_id,
+                    e,
+                )
+            return
+
+        async def _bg() -> None:
+            try:
+                await asyncio.to_thread(self.message_store.append, msg)
+            except Exception as e:
+                logger.warning(
+                    "Failed to persist user message for session %s: %s",
+                    session_id,
+                    e,
+                )
+
+        loop.create_task(_bg())
 
     def _persist_assistant_message(self, session_id: str, response: AgentResponse) -> None:
         """Store the assistant response with appropriate tags."""
+        tags = [MessageTag.HUMAN_NEEDED] if response.escalation else []
+        msg = StoredMessage(
+            session_id=session_id,
+            role="assistant",
+            content=response.model_dump_json(),
+            tags=tags,
+        )
+
         try:
-            tags = [MessageTag.HUMAN_NEEDED] if response.escalation else []
-            self.message_store.append(
-                StoredMessage(
-                    session_id=session_id,
-                    role="assistant",
-                    content=response.model_dump_json(),
-                    tags=tags,
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                self.message_store.append(msg)
+            except Exception as e:
+                logger.warning(
+                    "Failed to persist assistant message for session %s: %s",
+                    session_id,
+                    e,
                 )
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to persist assistant message for session %s: %s",
-                session_id,
-                e,
-            )
+            return
+
+        async def _bg() -> None:
+            try:
+                await asyncio.to_thread(self.message_store.append, msg)
+            except Exception as e:
+                logger.warning(
+                    "Failed to persist assistant message for session %s: %s",
+                    session_id,
+                    e,
+                )
+
+        loop.create_task(_bg())
 
     def _build_fallback_result(
         self,
