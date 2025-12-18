@@ -6,7 +6,6 @@ instead of global singletons.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import re
@@ -424,32 +423,14 @@ async def api_v1_messages(
         image_url_preview=safe_preview(payload.image_url, 100),
     )
 
-    # Schedule with guaranteed timeout to cap max response time
-    async def _run_with_timeout():
-        try:
-            await asyncio.wait_for(
-                service.process_message_async(
-                    user_id=user_id,
-                    text=payload.message or "",
-                    image_url=payload.image_url,
-                    channel=channel,
-                    trace_id=trace_id,
-                ),
-                timeout=45.0,
-            )
-        except asyncio.TimeoutError:
-            log_event(
-                logger,
-                event="api_v1_task_timeout",
-                level="warning",
-                trace_id=trace_id,
-                user_id=user_id,
-                channel=channel,
-                timeout_seconds=45,
-            )
-            # Do not raise — return 202 as before, AI will be cut off gracefully
-
-    background_tasks.add_task(_run_with_timeout)
+    background_tasks.add_task(
+        service.process_message_async,
+        user_id=user_id,
+        text=payload.message or "",
+        image_url=payload.image_url,
+        channel=channel,
+        trace_id=trace_id,
+    )
 
     logger.debug("[API_V1] returning 202")
     return {"status": "accepted"}

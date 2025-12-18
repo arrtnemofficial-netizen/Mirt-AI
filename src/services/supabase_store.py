@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from copy import deepcopy
+from typing import Any, Callable
 
 from src.agents import ConversationState
 from src.conf.config import settings
@@ -13,6 +16,140 @@ from src.services.supabase_client import get_supabase_client
 
 
 logger = logging.getLogger(__name__)
+
+
+class CircuitBreaker:
+    """Circuit breaker to prevent cascading failures when Supabase is down."""
+    
+    def __init__(self, failure_threshold: int = 5, timeout: float = 60.0):
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self.failure_count = 0
+        self.last_failure_time = 0
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+    
+    def call(self, func: Callable, *args, **kwargs):
+        """Execute function with circuit breaker protection."""
+        if self.state == "OPEN":
+            if time.time() - self.last_failure_time > self.timeout:
+                self.state = "HALF_OPEN"
+                logger.info("Circuit breaker entering HALF_OPEN state")
+            else:
+                raise Exception("Circuit breaker OPEN - Supabase operations disabled")
+        
+        try:
+            result = func(*args, **kwargs)
+            if self.state == "HALF_OPEN":
+                self.state = "CLOSED"
+                self.failure_count = 0
+                logger.info("Circuit breaker returning to CLOSED state")
+            return result
+        except Exception as e:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            
+            if self.failure_count >= self.failure_threshold:
+                self.state = "OPEN"
+                logger.error(
+                    "Circuit breaker OPENED after %d failures. Supabase disabled for %.1fs",
+                    self.failure_count,
+                    self.timeout
+                )
+            
+            raise e
+
+
+# Global circuit breaker instance
+_circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60.0)
+
+
+def retry_with_backoff(
+    max_retries: int = 3,
+    base_delay: float = 0.5,
+    max_delay: float = 5.0,
+    backoff_factor: float = 2.0,
+) -> Callable:
+    """Decorator for retrying database operations with exponential backoff."""
+    def decorator(func: Callable) -> Callable:
+        def _in_async_loop() -> bool:
+            try:
+                asyncio.get_running_loop()
+                return True
+            except RuntimeError:
+                return False
+
+        async def async_wrapper(*args, **kwargs):
+            last_exception = None
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    if asyncio.iscoroutinefunction(func):
+                        return await func(*args, **kwargs)
+                    else:
+                        return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    
+                    # Don't retry on certain errors
+                    if "authentication" in str(e).lower() or "unauthorized" in str(e).lower():
+                        break
+                        
+                    if attempt < max_retries:
+                        delay = min(base_delay * (backoff_factor ** attempt), max_delay)
+                        logger.warning(
+                            "Supabase operation failed (attempt %d/%d), retrying in %.1fs: %s",
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                            e
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(
+                            "Supabase operation failed after %d attempts: %s",
+                            max_retries + 1,
+                            e
+                        )
+            
+            raise last_exception
+        
+        def sync_wrapper(*args, **kwargs):
+            last_exception = None
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    
+                    # Don't retry on certain errors
+                    if "authentication" in str(e).lower() or "unauthorized" in str(e).lower():
+                        break
+                        
+                    if attempt < max_retries:
+                        delay = min(base_delay * (backoff_factor ** attempt), max_delay)
+                        logger.warning(
+                            "Supabase operation failed (attempt %d/%d), retrying in %.1fs: %s",
+                            attempt + 1,
+                            max_retries + 1,
+                            delay,
+                            e
+                        )
+                        # IMPORTANT: get()/save() are called from async request handlers.
+                        # Never block the asyncio event loop.
+                        if not _in_async_loop():
+                            time.sleep(delay)
+                    else:
+                        logger.error(
+                            "Supabase operation failed after %d attempts: %s",
+                            max_retries + 1,
+                            e
+                        )
+            
+            raise last_exception
+        
+        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+    return decorator
 
 
 class SupabaseSessionStore:
@@ -28,33 +165,40 @@ class SupabaseSessionStore:
         self._fallback_store: InMemorySessionStore = InMemorySessionStore()
         logger.info("SupabaseSessionStore initialized with table '%s'", self.table_name)
 
+    def _fetch_from_supabase(self, session_id: str) -> ConversationState | None:
+        """Fetch session from Supabase with circuit breaker protection."""
+        client = get_supabase_client()
+        if not client:
+            return None
+
+        def _do_fetch():
+            response = (
+                client.table(self.table_name)
+                .select("state")
+                .eq("session_id", session_id)
+                .limit(1)
+                .execute()
+            )
+
+            if response.data and len(response.data) > 0:
+                state_data = response.data[0].get("state")
+                if state_data:
+                    return deepcopy(state_data)
+            return None
+
+        try:
+            return _circuit_breaker.call(_do_fetch)
+        except Exception as e:
+            if "Circuit breaker" in str(e):
+                logger.warning("Circuit breaker blocked Supabase fetch for session %s", session_id)
+            else:
+                logger.error("Failed to fetch session %s from Supabase: %s", session_id, e)
+            return None
+
+    @retry_with_backoff(max_retries=2, base_delay=0.3, max_delay=2.0)  # Reduced retries since circuit breaker handles failures
     def get(self, session_id: str) -> ConversationState:
         """Return stored state or a fresh empty state."""
-        client = get_supabase_client()
-
-        supabase_state: ConversationState | None = None
-
-        if client:
-            try:
-                response = (
-                    client.table(self.table_name)
-                    .select("state")
-                    .eq("session_id", session_id)
-                    .limit(1)
-                    .execute()
-                )
-
-                if response.data and len(response.data) > 0:
-                    state_data = response.data[0].get("state")
-                    if state_data:
-                        supabase_state = deepcopy(state_data)
-            except Exception as e:
-                logger.error("Failed to fetch session %s from Supabase: %s", session_id, e)
-        else:
-            logger.warning(
-                "Supabase client not available, using in-memory session store for %s",
-                session_id,
-            )
+        supabase_state = self._fetch_from_supabase(session_id)
 
         # Always fetch fallback state (may be empty/new for first-time sessions)
         fallback_state = self._fallback_store.get(session_id)
@@ -82,6 +226,36 @@ class SupabaseSessionStore:
 
         return deepcopy(chosen)
 
+    def _save_to_supabase(self, session_id: str, state: ConversationState) -> bool:
+        """Save session to Supabase with circuit breaker protection."""
+        client = get_supabase_client()
+        if not client:
+            return False
+
+        def _do_save():
+            # Serialize state to handle LangChain objects
+            serialized_state = _serialize_for_json(dict(state))
+
+            # Upsert session
+            data = {
+                "session_id": session_id,
+                "state": serialized_state,
+                # 'updated_at' is usually handled by DB default/trigger, but we can explicit if needed
+            }
+
+            client.table(self.table_name).upsert(data, on_conflict="session_id").execute()
+            return True
+
+        try:
+            return _circuit_breaker.call(_do_save)
+        except Exception as e:
+            if "Circuit breaker" in str(e):
+                logger.warning("Circuit breaker blocked Supabase save for session %s", session_id)
+            else:
+                logger.error("Failed to save session %s to Supabase: %s", session_id, e)
+            return False
+
+    @retry_with_backoff(max_retries=2, base_delay=0.3, max_delay=2.0)  # Reduced retries since circuit breaker handles failures
     def save(self, session_id: str, state: ConversationState) -> None:
         """Persist the current state for the session."""
         # Always keep in-memory fallback up to date so UX is stable even if
@@ -95,29 +269,8 @@ class SupabaseSessionStore:
                 e,
             )
 
-        client = get_supabase_client()
-        if not client:
-            logger.warning(
-                "Supabase client not available, skipping remote save for session %s",
-                session_id,
-            )
-            return
-
-        try:
-            # Serialize state to handle LangChain objects
-            serialized_state = _serialize_for_json(dict(state))
-
-            # Upsert session
-            data = {
-                "session_id": session_id,
-                "state": serialized_state,
-                # 'updated_at' is usually handled by DB default/trigger, but we can explicit if needed
-            }
-
-            client.table(self.table_name).upsert(data, on_conflict="session_id").execute()
-
-        except Exception as e:
-            logger.error("Failed to save session %s to Supabase: %s", session_id, e)
+        # Try to save to Supabase with circuit breaker protection
+        self._save_to_supabase(session_id, state)
 
     def delete(self, session_id: str) -> bool:
         """Delete session state. Returns True if session existed."""

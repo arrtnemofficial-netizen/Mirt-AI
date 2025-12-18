@@ -194,12 +194,14 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         pool = AsyncConnectionPool(
             conninfo=database_url,
-            min_size=1,
-            max_size=10,
+            min_size=3,  # Increase warm connections for better performance
+            max_size=20,  # Increase max connections for production load
             max_idle=30.0,  # Close idle connections after 30s (before Supabase kills them)
             check=check_connection,  # Verify connection health before use
+            timeout=60.0,  # Increase connection acquisition timeout
             kwargs={
                 "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
+                "connect_timeout": 10,  # Connection establishment timeout
             },
         )
 
