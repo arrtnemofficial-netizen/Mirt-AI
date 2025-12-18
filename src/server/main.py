@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from src.conf.config import settings
-from src.core.logging import setup_logging
+from src.core.logging import log_event, safe_preview, setup_logging
 from src.integrations.manychat.webhook import ManychatPayloadError
 from src.services.webhook_dedupe import WebhookDedupeStore
 from src.server.dependencies import (
