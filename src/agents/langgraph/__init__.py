@@ -8,7 +8,6 @@ Core modules:
 - edges.py: Routing logic
 - graph.py: Graph assembly
 - streaming.py: Real-time token streaming (UX)
-- time_travel.py: State rollback/fork (debug/recovery)
 """
 
 from .checkpointer import (
@@ -36,11 +35,6 @@ from .streaming import (
     stream_events,
     stream_tokens,
 )
-from .time_travel import (
-    fork_from_state,
-    get_state_history,
-    rollback_to_step,
-)
 
 
 __all__ = [
@@ -64,8 +58,4 @@ __all__ = [
     "stream_events",
     "stream_tokens",
     "StreamEventType",
-    # Time Travel (debug/recovery)
-    "get_state_history",
-    "rollback_to_step",
-    "fork_from_state",
 ]

@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 _GLOBAL_CACHE: dict[str, Any] = {}
 
+# Cache TTL in seconds - increase to reduce Supabase load
+CACHE_TTL_VISION = 300.0  # 5 minutes for vision products
+CACHE_TTL_SEARCH = 120.0  # 2 minutes for search results
 
 # Flag to control error propagation vs silent failure (for backward compatibility)
 RAISE_ON_CATALOG_ERROR = True
@@ -141,8 +144,21 @@ class CatalogService:
         """
         Search products by text query.
         Minimal version - only uses columns that exist in DB.
+        Cached to reduce Supabase load.
         """
         tool_name = "catalog.search_products"
+
+        # Check cache first to reduce DB load
+        cache_key = f"search:{query or ''}:{category or ''}:{color or ''}:{limit}"
+        try:
+            cached = self._cache.get(cache_key)
+            if isinstance(cached, dict):
+                cached_ts = float(cached.get("ts") or 0.0)
+                cached_data = cached.get("data")
+                if cached_data is not None and (time.time() - cached_ts) < CACHE_TTL_SEARCH:
+                    return list(cached_data)
+        except Exception:
+            pass
 
         if not self.client:
             error_msg = "Supabase client not available"
@@ -175,6 +191,11 @@ class CatalogService:
             data = response.data or []
             success = True
             result_count = len(data)
+            # Cache the results
+            try:
+                self._cache[cache_key] = {"ts": time.time(), "data": list(data)}
+            except Exception:
+                pass
             return data
 
         except CatalogUnavailableError:
@@ -279,7 +300,7 @@ class CatalogService:
             if isinstance(cached, dict):
                 cached_ts = float(cached.get("ts") or 0.0)
                 cached_data = cached.get("data")
-                if cached_data is not None and (time.time() - cached_ts) < 60.0:
+                if cached_data is not None and (time.time() - cached_ts) < CACHE_TTL_VISION:
                     return list(cached_data)
         except Exception:
             pass

@@ -103,6 +103,7 @@ class ConversationState(TypedDict, total=False):
     moderation_result: dict[str, Any] | None
     should_escalate: bool
     escalation_reason: str | None
+    escalation_level: str | None  # SOFT, HARD, or None
 
     # Tool execution
     tool_plan_result: dict[str, Any] | None

@@ -466,6 +466,14 @@ def _get_base_vision_prompt() -> str:
     vision_main = registry.get("vision.main").content
     parts.append(vision_main)
 
+    # Add snippets for beautiful descriptions
+    try:
+        snippets = registry.get("snippets").content
+        parts.append("\n---\n# ШАБЛОНИ КРАСИВИХ ОПИСІВ (SNIPPETS)\n")
+        parts.append(snippets)
+    except Exception as e:
+        logger.warning(f"Could not load snippets: {e}")
+
     model_rules = _load_model_rules_yaml()
     if model_rules:
         parts.append("\n---\n# MODEL DATABASE\n")

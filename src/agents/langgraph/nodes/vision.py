@@ -45,6 +45,134 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
+def _get_snippet_by_header(header_name: str) -> list[str] | None:
+    """Get snippet by exact header name from snippets.md.
+    
+    Returns list of bubbles (split by ---) or None if not found.
+    """
+    try:
+        from src.core.prompt_registry import registry
+        content = registry.get("system.snippets").content
+    except Exception:
+        return None
+    
+    if not content:
+        return None
+    
+    # Parse snippets.md - find section with exact header
+    lines = content.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        
+        # Look for ### header with exact match
+        if line.startswith("### ") and line[4:].strip() == header_name:
+            # Found exact match! Extract the snippet body
+            body_lines = []
+            i += 1
+            while i < len(lines) and not lines[i].startswith("### "):
+                body_lines.append(lines[i])
+                i += 1
+            
+            # Parse body: skip КОЛИ/НЕ КОЛИ lines, split by ---
+            text_lines = []
+            for bl in body_lines:
+                bl_stripped = bl.strip()
+                if bl_stripped.startswith("КОЛИ:") or bl_stripped.startswith("НЕ КОЛИ:"):
+                    continue
+                text_lines.append(bl_stripped)
+            
+            # Join and split by ---
+            full_text = "\n".join(text_lines).strip()
+            if not full_text:
+                return None
+            
+            bubbles = [b.strip() for b in full_text.split("---") if b.strip()]
+            if bubbles:
+                logger.info("📋 Found snippet '%s': %d bubbles", header_name, len(bubbles))
+                return bubbles
+            return None
+        i += 1
+    
+    return None
+
+
+def _get_product_snippet(product_name: str) -> list[str] | None:
+    """Get presentation snippet for a product from snippets.md.
+    
+    Returns list of bubbles (split by ---) or None if not found.
+    Universal: works for ANY product that has a snippet in snippets.md.
+    
+    Format in snippets.md:
+        ### Сукня Анна — преміум-презентація
+        КОЛИ: ...
+        Текст бабла 1
+        ---
+        Текст бабла 2
+    """
+    try:
+        from src.core.prompt_registry import registry
+        content = registry.get("system.snippets").content
+    except Exception:
+        return None
+    
+    if not content:
+        return None
+    
+    # Normalize product name for matching
+    pn_lower = (product_name or "").lower().strip()
+    if not pn_lower:
+        return None
+    
+    # Extract key words (e.g., "сукня анна" -> ["сукня", "анна"])
+    keywords = [w for w in pn_lower.split() if len(w) > 2]
+    if not keywords:
+        return None
+    
+    # Parse snippets.md - find sections matching product
+    lines = content.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        
+        # Look for ### headers that contain product keywords
+        if line.startswith("### "):
+            header_lower = line[4:].lower()
+            
+            # Check if this header matches our product (all keywords present)
+            if all(kw in header_lower for kw in keywords):
+                # Found a match! Look for "презентація" or first snippet for this product
+                if "презентація" in header_lower or "відповідь" in header_lower:
+                    # Extract the snippet body (until next ### or EOF)
+                    body_lines = []
+                    i += 1
+                    while i < len(lines) and not lines[i].startswith("### "):
+                        body_lines.append(lines[i])
+                        i += 1
+                    
+                    # Parse body: skip КОЛИ/НЕ КОЛИ lines, split by ---
+                    text_lines = []
+                    for bl in body_lines:
+                        bl_stripped = bl.strip()
+                        if bl_stripped.startswith("КОЛИ:") or bl_stripped.startswith("НЕ КОЛИ:") or bl_stripped.startswith("ПРІОРИТЕТ:"):
+                            continue
+                        text_lines.append(bl_stripped)
+                    
+                    # Join and split by ---
+                    full_text = "\n".join(text_lines).strip()
+                    if not full_text:
+                        return None
+                    
+                    bubbles = [b.strip() for b in full_text.split("---") if b.strip()]
+                    if bubbles:
+                        logger.info("📋 Found snippet for '%s': %d bubbles", product_name, len(bubbles))
+                        return bubbles
+                    return None
+        i += 1
+    
+    return None
+
+
 async def _enrich_product_from_db(product_name: str, color: str | None = None) -> dict[str, Any] | None:
     """Lookup product in DB by name (and color if provided) and return enriched data.
 
@@ -307,19 +435,14 @@ def _build_vision_messages(
 
         messages.append(text_msg(message_text))
 
-        # Optional vibe override for a specific product (per-client tuning via env)
-        try:
-            vibe_anna = str(getattr(settings, "VISION_VIBE_TEXT_ANNA", "") or "").strip()
-        except Exception:
-            vibe_anna = ""
-        if vibe_anna:
-            pn = str(product_name or "").lower()
-            if ("анна" in pn) and ("сук" in pn):
-                parts = [p.strip() for p in vibe_anna.split("||") if p and p.strip()]
-                for p in parts[:3]:
-                    messages.append(text_msg(p))
-
-        if catalog_product:
+        # Try to get beautiful snippet from snippets.md for this product
+        # Universal: works for Сукня Анна, Костюм Лагуна, or ANY product you add to snippets.md
+        snippet_bubbles = _get_product_snippet(product_name)
+        if snippet_bubbles:
+            # Use snippet instead of generic description
+            for bubble in snippet_bubbles[:3]:  # Max 3 bubbles for presentation
+                messages.append(text_msg(bubble))
+        elif catalog_product:
             description = str(catalog_product.get("description") or "").strip()
             if description:
                 description = " ".join(description.split())
@@ -375,22 +498,29 @@ def _build_vision_messages(
     elif response.needs_clarification:
         messages.append(text_msg("Не можу точно визначити модель. Підкажіть, будь ласка, що це за товар? 🤍"))
 
-    # If we still have no product and no clarification, add a neutral salesperson-style fallback.
-    # (No explicit "уточніть" questions to avoid exposing AI behavior.)
+    # If we still have no product and no clarification - this is likely NOT our product
+    # Use "Невідомий товар" snippet from snippets.md
     if (not response.identified_product) and (not response.clarification_question) and (not response.needs_clarification):
-        messages.append(
-            text_msg(
-                "Підкажу ціну та розмір після зросту 👌 Напишіть, будь ласка, зріст дитини (см)."
-            )
-        )
+        # Try to get snippet for unknown product
+        unknown_snippet = _get_snippet_by_header("Невідомий товар (ескалація)")
+        if unknown_snippet:
+            for bubble in unknown_snippet[:3]:  # Max 3 bubbles
+                messages.append(text_msg(bubble))
+        else:
+            # Fallback if snippet not found
+            messages.append(text_msg("Це не наша модель 🤍"))
+            messages.append(text_msg("Але стиль дуже схожий на наші костюми/сукні!"))
+            messages.append(text_msg("Показати наші варіанти? Підкажіть, що шукаєте і на який зріст 🌸"))
 
-    # 5. Fallback
+    # 5. Fallback - use "Помилка розпізнавання фото" snippet
     if not messages:
-        messages.append(
-            text_msg(
-                "Не впізнала модель на фото. Можу показати популярні варіанти - скажіть, який тип або колір цікавить, і на який зріст шукаєте."
-            )
-        )
+        error_snippet = _get_snippet_by_header("Помилка розпізнавання фото")
+        if error_snippet:
+            for bubble in error_snippet:
+                messages.append(text_msg(bubble))
+        else:
+            messages.append(text_msg("Не впізнала модель на фото 🤍"))
+            messages.append(text_msg("Передаю менеджеру, щоб допоміг вам особисто!"))
 
     return messages
 
@@ -658,8 +788,15 @@ async def vision_node(
             next_phase = "VISION_DONE"
             next_state = State.STATE_2_VISION.value
         else:
-            next_phase = "INIT"
+            # Unknown product - escalate to manager!
+            next_phase = "ESCALATED"
             next_state = State.STATE_0_INIT.value
+
+        # Determine escalation level
+        escalation_level = "NONE"
+        if not selected_products and not response.needs_clarification:
+            # Product not identified and not asking for clarification = escalate
+            escalation_level = "SOFT"  # Manager will see this in CRM
 
         return {
             "current_state": next_state,
@@ -669,6 +806,7 @@ async def vision_node(
             # ВАЖЛИВО: Скидаємо has_image після обробки!
             # Це запобігає повторному входу в vision при наступних текстових повідомленнях
             "has_image": False,
+            "escalation_level": escalation_level,  # For CRM tracking
             "metadata": {
                 **state.get("metadata", {}),
                 "vision_confidence": response.confidence,
@@ -676,6 +814,7 @@ async def vision_node(
                 "has_image": False,  # Також в metadata
                 "vision_greeted": True,  # greeting уже відправлено
                 "available_colors": available_colors,
+                "escalation_level": escalation_level,
             },
             # Lightweight agent_response so renderers (Telegram/ManyChat) можуть показати фото/текст
             "agent_response": {
@@ -690,7 +829,7 @@ async def vision_node(
                     "session_id": session_id,
                     "current_state": next_state,
                     "intent": "PHOTO_IDENT",
-                    "escalation_level": "NONE",
+                    "escalation_level": escalation_level,
                 },
             },
             "step_number": state.get("step_number", 0) + 1,

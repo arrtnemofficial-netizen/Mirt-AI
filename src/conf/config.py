@@ -125,13 +125,8 @@ class Settings(BaseSettings):
         description="Short interim message for image processing when response is taking longer than expected.",
     )
 
-    VISION_VIBE_TEXT_ANNA: str = Field(
-        default="",
-        description=(
-            "Optional override for Vision first-touch vibe text when the identified product is 'Сукня Анна'. "
-            "Use '||' to split into multiple bubbles. Leave empty to use catalog description only."
-        ),
-    )
+    # REMOVED: VISION_VIBE_TEXT_ANNA - now using universal snippet loader from snippets.md
+    # All product-specific presentation texts are loaded dynamically from data/prompts/system/snippets.md
 
     MANYCHAT_TEXT_TIME_BUDGET_SECONDS: float = Field(
         default=22.0,
@@ -139,7 +134,7 @@ class Settings(BaseSettings):
     )
 
     MANYCHAT_VISION_TIME_BUDGET_SECONDS: float = Field(
-        default=32.0,
+        default=45.0,
         description="Max processing time budget for messages with images (seconds) before timeout fallback.",
     )
 

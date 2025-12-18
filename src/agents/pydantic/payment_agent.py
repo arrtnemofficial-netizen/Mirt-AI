@@ -61,32 +61,24 @@ def _build_model() -> OpenAIChatModel:
 # =============================================================================
 
 
-_payment_prompt = f"""
+_PAYMENT_PROMPT_FALLBACK = """
 Ти спеціаліст з оформлення замовлень MIRT_UA.
-
-ТВОЯ ЗАДАЧА:
-1. Зібрати дані для доставки
-2. Підтвердити замовлення
-3. Надати реквізити для оплати
-
-ДАНІ ДЛЯ ЗБОРУ:
-- ПІБ отримувача
-- Номер телефону
-- Місто доставки
-- Номер відділення Нової Пошти
-
-РЕКВІЗИТИ ДЛЯ ОПЛАТИ:
-- Використовувати тільки реквізити з SSOT-блоку
-- Пріоритет оплати: {PAYMENT_PREPAY_AMOUNT} грн
-
-ВАЖЛИВО:
-- Витягуй дані з повідомлень автоматично
-- Якщо даних не вистачає - питай ТІЛЬКИ про відсутні
-- Не питай повторно те що вже сказали
-- Коли всі дані зібрані - підтверди і надай реквізити
-
-Відповідай УКРАЇНСЬКОЮ, тепло і підтримуюче 🤍
+Збери дані для доставки: ПІБ, телефон, місто, відділення НП.
+Використовуй реквізити з SSOT-блоку.
+Відповідай УКРАЇНСЬКОЮ 🤍
 """
+
+
+def _get_payment_prompt() -> str:
+    """Get payment prompt from .md file with fallback."""
+    try:
+        from src.core.prompt_registry import registry
+        return registry.get("system.payment").content
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to load payment.md, using fallback: %s", e)
+        return _PAYMENT_PROMPT_FALLBACK
+
 
 _payment_agent: Agent[AgentDeps, PaymentResponse] | None = None
 
@@ -205,7 +197,7 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
             _build_model(),
             deps_type=AgentDeps,
             output_type=PaymentResponse,  # Changed from result_type (PydanticAI 1.23+)
-            system_prompt=_payment_prompt,
+            system_prompt=_get_payment_prompt(),
             retries=2,
         )
         _payment_agent.system_prompt(_add_order_context)

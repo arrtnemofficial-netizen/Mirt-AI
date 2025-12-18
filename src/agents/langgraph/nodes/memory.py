@@ -162,8 +162,16 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
 # =============================================================================
 
 # Phases that trigger memory update
+# IMPORTANT: Trigger on EVERY phase to capture facts early!
 MEMORY_TRIGGER_PHASES = {
+    "INIT",                 # STATE_0: Новий діалог
+    "DISCOVERY",            # STATE_1: Збір контексту
+    "VISION_DONE",          # STATE_2: Vision впізнав товар
+    "WAITING_FOR_SIZE",     # STATE_3: Потрібен розмір
+    "WAITING_FOR_COLOR",    # STATE_3: Потрібен колір
+    "SIZE_COLOR_DONE",      # STATE_3→4: Готові до offer
     "OFFER_MADE",           # STATE_4: Пропозиція зроблена
+    "WAITING_FOR_DELIVERY_DATA",  # STATE_5: Чекаємо дані доставки
     "WAITING_FOR_PAYMENT_PROOF",  # STATE_5: Payment flow
     "COMPLETED",            # STATE_7: Діалог завершено
     "COMPLAINT",            # STATE_8: Скарга
@@ -171,6 +179,10 @@ MEMORY_TRIGGER_PHASES = {
 
 # States that trigger memory update
 MEMORY_TRIGGER_STATES = {
+    "STATE_0_INIT",
+    "STATE_1_DISCOVERY",
+    "STATE_2_VISION",
+    "STATE_3_SIZE_COLOR",
     "STATE_4_OFFER",
     "STATE_5_PAYMENT_DELIVERY",
     "STATE_7_FINISHED",

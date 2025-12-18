@@ -405,16 +405,25 @@ class TestMemoryHelpers:
         }
         assert should_update_memory(state) is True
     
-    def test_35_should_update_non_trigger(self):
-        """Test should_update_memory returns False for non-trigger."""
+    def test_35_should_update_trigger_states(self):
+        """Test should_update_memory returns True for trigger states (including early states)."""
         from src.agents.langgraph.nodes.memory import should_update_memory
         
+        # STATE_1_DISCOVERY now triggers memory update (fixed to capture facts early)
         state = {
             "metadata": {"user_id": "user_123"},
             "dialog_phase": "DISCOVERY",
             "current_state": "STATE_1_DISCOVERY",
         }
-        assert should_update_memory(state) is False
+        assert should_update_memory(state) is True
+        
+        # STATE_9_OUT_OF_DOMAIN should NOT trigger memory update
+        state_out_of_domain = {
+            "metadata": {"user_id": "user_123"},
+            "dialog_phase": "OUT_OF_DOMAIN",
+            "current_state": "STATE_9_OUT_OF_DOMAIN",
+        }
+        assert should_update_memory(state_out_of_domain) is False
 
 
 # =============================================================================

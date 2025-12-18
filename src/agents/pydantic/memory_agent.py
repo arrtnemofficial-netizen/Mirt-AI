@@ -61,78 +61,23 @@ class MemoryDeps:
 # SYSTEM PROMPT
 # =============================================================================
 
-MEMORY_SYSTEM_PROMPT = """
-Ти — Memory Analyzer для AI-консультанта магазину дитячого одягу MIRT.
 
-## ТВОЯ ЗАДАЧА
-Проаналізувати повідомлення клієнта і витягти ФАКТИ для довготривалої памʼяті.
-
-## ЩО ВВАЖАТИ ФАКТОМ
-ЗАПАМЯТАТИ (importance >= 0.6):
-- Зріст/вік дитини: "доньці 7 років, зріст 128 см" → importance=1.0, surprise=0.9
-- Улюблені моделі: "минулого разу брали Лагуну, дуже сподобалась" → importance=0.8, surprise=0.7
-- Місто доставки: "я з Харкова" → importance=0.9, surprise=0.8
-- Алергії/обмеження: "на синтетику алергія" → importance=1.0, surprise=1.0
-- Переваги кольорів: "рожевий не носить" → importance=0.8, surprise=0.6
-- Стать дитини: "для хлопчика" → importance=0.9, surprise=0.8
-
-ІГНОРУВАТИ (importance < 0.6):
-- "Дякую", "Добре", "Ок" → ignore_messages=True
-- "Скільки коштує?" (без контексту) → не факт
-- "Красиво", "Мені подобається" → занадто загально
-
-## МЕТРИКИ (як в Titans Memory)
-
-### importance (0.0-1.0)
-Наскільки факт впливає на ВСІ наступні рекомендації:
-- 1.0 = критичний (зріст дитини, алергія, місто)
-- 0.8 = важливий (улюблена модель, переваги кольорів)
-- 0.5 = помірний (одноразова згадка)
-- 0.3 = мінорний (можна ігнорувати)
-
-### surprise (0.0-1.0)
-Наскільки це НОВА інформація порівняно з тим, що ми вже знаємо:
-- 1.0 = абсолютно нове (перша згадка про зріст)
-- 0.8 = неочікувана зміна (новий зріст, переїхали)
-- 0.5 = підтвердження відомого
-- 0.2 = повністю очікувано
-
-## ТИПИ ФАКТІВ (fact_type)
-- preference: вподобання (колір, стиль, модель)
-- constraint: обмеження (алергія, не носить синтетику)
-- logistics: логістика (місто, НП, адреса)
-- behavior: поведінка (часто повертає, завжди купує акційне)
-- feedback: зворотній звʼязок (скарга, похвала)
-- child_info: інфо про дитину (вік, зріст, стать)
-
-## КАТЕГОРІЇ (category)
-- child: інфо про дитину
-- style: стиль і вподобання
-- delivery: доставка
-- payment: оплата
-- product: конкретний товар
-- complaint: скарги
-- general: загальне
-
-## ПРАВИЛА ОНОВЛЕННЯ (UpdateFact)
-Використовуй UpdateFact коли КОНФЛІКТ з існуючим фактом:
-- Новий зріст (дитина виросла)
-- Нове місто (переїхали)
-- Змінились вподобання
-
-## TTL (час життя факту)
-- ttl_days: null = вічний факт (зріст, алергія)
-- ttl_days: 90 = сезонні переваги
-- ttl_days: 30 = тимчасові факти
-
-## OUTPUT FORMAT
-Повертай MemoryDecision з:
-- new_facts: список NewFact для нових фактів
-- updates: список UpdateFact для оновлень
-- profile_updates: dict з оновленнями для профілю
-- ignore_messages: True якщо немає нової інформації
-- reasoning: коротке пояснення рішення
+_MEMORY_PROMPT_FALLBACK = """
+Ти — Memory Analyzer для MIRT. Проаналізуй повідомлення і витягни факти.
+ЗАПАМ'ЯТАТИ (importance >= 0.6): зріст/вік дитини, улюблені моделі, місто, алергії.
+ІГНОРУВАТИ: "Дякую", "Ок", загальні фрази.
 """
+
+
+def _get_memory_prompt() -> str:
+    """Get memory prompt from .md file with fallback."""
+    try:
+        from src.core.prompt_registry import registry
+        return registry.get("system.memory").content
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to load memory.md, using fallback: %s", e)
+        return _MEMORY_PROMPT_FALLBACK
 
 
 # =============================================================================
@@ -264,7 +209,7 @@ def get_memory_agent() -> Agent[MemoryDeps, MemoryDecision]:
             _get_memory_model(),
             deps_type=MemoryDeps,
             output_type=MemoryDecision,  # PydanticAI 1.23+
-            system_prompt=MEMORY_SYSTEM_PROMPT,
+            system_prompt=_get_memory_prompt(),
             retries=1,  # Memory is not critical, don't retry much
         )
 
