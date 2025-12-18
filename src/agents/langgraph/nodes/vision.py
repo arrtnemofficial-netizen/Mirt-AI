@@ -111,6 +111,24 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
                     product = p
                     break
 
+        def _extract_colors(row: dict[str, Any]) -> list[str]:
+            raw = row.get("colors") or row.get("color") or []
+            if isinstance(raw, list):
+                return [str(x).strip() for x in raw if str(x).strip()]
+            if isinstance(raw, str):
+                return [raw.strip()] if raw.strip() else []
+            return []
+
+        color_options: list[str] = []
+        if (not color) and results:
+            seen: set[str] = set()
+            for r in results:
+                for c in _extract_colors(r):
+                    lc = c.lower()
+                    if lc not in seen:
+                        seen.add(lc)
+                        color_options.append(c)
+
         # Якщо не знайшли з кольором - беремо перший
         if not product and results:
             product = results[0]
@@ -125,6 +143,15 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
                 or product.get("image")
                 or ""
             )
+
+            ambiguous_color = bool((not color) and len(color_options) >= 2)
+            if ambiguous_color:
+                photo_url = ""
+                try:
+                    product["_color_options"] = color_options
+                except Exception:
+                    pass
+
             logger.info(
                 "📦 Enriched from DB: %s (color=%s) -> %s, photo=%s",
                 product_name, color, price_display,
@@ -135,12 +162,18 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
                 "name": product.get("name", product_name),
                 "price": CatalogService.get_price_for_size(product),
                 "price_display": price_display,
-                "color": (product.get("colors") or [""])[0]
-                if isinstance(product.get("colors"), list)
-                else product.get("colors", ""),
+                "color": ""
+                if ambiguous_color
+                else (
+                    (product.get("colors") or [""])[0]
+                    if isinstance(product.get("colors"), list)
+                    else product.get("colors", "")
+                ),
                 "photo_url": photo_url,
                 "description": product.get("description", ""),
                 "_catalog_row": product,
+                "_color_options": color_options,
+                "_ambiguous_color": ambiguous_color,
             }
     except Exception as e:
         logger.warning("DB enrichment failed: %s", e)
@@ -259,6 +292,17 @@ def _build_vision_messages(
                 if snippet:
                     messages.append(text_msg(snippet))
 
+        color_options = []
+        try:
+            if catalog_product and isinstance(catalog_product.get("_color_options"), list):
+                color_options = [str(x) for x in (catalog_product.get("_color_options") or []) if str(x).strip()]
+        except Exception:
+            color_options = []
+
+        if (not product.color) and len(color_options) >= 2:
+            options_text = ", ".join(color_options[:5])
+            messages.append(text_msg(f"Підкажіть, будь ласка, який колір обираєте: {options_text}? 🤍"))
+
         # БАБЛА 3: Якщо зріст вже в тексті (фото + текст разом) - показуємо ціну одразу!
         # Інакше питаємо зріст, і agent_node обробить відповідь
         height = extract_height_from_text(user_message)
@@ -277,8 +321,7 @@ def _build_vision_messages(
             # Тільки фото без зросту - питаємо
             messages.append(text_msg("На який зріст підказати? 🌸"))
 
-        # БАБЛА 4: Фото товару (якщо є)
-        if product.photo_url:
+        if product.photo_url and (product.color or len(color_options) < 2):
             messages.append(image_msg(product.photo_url))
 
     # 4. Clarification (тільки якщо НЕ впізнали товар)

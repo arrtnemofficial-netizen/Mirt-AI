@@ -269,8 +269,33 @@ class SupabaseSessionStore:
                 e,
             )
 
-        # Try to save to Supabase with circuit breaker protection
-        self._save_to_supabase(session_id, state)
+        # Try to save to Supabase with circuit breaker protection.
+        # IMPORTANT: This method is called from async request handlers. Supabase
+        # client calls are synchronous and can block the event loop on network
+        # issues (e.g., Cloudflare 520). Offload to a background task.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop (sync context) → best effort synchronous save.
+            self._save_to_supabase(session_id, state)
+            return
+
+        async def _save_bg() -> None:
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._save_to_supabase, session_id, state),
+                    timeout=3.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Supabase save timed out (>3s) for session %s; continuing without persistence",
+                    session_id,
+                )
+            except Exception as e:
+                # Observability only; _save_to_supabase already logs typical failures.
+                logger.debug("Supabase save background task failed for %s: %s", session_id, e)
+
+        loop.create_task(_save_bg())
 
     def delete(self, session_id: str) -> bool:
         """Delete session state. Returns True if session existed."""

@@ -337,6 +337,15 @@ class ManyChatPushClient:
             getattr(settings, "MANYCHAT_INSTAGRAM_BUBBLE_DELAY_SECONDS", 5.0)
         )
 
+        # IMPORTANT: Instagram delivery must be fast (UX + 45s SLA).
+        # Cap artificial delays so a multi-bubble response doesn't take minutes.
+        max_typing_delay_instagram = float(
+            getattr(settings, "MANYCHAT_INSTAGRAM_MAX_TYPING_DELAY_SECONDS", 2.0)
+        )
+        max_interbubble_delay_total_instagram = float(
+            getattr(settings, "MANYCHAT_INSTAGRAM_MAX_INTERBUBBLE_DELAY_SECONDS", 10.0)
+        )
+
         allowed_fields_raw = str(
             getattr(settings, "MANYCHAT_INSTAGRAM_ALLOWED_FIELDS", "ai_state,ai_intent")
         )
@@ -498,12 +507,20 @@ class ManyChatPushClient:
             if clean_messages and clean_messages[0].get("type") == "text":
                 first_text_len = len(str(clean_messages[0].get("text") or ""))
             delay = calculate_typing_delay(first_text_len)
+            delay = min(delay, max_typing_delay_instagram)
             logger.debug(
                 "[MANYCHAT] Typing delay (split): %.2fs for %d chars",
                 delay,
                 first_text_len,
             )
             await asyncio.sleep(delay)
+
+            effective_bubble_delay = bubble_delay_seconds
+            if max_interbubble_delay_total_instagram > 0:
+                effective_bubble_delay = min(
+                    effective_bubble_delay,
+                    max_interbubble_delay_total_instagram / max(len(clean_messages) - 1, 1),
+                )
 
             for idx, msg in enumerate(clean_messages):
                 is_last = idx == (len(clean_messages) - 1)
@@ -536,8 +553,8 @@ class ManyChatPushClient:
                 if not ok_one:
                     return False
 
-                if not is_last and bubble_delay_seconds > 0:
-                    await asyncio.sleep(bubble_delay_seconds)
+                if not is_last and effective_bubble_delay > 0:
+                    await asyncio.sleep(effective_bubble_delay)
 
             logger.info(
                 "[MANYCHAT] Pushed %d messages to %s (split-send)",
@@ -551,6 +568,8 @@ class ManyChatPushClient:
             len(m.get("text", "")) for m in clean_messages if m.get("type") == "text"
         )
         delay = calculate_typing_delay(total_text_length)
+        if channel == "instagram":
+            delay = min(delay, max_typing_delay_instagram)
         logger.debug("[MANYCHAT] Typing delay: %.2fs for %d chars", delay, total_text_length)
         await asyncio.sleep(delay)
 
