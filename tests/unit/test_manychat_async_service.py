@@ -2,6 +2,7 @@ import pytest
 
 from src.core.models import AgentResponse, Message, Metadata, Product
 from src.integrations.manychat.async_service import ManyChatAsyncService
+from src.integrations.manychat.response_builder import build_manychat_messages
 from src.integrations.manychat.webhook import ManychatWebhook
 from src.services.session_store import InMemorySessionStore
 
@@ -110,6 +111,38 @@ async def test_push_response_builds_text_and_image_messages(monkeypatch: pytest.
     assert call["messages"][0]["type"] == "text"
     assert "Hello" in call["messages"][0]["text"]
     assert any(m.get("type") == "image" for m in call["messages"])
+
+
+def test_build_manychat_messages_preserves_inline_image_order():
+    agent_response = AgentResponse(
+        event="simple_answer",
+        messages=[
+            Message(content="Це наш Костюм Лагуна!"),
+            Message(type="image", content="https://example.com/laguna.jpg"),
+            Message(content="На який зріст підказати?"),
+        ],
+        products=[
+            # Same URL as the inline image: should not duplicate.
+            Product.from_legacy(
+                {
+                    "product_id": 1,
+                    "name": "Костюм Лагуна",
+                    "price": 100,
+                    "photo_url": "https://example.com/laguna.jpg",
+                }
+            )
+        ],
+        metadata=Metadata(current_state="STATE_2_VISION", intent="PHOTO_IDENT"),
+    )
+
+    messages = build_manychat_messages(agent_response, include_product_images=True)
+
+    assert messages[0] == {"type": "text", "text": "Це наш Костюм Лагуна!"}
+    assert messages[1] == {"type": "image", "url": "https://example.com/laguna.jpg"}
+    assert messages[2] == {"type": "text", "text": "На який зріст підказати?"}
+    assert [m for m in messages if m.get("type") == "image"] == [
+        {"type": "image", "url": "https://example.com/laguna.jpg"}
+    ]
 
 
 @pytest.mark.asyncio

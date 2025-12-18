@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -82,6 +82,7 @@ def test_webhooks_manychat_accepts_x_manychat_token_and_schedules_task(
         image_url=None,
         channel="instagram",
         subscriber_data={"id": "123"},
+        trace_id=ANY,
     )
 
 
@@ -124,6 +125,7 @@ def test_webhooks_manychat_accepts_authorization_bearer_token(
         image_url=None,
         channel="instagram",
         subscriber_data={"id": "123"},
+        trace_id=ANY,
     )
 
 
@@ -172,6 +174,7 @@ def test_webhooks_manychat_accepts_image_only_in_push_mode(
         image_url="https://example.com/photo.jpg",
         channel="instagram",
         subscriber_data={"id": "123"},
+        trace_id=ANY,
     )
 
 

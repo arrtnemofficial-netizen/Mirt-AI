@@ -52,6 +52,15 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
     from src.core.prompt_registry import registry
     from src.conf.config import settings
 
+    # Support callers passing enum values (e.g. State.STATE_1_DISCOVERY)
+    # Note: State is a StrEnum, so isinstance(state_name, str) returns True
+    # We need to check for Enum first
+    from enum import Enum
+    if isinstance(state_name, Enum):
+        state_name = state_name.value
+    elif not isinstance(state_name, str):
+        state_name = str(state_name)
+
     # Handle payment sub-phases specially
     if sub_phase and state_name == "STATE_5_PAYMENT_DELIVERY":
         key = PAYMENT_SUB_PHASES.get(sub_phase)

@@ -343,6 +343,10 @@ def _build_vision_messages(
                 if snippet:
                     messages.append(text_msg(snippet))
 
+        # Photo bubble should come before the question bubble (ManyChat/IG UX).
+        if product.photo_url and (not needs_color_confirmation):
+            messages.append(image_msg(product.photo_url))
+
         if needs_color_confirmation:
             options_text = ", ".join(color_options[:5])
             messages.append(text_msg(f"Підкажіть, будь ласка, який колір обираєте: {options_text}? 🤍"))
@@ -364,9 +368,6 @@ def _build_vision_messages(
         else:
             # Тільки фото без зросту - питаємо
             messages.append(text_msg("На який зріст підказати? 🌸"))
-
-        if product.photo_url and (not needs_color_confirmation):
-            messages.append(image_msg(product.photo_url))
 
     # 4. Clarification (тільки якщо НЕ впізнали товар)
     elif response.clarification_question:
@@ -680,9 +681,9 @@ async def vision_node(
             "agent_response": {
                 "event": "simple_answer",
                 "messages": [
-                    {"type": "text", "content": m.get("content", "")}
+                    {"type": str(m.get("type") or "text"), "content": str(m.get("content") or "")}
                     for m in assistant_messages
-                    if m.get("type") == "text"
+                    if str(m.get("type") or "text") in ("text", "image")
                 ],
                 "products": selected_products,
                 "metadata": {

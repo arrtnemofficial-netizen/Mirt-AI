@@ -77,6 +77,62 @@ class ManyChatAsyncService:
         # Debouncer: aggregate rapid messages
         self.debouncer = MessageDebouncer(delay=float(getattr(settings, "MANYCHAT_DEBOUNCE_SECONDS", 1.0)))
 
+    async def _safe_send_text(
+        self,
+        *,
+        subscriber_id: str,
+        text: str,
+        channel: str,
+        trace_id: str | None = None,
+    ) -> bool:
+        try:
+            return await self.push_client.send_text(
+                subscriber_id=subscriber_id,
+                text=text,
+                channel=channel,
+                trace_id=trace_id,
+            )
+        except TypeError:
+            return await self.push_client.send_text(
+                subscriber_id=subscriber_id,
+                text=text,
+                channel=channel,
+            )
+
+    async def _safe_send_content(
+        self,
+        *,
+        subscriber_id: str,
+        messages: list[dict[str, Any]],
+        channel: str,
+        quick_replies: list[dict[str, str]] | None,
+        set_field_values: list[dict[str, Any]] | None,
+        add_tags: list[str] | None,
+        remove_tags: list[str] | None,
+        trace_id: str | None = None,
+    ) -> bool:
+        try:
+            return await self.push_client.send_content(
+                subscriber_id=subscriber_id,
+                messages=messages,
+                channel=channel,
+                quick_replies=quick_replies,
+                set_field_values=set_field_values,
+                add_tags=add_tags,
+                remove_tags=remove_tags,
+                trace_id=trace_id,
+            )
+        except TypeError:
+            return await self.push_client.send_content(
+                subscriber_id=subscriber_id,
+                messages=messages,
+                channel=channel,
+                quick_replies=quick_replies,
+                set_field_values=set_field_values,
+                add_tags=add_tags,
+                remove_tags=remove_tags,
+            )
+
     async def _maybe_push_interim(
         self,
         *,
@@ -109,7 +165,7 @@ class ManyChatAsyncService:
 
         if not interim_text:
             return
-        await self.push_client.send_text(
+        await self._safe_send_text(
             subscriber_id=user_id,
             text=interim_text,
             channel=channel,
@@ -166,9 +222,9 @@ class ManyChatAsyncService:
                 channel=channel,
             )
             fallback = get_fallback_response(FallbackType.RATE_LIMITED)
-            await self.push_client.send_text(
-                user_id,
-                fallback["text"],
+            await self._safe_send_text(
+                subscriber_id=user_id,
+                text=str(fallback["text"]),
                 channel=channel,
                 trace_id=trace_id,
             )
@@ -318,7 +374,7 @@ class ManyChatAsyncService:
 
                 fallback = get_fallback_response(FallbackType.LLM_TIMEOUT)
                 if fallback.get("text"):
-                    await self.push_client.send_text(
+                    await self._safe_send_text(
                         subscriber_id=user_id,
                         text=str(fallback["text"]),
                         channel=channel,
@@ -385,7 +441,7 @@ class ManyChatAsyncService:
         agent_response: AgentResponse,
         channel: str,
         *,
-        trace_id: str,
+        trace_id: str | None = None,
     ) -> None:
         """Convert AgentResponse to ManyChat format and push."""
 
@@ -421,7 +477,7 @@ class ManyChatAsyncService:
             messages_count=len(messages),
         )
 
-        success = await self.push_client.send_content(
+        success = await self._safe_send_content(
             subscriber_id=user_id,
             messages=messages,
             channel=channel,
@@ -462,7 +518,7 @@ class ManyChatAsyncService:
 
     async def _push_error_message(self, user_id: str, channel: str, *, trace_id: str) -> None:
         """Push a friendly error message."""
-        await self.push_client.send_text(
+        await self._safe_send_text(
             subscriber_id=user_id,
             text=self._get_error_text(),
             channel=channel,
@@ -511,7 +567,7 @@ class ManyChatAsyncService:
             response_text = "Сесія очищена! ✨\nНапишіть мені що-небудь, щоб почати 💬"
 
         # Push confirmation
-        await self.push_client.send_text(
+        await self._safe_send_text(
             subscriber_id=user_id,
             text=response_text,
             channel=channel,

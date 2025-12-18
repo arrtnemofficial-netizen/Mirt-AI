@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from src.core.models import AgentResponse
-from src.services.renderer import render_agent_response_text
 
 from .constants import (
     FIELD_AI_INTENT,
@@ -22,21 +21,26 @@ def build_manychat_messages(
     *,
     include_product_images: bool,
 ) -> list[dict[str, Any]]:
-    text_chunks = render_agent_response_text(agent_response)
     messages: list[dict[str, Any]] = []
-    for chunk in text_chunks:
-        # Split into separate bubbles by blank lines to simulate human-style messaging.
-        # This is intentionally ManyChat-specific (does not affect Telegram renderer).
-        parts = [p.strip() for p in str(chunk).split("\n\n") if p and p.strip()]
-        if not parts:
-            continue
-        for part in parts:
-            messages.append({"type": "text", "text": part})
+    for msg in agent_response.messages:
+        if msg.type == "text":
+            # Split into separate bubbles by blank lines to simulate human-style messaging.
+            parts = [p.strip() for p in str(msg.content).split("\n\n") if p and p.strip()]
+            if not parts:
+                continue
+            for part in parts:
+                messages.append({"type": "text", "text": part})
+        elif msg.type == "image":
+            url = str(msg.content or "").strip()
+            if url:
+                messages.append({"type": "image", "url": url})
 
     if include_product_images:
+        existing_urls = {m.get("url") for m in messages if m.get("type") == "image"}
         for product in agent_response.products:
             if product.photo_url:
-                messages.append({"type": "image", "url": product.photo_url})
+                if product.photo_url not in existing_urls:
+                    messages.append({"type": "image", "url": product.photo_url})
 
     return messages
 

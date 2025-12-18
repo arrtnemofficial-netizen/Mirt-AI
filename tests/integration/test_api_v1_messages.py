@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -65,11 +65,12 @@ def test_api_v1_messages_accepts_x_api_key_and_schedules_task(client, monkeypatc
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
 
-    process_message_async.assert_awaited_once_with(
+    process_message_async.assert_called_once_with(
         user_id="123",
         text="hi",
         image_url=None,
         channel="instagram",
+        trace_id=ANY,
     )
 
 
@@ -98,11 +99,12 @@ def test_api_v1_messages_accepts_bearer_token(client, monkeypatch: pytest.Monkey
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
 
-    process_message_async.assert_awaited_once_with(
+    process_message_async.assert_called_once_with(
         user_id="123",
         text="hi",
         image_url=None,
         channel="instagram",
+        trace_id=ANY,
     )
 
 
@@ -131,11 +133,12 @@ def test_api_v1_messages_accepts_messages_alias(client, monkeypatch: pytest.Monk
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
 
-    process_message_async.assert_awaited_once_with(
+    process_message_async.assert_called_once_with(
         user_id="123",
         text="hi",
         image_url=None,
         channel="instagram",
+        trace_id=ANY,
     )
 
 
@@ -164,11 +167,12 @@ def test_api_v1_messages_accepts_image_only(client, monkeypatch: pytest.MonkeyPa
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
 
-    process_message_async.assert_awaited_once_with(
+    process_message_async.assert_called_once_with(
         user_id="123",
         text="",
         image_url="https://example.com/photo.jpg",
         channel="instagram",
+        trace_id=ANY,
     )
 
 
@@ -197,11 +201,12 @@ def test_api_v1_messages_strips_manychat_prefix_dot_semicolon(client, monkeypatc
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
 
-    process_message_async.assert_awaited_once_with(
+    process_message_async.assert_called_once_with(
         user_id="123",
         text="/restart",
         image_url=None,
         channel="instagram",
+        trace_id=ANY,
     )
 
 
@@ -230,8 +235,8 @@ def test_api_v1_messages_removes_embedded_image_url_from_text(client, monkeypatc
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
 
-    process_message_async.assert_awaited_once()
-    kwargs = process_message_async.await_args.kwargs
+    process_message_async.assert_called_once()
+    kwargs = process_message_async.call_args.kwargs
     assert kwargs["user_id"] == "123"
     assert kwargs["channel"] == "instagram"
     assert kwargs["image_url"] is not None
