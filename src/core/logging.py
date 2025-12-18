@@ -78,6 +78,7 @@ def log_event(
         "api_v1_payload_received": "📩 API: payload отримано",
         "api_v1_payload_parsed": "🧾 API: payload розібрано",
         "api_v1_task_scheduled": "🛰️ API: задача запланована",
+        "api_v1_task_timeout": "⏱️ API: timeout (45c)",
         "manychat_task_scheduled": "🛰️ ManyChat: задача запланована",
         "manychat_message_accepted": "📬 ManyChat: прийнято (202)",
         "manychat_process_start": "🔥 ManyChat: старт обробки",

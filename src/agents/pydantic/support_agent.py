@@ -452,7 +452,7 @@ async def run_support(
                 deps=deps,
                 message_history=message_history,
             ),
-            timeout=120,  # Increased for slow API tiers
+            timeout=45,  # Reduced to cap max response time
         )
 
         # result.output is the typed output (SupportResponse)
