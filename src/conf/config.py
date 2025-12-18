@@ -134,8 +134,8 @@ class Settings(BaseSettings):
     )
 
     MANYCHAT_VISION_TIME_BUDGET_SECONDS: float = Field(
-        default=45.0,
-        description="Max processing time budget for messages with images (seconds) before timeout fallback.",
+        default=55.0,
+        description="Max processing time budget for messages with images (seconds) before timeout fallback. Vision can take 20-30s.",
     )
 
     MANYCHAT_SAFE_MODE_INSTAGRAM: bool = Field(

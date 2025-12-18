@@ -597,21 +597,35 @@ async def vision_node(
                 catalog_row = None
 
         # =====================================================
-        # CRITICAL: PRODUCT NOT IN CATALOG = HARD ESCALATION!
+        # CRITICAL: UNKNOWN PRODUCT = HARD ESCALATION!
         # =====================================================
-        # If Vision "identified" a product but it's NOT in our DB,
-        # this means either:
-        # 1. Product is from another store (competitor)
-        # 2. AI hallucinated a product name
-        # In both cases: DO NOT show fake product, ESCALATE!
+        # ESCALATE if ANY of these conditions:
+        # 1. Vision returned identified_product but NOT in our DB
+        # 2. Vision returned NO product (identified_product is None)
+        # 3. Low confidence (< 50%) regardless of alternatives
+        # In ALL cases: DO NOT guess, ESCALATE to manager!
         # =====================================================
+        confidence = response.confidence or 0.0
+        
+        # Case 1: AI "identified" product but it's NOT in catalog (hallucination/competitor)
         product_not_in_catalog = (
             response.identified_product is not None
             and catalog_row is None
         )
-        low_confidence = (response.confidence or 0.0) < 0.5
         
-        if product_not_in_catalog or (response.identified_product and low_confidence and catalog_row is None):
+        # Case 2: AI couldn't identify anything (product is None or "<not identified>")
+        no_product_identified = (
+            response.identified_product is None
+            or (response.identified_product and response.identified_product.name in ("<not identified>", "<none>", ""))
+        )
+        
+        # Case 3: Low confidence - don't trust the result
+        low_confidence = confidence < 0.5
+        
+        # ESCALATE if: not in catalog OR (no product AND low confidence)
+        should_escalate = product_not_in_catalog or (no_product_identified and low_confidence)
+        
+        if should_escalate:
             logger.warning(
                 "🚨 [SESSION %s] ESCALATION: Product not in catalog or low confidence! "
                 "claimed='%s' confidence=%.0f%% catalog_found=%s",

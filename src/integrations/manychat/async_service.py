@@ -320,11 +320,12 @@ class ManyChatAsyncService:
             has_image_final = bool(isinstance(final_metadata, dict) and final_metadata.get("has_image"))
 
             # Enforce time budget per message. Also push an interim message if we exceed a smaller threshold.
+            # Vision processing can take 20-30 seconds, so we need a larger budget
             try:
-                text_budget = float(getattr(settings, "MANYCHAT_TEXT_TIME_BUDGET_SECONDS", 22.0))
-                vision_budget = float(getattr(settings, "MANYCHAT_VISION_TIME_BUDGET_SECONDS", 32.0))
+                text_budget = float(getattr(settings, "MANYCHAT_TEXT_TIME_BUDGET_SECONDS", 25.0))
+                vision_budget = float(getattr(settings, "MANYCHAT_VISION_TIME_BUDGET_SECONDS", 55.0))
             except Exception:
-                text_budget, vision_budget = 22.0, 32.0
+                text_budget, vision_budget = 25.0, 55.0
             time_budget = vision_budget if has_image_final else text_budget
 
             interim_task = asyncio.create_task(
