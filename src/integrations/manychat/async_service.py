@@ -12,12 +12,14 @@ Flow:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph
+from src.conf.config import settings
 from src.core.fallbacks import FallbackType, get_fallback_response
 from src.core.rate_limiter import check_rate_limit
 from src.services.conversation import create_conversation_handler
@@ -72,8 +74,47 @@ class ManyChatAsyncService:
             message_store=self.message_store,
             runner=self.runner,
         )
-        # Debouncer: wait 3 seconds to aggregate rapid messages
-        self.debouncer = MessageDebouncer(delay=3.0)
+        # Debouncer: aggregate rapid messages
+        self.debouncer = MessageDebouncer(delay=float(getattr(settings, "MANYCHAT_DEBOUNCE_SECONDS", 1.0)))
+
+    async def _maybe_push_interim(
+        self,
+        *,
+        user_id: str,
+        channel: str,
+        trace_id: str,
+        has_image: bool,
+    ) -> None:
+        """Push a short interim message if processing is taking too long."""
+        try:
+            fallback_after = float(getattr(settings, "MANYCHAT_FALLBACK_AFTER_SECONDS", 10.0))
+        except Exception:
+            fallback_after = 10.0
+
+        if fallback_after <= 0:
+            return
+
+        await asyncio.sleep(fallback_after)
+
+        # If we reached here, main processing likely still running.
+        # Keep it short: 1 bubble, no images.
+        interim_text = str(
+            getattr(
+                settings,
+                "MANYCHAT_INTERIM_TEXT_WITH_IMAGE" if has_image else "MANYCHAT_INTERIM_TEXT",
+                "Секунду, уточняю по наявності та деталях.",
+            )
+            or ""
+        ).strip()
+
+        if not interim_text:
+            return
+        await self.push_client.send_text(
+            subscriber_id=user_id,
+            text=interim_text,
+            channel=channel,
+            trace_id=trace_id,
+        )
 
     async def process_message_async(
         self,
@@ -220,6 +261,25 @@ class ManyChatAsyncService:
             final_text = aggregated_msg.text
             final_metadata = aggregated_msg.extra_metadata
 
+            has_image_final = bool(isinstance(final_metadata, dict) and final_metadata.get("has_image"))
+
+            # Enforce time budget per message. Also push an interim message if we exceed a smaller threshold.
+            try:
+                text_budget = float(getattr(settings, "MANYCHAT_TEXT_TIME_BUDGET_SECONDS", 22.0))
+                vision_budget = float(getattr(settings, "MANYCHAT_VISION_TIME_BUDGET_SECONDS", 32.0))
+            except Exception:
+                text_budget, vision_budget = 22.0, 32.0
+            time_budget = vision_budget if has_image_final else text_budget
+
+            interim_task = asyncio.create_task(
+                self._maybe_push_interim(
+                    user_id=user_id,
+                    channel=channel,
+                    trace_id=trace_id,
+                    has_image=has_image_final,
+                )
+            )
+
             log_event(
                 logger,
                 event="manychat_debounce_aggregated",
@@ -231,14 +291,43 @@ class ManyChatAsyncService:
                 has_image=bool(final_metadata.get("has_image")),
             )
 
-            # Process through conversation handler
+            # Process through conversation handler with timeout.
             if isinstance(final_metadata, dict):
                 final_metadata = {**final_metadata, "trace_id": trace_id, "channel": channel}
-            result = await self._handler.process_message(
-                user_id,
-                final_text,
-                extra_metadata=final_metadata,
-            )
+
+            try:
+                result = await asyncio.wait_for(
+                    self._handler.process_message(
+                        user_id,
+                        final_text,
+                        extra_metadata=final_metadata,
+                    ),
+                    timeout=max(time_budget, 1.0),
+                )
+            except asyncio.TimeoutError:
+                log_event(
+                    logger,
+                    event="manychat_time_budget_exceeded",
+                    level="warning",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    budget_seconds=time_budget,
+                    has_image=has_image_final,
+                )
+
+                fallback = get_fallback_response(FallbackType.LLM_TIMEOUT)
+                if fallback.get("text"):
+                    await self.push_client.send_text(
+                        subscriber_id=user_id,
+                        text=str(fallback["text"]),
+                        channel=channel,
+                        trace_id=trace_id,
+                    )
+                return
+            finally:
+                # Stop interim task if main processing finished or timed out.
+                interim_task.cancel()
 
             if result.is_fallback:
                 root_cause = classify_root_cause(

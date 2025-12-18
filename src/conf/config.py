@@ -71,6 +71,46 @@ class Settings(BaseSettings):
         description="Use async push mode (recommended). If False, uses sync response mode.",
     )
 
+    MANYCHAT_USE_CELERY: bool = Field(
+        default=False,
+        description=(
+            "If True and CELERY_ENABLED is also True, ManyChat incoming messages are processed via Celery tasks. "
+            "If False, ManyChat uses FastAPI BackgroundTasks even when Celery is enabled (recommended when Celery is only for summarize/followups)."
+        ),
+    )
+
+    MANYCHAT_DEBOUNCE_SECONDS: float = Field(
+        default=1.0,
+        description="Debounce window (seconds) for aggregating rapid ManyChat messages.",
+    )
+
+    MANYCHAT_FALLBACK_AFTER_SECONDS: float = Field(
+        default=10.0,
+        description=(
+            "If processing is still running after this many seconds, send a short interim message to the user."
+        ),
+    )
+
+    MANYCHAT_INTERIM_TEXT: str = Field(
+        default="Секунду, уточняю по наявності та деталях.",
+        description="Short interim message for text-only processing when response is taking longer than expected.",
+    )
+
+    MANYCHAT_INTERIM_TEXT_WITH_IMAGE: str = Field(
+        default="Дякую, бачу фото. Зараз перегляну та відповім.",
+        description="Short interim message for image processing when response is taking longer than expected.",
+    )
+
+    MANYCHAT_TEXT_TIME_BUDGET_SECONDS: float = Field(
+        default=22.0,
+        description="Max processing time budget for text-only messages (seconds) before timeout fallback.",
+    )
+
+    MANYCHAT_VISION_TIME_BUDGET_SECONDS: float = Field(
+        default=32.0,
+        description="Max processing time budget for messages with images (seconds) before timeout fallback.",
+    )
+
     MANYCHAT_SAFE_MODE_INSTAGRAM: bool = Field(
         default=True,
         description=(

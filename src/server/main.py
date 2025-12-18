@@ -536,7 +536,7 @@ async def manychat_webhook(
             # -----------------------------------------------------------------
             # DURABLE PROCESSING (Celery or BackgroundTasks fallback)
             # -----------------------------------------------------------------
-            if settings.CELERY_ENABLED:
+            if settings.CELERY_ENABLED and getattr(settings, "MANYCHAT_USE_CELERY", False):
                 # Use durable Celery task
                 from src.workers.tasks.manychat import process_manychat_message
                 
