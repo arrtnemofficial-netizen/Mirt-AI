@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.conf.config import settings
+from src.services.trim_policy import get_llm_history_limit
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def trim_message_history(
         3. Log when trimming occurs
     """
     if max_messages is None:
-        max_messages = settings.LLM_MAX_HISTORY_MESSAGES
+        max_messages = get_llm_history_limit()
 
     # Disabled if max_messages is 0
     if max_messages <= 0:
@@ -151,7 +151,7 @@ def should_trim(
     - Estimated tokens exceed max_tokens
     """
     if max_messages is None:
-        max_messages = settings.LLM_MAX_HISTORY_MESSAGES
+        max_messages = get_llm_history_limit()
 
     if len(messages) > max_messages:
         return True

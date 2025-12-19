@@ -420,9 +420,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         slow_threshold_s = _setting_float(settings, "CHECKPOINTER_SLOW_LOG_SECONDS", 1.0)
 
-        max_messages = _setting_int(settings, "CHECKPOINTER_MAX_MESSAGES", 200)
-        max_chars = _setting_int(settings, "CHECKPOINTER_MAX_MESSAGE_CHARS", 4000)
-        drop_base64 = _setting_bool(settings, "CHECKPOINTER_DROP_BASE64", True)
+        from src.services.trim_policy import get_checkpoint_compaction
+
+        max_messages, max_chars, drop_base64 = get_checkpoint_compaction(settings)
 
         class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
             async def _ensure_pool_open(self) -> None:

@@ -1,38 +1,39 @@
-# 📚 MIRT AI — Технічна документація (docs/)
+﻿# MIRT AI — асистент для бізнесу (UA)
 
-> **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+MIRT AI — інтелектуальний асистент для обслуговування клієнтів. Підтримує ManyChat/Telegram, використовує LangGraph для ведення діалогу та зберігає сесії в Postgres/Supabase. Celery обробляє фонові задачі.
 
----
+## Що робить система
 
-## ✅ АКТУАЛЬНІ ДОКУМЕНТИ
+- Приймає повідомлення з Instagram/Telegram.
+- Обробляє запити з debounce для уникнення спаму.
+- LangGraph веде діалог та зберігає контекст.
+- ManyChat/Telegram надсилає відповіді користувачеві.
 
-| Документ | Опис |
-|----------|------|
-| [DEV_SYSTEM_GUIDE.md](DEV_SYSTEM_GUIDE.md) | 👨‍💻 **Повний гайд розробника** |
-| [STATUS_REPORT.md](STATUS_REPORT.md) | 📊 Поточний статус реалізації |
-| [AGENTS_ARCHITECTURE.md](AGENTS_ARCHITECTURE.md) | 🤖 Архітектура агентів |
-| [FSM_TRANSITION_TABLE.md](FSM_TRANSITION_TABLE.md) | 🔀 **FROZEN SPEC:** Стани, інтенти, переходи |
-| [TESTING.md](TESTING.md) | 🧪 Стратегія тестування (Golden Suite) |
-| [PROMPT_ENGINEERING.md](PROMPT_ENGINEERING.md) | ✏️ Гайд по роботі з промптами |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | 🚀 Інструкції деплою (Docker, Railway) |
-| [CELERY.md](CELERY.md) | ⚙️ Background tasks (Celery + Redis) |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 🤝 Правила контрибʼюції |
+## Як запустити локально (dev)
 
----
+1) Встановіть залежності:
+```bash
+python -m pip install -r requirements.txt
+```
 
-## 📜 LEGACY / ROADMAP
+2) Налаштуйте змінні середовища:
+- Див. `docs/DEPLOYMENT.md` та `.env.example`.
 
-| Документ | Статус | Примітка |
-|----------|--------|----------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | LEGACY | Історичний опис v3.0. Актуальну архітектуру див. в [DEV_SYSTEM_GUIDE.md](DEV_SYSTEM_GUIDE.md) |
-| [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | LEGACY | Snapshot міграції 2025-12-07. Актуальний стан див. в [STATUS_REPORT.md](STATUS_REPORT.md) |
-| [PRODUCTION_IMPROVEMENT_PLAN.md](PRODUCTION_IMPROVEMENT_PLAN.md) | ROADMAP | Плани подальшого розвитку (кешування, CI/CD тощо) |
+3) Запустіть API:
+```bash
+python -m uvicorn src.server.main:app --reload
+```
 
----
+4) (Опціонально) Запустіть worker/beat:
+```bash
+celery -A src.workers.celery_app worker -l info
+celery -A src.workers.celery_app beat -l info
+```
 
-## 🔗 ГОЛОВНІ ДОКУМЕНТИ (корінь проекту)
+## Де читати далі
 
-- [README.md](../README.md) — Головний огляд
-- [PRD.md](../PRD.md) — Product Requirements Document
-- [DOCUMENTATION.md](../DOCUMENTATION.md) — Центральний індекс
-- [.rules/rulesllm.md](../.rules/rulesllm.md) — Правила для AI/LLM
+- Архітектура: `docs/ARCHITECTURE.md`
+- ManyChat: `docs/MANYCHAT_PUSH_MODE.md`, `docs/MANYCHAT_SETUP.md`
+- Деплой: `docs/DEPLOYMENT.md`
+- Observability: `docs/OBSERVABILITY_RUNBOOK.md`
+

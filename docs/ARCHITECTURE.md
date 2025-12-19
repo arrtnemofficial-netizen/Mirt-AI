@@ -1,90 +1,77 @@
-# Architecture v3.0: The Golden Era 🏛️
+﻿# ???????????
 
-> ⚠️ **LEGACY DOC (v3.0)**
-> Поточну архітектуру дивись у `DEV_SYSTEM_GUIDE.md` (розділ 3–4) та `PROJECT_STATUS_REPORT.md`.
-> Цей файл збережено як історичний snapshot старої Celery‑орієнтованої архітектури і **не є Single Source of Truth**.
+## ??????????
 
-**Mirt-AI** is a production-grade AI stylist engine designed for reliability, scalability, and strict business compliance.
+- **Web API (FastAPI)**: ?????? webhook/HTTP????????.
+- **ManyChat ??????????**: push/response ?????, debounce, time budget.
+- **LangGraph**: ??????? ??????????? ???????.
+- **Checkpointer (Postgres)**: persistence ????? LangGraph.
+- **Supabase Session Store**: ?????????? ???? ?????/???????????.
+- **Celery + Redis**: ?????? ??????, follow?up, ??????? ?????.
 
----
+## ????? ManyChat (push)
 
-## 1. High-Level Overview
+1) ManyChat ? `/webhooks/manychat` (202)
+2) Async pipeline: debounce ? handler ? LangGraph
+3) Push ????? ManyChat API
 
-The system follows a **Queue-Based Event-Driven Architecture**. Use of `Celery` + `Redis` ensures that:
-1.  **Users never wait** for sync HTTP calls.
-2.  **Bursts of traffic** are buffered.
-3.  **Failures are retried** automatically.
+## ????? ManyChat (response)
 
-### Diagram
-```mermaid
-graph TD
-    Client[Telegram/ManyChat] -->|Webhook| Web[FastAPI Server]
-    Web -->|Idempotent Dispatch| Redis[(Redis Broker)]
-    
-    subgraph "Celery Workers Layer"
-        Redis -->|Queue: llm| WorkerLLM[Agent Worker]
-        Redis -->|Queue: crm| WorkerCRM[CRM Worker]
-        Redis -->|Queue: tasks| WorkerTasks[Background Tasks]
-    end
-    
-    WorkerLLM -->|LangGraph v2| BRAIN[AI Logic]
-    BRAIN -->|Registry| PROMPTS[Prompt Files]
-    WorkerCRM -->|API| Snitkix[CRM System]
-    WorkerTasks -->|Write| DB[(Supabase)]
-```
+1) ManyChat ? `/webhooks/manychat`
+2) Debounce + handler ? ????????? v2
 
----
+## ????? Telegram (???? ?????????)
 
-## 2. Core Components
+1) Telegram webhook ? ????????
+2) Debounce ? handler ? LangGraph
+3) ????????? ????? ? Telegram
 
-### 🧠 The Brain: `src/agents/`
-- **LangGraph v2**: A stateful graph with 5 nodes.
-  - `moderation`: Guard against abuse.
-  - `intent`: Classify user intent (Buy vs Support).
-  - `agent`: Generate response using Pydantic AI.
-  - `validation`: Regex-check output prices and URLs.
-- **State Machine**: Deterministic transitions defined in `state_machine.py`. The LLM *proposes* moves, but code *executes* them.
+## ??????? ??????
 
-### 📜 Prompt Registry: `src/core/prompt_registry.py`
-The "Source of Truth" for AI behavior.
-- **SSOT**: Prompts are loaded from `data/prompts/`.
-- **Versioning**: Can serve different prompt versions (though currently v1 default).
-- **Format**: Markdown files with clear `# Role` and `## Rules` sections.
+- `src/integrations/manychat/pipeline.py` ? ?????? ???????? debounce + handler
+- `src/integrations/manychat/async_service.py` ? push ?????
+- `src/integrations/manychat/webhook.py` ? response ?????
+- `src/agents/langgraph/*` ? ????, ?????, checkpointer
+- `src/services/trim_policy.py` ? ????? ??????/trim
 
-### 👷 The Workers: `src/workers/` (The Engine)
-This is a **10/10 Production System**.
-- **Queues**:
-  - `llm` (60s limit): Fast, interactive chat tasks.
-  - `summarization` (120s): Heavy background processing.
-  - `priority`: For paid users (future proofing).
-- **Dispatcher** (`dispatcher.py`):
-  - Handles **Idempotency** using message_id hashes.
-  - Supports `Sync` mode for local dev (`CELERY_ENABLED=false`).
-  - Generates `trace_id` for observability.
-- **Usage Tracking** (`llm_usage.py`):
-  - Calcluates cost per token (Input/Output).
-  - Aggregates daily spend.
+## ?????? ?? ???????
 
----
+???? ?????? ??????? ? ????? ?????????? ? ????? ?????????? ? ?????????.
 
-## 3. Data Flow (Life of a Message)
+# Архітектура MIRT AI
 
-1. **Ingestion**: `POST /webhooks/telegram` receives JSON.
-2. **Dispatch**: `dispatcher.dispatch_message()` creates a unique `task_id`.
-3. **Queue**: Message pushed to Redis `llm` queue.
-4. **Execution**: Celery Worker picks up task.
-   - Loads conversation history from Supabase.
-   - Runs LangGraph Agent.
-   - Saves new state key-value.
-5. **Response**: Result sent back to Telegram API.
+## Головні компоненти
 
----
+- **Web API (FastAPI)** – приймає вебхуки (ManyChat/Telegram/Snitkix) і REST-запити.
+- **ManyChat інтеграція** – окремі режими push та response; керує debounce, time budget.
+- **LangGraph** – основна оркестрація станів, HITL, інтеррапти.
+- **Postgres Checkpointer** – зберігає повний стан LangGraph для resume/time-travel.
+- **Supabase Session Store** – довготривале збереження клієнтських сесій/метаданих.
+- **Celery + Redis** – фонові задачі (LLM воркери, follow-up, відправка ManyChat pushів).
 
-## 4. Key Design Decisions
+## Потік ManyChat (push mode)
+1. ManyChat викликає `/webhooks/manychat` → одразу 202.
+2. `ManyChatAsyncService` через debounce збирає повідомлення.
+3. LangGraph обробляє діалог → push-відповідь через ManyChat API.
 
-| Feature | Implementation | Why? |
-| :--- | :--- | :--- |
-| **Strictness** | Unit Tests verify Prompt Text | LLMs hallucinate rules; Code does not. |
-| **Persistence** | Supabase (Postgres) | Structured history for long-term memory. |
-| **Reliability** | Celery Retries + Dead Letter | Network blips shouldn't lose orders. |
-| **Cost Control** | Token Tracking Table | Monitor spend per user/model/day. |
+## Потік ManyChat (response mode)
+1. ManyChat викликає `/webhooks/manychat`.
+2. Debounce + LangGraph.
+3. Формуємо ManyChat v2 envelope та повертаємо у відповідь (sync).
+
+## Telegram (полегшений режим)
+1. Telegram webhook потрапляє до Bot/Dispatcher.
+2. Debounce → LangGraph.
+3. Відправка результату через Telegram Bot API.
+
+## Ключові модулі
+
+- `src/integrations/manychat/pipeline.py` – спільний пайплайн debounce + handler.
+- `src/integrations/manychat/async_service.py` – push mode.
+- `src/integrations/manychat/webhook.py` – response mode.
+- `src/agents/langgraph/*` – стан, граф, checkpointer, вузли.
+- `src/services/trim_policy.py` – soft/hard-limits для state/messages.
+
+## Що ще важливо
+
+Ця схема працює лише разом із Observability (див. `docs/OBSERVABILITY_RUNBOOK.md`) та FSM (див. `docs/FSM_TRANSITION_TABLE.md`), бо всі сервіси синхронізують `dialog_phase` і rely на спільних метриках.

@@ -1,105 +1,44 @@
-# MIRT AI Agents — Архітектура та керування
+﻿# Архітектура агентів (LangGraph)
 
-> 📚 **Центральний індекс документації:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+## Що таке LangGraph у MIRT
 
-## 1. Загальна ідея
+Наш граф складається з набору вузлів, кожен з яких виконує окрему логіку:
+- **Moderation / Intent / Vision / Offer / Payment / Upsell / Escalation**.
+- Підтримка **HITL** (interrupt перед payment).
+- Повна **persistence** через Postgres checkpointer.
 
-Агентний шар MIRT AI складається з двох рівнів:
+Див. `src/agents/langgraph/graph.py` для повної конфігурації.
 
-- **LangGraph (`src/agents/langgraph`)** — оркестрація, state machine, routing
-- **Pydantic AI (`src/agents/pydantic`)** — LLM-агенти, моделі, DI
+## Стан (`ConversationState`)
 
-Потік: `Повідомлення → LangGraph → master_router → Нода → PydanticAI Agent → state update`
+Визначено в `src/agents/langgraph/state.py`. Ключові поля:
 
----
+| Поле          | Опис                                                                 |
+|---------------|----------------------------------------------------------------------|
+| `messages`    | Поточна історія діалогу. Тримайте в межах `STATE_MAX_MESSAGES`.       |
+| `dialog_phase`| Поточна фаза FSM (див. `docs/FSM_TRANSITION_TABLE.md`).               |
+| `metadata`    | Будь-які сервісні дані (channel, trace_id, vision_confidence тощо).   |
+| `selected_products`, `agent_response`, `escalation_level` | Вихідні дані для ManyChat/Telegram. |
 
-## 2. LangGraph (`src/agents/langgraph`)
+Trim-політики:
+- `STATE_MAX_MESSAGES`
+- `LLM_MAX_HISTORY_MESSAGES`
+- `CHECKPOINTER_MAX_MESSAGES`
 
-### 2.1. Ключові файли
+Конфіг описано в `src/services/trim_policy.py`.
 
-| Файл | Призначення |
-|------|-------------|
-| `graph.py` | Production-граф, ноди: moderation, intent, vision, agent, offer, payment, upsell, crm_error, validation, escalation, memory |
-| `edges.py` | `master_router`, `route_after_intent`, `route_after_validation` |
-| `state.py` | `ConversationState`, `create_initial_state` |
-| `state_prompts.py` | Промпти для FSM станів, `determine_next_dialog_phase` |
-| `checkpointer.py` | Persistence (Memory/Postgres) |
-| `streaming.py` | Streaming токенів |
-| `time_travel.py` | Історія, rollback, fork |
+## Checkpointer
 
-### 2.2. Ноди (`langgraph/nodes/`)
+Модуль `src/agents/langgraph/checkpointer.py`:
+- Будує пул `AsyncConnectionPool` (Supabase/Postgres).
+- Логує повільні операції (`aget_tuple`, `aput`).
+- Робить компакцію payload (`CHECKPOINTER_MAX_MESSAGE_CHARS`, `CHECKPOINTER_DROP_BASE64`).
 
-| Нода | Призначення |
-|------|-------------|
-| `agent.py` | Текстовий діалог (`run_support`) |
-| `vision.py` | Аналіз фото (`run_vision`) |
-| `offer.py` | **Multi-Role Deliberation**, pre/post-validation цін |
-| `payment.py` | Збір даних замовлення, HITL interrupt |
-| `upsell.py` | Допродаж |
-| `escalation.py` | Передача оператору |
-| `memory.py` | `memory_context_node`, `memory_update_node` |
+Для моніторингу див. `docs/OBSERVABILITY_RUNBOOK.md`.
 
----
+## Як розширювати граф
+1. Додайте вузол у `graph.py`.
+2. Оновіть FSM таблицю.
+3. Додайте промпт у `src/core/prompt_registry.py`.
+4. Налаштуйте observability (нові метрики / події).
 
-## 3. Pydantic AI (`src/agents/pydantic`)
-
-### 3.1. Моделі (`models.py`)
-
-- `SupportResponse` — головна модель відповіді
-- `VisionResponse` — результат vision
-- `PaymentResponse` — дані замовлення
-- `OfferDeliberation` — Multi-Role Deliberation (customer/business/quality views)
-- `CustomerDataExtracted` — дані клієнта для STATE_5
-
-### 3.2. AgentDeps (`deps.py`)
-
-DI-контейнер:
-- `session_id`, `user_id`, `channel`
-- `selected_products`, `customer_name`, `customer_phone`
-- Сервіси: `db`, `catalog`, `memory`
-- Titans-like: `profile`, `facts`, `memory_context_prompt`
-
-Фабрики:
-- `create_deps_from_state(state)` — базовий
-- `create_deps_with_memory(state)` — з підвантаженням памʼяті
-
-### 3.3. Агенти
-
-| Агент | Файл | Роль |
-|-------|------|------|
-| Support | `support_agent.py` | Консультант "Софія" |
-| Vision | `vision_agent.py` | Розпізнавання фото |
-| Payment | `payment_agent.py` | Оформлення замовлень |
-| Memory | `memory_agent.py` | Класифікація фактів |
-
----
-
-## 4. Практичні сценарії
-
-### Змінити поведінку по стейтах
-→ `state_prompts.py`, `data/prompts/states/*`
-
-### Додати ноду
-→ `nodes/*.py` → `graph.py` → `edges.py`
-
-### Змінити payment flow
-→ `state_prompts.py` (payment sub-phases) → `nodes/payment.py`
-
-### Змінити vision
-→ `nodes/vision.py` → `pydantic/vision_agent.py` → `data/vision/*`
-
----
-
-## 5. Потік діалогу
-
-```
-1. Вхідне → build_production_graph().invoke()
-2. master_router → вибирає ноду по dialog_phase + intent
-3. Нода → викликає Pydantic-агента
-4. Оновлення state + dialog_phase
-5. end → відповідь клієнту
-```
-
----
-
-> Детальний опис: [DEV_SYSTEM_GUIDE.md](DEV_SYSTEM_GUIDE.md)

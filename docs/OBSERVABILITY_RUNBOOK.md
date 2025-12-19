@@ -1,30 +1,36 @@
-# Observability + Runbook (Production)
+﻿# Observability + Runbook (Production)
 
-This runbook lists the key signals and what to do when things go wrong.
-
-## Core signals to watch
+## Ключові сигнали
 
 - `manychat_time_budget_exceeded`
-  - Meaning: request exceeded ManyChat time budget.
-  - Action: check checkpointer timings and LLM latency; verify state size caps.
+  - Значення: запит перевищив ManyChat time budget.
+  - Дії: перевірити checkpointer/LLM latency; подивитися `size_bytes` у логах.
+
+- `manychat_debounce_aggregated`
+  - Значення: debounce спрацював, повідомлення об’єднано.
+  - Дії: дивимося delay, `final_text`.
+
+- `manychat_debounce_superseded`
+  - Значення: попереднє повідомлення замінено новим.
+  - Дії: перевірити частоту інпутів/спам.
 
 - `[CHECKPOINTER] aget_tuple/aput/aput_writes ... took ...`
-  - Meaning: Postgres checkpointer is slow.
-  - Action: confirm pooler URL, pool sizes, and state compaction.
+  - Значення: повільний Postgres checkpointer.
+  - Дії: перевірити pooler, state size, compaction.
 
 - `[CHECKPOINTER] pool opened on demand`
-  - Meaning: pool is opening lazily or reopening.
-  - Action: verify warmup and pool sizes; check connection limits.
+  - Значення: пул відкривається під час запиту.
+  - Дії: увімкнути warmup, відрегулювати pool sizes.
 
 - `vision invalid_image_url` / `Timeout while downloading`
-  - Meaning: CDN or image URL is not reachable.
-  - Action: verify media proxy, allowlist, CDN health.
+  - Значення: проблеми з CDN або завантаженням зображення.
+  - Дії: media proxy, allowlist, повторити зображення.
 
-- `state_messages_trimmed` (metric)
-  - Meaning: state history is being capped.
-  - Action: confirm `STATE_MAX_MESSAGES` is set to a safe value.
+- `state_messages_trimmed`
+  - Значення: застосовано trim до state.
+  - Дії: переглянути `STATE_MAX_MESSAGES` та політики.
 
-## Recommended limits (baseline)
+## Рекомендовані ліміти
 
 - `STATE_MAX_MESSAGES=100`
 - `LLM_MAX_HISTORY_MESSAGES=20`
@@ -32,15 +38,9 @@ This runbook lists the key signals and what to do when things go wrong.
 - `CHECKPOINTER_MAX_MESSAGE_CHARS=4000`
 - `CHECKPOINTER_DROP_BASE64=true`
 
-## Triage steps
-
-1) Check if the issue is LLM latency or checkpointer latency.
-2) If checkpointer is slow, lower pool sizes and verify pooler.
-3) If state is large, enforce caps and verify compaction.
-4) If vision fails, use media proxy and validate image URLs.
-
-## Escalation decision
-
-- If >5% of requests hit budget timeouts: reduce payload size and raise alerts.
-- If checkpointer has >2s spikes: reduce pool size and confirm pooler.
-- If repeated vision errors: switch to proxy or disable vision for that source.
+## Що робити при інциденті (швидкий чек-лист)
+1) Перевірити логи `manychat_time_budget_exceeded` та `CHECKPOINTER aget_tuple/aput` (див. розмір payload).  
+2) Якщо пул відкривається “on demand” → прогнати warmup або зменшити pool max_size.  
+3) При проблемах із Vision CDN → увімкнути proxy/allowlist, перевірити `normalize_image_url`.  
+4) Якщо trim спрацьовує часто → зменшити історію в промпті або підняти ліміти усвідомлено.  
+5) За потреби тимчасово переводимо канал у спрощений режим (менше історії, більше fallback).

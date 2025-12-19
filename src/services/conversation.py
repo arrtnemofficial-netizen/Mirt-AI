@@ -522,13 +522,13 @@ class ConversationHandler:
                 state["metadata"].update(extra_metadata)
                 # Mirror critical flags to top-level so routers can see them
                 if extra_metadata.get("has_image"):
-                    image_url = extra_metadata.get("image_url")
-                    if isinstance(image_url, str):
-                        trimmed = image_url.strip()
-                        if trimmed.startswith(("http://", "https://")) and len(trimmed) <= 2000:
-                            state["has_image"] = True
-                            state["image_url"] = trimmed
-                            state["metadata"]["image_url"] = trimmed
+                    from src.services.media_utils import normalize_image_url
+
+                    normalized = normalize_image_url(extra_metadata.get("image_url"))
+                    if normalized:
+                        state["has_image"] = True
+                        state["image_url"] = normalized
+                        state["metadata"]["image_url"] = normalized
 
             # Generate or reuse trace_id for this request (Observability)
             trace_id = None

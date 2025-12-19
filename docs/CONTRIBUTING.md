@@ -1,41 +1,30 @@
-# Contributing to Mirt-AI 🤝
+﻿# Contributing (UA)
 
-Welcome to the team. To maintain our **"Golden Std"**, please follow these rules strictly.
+## Гілки
 
----
+- Фічі: `feat/*`
+- Фікси: `fix/*`
 
-## 1. The Golden Rule of Prompts
+## Форматування та лінтінг
 
-**NEVER edit a prompt without adding a test.**
-If you change how the bot handles "Returns", you MUST add a "Return Policy" scenario to `tests/data/golden_data.yaml`.
+```bash
+ruff format .
+ruff check .
+```
 
-## 2. Code Style
+## Тести
 
-- **Python**: 3.11+
-- **Linter**: Ruff (Strict mode).
-- **Formatter**: Black compatible.
-- **Type Hints**: Required for EVERY function.
+```bash
+pytest
+```
 
-## 3. Workflow
+## Змінні середовища
 
-1.  **Feature Branch**: `feature/your-feature-name`
-2.  **Dev Mode**:
-    ```bash
-    # Run without Celery (Sync) for easier debugging
-    export CELERY_ENABLED=false
-    uvicorn src.server.main:app
-    ```
-3.  **Verification**:
-    ```bash
-    # MUST PASSS before PR
-    pytest
-    ```
+Файл `.env` не додається до git. Використовуйте `.env.example` як шаблон.
 
-## 4. Documentation
+## Pull Request
 
-> **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
+- Переконайтеся, що всі тести проходять.
+- Додайте опис змін до PR.
+- Дотримуйтесь існуючого стилю коду.
 
-- Якщо змінюєш архітектуру → Оновлюй `DEV_SYSTEM_GUIDE.md` (НЕ `docs/ARCHITECTURE.md` — він legacy).
-- Якщо додаєш Env Vars → Оновлюй `README.md` і `.env.example`.
-- Якщо змінюєш FSM логіку → **СПОЧАТКУ** оновлюй `docs/FSM_TRANSITION_TABLE.md`, потім код.
-- Якщо змінюєш промпти → Читай `docs/PROMPT_ENGINEERING.md`.

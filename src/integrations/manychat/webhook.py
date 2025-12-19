@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.services.conversation import create_conversation_handler
-from src.services.debouncer import BufferedMessage, MessageDebouncer
+from src.services.debouncer import MessageDebouncer
+from src.services.media_utils import normalize_image_url
 from src.services.message_store import MessageStore, create_message_store
 
 from .constants import (  # noqa: F401
@@ -26,6 +27,7 @@ from .constants import (  # noqa: F401
     TAG_AI_RESPONDED,
     TAG_NEEDS_HUMAN,
 )
+from .pipeline import process_manychat_pipeline
 from .response_builder import (
     build_manychat_quick_replies,
     build_manychat_v2_response,
@@ -87,20 +89,29 @@ class ManychatWebhook:
             }
             logger.info("[MANYCHAT:%s] 📷 Image received: %s", user_id, image_url[:80])
 
-        # ---------------------------------------------------------------------
-        # DEBOUNCING LOGIC
-        # ---------------------------------------------------------------------
-        buffered_msg = BufferedMessage(
-            text=text, has_image=bool(image_url), image_url=image_url, extra_metadata=extra_metadata
-        )
-
-        # Wait for aggregation.
-        # Returns None if this request is superseded by a newer one.
-        aggregated_msg = await self.debouncer.wait_for_debounce(user_id, buffered_msg)
-
-        if aggregated_msg is None:
-            # Superseded -> Return empty response ("silent success")
+        def _on_superseded() -> None:
             logger.info("[MANYCHAT:%s] Request superseded by newer message, skipping.", user_id)
+
+        def _on_debounced(
+            _aggregated_msg: Any,
+            _has_image: bool,
+            final_text: str,
+            _final_metadata: dict[str, Any] | None,
+        ) -> None:
+            logger.info("[MANYCHAT:%s] Processing AGGREGATED: text='%s'", user_id, final_text[:50])
+
+        pipeline_result = await process_manychat_pipeline(
+            handler=self._handler,
+            debouncer=self.debouncer,
+            user_id=user_id,
+            text=text,
+            image_url=image_url,
+            extra_metadata=extra_metadata,
+            on_superseded=_on_superseded,
+            on_debounced=_on_debounced,
+        )
+        if pipeline_result is None:
+            # Superseded -> Return empty response ("silent success")
             return {
                 "version": "v2",
                 "content": {
@@ -110,18 +121,7 @@ class ManychatWebhook:
                 },
             }
 
-        # ---------------------------------------------------------------------
-        # PROCESS AGGREGATED MESSAGE
-        # ---------------------------------------------------------------------
-        final_text = aggregated_msg.text
-        final_metadata = aggregated_msg.extra_metadata
-
-        logger.info("[MANYCHAT:%s] Processing AGGREGATED: text='%s'", user_id, final_text[:50])
-
-        # Use centralized handler with error handling
-        result = await self._handler.process_message(
-            user_id, final_text, extra_metadata=final_metadata
-        )
+        result = pipeline_result.result
 
         if result.is_fallback:
             logger.warning(
@@ -166,6 +166,8 @@ class ManychatWebhook:
         if not image_url:
             data = payload.get("data", {})
             image_url = data.get("image_url") or data.get("photo_url")
+
+        image_url = normalize_image_url(image_url)
 
         if not subscriber:
             raise ManychatPayloadError("Missing subscriber in payload")

@@ -24,9 +24,11 @@ from src.core.fallbacks import FallbackType, get_fallback_response
 from src.core.logging import classify_root_cause, log_event, safe_preview
 from src.core.rate_limiter import check_rate_limit
 from src.services.conversation import create_conversation_handler
-from src.services.debouncer import BufferedMessage, MessageDebouncer
+from src.services.debouncer import MessageDebouncer
+from src.services.media_utils import normalize_image_url
 from src.services.message_store import MessageStore, create_message_store
 
+from .pipeline import process_manychat_pipeline
 from .push_client import ManyChatPushClient, get_manychat_push_client
 from .response_builder import (
     build_manychat_field_values,
@@ -177,32 +179,6 @@ class ManyChatAsyncService:
 
         return extra_metadata
 
-    async def _debounce_message(
-        self,
-        *,
-        user_id: str,
-        buffered_msg: BufferedMessage,
-        trace_id: str,
-        channel: str,
-    ) -> BufferedMessage | None:
-        aggregated_msg = await self.debouncer.wait_for_debounce(user_id, buffered_msg)
-        if aggregated_msg is None:
-            log_event(
-                logger,
-                event="manychat_debounce_superseded",
-                trace_id=trace_id,
-                user_id=user_id,
-                channel=channel,
-            )
-        return aggregated_msg
-
-    @staticmethod
-    def _extract_has_image(aggregated_msg: BufferedMessage, metadata: Any) -> bool:
-        has_image_final = bool(getattr(aggregated_msg, "has_image", False))
-        if not has_image_final and isinstance(metadata, dict):
-            has_image_final = bool(metadata.get("has_image"))
-        return has_image_final
-
     @staticmethod
     def _get_time_budget(has_image: bool) -> float:
         try:
@@ -211,19 +187,6 @@ class ManyChatAsyncService:
         except Exception:
             text_budget, vision_budget = 25.0, 55.0
         return vision_budget if has_image else text_budget
-
-    async def _run_handler_with_timeout(
-        self,
-        *,
-        user_id: str,
-        text: str,
-        metadata: dict[str, Any] | None,
-        time_budget: float,
-    ):
-        return await asyncio.wait_for(
-            self._handler.process_message(user_id, text, extra_metadata=metadata),
-            timeout=max(time_budget, 1.0),
-        )
 
     async def _safe_send_text(
         self,
@@ -347,6 +310,7 @@ class ManyChatAsyncService:
         """
         start_time = time.time()
         trace_id = trace_id or str(uuid.uuid4())
+        image_url = normalize_image_url(image_url)
         self._log_process_start(
             trace_id=trace_id,
             user_id=user_id,
@@ -396,65 +360,63 @@ class ManyChatAsyncService:
                 subscriber_data=subscriber_data,
                 trace_id=trace_id,
             )
+            extra_metadata = {**extra_metadata, "trace_id": trace_id, "channel": channel}
 
-            # Debouncing: aggregate rapid messages
-            buffered_msg = BufferedMessage(
-                text=text,
-                has_image=bool(image_url),
-                image_url=image_url,
-                extra_metadata=extra_metadata,
-            )
+            interim_task: asyncio.Task[None] | None = None
+            has_image_final: bool | None = None
+            time_budget: float | None = None
 
-            aggregated_msg = await self._debounce_message(
-                user_id=user_id,
-                buffered_msg=buffered_msg,
-                trace_id=trace_id,
-                channel=channel,
-            )
-            if aggregated_msg is None:
-                return
-
-            final_text = aggregated_msg.text
-            final_metadata = aggregated_msg.extra_metadata
-
-            # Prefer debouncer flag; fallback to metadata for test stubs/mocks.
-            has_image_final = self._extract_has_image(aggregated_msg, final_metadata)
-
-            # Enforce time budget per message. Also push an interim message if we exceed a smaller threshold.
-            # Vision processing can take 20-30 seconds, so we need a larger budget
-            time_budget = self._get_time_budget(has_image_final)
-
-            interim_task = asyncio.create_task(
-                self._maybe_push_interim(
+            def _on_superseded() -> None:
+                log_event(
+                    logger,
+                    event="manychat_debounce_superseded",
+                    trace_id=trace_id,
                     user_id=user_id,
                     channel=channel,
-                    trace_id=trace_id,
-                    has_image=has_image_final,
                 )
-            )
 
-            log_event(
-                logger,
-                event="manychat_debounce_aggregated",
-                trace_id=trace_id,
-                user_id=user_id,
-                channel=channel,
-                text_len=len(final_text or ""),
-                text_preview=safe_preview(final_text, 160),
-                has_image=has_image_final,
-            )
-
-            # Process through conversation handler with timeout.
-            if isinstance(final_metadata, dict):
-                final_metadata = {**final_metadata, "trace_id": trace_id, "channel": channel}
+            def _on_debounced(
+                _aggregated_msg: Any,
+                has_image: bool,
+                final_text: str,
+                _final_metadata: dict[str, Any] | None,
+            ) -> None:
+                nonlocal interim_task, has_image_final, time_budget
+                has_image_final = has_image
+                time_budget = self._get_time_budget(has_image)
+                interim_task = asyncio.create_task(
+                    self._maybe_push_interim(
+                        user_id=user_id,
+                        channel=channel,
+                        trace_id=trace_id,
+                        has_image=has_image,
+                    )
+                )
+                log_event(
+                    logger,
+                    event="manychat_debounce_aggregated",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    text_len=len(final_text or ""),
+                    text_preview=safe_preview(final_text, 160),
+                    has_image=has_image,
+                )
 
             try:
-                result = await self._run_handler_with_timeout(
+                pipeline_result = await process_manychat_pipeline(
+                    handler=self._handler,
+                    debouncer=self.debouncer,
                     user_id=user_id,
-                    text=final_text,
-                    metadata=final_metadata,
-                    time_budget=time_budget,
+                    text=text,
+                    image_url=image_url,
+                    extra_metadata=extra_metadata,
+                    time_budget_provider=self._get_time_budget,
+                    on_superseded=_on_superseded,
+                    on_debounced=_on_debounced,
                 )
+                if pipeline_result is None:
+                    return
             except TimeoutError:
                 log_event(
                     logger,
@@ -478,7 +440,10 @@ class ManyChatAsyncService:
                 return
             finally:
                 # Stop interim task if main processing finished or timed out.
-                interim_task.cancel()
+                if interim_task:
+                    interim_task.cancel()
+
+            result = pipeline_result.result
 
             if result.is_fallback:
                 root_cause = classify_root_cause(
