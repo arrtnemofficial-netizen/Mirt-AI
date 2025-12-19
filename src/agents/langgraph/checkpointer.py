@@ -328,9 +328,29 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs%s", op, thread_id, elapsed, extra)
 
         class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
+            async def _ensure_pool_open(self) -> None:
+                pool = getattr(self, "pool", None)
+                if pool is None:
+                    return
+                try:
+                    is_closed = bool(getattr(pool, "closed", False))
+                except Exception:
+                    is_closed = False
+                if not is_closed:
+                    return
+                try:
+                    try:
+                        await pool.open(wait=True)
+                    except TypeError:
+                        await pool.open()
+                    logger.info("[CHECKPOINTER] pool opened on demand")
+                except Exception as exc:
+                    logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
+
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    await self._ensure_pool_open()
                     result = await super().aget_tuple(*args, **kwargs)
                     return result
                 finally:
@@ -348,6 +368,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             async def aput(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    await self._ensure_pool_open()
                     return await super().aput(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
@@ -357,6 +378,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             async def aput_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    await self._ensure_pool_open()
                     return await super().aput_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None

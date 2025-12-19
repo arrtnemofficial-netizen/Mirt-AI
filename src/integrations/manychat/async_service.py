@@ -528,11 +528,12 @@ class ManyChatAsyncService:
             trace_id=trace_id,
         )
 
+
     async def _handle_restart_command(self, user_id: str, channel: str) -> None:
         """Handle /restart command - clear session and confirm."""
         import time as _time
         _restart_start = _time.time()
-        
+
         # Clear any pending debouncer buffers/timers so no stale aggregated message
         # is processed after restart.
         try:
@@ -561,7 +562,7 @@ class ManyChatAsyncService:
                 timeout=5.0,  # Max 5 seconds for checkpointer reset
             )
             logger.info(
-                "[MANYCHAT:%s] 🔄 LangGraph state reset via /restart (%.2fs)",
+                "[MANYCHAT:%s] LangGraph state reset via /restart (%.2fs)",
                 user_id,
                 _time.time() - _lg_start,
             )
@@ -581,14 +582,18 @@ class ManyChatAsyncService:
         # CRITICAL: Use to_thread() to avoid blocking event loop!
         _del_start = _time.time()
         deleted = await asyncio.to_thread(self.store.delete, user_id)
-        logger.info("[MANYCHAT:%s] 🗑️ store.delete took %.2fs", user_id, _time.time() - _del_start)
+        logger.info("[MANYCHAT:%s] store.delete took %.2fs", user_id, _time.time() - _del_start)
 
         if deleted:
-            logger.info("[MANYCHAT:%s] 🔄 Session cleared via /restart", user_id)
-            response_text = "Сесія очищена! ✨\nНапишіть мені що-небудь, і ми почнемо спочатку 💬"
+            logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
+            response_text = (
+                "Session cleared. You can start over. Send your message when ready."
+            )
         else:
-            logger.info("[MANYCHAT:%s] 🔄 /restart called but no session existed", user_id)
-            response_text = "Сесія очищена! ✨\nНапишіть мені що-небудь, щоб почати 💬"
+            logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
+            response_text = (
+                "No session to clear. Send your message when ready."
+            )
 
         # Push confirmation
         await self._safe_send_text(
