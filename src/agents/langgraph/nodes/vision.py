@@ -567,6 +567,64 @@ async def vision_node(
     deps.image_url = state.get("image_url") or state.get("metadata", {}).get("image_url")
     deps.current_state = State.STATE_2_VISION.value
 
+    def _build_vision_error_escalation(error_msg: str) -> dict[str, Any]:
+        escalation_messages = [
+            text_msg("Не вдалося обробити фото. Передаю менеджеру."),
+            text_msg("Будь ласка, очікуйте відповідь від менеджера."),
+        ]
+
+        async def _send_notification_background() -> None:
+            try:
+                from src.services.notification_service import NotificationService
+
+                notification = NotificationService()
+                await notification.send_escalation_alert(
+                    session_id=session_id or "unknown",
+                    reason="vision_error",
+                    user_context=user_message,
+                    details={
+                        "trace_id": trace_id,
+                        "dialog_phase": "ESCALATED",
+                        "current_state": State.STATE_0_INIT.value,
+                        "intent": "PHOTO_IDENT",
+                        "error": error_msg[:200],
+                        "image_url": deps.image_url if deps else None,
+                    },
+                )
+                logger.info("[SESSION %s] Telegram notification sent to manager", session_id)
+            except Exception as notif_err:
+                logger.warning("Failed to send Telegram notification: %s", notif_err)
+
+        asyncio.create_task(_send_notification_background())
+
+        return {
+            "current_state": State.STATE_0_INIT.value,
+            "messages": escalation_messages,
+            "selected_products": [],
+            "dialog_phase": "ESCALATED",
+            "has_image": False,
+            "image_url": None,
+            "escalation_level": "HARD",
+            "metadata": {
+                **state.get("metadata", {}),
+                "vision_error": error_msg[:200],
+                "needs_clarification": False,
+                "has_image": False,
+                "escalation_level": "HARD",
+                "escalation_reason": "vision_error",
+            },
+            "agent_response": {
+                "messages": escalation_messages,
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_0_INIT.value,
+                    "intent": "PHOTO_IDENT",
+                    "escalation_level": "HARD",
+                },
+            },
+            "step_number": state.get("step_number", 0) + 1,
+        }
+
     logger.info(
         "🖼️ [SESSION %s] Vision node started: image=%s",
         session_id,
@@ -576,26 +634,30 @@ async def vision_node(
     try:
         # Call vision agent
         response = await run_vision(message=user_message, deps=deps)
+    except Exception as e:
+        err = str(e)
+        logger.error("Vision agent error: %s", err)
+        return _build_vision_error_escalation(err)
 
-        catalog_row: dict[str, Any] | None = None
-        if response.identified_product:
-            try:
-                catalog = CatalogService()
-                enriched_row = await _enrich_product_from_db(
-                    response.identified_product.name,
-                    color=response.identified_product.color,
-                )
-                if enriched_row and isinstance(enriched_row.get("_catalog_row"), dict):
-                    catalog_row = enriched_row.get("_catalog_row")
-                    try:
-                        if isinstance(enriched_row.get("_color_options"), list):
-                            catalog_row["_color_options"] = enriched_row.get("_color_options")
-                        if "_ambiguous_color" in enriched_row:
-                            catalog_row["_ambiguous_color"] = enriched_row.get("_ambiguous_color")
-                    except Exception:
-                        pass
-            except Exception:
-                catalog_row = None
+    catalog_row: dict[str, Any] | None = None
+    if response.identified_product:
+        try:
+            catalog = CatalogService()
+            enriched_row = await _enrich_product_from_db(
+                response.identified_product.name,
+                color=response.identified_product.color,
+            )
+            if enriched_row and isinstance(enriched_row.get("_catalog_row"), dict):
+                catalog_row = enriched_row.get("_catalog_row")
+                try:
+                    if isinstance(enriched_row.get("_color_options"), list):
+                        catalog_row["_color_options"] = enriched_row.get("_color_options")
+                    if "_ambiguous_color" in enriched_row:
+                        catalog_row["_ambiguous_color"] = enriched_row.get("_ambiguous_color")
+                except Exception:
+                    pass
+        except Exception:
+            catalog_row = None
 
         # =====================================================
         # CRITICAL: UNKNOWN PRODUCT = HARD ESCALATION!
@@ -939,11 +1001,3 @@ async def vision_node(
             "last_error": None,
         }
 
-    except Exception as e:
-        logger.exception("Vision node failed: %s", e)
-        return {
-            "last_error": str(e),
-            "tool_errors": [*state.get("tool_errors", []), f"Vision error: {e}"],
-            "retry_count": state.get("retry_count", 0) + 1,
-            "step_number": state.get("step_number", 0) + 1,
-        }

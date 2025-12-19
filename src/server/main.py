@@ -137,8 +137,14 @@ async def lifespan(app: FastAPI):
         from src.agents.langgraph.checkpointer import warmup_checkpointer_pool
         logger.info("Warming up LangGraph (this may take 10-20 seconds on first deploy)...")
         _graph = get_production_graph()
-        await warmup_checkpointer_pool()
-        logger.info("LangGraph warmed up successfully!")
+        warmup_ok = await warmup_checkpointer_pool()
+        if not warmup_ok:
+            required = (os.getenv("CHECKPOINTER_WARMUP_REQUIRED", "false") or "false").strip().lower()
+            if required in {"1", "true", "yes"}:
+                raise RuntimeError("Checkpointer warmup required but failed")
+            logger.warning("LangGraph warmup incomplete; continuing without warm pool")
+        else:
+            logger.info("LangGraph warmed up successfully!")
     except Exception as e:
         logger.warning("Failed to warm up LangGraph: %s (will initialize on first request)", e)
 

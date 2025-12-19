@@ -7,6 +7,7 @@ Uses TypedDict with Annotated reducers for proper LangGraph integration.
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Any, Literal
 
 from langgraph.graph.message import add_messages
@@ -42,6 +43,17 @@ def append_list(current: list, new: list) -> list:
         return current
     return current + [x for x in new if x not in current]
 
+def add_messages_capped(current: list, new: list) -> list:
+    """Append messages but keep only the last N to prevent unbounded growth."""
+    merged = add_messages(current, new)
+    try:
+        max_messages = int(os.getenv("STATE_MAX_MESSAGES", "100") or "100")
+    except Exception:
+        max_messages = 100
+    if max_messages > 0 and len(merged) > max_messages:
+        return merged[-max_messages:]
+    return merged
+
 
 # =============================================================================
 # CONVERSATION STATE
@@ -56,7 +68,7 @@ class ConversationState(TypedDict, total=False):
     """
 
     # Core conversation data
-    messages: Annotated[list[dict[str, Any]], add_messages]
+    messages: Annotated[list[dict[str, Any]], add_messages_capped]
     current_state: str  # FSM state (STATE_0_INIT, etc.)
     metadata: Annotated[dict[str, Any], merge_dict]
 

@@ -314,6 +314,40 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
             return json_bytes, messages_count
 
+        def _compact_payload(payload: Any) -> Any:
+            if not isinstance(payload, dict):
+                return payload
+
+            compact = payload
+            messages = payload.get("messages")
+            if isinstance(messages, list):
+                max_messages = _env_int("CHECKPOINTER_MAX_MESSAGES", 200)
+                if max_messages > 0 and len(messages) > max_messages:
+                    messages = messages[-max_messages:]
+
+                max_chars = _env_int("CHECKPOINTER_MAX_MESSAGE_CHARS", 4000)
+                if max_chars > 0:
+                    trimmed: list[Any] = []
+                    for m in messages:
+                        if isinstance(m, dict):
+                            content = m.get("content")
+                            if isinstance(content, str) and len(content) > max_chars:
+                                m = {**m, "content": content[:max_chars] + "...[truncated]"}
+                        trimmed.append(m)
+                    messages = trimmed
+
+                compact = {**compact, "messages": messages}
+
+            raw_drop = (os.getenv("CHECKPOINTER_DROP_BASE64", "true") or "true").strip().lower()
+            drop_base64 = raw_drop in {"1", "true", "yes"}
+            if drop_base64:
+                image_url = compact.get("image_url")
+                if isinstance(image_url, str) and len(image_url) > 2000:
+                    if image_url.startswith("data:") or "base64" in image_url:
+                        compact = {**compact, "image_url": "<base64_stripped>"}
+
+            return compact
+
         def _log_if_slow(op: str, started_at: float, config: Any | None, *, payload: Any | None = None) -> None:
             elapsed = time.perf_counter() - started_at
             if elapsed < slow_threshold_s:
@@ -368,6 +402,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 _t0 = time.perf_counter()
                 try:
                     await self._ensure_pool_open()
+                    if len(args) > 1:
+                        payload = _compact_payload(args[1])
+                        args = (args[0], payload, *args[2:])
                     return await super().aput(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
@@ -378,6 +415,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 _t0 = time.perf_counter()
                 try:
                     await self._ensure_pool_open()
+                    if len(args) > 1:
+                        payload = _compact_payload(args[1])
+                        args = (args[0], payload, *args[2:])
                     return await super().aput_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
@@ -583,10 +623,10 @@ def get_current_checkpointer_type() -> CheckpointerType | None:
     return _checkpointer_type
 
 
-async def warmup_checkpointer_pool() -> None:
+async def warmup_checkpointer_pool() -> bool:
     raw_enabled = (os.getenv("CHECKPOINTER_WARMUP", "true") or "true").strip().lower()
     if raw_enabled in {"0", "false", "no"}:
-        return
+        return True
 
     try:
         timeout_s = float(os.getenv("CHECKPOINTER_WARMUP_TIMEOUT_SECONDS", "15") or "15")
@@ -596,7 +636,7 @@ async def warmup_checkpointer_pool() -> None:
     checkpointer = get_checkpointer()
     pool = getattr(checkpointer, "pool", None)
     if pool is None:
-        return
+        return False
 
     _t0 = time.perf_counter()
     try:
@@ -613,7 +653,7 @@ async def warmup_checkpointer_pool() -> None:
             time.perf_counter() - _t0,
             e,
         )
-        return
+        return False
 
     logger.info("[CHECKPOINTER] pool open triggered in %.2fs", time.perf_counter() - _t0)
 
@@ -630,9 +670,10 @@ async def warmup_checkpointer_pool() -> None:
             time.perf_counter() - _t1,
             e,
         )
-        return
+        return False
 
     logger.info("[CHECKPOINTER] pool preflight ok in %.2fs", time.perf_counter() - _t1)
+    return True
 
 
 def is_persistent() -> bool:
