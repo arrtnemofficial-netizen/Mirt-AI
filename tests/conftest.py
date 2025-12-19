@@ -6,6 +6,12 @@ from typing import List, Dict
 from dataclasses import dataclass
 import pytest
 
+# Psycopg async doesn't support ProactorEventLoop on Windows.
+if sys.platform == "win32":
+    import asyncio
+
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # Add project root to path
 root = Path(__file__).resolve().parents[1]
 project_root = str(root)

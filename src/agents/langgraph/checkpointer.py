@@ -329,14 +329,10 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
             async def _ensure_pool_open(self) -> None:
-                pool = getattr(self, "pool", None)
+                pool = getattr(self, "pool", None) or getattr(self, "conn", None)
                 if pool is None:
                     return
-                try:
-                    is_closed = bool(getattr(pool, "closed", False))
-                except Exception:
-                    is_closed = False
-                if not is_closed:
+                if not hasattr(pool, "open"):
                     return
                 try:
                     try:
@@ -345,6 +341,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                         await pool.open()
                     logger.info("[CHECKPOINTER] pool opened on demand")
                 except Exception as exc:
+                    msg = str(exc).lower()
+                    if "already" in msg and "open" in msg:
+                        return
                     logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
 
             async def aget_tuple(self, *args: Any, **kwargs: Any):

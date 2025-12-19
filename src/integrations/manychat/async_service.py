@@ -317,9 +317,10 @@ class ManyChatAsyncService:
             final_text = aggregated_msg.text
             final_metadata = aggregated_msg.extra_metadata
 
-            # CRITICAL: Use aggregated_msg.has_image, NOT metadata!
-            # The debouncer sets has_image on BufferedMessage, not in extra_metadata
-            has_image_final = aggregated_msg.has_image
+            # Prefer debouncer flag; fallback to metadata for test stubs/mocks.
+            has_image_final = bool(getattr(aggregated_msg, "has_image", False))
+            if not has_image_final and isinstance(final_metadata, dict):
+                has_image_final = bool(final_metadata.get("has_image"))
 
             # Enforce time budget per message. Also push an interim message if we exceed a smaller threshold.
             # Vision processing can take 20-30 seconds, so we need a larger budget
@@ -347,7 +348,7 @@ class ManyChatAsyncService:
                 channel=channel,
                 text_len=len(final_text or ""),
                 text_preview=safe_preview(final_text, 160),
-                has_image=bool(final_metadata.get("has_image")),
+                has_image=has_image_final,
             )
 
             # Process through conversation handler with timeout.
@@ -587,12 +588,12 @@ class ManyChatAsyncService:
         if deleted:
             logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
             response_text = (
-                "Session cleared. You can start over. Send your message when ready."
+                "Сесія очищена. Можемо почати спочатку. Напишіть, що вас цікавить 😊"
             )
         else:
             logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
             response_text = (
-                "No session to clear. Send your message when ready."
+                "Сесія вже була порожня. Напишіть, що вас цікавить 😊"
             )
 
         # Push confirmation
