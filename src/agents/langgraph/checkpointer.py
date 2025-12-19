@@ -22,6 +22,7 @@ import os
 import time
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+import json
 
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -112,7 +113,11 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     """
     settings = None
     # Try to get database URL from environment
-    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+    database_url = (
+        os.getenv("DATABASE_URL_POOLER")
+        or os.getenv("DATABASE_URL")
+        or os.getenv("POSTGRES_URL")
+    )
 
     if not database_url:
         try:
@@ -194,18 +199,77 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             except Exception:
                 raise  # Connection is dead, pool will discard it
 
-        pool = AsyncConnectionPool(
-            conninfo=database_url,
-            min_size=3,  # Increase warm connections for better performance
-            max_size=20,  # Increase max connections for production load
-            max_idle=30.0,  # Close idle connections after 30s (before Supabase kills them)
-            check=check_connection,  # Verify connection health before use
-            timeout=60.0,  # Increase connection acquisition timeout
-            kwargs={
-                "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
-                "connect_timeout": 10,  # Connection establishment timeout
-            },
-        )
+        def _env_float(name: str, default: float) -> float:
+            raw = (os.getenv(name, "") or "").strip()
+            if not raw:
+                return default
+            try:
+                return float(raw)
+            except Exception:
+                return default
+
+        def _env_int(name: str, default: int) -> int:
+            raw = (os.getenv(name, "") or "").strip()
+            if not raw:
+                return default
+            try:
+                return int(float(raw))
+            except Exception:
+                return default
+
+        pool_min_size = _env_int("CHECKPOINTER_POOL_MIN_SIZE", 1)
+        pool_max_size = _env_int("CHECKPOINTER_POOL_MAX_SIZE", 5)
+        pool_timeout_s = _env_float("CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
+        pool_max_idle_s = _env_float("CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
+        connect_timeout_s = _env_float("CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 10.0)
+
+        statement_timeout_ms = _env_int("CHECKPOINTER_STATEMENT_TIMEOUT_MS", 8000)
+        lock_timeout_ms = _env_int("CHECKPOINTER_LOCK_TIMEOUT_MS", 2000)
+
+        if pool_min_size < 0:
+            pool_min_size = 0
+        if pool_max_size < 1:
+            pool_max_size = 1
+        if pool_min_size > pool_max_size:
+            pool_min_size = pool_max_size
+
+        options = None
+        if statement_timeout_ms > 0 or lock_timeout_ms > 0:
+            parts: list[str] = []
+            if statement_timeout_ms > 0:
+                parts.append(f"-c statement_timeout={statement_timeout_ms}")
+            if lock_timeout_ms > 0:
+                parts.append(f"-c lock_timeout={lock_timeout_ms}")
+            options = " ".join(parts) if parts else None
+
+        pool_kwargs: dict[str, Any] = {
+            "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
+            "connect_timeout": connect_timeout_s,
+        }
+        if options:
+            pool_kwargs["options"] = options
+
+        try:
+            pool = AsyncConnectionPool(
+                conninfo=database_url,
+                min_size=pool_min_size,
+                max_size=pool_max_size,
+                max_idle=pool_max_idle_s,
+                check=check_connection,  # Verify connection health before use
+                timeout=pool_timeout_s,
+                open=False,
+                kwargs=pool_kwargs,
+            )
+        except TypeError:
+            pool = AsyncConnectionPool(
+                conninfo=database_url,
+                min_size=pool_min_size,
+                max_size=pool_max_size,
+                max_idle=pool_max_idle_s,
+                check=check_connection,  # Verify connection health before use
+                timeout=pool_timeout_s,
+                kwargs=pool_kwargs,
+            )
 
         slow_threshold_s = 1.0
         try:
@@ -223,22 +287,63 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     return str(thread_id)
             return "?"
 
-        def _log_if_slow(op: str, started_at: float, config: Any | None) -> None:
+        def _checkpoint_stats(obj: Any) -> tuple[int | None, int | None]:
+            """Return (json_bytes, messages_count) best-effort."""
+            json_bytes: int | None = None
+            messages_count: int | None = None
+            try:
+                s = json.dumps(obj, ensure_ascii=False, default=str)
+                json_bytes = len(s.encode("utf-8", errors="ignore"))
+            except Exception:
+                json_bytes = None
+
+            try:
+                if isinstance(obj, dict):
+                    # Common internal shapes used by LangGraph checkpointers.
+                    for k in ("channel_values", "values", "state"):
+                        v = obj.get(k)
+                        if isinstance(v, dict) and "messages" in v:
+                            mv = v.get("messages")
+                            if isinstance(mv, list):
+                                messages_count = len(mv)
+                                break
+                    if messages_count is None and isinstance(obj.get("messages"), list):
+                        messages_count = len(obj.get("messages"))
+            except Exception:
+                messages_count = None
+
+            return json_bytes, messages_count
+
+        def _log_if_slow(op: str, started_at: float, config: Any | None, *, payload: Any | None = None) -> None:
             elapsed = time.perf_counter() - started_at
             if elapsed < slow_threshold_s:
                 return
             thread_id = _extract_thread_id(config)
             level = logging.WARNING if elapsed >= max(10.0, slow_threshold_s * 10.0) else logging.INFO
-            logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs", op, thread_id, elapsed)
+            extra = ""
+            if payload is not None:
+                size_b, msg_n = _checkpoint_stats(payload)
+                if size_b is not None or msg_n is not None:
+                    extra = f" size_bytes={size_b} messages={msg_n}"
+            logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs%s", op, thread_id, elapsed, extra)
 
         class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
-                    return await super().aget_tuple(*args, **kwargs)
+                    result = await super().aget_tuple(*args, **kwargs)
+                    return result
                 finally:
                     config = args[0] if args else None
-                    _log_if_slow("aget_tuple", _t0, config)
+                    payload = None
+                    try:
+                        if isinstance(locals().get("result"), tuple) and len(locals()["result"]) > 0:
+                            payload = locals()["result"][0]
+                        else:
+                            payload = locals().get("result")
+                    except Exception:
+                        payload = None
+                    _log_if_slow("aget_tuple", _t0, config, payload=payload)
 
             async def aput(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -246,7 +351,8 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     return await super().aput(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
-                    _log_if_slow("aput", _t0, config)
+                    payload = args[1] if len(args) > 1 else None
+                    _log_if_slow("aput", _t0, config, payload=payload)
 
             async def aput_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -254,7 +360,8 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     return await super().aput_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
-                    _log_if_slow("aput_writes", _t0, config)
+                    payload = args[1] if len(args) > 1 else None
+                    _log_if_slow("aput_writes", _t0, config, payload=payload)
 
             def get_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -472,9 +579,12 @@ async def warmup_checkpointer_pool() -> None:
 
     _t0 = time.perf_counter()
     try:
+        # Prefer wait=True so min_size connections are established during warmup,
+        # preventing the first request from paying the connect handshake cost.
         try:
-            await asyncio.wait_for(pool.open(wait=False), timeout=timeout_s)
+            await asyncio.wait_for(pool.open(wait=True), timeout=timeout_s)
         except TypeError:
+            # Older psycopg_pool versions may not support wait=...
             await asyncio.wait_for(pool.open(), timeout=timeout_s)
     except Exception as e:
         logger.warning(
