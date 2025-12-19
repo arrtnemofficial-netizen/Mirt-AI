@@ -39,7 +39,7 @@ class DummyRunner:
         # Set agent_response like real nodes do (line 157 in agent_node.py)
         state["agent_response"] = self.agent_response.model_dump()
         # Ensure escalation_level is preserved in state
-        if hasattr(self.agent_response.metadata, 'escalation_level'):
+        if hasattr(self.agent_response.metadata, "escalation_level"):
             state["escalation_level"] = self.agent_response.metadata.escalation_level
         return state
 
@@ -87,14 +87,16 @@ async def test_manychat_custom_fields():
         event="simple_answer",
         messages=[Message(content="Ось сукня")],
         products=[
-            Product.from_legacy({
-                "product_id": 123,
-                "name": "Сукня Анна",
-                "price": 1200,
-                "size": "122-128",
-                "color": "синій",
-                "photo_url": "https://example.com/photo.jpg",
-            })
+            Product.from_legacy(
+                {
+                    "product_id": 123,
+                    "name": "Сукня Анна",
+                    "price": 1200,
+                    "size": "122-128",
+                    "color": "синій",
+                    "photo_url": "https://example.com/photo.jpg",
+                }
+            )
         ],
         metadata=Metadata(current_state="STATE_4_OFFER", intent="DISCOVERY_OR_QUESTION"),
     )
@@ -187,12 +189,9 @@ async def test_manychat_image_extraction():
         "message": {
             "text": "",
             "attachments": [
-                {
-                    "type": "image",
-                    "payload": {"url": "https://instagram.com/photo.jpg"}
-                }
-            ]
-        }
+                {"type": "image", "payload": {"url": "https://instagram.com/photo.jpg"}}
+            ],
+        },
     }
 
     output = await handler.handle(payload)
@@ -213,17 +212,12 @@ async def test_manychat_image_only_no_text():
     payload = {
         "subscriber": {"id": "user456"},
         "message": {
-            "attachments": [
-                {
-                    "type": "image",
-                    "payload": {"url": "https://example.com/photo.jpg"}
-                }
-            ]
-        }
+            "attachments": [{"type": "image", "payload": {"url": "https://example.com/photo.jpg"}}]
+        },
     }
 
     user_id, text, image_url = ManychatWebhook._extract_user_text_and_image(payload)
-    
+
     assert user_id == "user456"
     assert text == ""
     assert image_url == "https://example.com/photo.jpg"
@@ -238,7 +232,7 @@ async def test_manychat_missing_text_and_image_raises():
 
     payload = {
         "subscriber": {"id": "user789"},
-        "message": {}  # No text, no attachments
+        "message": {},  # No text, no attachments
     }
 
     with pytest.raises(ManychatPayloadError, match="Missing message text or image"):
@@ -390,14 +384,14 @@ async def test_manychat_handle_debouncer_supersedes_older_request():
 @pytest.mark.integration
 def test_push_client_preserves_numeric_field_values():
     """Test that ManyChatPushClient preserves numeric types for ManyChat compatibility.
-    
+
     ManyChat Number fields require numeric values, not string representations.
     Note: ManyChat limits to 5 actions max, so we test with 5 fields.
     """
     from src.integrations.manychat.push_client import ManyChatPushClient
-    
+
     client = ManyChatPushClient(api_url="https://test", api_key="test")
-    
+
     # Test with mixed types (5 max due to ManyChat limit)
     field_values = [
         {"field_name": "text_field", "field_value": "some text"},
@@ -406,27 +400,27 @@ def test_push_client_preserves_numeric_field_values():
         {"field_name": "string_number", "field_value": "2500"},  # Should be parsed as int
         {"field_name": "bool_field", "field_value": True},
     ]
-    
+
     actions = client._build_actions(field_values, None, None)
-    
+
     # Verify types are preserved correctly (5 actions max)
     assert len(actions) == 5
-    
+
     # Text stays as text
     assert actions[0]["value"] == "some text"
     assert isinstance(actions[0]["value"], str)
-    
+
     # Numbers stay as numbers
     assert actions[1]["value"] == 1500
     assert isinstance(actions[1]["value"], int)
-    
+
     assert actions[2]["value"] == 99.99
     assert isinstance(actions[2]["value"], float)
-    
+
     # String numbers are parsed to numeric types
     assert actions[3]["value"] == 2500
     assert isinstance(actions[3]["value"], int)
-    
+
     # Booleans stay as booleans
     assert actions[4]["value"] is True
     assert isinstance(actions[4]["value"], bool)

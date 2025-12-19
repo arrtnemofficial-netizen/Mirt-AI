@@ -21,25 +21,13 @@ from typing import TYPE_CHECKING, Any
 from src.agents import get_active_graph
 from src.conf.config import settings
 from src.core.fallbacks import FallbackType, get_fallback_response
+from src.core.logging import classify_root_cause, log_event, safe_preview
 from src.core.rate_limiter import check_rate_limit
 from src.services.conversation import create_conversation_handler
 from src.services.debouncer import BufferedMessage, MessageDebouncer
 from src.services.message_store import MessageStore, create_message_store
-from src.services.renderer import render_agent_response_text
-from src.core.logging import classify_root_cause, log_event, safe_preview
 
 from .push_client import ManyChatPushClient, get_manychat_push_client
-from .constants import (
-    FIELD_AI_INTENT,
-    FIELD_AI_STATE,
-    FIELD_LAST_PRODUCT,
-    FIELD_ORDER_SUM,
-    TAG_AI_RESPONDED,
-    TAG_NEEDS_HUMAN,
-    TAG_ORDER_PAID,
-    TAG_ORDER_STARTED,
-)
-
 from .response_builder import (
     build_manychat_field_values,
     build_manychat_messages,
@@ -75,7 +63,167 @@ class ManyChatAsyncService:
             runner=self.runner,
         )
         # Debouncer: aggregate rapid messages
-        self.debouncer = MessageDebouncer(delay=float(getattr(settings, "MANYCHAT_DEBOUNCE_SECONDS", 1.0)))
+        self.debouncer = MessageDebouncer(
+            delay=float(getattr(settings, "MANYCHAT_DEBOUNCE_SECONDS", 1.0))
+        )
+
+    @staticmethod
+    def _normalize_command_text(text: str) -> tuple[str, str, str]:
+        raw_text = (text or "").strip()
+        if raw_text.startswith(".;"):
+            raw_text = raw_text[2:].lstrip()
+        clean_text = raw_text.lower()
+        first_token = clean_text.split(maxsplit=1)[0] if clean_text else ""
+        return raw_text, clean_text, first_token
+
+    @staticmethod
+    def _is_restart_command(first_token: str) -> bool:
+        return first_token in ("/restart", "/start", "restart", "start")
+
+    def _log_process_start(
+        self,
+        *,
+        trace_id: str,
+        user_id: str,
+        channel: str,
+        text: str,
+        image_url: str | None,
+    ) -> None:
+        log_event(
+            logger,
+            event="manychat_process_start",
+            trace_id=trace_id,
+            user_id=user_id,
+            channel=channel,
+            text_len=len(text or ""),
+            text_preview=safe_preview(text, 160),
+            has_image=bool(image_url),
+            image_url_preview=safe_preview(image_url, 100),
+        )
+
+    def _log_process_done(
+        self,
+        *,
+        trace_id: str,
+        user_id: str,
+        channel: str,
+        start_time: float,
+        response: AgentResponse,
+    ) -> None:
+        log_event(
+            logger,
+            event="manychat_process_done",
+            trace_id=trace_id,
+            user_id=user_id,
+            channel=channel,
+            latency_ms=round((time.time() - start_time) * 1000, 2),
+            intent=getattr(response.metadata, "intent", None),
+            current_state=getattr(response.metadata, "current_state", None),
+            messages_count=len(getattr(response, "messages", []) or []),
+            products_count=len(getattr(response, "products", []) or []),
+        )
+
+    def _build_extra_metadata(
+        self,
+        *,
+        user_id: str,
+        channel: str,
+        image_url: str | None,
+        subscriber_data: dict[str, Any] | None,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        extra_metadata: dict[str, Any] = {}
+
+        if image_url:
+            extra_metadata.update({"has_image": True, "image_url": image_url})
+            log_event(
+                logger,
+                event="manychat_image_attached",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                has_image=True,
+                image_url_preview=safe_preview(image_url, 100),
+            )
+
+        if subscriber_data:
+            instagram_username = subscriber_data.get("instagram_username") or subscriber_data.get(
+                "username"
+            )
+            if instagram_username:
+                extra_metadata["instagram_username"] = instagram_username
+                log_event(
+                    logger,
+                    event="manychat_subscriber_username",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                )
+
+            name = (
+                subscriber_data.get("name")
+                or subscriber_data.get("full_name")
+                or subscriber_data.get("first_name")
+            )
+            if name:
+                extra_metadata["user_nickname"] = name
+                log_event(
+                    logger,
+                    event="manychat_subscriber_name",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                )
+
+        return extra_metadata
+
+    async def _debounce_message(
+        self,
+        *,
+        user_id: str,
+        buffered_msg: BufferedMessage,
+        trace_id: str,
+        channel: str,
+    ) -> BufferedMessage | None:
+        aggregated_msg = await self.debouncer.wait_for_debounce(user_id, buffered_msg)
+        if aggregated_msg is None:
+            log_event(
+                logger,
+                event="manychat_debounce_superseded",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+            )
+        return aggregated_msg
+
+    @staticmethod
+    def _extract_has_image(aggregated_msg: BufferedMessage, metadata: Any) -> bool:
+        has_image_final = bool(getattr(aggregated_msg, "has_image", False))
+        if not has_image_final and isinstance(metadata, dict):
+            has_image_final = bool(metadata.get("has_image"))
+        return has_image_final
+
+    @staticmethod
+    def _get_time_budget(has_image: bool) -> float:
+        try:
+            text_budget = float(getattr(settings, "MANYCHAT_TEXT_TIME_BUDGET_SECONDS", 25.0))
+            vision_budget = float(getattr(settings, "MANYCHAT_VISION_TIME_BUDGET_SECONDS", 55.0))
+        except Exception:
+            text_budget, vision_budget = 25.0, 55.0
+        return vision_budget if has_image else text_budget
+
+    async def _run_handler_with_timeout(
+        self,
+        *,
+        user_id: str,
+        text: str,
+        metadata: dict[str, Any] | None,
+        time_budget: float,
+    ):
+        return await asyncio.wait_for(
+            self._handler.process_message(user_id, text, extra_metadata=metadata),
+            timeout=max(time_budget, 1.0),
+        )
 
     async def _safe_send_text(
         self,
@@ -183,14 +331,14 @@ class ManyChatAsyncService:
         trace_id: str | None = None,
     ) -> None:
         """Process message and push response to ManyChat.
-        
+
         This method is designed to be run in a background task.
         It handles debouncing, AI processing, and push delivery.
-        
+
         Commands:
             /restart - Clear session and respond "Сесія очищена!"
             /start - Same as /restart (alias)
-        
+
         Args:
             user_id: ManyChat subscriber ID
             text: Message text
@@ -199,16 +347,12 @@ class ManyChatAsyncService:
         """
         start_time = time.time()
         trace_id = trace_id or str(uuid.uuid4())
-        log_event(
-            logger,
-            event="manychat_process_start",
+        self._log_process_start(
             trace_id=trace_id,
             user_id=user_id,
             channel=channel,
-            text_len=len(text or ""),
-            text_preview=safe_preview(text, 160),
-            has_image=bool(image_url),
-            image_url_preview=safe_preview(image_url, 100),
+            text=text,
+            image_url=image_url,
         )
 
         # RATE LIMITING: Захист від спаму/abuse
@@ -232,12 +376,8 @@ class ManyChatAsyncService:
 
         try:
             # Handle commands BEFORE debouncing
-            raw_text = (text or "").strip()
-            if raw_text.startswith(".;"):
-                raw_text = raw_text[2:].lstrip()
-            clean_text = raw_text.lower()
-            first_token = clean_text.split(maxsplit=1)[0] if clean_text else ""
-            if first_token in ("/restart", "/start", "restart", "start"):
+            _, _, first_token = self._normalize_command_text(text)
+            if self._is_restart_command(first_token):
                 log_event(
                     logger,
                     event="manychat_restart_command",
@@ -249,49 +389,13 @@ class ManyChatAsyncService:
                 return
 
             # Build metadata including username info
-            extra_metadata = {}
-            
-            # Add image info
-            if image_url:
-                extra_metadata.update({
-                    "has_image": True,
-                    "image_url": image_url,
-                })
-                log_event(
-                    logger,
-                    event="manychat_image_attached",
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    channel=channel,
-                    has_image=True,
-                    image_url_preview=safe_preview(image_url, 100),
-                )
-            
-            # Add username info from subscriber data
-            if subscriber_data:
-                # Instagram username
-                instagram_username = subscriber_data.get("instagram_username") or subscriber_data.get("username")
-                if instagram_username:
-                    extra_metadata["instagram_username"] = instagram_username
-                    log_event(
-                        logger,
-                        event="manychat_subscriber_username",
-                        trace_id=trace_id,
-                        user_id=user_id,
-                        channel=channel,
-                    )
-                
-                # Name/nickname
-                name = subscriber_data.get("name") or subscriber_data.get("full_name") or subscriber_data.get("first_name")
-                if name:
-                    extra_metadata["user_nickname"] = name
-                    log_event(
-                        logger,
-                        event="manychat_subscriber_name",
-                        trace_id=trace_id,
-                        user_id=user_id,
-                        channel=channel,
-                    )
+            extra_metadata = self._build_extra_metadata(
+                user_id=user_id,
+                channel=channel,
+                image_url=image_url,
+                subscriber_data=subscriber_data,
+                trace_id=trace_id,
+            )
 
             # Debouncing: aggregate rapid messages
             buffered_msg = BufferedMessage(
@@ -301,35 +405,24 @@ class ManyChatAsyncService:
                 extra_metadata=extra_metadata,
             )
 
-            aggregated_msg = await self.debouncer.wait_for_debounce(user_id, buffered_msg)
-
+            aggregated_msg = await self._debounce_message(
+                user_id=user_id,
+                buffered_msg=buffered_msg,
+                trace_id=trace_id,
+                channel=channel,
+            )
             if aggregated_msg is None:
-                # Superseded by newer message
-                log_event(
-                    logger,
-                    event="manychat_debounce_superseded",
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    channel=channel,
-                )
                 return
 
             final_text = aggregated_msg.text
             final_metadata = aggregated_msg.extra_metadata
 
             # Prefer debouncer flag; fallback to metadata for test stubs/mocks.
-            has_image_final = bool(getattr(aggregated_msg, "has_image", False))
-            if not has_image_final and isinstance(final_metadata, dict):
-                has_image_final = bool(final_metadata.get("has_image"))
+            has_image_final = self._extract_has_image(aggregated_msg, final_metadata)
 
             # Enforce time budget per message. Also push an interim message if we exceed a smaller threshold.
             # Vision processing can take 20-30 seconds, so we need a larger budget
-            try:
-                text_budget = float(getattr(settings, "MANYCHAT_TEXT_TIME_BUDGET_SECONDS", 25.0))
-                vision_budget = float(getattr(settings, "MANYCHAT_VISION_TIME_BUDGET_SECONDS", 55.0))
-            except Exception:
-                text_budget, vision_budget = 25.0, 55.0
-            time_budget = vision_budget if has_image_final else text_budget
+            time_budget = self._get_time_budget(has_image_final)
 
             interim_task = asyncio.create_task(
                 self._maybe_push_interim(
@@ -356,15 +449,13 @@ class ManyChatAsyncService:
                 final_metadata = {**final_metadata, "trace_id": trace_id, "channel": channel}
 
             try:
-                result = await asyncio.wait_for(
-                    self._handler.process_message(
-                        user_id,
-                        final_text,
-                        extra_metadata=final_metadata,
-                    ),
-                    timeout=max(time_budget, 1.0),
+                result = await self._run_handler_with_timeout(
+                    user_id=user_id,
+                    text=final_text,
+                    metadata=final_metadata,
+                    time_budget=time_budget,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log_event(
                     logger,
                     event="manychat_time_budget_exceeded",
@@ -410,17 +501,12 @@ class ManyChatAsyncService:
             # Push response to ManyChat
             await self._push_response(user_id, result.response, channel, trace_id=trace_id)
 
-            log_event(
-                logger,
-                event="manychat_process_done",
+            self._log_process_done(
                 trace_id=trace_id,
                 user_id=user_id,
                 channel=channel,
-                latency_ms=round((time.time() - start_time) * 1000, 2),
-                intent=getattr(result.response.metadata, "intent", None),
-                current_state=getattr(result.response.metadata, "current_state", None),
-                messages_count=len(getattr(result.response, "messages", []) or []),
-                products_count=len(getattr(result.response, "products", []) or []),
+                start_time=start_time,
+                response=result.response,
             )
 
         except Exception as e:
@@ -518,6 +604,7 @@ class ManyChatAsyncService:
     def _get_error_text() -> str:
         """Get human-like error message."""
         from src.core.human_responses import get_human_response
+
         return get_human_response("error")
 
     async def _push_error_message(self, user_id: str, channel: str, *, trace_id: str) -> None:
@@ -529,10 +616,10 @@ class ManyChatAsyncService:
             trace_id=trace_id,
         )
 
-
     async def _handle_restart_command(self, user_id: str, channel: str) -> None:
         """Handle /restart command - clear session and confirm."""
         import time as _time
+
         _restart_start = _time.time()
 
         # Clear any pending debouncer buffers/timers so no stale aggregated message
@@ -567,7 +654,7 @@ class ManyChatAsyncService:
                 user_id,
                 _time.time() - _lg_start,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "[MANYCHAT:%s] LangGraph state reset timed out (>5s), skipping",
                 user_id,
@@ -587,14 +674,10 @@ class ManyChatAsyncService:
 
         if deleted:
             logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
-            response_text = (
-                "Сесія очищена. Можемо почати спочатку. Напишіть, що вас цікавить 😊"
-            )
+            response_text = "Сесія очищена. Можемо почати спочатку. Напишіть, що вас цікавить 😊"
         else:
             logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
-            response_text = (
-                "Сесія вже була порожня. Напишіть, що вас цікавить 😊"
-            )
+            response_text = "Сесія вже була порожня. Напишіть, що вас цікавить 😊"
 
         # Push confirmation
         await self._safe_send_text(
@@ -606,7 +689,7 @@ class ManyChatAsyncService:
     @staticmethod
     def _build_field_values(agent_response: AgentResponse) -> list[dict[str, Any]]:
         """Build Custom Field values from AgentResponse.
-        
+
         Note: Values preserve their types (str, int, float) for ManyChat compatibility.
         ManyChat Number fields require numeric values, not strings.
         """
@@ -618,13 +701,13 @@ class ManyChatAsyncService:
         return build_manychat_tags(agent_response)
 
     @staticmethod
-    def _build_quick_replies(agent_response: AgentResponse) -> list[dict[str, str]]:
+    def _build_quick_replies(_agent_response: AgentResponse) -> list[dict[str, str]]:
         """Build Quick Reply buttons based on current state.
-        
+
         NOTE: ManyChat sendContent API does NOT support quick_replies for Instagram.
         The 'type: text' format causes "Unsupported quick reply type" error.
         Returning empty list until proper format is determined.
-        
+
         For now, users will type responses manually (which works fine).
         """
         # DISABLED: ManyChat sendContent rejects quick_replies with type='text'

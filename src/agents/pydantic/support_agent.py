@@ -157,7 +157,7 @@ async def _add_state_context(ctx: RunContext[AgentDeps]) -> str:
 async def _add_memory_context(ctx: RunContext[AgentDeps]) -> str:
     """
     Add memory context (Titans-like) to prompt.
-    
+
     This injects persistent profile and fluid facts from memory system.
     Populated by memory_context_node before agent execution.
     """
@@ -214,7 +214,9 @@ async def _add_state_instructions(ctx: RunContext[AgentDeps]) -> str:
     # Fallback to registry
     try:
         prompt = registry.get(f"state.{state}")
-        logger.info("📋 Loaded state prompt from registry for %s (%d chars)", state, len(prompt.content))
+        logger.info(
+            "📋 Loaded state prompt from registry for %s (%d chars)", state, len(prompt.content)
+        )
         return f"\n--- ІНСТРУКЦІЯ ДЛЯ СТАНУ ({state}) ---\n{prompt.content}"
     except (FileNotFoundError, ValueError) as e:
         logger.warning("No prompt found for state: %s (%s)", state, e)
@@ -477,9 +479,7 @@ async def run_support(
         logger.exception("Support agent error: %s", e)
         return SupportResponse(
             event="escalation",
-            messages=[
-                MessageItem(content=_get_error_response())
-            ],
+            messages=[MessageItem(content=_get_error_response())],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
                 current_state=deps.current_state or "STATE_0_INIT",

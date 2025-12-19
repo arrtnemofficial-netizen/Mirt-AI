@@ -20,7 +20,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 TEST_SET_PATH = Path(__file__).parent.parent / "data" / "vision" / "generated" / "test_set.json"
-CANONICAL_NAMES_PATH = Path(__file__).parent.parent / "data" / "vision" / "generated" / "canonical_names.json"
+CANONICAL_NAMES_PATH = (
+    Path(__file__).parent.parent / "data" / "vision" / "generated" / "canonical_names.json"
+)
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +92,9 @@ class TestTestSetIntegrity:
         """Price must be positive int or valid range."""
         for case in test_set:
             if "expected_price" in case:
-                assert isinstance(case["expected_price"], (int, float)), f"{case['id']}: bad price type"
+                assert isinstance(case["expected_price"], (int, float)), (
+                    f"{case['id']}: bad price type"
+                )
                 assert case["expected_price"] >= 0, f"{case['id']}: negative price"
             elif "expected_price_range" in case:
                 rng = case["expected_price_range"]

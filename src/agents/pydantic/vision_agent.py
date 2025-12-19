@@ -134,14 +134,18 @@ async def _download_image_as_base64(url: str, max_retries: int = 2) -> str | Non
             if e.response.status_code == 403 and attempt < max_retries:
                 logger.warning("HTTP 403, retrying (%d/%d)...", attempt + 1, max_retries)
                 import asyncio
+
                 await asyncio.sleep(0.5)
                 continue
             logger.error("Failed to download image (HTTP %d): %s", e.response.status_code, url[:80])
             return None
         except Exception as e:
             if attempt < max_retries:
-                logger.warning("Download error, retrying (%d/%d): %s", attempt + 1, max_retries, str(e)[:50])
+                logger.warning(
+                    "Download error, retrying (%d/%d): %s", attempt + 1, max_retries, str(e)[:50]
+                )
                 import asyncio
+
                 await asyncio.sleep(0.5)
                 continue
             logger.error("Failed to download image: %s - %s", type(e).__name__, str(e)[:100])
@@ -152,6 +156,7 @@ async def _download_image_as_base64(url: str, max_retries: int = 2) -> str | Non
 
 def _is_private_cdn_url(url: str) -> bool:
     from urllib.parse import urlparse
+
     try:
         parsed = urlparse(url)
         return any(host in parsed.netloc for host in _PRIVATE_CDN_HOSTS)
@@ -170,7 +175,9 @@ def _is_private_cdn_url(url: str) -> bool:
 def _build_model() -> OpenAIChatModel:
     model_name = settings.LLM_MODEL_VISION
 
-    is_openai_model = model_name.startswith("gpt-") or model_name.startswith("o1") or model_name.startswith("o3")
+    is_openai_model = (
+        model_name.startswith("gpt-") or model_name.startswith("o1") or model_name.startswith("o3")
+    )
 
     if is_openai_model:
         api_key = settings.OPENAI_API_KEY.get_secret_value()
@@ -186,9 +193,7 @@ def _build_model() -> OpenAIChatModel:
 
     if not api_key:
         logger.error("No API key for vision model! Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
-        raise ValueError(
-            "Vision model requires API key. Set OPENAI_API_KEY or OPENROUTER_API_KEY."
-        )
+        raise ValueError("Vision model requires API key. Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
 
     logger.info("Vision model: %s (via %s)", model_name, base_url[:30])
 
@@ -304,8 +309,12 @@ async def _load_vision_guide_from_db() -> str:
                     if min_p == max_p:
                         lines.append(f"- **Ціна**: {int(min_p)} грн")
                     else:
-                        lines.append(f"- **Ціна**: від {int(min_p)} до {int(max_p)} грн (залежить від розміру)")
-                    size_prices = ", ".join([f"{sz}: {int(pr)} грн" for sz, pr in price_by_size.items()])
+                        lines.append(
+                            f"- **Ціна**: від {int(min_p)} до {int(max_p)} грн (залежить від розміру)"
+                        )
+                    size_prices = ", ".join(
+                        [f"{sz}: {int(pr)} грн" for sz, pr in price_by_size.items()]
+                    )
                     lines.append(f"- **Ціни по розмірах**: {size_prices}")
             else:
                 price = product.get("price")
@@ -376,7 +385,13 @@ def _load_model_rules_yaml() -> str:
 
     import yaml
 
-    rules_path = Path(__file__).parent.parent.parent.parent / "data" / "vision" / "generated" / "model_rules.yaml"
+    rules_path = (
+        Path(__file__).parent.parent.parent.parent
+        / "data"
+        / "vision"
+        / "generated"
+        / "model_rules.yaml"
+    )
 
     try:
         with open(rules_path, encoding="utf-8") as f:
@@ -434,7 +449,13 @@ def _load_vision_guide_from_json() -> str:
     import json
     from pathlib import Path
 
-    guide_path = Path(__file__).parent.parent.parent.parent / "data" / "vision" / "generated" / "vision_guide.json"
+    guide_path = (
+        Path(__file__).parent.parent.parent.parent
+        / "data"
+        / "vision"
+        / "generated"
+        / "vision_guide.json"
+    )
 
     try:
         with open(guide_path, encoding="utf-8") as f:
@@ -500,7 +521,13 @@ def _load_recognition_tips_from_json() -> str:
     import json
     from pathlib import Path
 
-    guide_path = Path(__file__).parent.parent.parent.parent / "data" / "vision" / "generated" / "vision_guide.json"
+    guide_path = (
+        Path(__file__).parent.parent.parent.parent
+        / "data"
+        / "vision"
+        / "generated"
+        / "vision_guide.json"
+    )
 
     try:
         with open(guide_path, encoding="utf-8") as f:
@@ -731,7 +758,9 @@ async def run_vision(
 
     logger.info(
         "👁️ Vision agent starting (MULTIMODAL): image_url=%s",
-        final_image_url[:80] if final_image_url and not final_image_url.startswith("data:") else "<base64>",
+        final_image_url[:80]
+        if final_image_url and not final_image_url.startswith("data:")
+        else "<base64>",
     )
 
     try:

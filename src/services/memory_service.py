@@ -17,12 +17,13 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
 
 from src.services.supabase_client import get_supabase_client
 
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from supabase import Client
 
     from src.agents.pydantic.memory_models import (
@@ -77,6 +78,7 @@ def _get_memory_models():
         UpdateFact,
         UserProfile,
     )
+
     return {
         "ChildProfile": ChildProfile,
         "CommerceInfo": CommerceInfo,
@@ -95,7 +97,7 @@ def _get_memory_models():
 class MemoryService:
     """
     Service для роботи з Titans-like памʼяттю.
-    
+
     Provides:
     - Profile CRUD (Persistent Memory)
     - Facts CRUD with gating (Fluid Memory)
@@ -130,10 +132,10 @@ class MemoryService:
     async def get_profile(self, user_id: str) -> UserProfile | None:
         """
         Завантажити профіль користувача.
-        
+
         Args:
             user_id: External ID (Telegram/ManyChat/Instagram)
-            
+
         Returns:
             UserProfile або None якщо не знайдено
         """
@@ -164,10 +166,10 @@ class MemoryService:
     async def get_or_create_profile(self, user_id: str) -> UserProfile:
         """
         Отримати профіль або створити новий.
-        
+
         Args:
             user_id: External ID
-            
+
         Returns:
             Existing or new UserProfile
         """
@@ -181,10 +183,10 @@ class MemoryService:
     async def create_profile(self, user_id: str) -> UserProfile:
         """
         Створити новий профіль.
-        
+
         Args:
             user_id: External ID
-            
+
         Returns:
             Created UserProfile
         """
@@ -204,11 +206,7 @@ class MemoryService:
                 "last_seen_at": now,
             }
 
-            response = (
-                self.client.table(TABLE_PROFILES)
-                .insert(data)
-                .execute()
-            )
+            response = self.client.table(TABLE_PROFILES).insert(data).execute()
 
             if response.data:
                 logger.info("Created profile for user %s", user_id)
@@ -230,14 +228,14 @@ class MemoryService:
     ) -> UserProfile | None:
         """
         Оновити профіль (merge з існуючими даними).
-        
+
         Args:
             user_id: External ID
             child_profile: Partial update for child_profile
             style_preferences: Partial update for style_preferences
             logistics: Partial update for logistics
             commerce: Partial update for commerce
-            
+
         Returns:
             Updated UserProfile або None при помилці
         """
@@ -263,7 +261,13 @@ class MemoryService:
             if style_preferences:
                 merged = {**current.style_preferences.model_dump(), **style_preferences}
                 # Merge lists (append unique values)
-                for key in ["favorite_models", "favorite_colors", "avoided_colors", "preferred_styles", "fabric_preferences"]:
+                for key in [
+                    "favorite_models",
+                    "favorite_colors",
+                    "avoided_colors",
+                    "preferred_styles",
+                    "fabric_preferences",
+                ]:
                     if key in style_preferences and key in current.style_preferences.model_dump():
                         existing = current.style_preferences.model_dump().get(key, [])
                         new = style_preferences.get(key, [])
@@ -280,10 +284,7 @@ class MemoryService:
 
             # Apply update
             response = (
-                self.client.table(TABLE_PROFILES)
-                .update(updates)
-                .eq("user_id", user_id)
-                .execute()
+                self.client.table(TABLE_PROFILES).update(updates).eq("user_id", user_id).execute()
             )
 
             if response.data:
@@ -302,15 +303,15 @@ class MemoryService:
             return
 
         try:
-            self.client.table(TABLE_PROFILES).update({
-                "last_seen_at": datetime.now(UTC).isoformat()
-            }).eq("user_id", user_id).execute()
+            self.client.table(TABLE_PROFILES).update(
+                {"last_seen_at": datetime.now(UTC).isoformat()}
+            ).eq("user_id", user_id).execute()
         except Exception as e:
             logger.warning("Failed to touch profile for user %s: %s", user_id, e)
 
     def _row_to_profile(self, row: dict) -> UserProfile:
         """Convert DB row to UserProfile.
-        
+
         SENIOR TIP: We use self.models for lazy import to avoid circular imports.
         The models are only loaded when first accessed, not at module load time.
         """
@@ -341,16 +342,16 @@ class MemoryService:
     ) -> Fact | None:
         """
         Зберегти новий факт (з gating перевіркою).
-        
+
         Gating rule: importance >= 0.6 AND surprise >= 0.4
-        
+
         Args:
             user_id: External ID
             fact: NewFact to store
             session_id: Optional session ID
             embedding: Optional vector embedding
             bypass_gating: Bypass importance/surprise check
-            
+
         Returns:
             Stored Fact або None якщо відхилено gating
         """
@@ -359,13 +360,15 @@ class MemoryService:
             if fact.importance < MIN_IMPORTANCE_TO_STORE:
                 logger.debug(
                     "Fact rejected by gating: importance=%.2f < %.2f",
-                    fact.importance, MIN_IMPORTANCE_TO_STORE
+                    fact.importance,
+                    MIN_IMPORTANCE_TO_STORE,
                 )
                 return None
             if fact.surprise < MIN_SURPRISE_TO_STORE:
                 logger.debug(
                     "Fact rejected by gating: surprise=%.2f < %.2f",
-                    fact.surprise, MIN_SURPRISE_TO_STORE
+                    fact.surprise,
+                    MIN_SURPRISE_TO_STORE,
                 )
                 return None
 
@@ -398,16 +401,14 @@ class MemoryService:
             if embedding:
                 data["embedding"] = embedding
 
-            response = (
-                self.client.table(TABLE_MEMORIES)
-                .insert(data)
-                .execute()
-            )
+            response = self.client.table(TABLE_MEMORIES).insert(data).execute()
 
             if response.data:
                 logger.info(
                     "Stored fact for user %s: importance=%.2f, surprise=%.2f",
-                    user_id, fact.importance, fact.surprise
+                    user_id,
+                    fact.importance,
+                    fact.surprise,
                 )
                 return self._row_to_fact(response.data[0])
 
@@ -424,11 +425,11 @@ class MemoryService:
     ) -> Fact | None:
         """
         Оновити існуючий факт.
-        
+
         Args:
             update: UpdateFact with new content
             embedding: Optional new embedding
-            
+
         Returns:
             Updated Fact або None при помилці
         """
@@ -450,7 +451,15 @@ class MemoryService:
                 data["embedding"] = embedding
 
             # Increment version
-            data["version"] = self.client.table(TABLE_MEMORIES).select("version").eq("id", str(update.fact_id)).single().execute().data.get("version", 0) + 1
+            data["version"] = (
+                self.client.table(TABLE_MEMORIES)
+                .select("version")
+                .eq("id", str(update.fact_id))
+                .single()
+                .execute()
+                .data.get("version", 0)
+                + 1
+            )
 
             response = (
                 self.client.table(TABLE_MEMORIES)
@@ -478,13 +487,13 @@ class MemoryService:
     ) -> list[Fact]:
         """
         Отримати факти для користувача.
-        
+
         Args:
             user_id: External ID
             limit: Max facts to return
             categories: Filter by categories
             min_importance: Minimum importance threshold
-            
+
         Returns:
             List of Facts sorted by importance
         """
@@ -530,14 +539,14 @@ class MemoryService:
     ) -> list[tuple[Fact, float]]:
         """
         Semantic search через pgvector.
-        
+
         Args:
             user_id: External ID
             query_embedding: Query vector (1536 dims)
             limit: Max results
             min_importance: Minimum importance
             categories: Filter by categories
-            
+
         Returns:
             List of (Fact, similarity_score) tuples
         """
@@ -559,7 +568,7 @@ class MemoryService:
             if response.data:
                 results = []
                 for row in response.data:
-                    fact = Fact(
+                    fact = self.models["Fact"](
                         id=row["id"],
                         user_id=user_id,
                         content=row["content"],
@@ -584,10 +593,12 @@ class MemoryService:
             return False
 
         try:
-            self.client.table(TABLE_MEMORIES).update({
-                "is_active": False,
-                "updated_at": datetime.now(UTC).isoformat(),
-            }).eq("id", str(fact_id)).execute()
+            self.client.table(TABLE_MEMORIES).update(
+                {
+                    "is_active": False,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ).eq("id", str(fact_id)).execute()
 
             logger.info("Deactivated fact %s: %s", fact_id, reason)
             return True
@@ -604,15 +615,15 @@ class MemoryService:
         try:
             now = datetime.now(UTC).isoformat()
             for fact_id in fact_ids:
-                self.client.table(TABLE_MEMORIES).update({
-                    "last_accessed_at": now
-                }).eq("id", fact_id).execute()
+                self.client.table(TABLE_MEMORIES).update({"last_accessed_at": now}).eq(
+                    "id", fact_id
+                ).execute()
         except Exception as e:
             logger.warning("Failed to touch facts: %s", e)
 
     def _row_to_fact(self, row: dict) -> Fact:
         """Convert DB row to Fact."""
-        return Fact(
+        return self.models["Fact"](
             id=row.get("id"),
             user_id=row.get("user_id", ""),
             session_id=row.get("session_id"),
@@ -667,13 +678,13 @@ class MemoryService:
     ) -> MemorySummary | None:
         """
         Зберегти summary (замінює попередній).
-        
+
         Args:
             user_id: External ID
             summary_text: Summary text
             key_facts: Key facts list
             facts_count: Number of facts summarized
-            
+
         Returns:
             Created MemorySummary
         """
@@ -682,10 +693,12 @@ class MemoryService:
 
         try:
             # Deactivate old summaries
-            self.client.table(TABLE_SUMMARIES).update({
-                "is_current": False,
-                "updated_at": datetime.now(UTC).isoformat(),
-            }).eq("user_id", user_id).eq("summary_type", "user").execute()
+            self.client.table(TABLE_SUMMARIES).update(
+                {
+                    "is_current": False,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ).eq("user_id", user_id).eq("summary_type", "user").execute()
 
             # Create new summary
             now = datetime.now(UTC).isoformat()
@@ -700,11 +713,7 @@ class MemoryService:
                 "is_current": True,
             }
 
-            response = (
-                self.client.table(TABLE_SUMMARIES)
-                .insert(data)
-                .execute()
-            )
+            response = self.client.table(TABLE_SUMMARIES).insert(data).execute()
 
             if response.data:
                 logger.info("Saved summary for user %s", user_id)
@@ -718,7 +727,7 @@ class MemoryService:
 
     def _row_to_summary(self, row: dict) -> MemorySummary:
         """Convert DB row to MemorySummary."""
-        return MemorySummary(
+        return self.models["MemorySummary"](
             summary_type=row.get("summary_type", "user"),
             summary_text=row.get("summary_text", ""),
             key_facts=row.get("key_facts", []),
@@ -738,14 +747,14 @@ class MemoryService:
     ) -> MemoryContext:
         """
         Завантажити повний контекст памʼяті для агента.
-        
+
         Це головний метод для використання в memory_context_node.
-        
+
         Args:
             user_id: External ID
             query_embedding: Optional query for semantic search
             facts_limit: Max facts to load
-            
+
         Returns:
             MemoryContext з profile, facts, summary
         """
@@ -755,9 +764,7 @@ class MemoryService:
         # Load facts (semantic search if embedding provided)
         facts: list[Fact] = []
         if query_embedding:
-            search_results = await self.search_facts(
-                user_id, query_embedding, limit=facts_limit
-            )
+            search_results = await self.search_facts(user_id, query_embedding, limit=facts_limit)
             facts = [f for f, _ in search_results]
         else:
             facts = await self.get_facts(user_id, limit=facts_limit)
@@ -786,12 +793,12 @@ class MemoryService:
     ) -> dict[str, int]:
         """
         Застосувати рішення MemoryAgent.
-        
+
         Args:
             user_id: External ID
             decision: MemoryDecision from MemoryAgent
             session_id: Optional session ID
-            
+
         Returns:
             Stats: {"stored": N, "updated": M, "deleted": K, "rejected": R}
         """
@@ -833,7 +840,11 @@ class MemoryService:
 
         logger.info(
             "Applied memory decision for user %s: stored=%d, updated=%d, deleted=%d, rejected=%d",
-            user_id, stats["stored"], stats["updated"], stats["deleted"], stats["rejected"]
+            user_id,
+            stats["stored"],
+            stats["updated"],
+            stats["deleted"],
+            stats["rejected"],
         )
 
         return stats
@@ -845,7 +856,7 @@ class MemoryService:
     async def apply_time_decay(self) -> int:
         """
         Застосувати time decay до старих фактів.
-        
+
         Returns:
             Number of affected rows
         """
@@ -864,7 +875,7 @@ class MemoryService:
     async def cleanup_expired(self) -> int:
         """
         Видалити expired факти.
-        
+
         Returns:
             Number of deleted rows
         """

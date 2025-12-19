@@ -219,23 +219,23 @@ RUSSIAN_ONLY_CHARS = set("ыэъЫЭЪёЁ")
 
 # Russian words that should NEVER appear in Ukrainian response
 RUSSIAN_MARKERS = [
-    r"\bщас\b",      # сейчас (рос) vs зараз (укр)
-    r"\bсейчас\b",   # сейчас (рос)
-    r"\bтолько\b",   # только (рос) vs тільки (укр)
-    r"\bхорошо\b",   # хорошо (рос) vs добре (укр)
+    r"\bщас\b",  # сейчас (рос) vs зараз (укр)
+    r"\bсейчас\b",  # сейчас (рос)
+    r"\bтолько\b",  # только (рос) vs тільки (укр)
+    r"\bхорошо\b",  # хорошо (рос) vs добре (укр)
     r"\bконечно\b",  # конечно (рос) vs звичайно (укр)
     r"\bпожалуйста\b",  # пожалуйста (рос) vs будь ласка (укр)
     r"\bспасибо\b",  # спасибо (рос) vs дякую (укр)
-    r"\bждите\b",    # ждите (рос) vs чекайте (укр)
+    r"\bждите\b",  # ждите (рос) vs чекайте (укр)
     r"\bподождите\b",  # подождите (рос) vs зачекайте (укр)
     r"\bздравствуйте\b",  # здравствуйте (рос) vs вітаю (укр)
-    r"\bпривет\b",   # привет (рос) vs привіт (укр)
+    r"\bпривет\b",  # привет (рос) vs привіт (укр)
 ]
 
 
 def _validate_language_ukrainian(response: dict[str, Any]) -> list[str]:
     """Validate that response is in Ukrainian, not Russian.
-    
+
     This is CRITICAL for brand consistency and legal compliance.
     """
     import re
@@ -258,7 +258,7 @@ def _validate_language_ukrainian(response: dict[str, Any]) -> list[str]:
         for pattern in RUSSIAN_MARKERS:
             if re.search(pattern, text_lower):
                 errors.append(
-                    f"Message {i}: contains Russian word '{pattern.strip(chr(92)+'b')}' - use Ukrainian equivalent"
+                    f"Message {i}: contains Russian word '{pattern.strip(chr(92) + 'b')}' - use Ukrainian equivalent"
                 )
 
     return errors

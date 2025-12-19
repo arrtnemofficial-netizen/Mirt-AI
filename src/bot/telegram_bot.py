@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
@@ -27,6 +26,8 @@ from src.services.session_store import InMemorySessionStore, SessionStore
 
 
 if TYPE_CHECKING:
+    from aiogram.types import Message
+
     from src.core.models import AgentResponse
 
 
@@ -192,7 +193,7 @@ async def _process_incoming_debounced(
         has_image=has_image,
         image_url=image_url,
         extra_metadata=extra_metadata,
-        original_message=message
+        original_message=message,
     )
 
     # Define the actual processing logic as a callback
@@ -204,9 +205,7 @@ async def _process_incoming_debounced(
 
 
 async def _execute_aggregated_logic(
-    session_id: str,
-    aggregated_msg: BufferedMessage,
-    handler: ConversationHandler
+    session_id: str, aggregated_msg: BufferedMessage, handler: ConversationHandler
 ) -> None:
     """Actual processing logic executed after debounce delay."""
 
@@ -277,14 +276,14 @@ async def _dispatch_to_telegram(
     text_chunks = render_agent_response_text(agent_response)
 
     # Send text messages
-    for i, chunk in enumerate(text_chunks):
+    for _i, chunk in enumerate(text_chunks):
         if not chunk or not chunk.strip():
             continue
         await message.answer(chunk)
 
     # Send product photos only for vision/photo-ident responses to avoid повторних фото
     if agent_response.metadata.intent == "PHOTO_IDENT":
-        for i, product in enumerate(agent_response.products):
+        for _i, product in enumerate(agent_response.products):
             if product.photo_url:
                 await message.answer_photo(
                     photo=product.photo_url,

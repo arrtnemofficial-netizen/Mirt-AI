@@ -22,7 +22,7 @@ class MinimalClientData:
 
 def extract_phone(text: str) -> str | None:
     """Extract and normalize Ukrainian phone number.
-    
+
     Returns: +380XXXXXXXXX or None
     """
     # Pattern: +380, 380, 0XX formats
@@ -46,7 +46,7 @@ def extract_phone(text: str) -> str | None:
 
 def extract_nova_poshta(text: str) -> str | None:
     """Extract Nova Poshta branch number.
-    
+
     Handles: НП 54, нп54, відділення 25, поштомат 100, нова почта 15
     Returns: Just the number (string)
     """
@@ -70,7 +70,7 @@ def extract_nova_poshta(text: str) -> str | None:
 
 def parse_minimal(text: str) -> MinimalClientData:
     """Parse only phone and NP from text.
-    
+
     For name/city normalization, rely on LLM with proper prompting.
     """
     return MinimalClientData(

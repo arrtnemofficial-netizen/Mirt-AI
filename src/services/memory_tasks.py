@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 async def apply_time_decay() -> dict[str, int]:
     """
     Застосувати time decay до старих фактів.
-    
+
     Зменшує importance для фактів, які давно не використовувались.
     Це робить памʼять "живою" — застаріле поступово забувається.
-    
+
     Returns:
         Stats dict with affected counts
     """
@@ -57,10 +57,7 @@ async def apply_time_decay() -> dict[str, int]:
         affected = await memory_service.apply_time_decay()
 
         elapsed = (datetime.now(UTC) - start).total_seconds()
-        logger.info(
-            "✅ Time decay complete: %d facts affected in %.2fs",
-            affected, elapsed
-        )
+        logger.info("✅ Time decay complete: %d facts affected in %.2fs", affected, elapsed)
 
         return {
             "affected": affected,
@@ -76,9 +73,9 @@ async def apply_time_decay() -> dict[str, int]:
 async def cleanup_expired() -> dict[str, int]:
     """
     Видалити (деактивувати) expired факти.
-    
+
     Факти з expires_at < now() будуть помічені як is_active=False.
-    
+
     Returns:
         Stats dict with cleaned counts
     """
@@ -95,10 +92,7 @@ async def cleanup_expired() -> dict[str, int]:
         cleaned = await memory_service.cleanup_expired()
 
         elapsed = (datetime.now(UTC) - start).total_seconds()
-        logger.info(
-            "✅ Cleanup complete: %d expired facts deactivated in %.2fs",
-            cleaned, elapsed
-        )
+        logger.info("✅ Cleanup complete: %d expired facts deactivated in %.2fs", cleaned, elapsed)
 
         return {
             "cleaned": cleaned,
@@ -114,12 +108,12 @@ async def cleanup_expired() -> dict[str, int]:
 async def generate_user_summary(user_id: str) -> dict[str, any]:
     """
     Згенерувати summary для конкретного користувача.
-    
+
     Збирає всі активні факти і створює стислий summary.
-    
+
     Args:
         user_id: User to generate summary for
-        
+
     Returns:
         Summary stats
     """
@@ -175,10 +169,10 @@ async def generate_user_summary(user_id: str) -> dict[str, any]:
 async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
     """
     Згенерувати summaries для активних юзерів.
-    
+
     Args:
         days: Consider users active if seen in last N days
-        
+
     Returns:
         Stats dict
     """
@@ -195,10 +189,7 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
         response = (
-            client.table("mirt_profiles")
-            .select("user_id")
-            .gte("last_seen_at", cutoff)
-            .execute()
+            client.table("mirt_profiles").select("user_id").gte("last_seen_at", cutoff).execute()
         )
 
         if not response.data:
@@ -219,7 +210,9 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
 
         logger.info(
             "✅ Summary generation complete: %d/%d users in %.2fs",
-            successful, len(user_ids), elapsed
+            successful,
+            len(user_ids),
+            elapsed,
         )
 
         return {
@@ -237,12 +230,12 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
 async def memory_maintenance() -> dict[str, any]:
     """
     Повний цикл обслуговування памʼяті.
-    
+
     Запускає:
     1. Time decay
     2. Cleanup expired
     3. Generate summaries
-    
+
     Returns:
         Combined stats from all tasks
     """

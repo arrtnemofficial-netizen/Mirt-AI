@@ -8,12 +8,8 @@ These tests verify that:
 4. Colors/prices come from catalog, not LLM hallucinations
 """
 
-import pytest
-from typing import Any
-
-from src.agents.langgraph.nodes.intent import detect_intent_from_text, INTENT_PATTERNS
-from src.agents.langgraph.edges import route_after_intent, _resolve_intent_route
-from src.core.state_machine import State
+from src.agents.langgraph.edges import route_after_intent
+from src.agents.langgraph.nodes.intent import detect_intent_from_text
 
 
 # =============================================================================
@@ -35,7 +31,9 @@ class TestIntentDetection:
         ]
         for phrase in payment_phrases:
             intent = detect_intent_from_text(phrase, has_image=False, current_state="STATE_0_INIT")
-            assert intent == "PAYMENT_DELIVERY", f"'{phrase}' should be PAYMENT_DELIVERY, got {intent}"
+            assert intent == "PAYMENT_DELIVERY", (
+                f"'{phrase}' should be PAYMENT_DELIVERY, got {intent}"
+            )
 
     def test_product_selection_in_offer_state(self):
         """Selecting a product name in OFFER state should trigger PAYMENT."""
@@ -46,7 +44,9 @@ class TestIntentDetection:
 
     def test_size_in_payment_state(self):
         """Size info in PAYMENT state should stay PAYMENT."""
-        intent = detect_intent_from_text("158", has_image=False, current_state="STATE_5_PAYMENT_DELIVERY")
+        intent = detect_intent_from_text(
+            "158", has_image=False, current_state="STATE_5_PAYMENT_DELIVERY"
+        )
         assert intent == "PAYMENT_DELIVERY", f"Got {intent}"
 
     def test_photo_with_text_in_offer(self):
@@ -60,7 +60,9 @@ class TestIntentDetection:
         for word in confirmations:
             intent = detect_intent_from_text(word, has_image=False, current_state="STATE_4_OFFER")
             # FIXED: All confirmations now trigger PAYMENT_DELIVERY in OFFER state
-            assert intent == "PAYMENT_DELIVERY", f"'{word}' should be PAYMENT_DELIVERY, got {intent}"
+            assert intent == "PAYMENT_DELIVERY", (
+                f"'{word}' should be PAYMENT_DELIVERY, got {intent}"
+            )
 
 
 # =============================================================================
@@ -127,17 +129,22 @@ class TestProductSelection:
     def test_product_names_should_trigger_payment_in_offer(self):
         """Product names in OFFER state should trigger PAYMENT flow."""
         for product in PRODUCT_SELECTION_PATTERNS:
-            intent = detect_intent_from_text(product, has_image=False, current_state="STATE_4_OFFER")
+            intent = detect_intent_from_text(
+                product, has_image=False, current_state="STATE_4_OFFER"
+            )
             # FIXED: All product names now trigger PAYMENT_DELIVERY in OFFER state
-            assert intent == "PAYMENT_DELIVERY", f"'{product}' should be PAYMENT_DELIVERY, got {intent}"
+            assert intent == "PAYMENT_DELIVERY", (
+                f"'{product}' should be PAYMENT_DELIVERY, got {intent}"
+            )
 
     def test_product_names_in_init_state_are_discovery(self):
         """Product names in INIT state should be DISCOVERY or PRODUCT_CATEGORY (not payment)."""
         for product in PRODUCT_SELECTION_PATTERNS:
             intent = detect_intent_from_text(product, has_image=False, current_state="STATE_0_INIT")
             # In INIT state, product names are discovery questions or product category queries
-            assert intent in ["DISCOVERY_OR_QUESTION", "PRODUCT_CATEGORY"], \
+            assert intent in ["DISCOVERY_OR_QUESTION", "PRODUCT_CATEGORY"], (
                 f"'{product}' in INIT should be DISCOVERY/PRODUCT_CATEGORY, got {intent}"
+            )
 
 
 # =============================================================================
@@ -170,7 +177,9 @@ class TestFullFlow:
     def test_size_selection_flow(self):
         """Simulate: product selected -> size question -> size answer -> payment."""
         # User gives size
-        intent1 = detect_intent_from_text("158", has_image=False, current_state="STATE_3_SIZE_COLOR")
+        intent1 = detect_intent_from_text(
+            "158", has_image=False, current_state="STATE_3_SIZE_COLOR"
+        )
         print(f"'158' in SIZE_COLOR -> {intent1}")
 
         # User confirms
@@ -203,9 +212,21 @@ if __name__ == "__main__":
     print("=" * 60)
 
     routing_cases = [
-        {"detected_intent": "PAYMENT_DELIVERY", "current_state": "STATE_4_OFFER", "selected_products": [{}]},
-        {"detected_intent": "DISCOVERY_OR_QUESTION", "current_state": "STATE_4_OFFER", "selected_products": [{}]},
-        {"detected_intent": "SIZE_HELP", "current_state": "STATE_3_SIZE_COLOR", "selected_products": [{}]},
+        {
+            "detected_intent": "PAYMENT_DELIVERY",
+            "current_state": "STATE_4_OFFER",
+            "selected_products": [{}],
+        },
+        {
+            "detected_intent": "DISCOVERY_OR_QUESTION",
+            "current_state": "STATE_4_OFFER",
+            "selected_products": [{}],
+        },
+        {
+            "detected_intent": "SIZE_HELP",
+            "current_state": "STATE_3_SIZE_COLOR",
+            "selected_products": [{}],
+        },
     ]
 
     for state in routing_cases:

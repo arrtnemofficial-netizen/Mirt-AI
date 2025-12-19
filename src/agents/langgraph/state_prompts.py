@@ -42,20 +42,21 @@ PAYMENT_SUB_PHASES = {
 def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
     """
     Get the prompt for a specific state.
-    
+
     PRIORITY ORDER (Single Source of Truth):
     1. PromptRegistry (data/prompts/states/*.md) - PREFERRED
     2. STATE_PROMPTS dict - FALLBACK
-    
+
     This allows editing prompts via .md files without code changes.
     """
-    from src.core.prompt_registry import registry
-    from src.conf.config import settings
-
     # Support callers passing enum values (e.g. State.STATE_1_DISCOVERY)
     # Note: State is a StrEnum, so isinstance(state_name, str) returns True
     # We need to check for Enum first
     from enum import Enum
+
+    from src.conf.config import settings
+    from src.core.prompt_registry import registry
+
     if isinstance(state_name, Enum):
         state_name = state_name.value
     elif not isinstance(state_name, str):
@@ -122,7 +123,7 @@ def validate_payment_subphase_prompts() -> list[str]:
 def get_payment_sub_phase(state: dict[str, Any]) -> str:
     """
     Determine which sub-phase of payment we're in.
-    
+
     Based on what data we have:
     - No customer data → REQUEST_DATA
     - Has customer data, not confirmed → CONFIRM_DATA
@@ -166,12 +167,12 @@ def determine_next_dialog_phase(
 ) -> str:
     """
     Determine the next dialog_phase based on current state and conditions.
-    
+
     This is the CORE transition logic matching n8n state machine.
     """
     # STATE_0_INIT transitions
     if current_state == "STATE_0_INIT":
-        if intent == "GREETING_ONLY" or intent == "DISCOVERY_OR_QUESTION":
+        if intent in {"GREETING_ONLY", "DISCOVERY_OR_QUESTION"}:
             return "DISCOVERY"
         elif intent == "PHOTO_IDENT":
             return "VISION_DONE"
@@ -231,14 +232,12 @@ def determine_next_dialog_phase(
 
     # STATE_5_PAYMENT_DELIVERY transitions
     if current_state == "STATE_5_PAYMENT_DELIVERY":
-        if payment_sub_phase == "THANK_YOU":
-            return "UPSELL_OFFERED"
-        elif payment_sub_phase == "SHOW_PAYMENT":
-            return "WAITING_FOR_PAYMENT_PROOF"
-        elif payment_sub_phase == "CONFIRM_DATA":
-            return "WAITING_FOR_PAYMENT_METHOD"
-        else:
-            return "WAITING_FOR_DELIVERY_DATA"
+        phase_map = {
+            "THANK_YOU": "UPSELL_OFFERED",
+            "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",
+            "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",
+        }
+        return phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
 
     # STATE_6_UPSELL transitions
     if current_state == "STATE_6_UPSELL":
@@ -278,6 +277,7 @@ def _get_intent_patterns() -> dict:
     global _INTENT_PATTERNS_CACHE
     if _INTENT_PATTERNS_CACHE is None:
         from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
+
         _INTENT_PATTERNS_CACHE = INTENT_PATTERNS
     return _INTENT_PATTERNS_CACHE
 
@@ -285,7 +285,7 @@ def _get_intent_patterns() -> dict:
 def detect_simple_intent(message: str) -> str | None:
     """
     Simple keyword-based intent detection.
-    
+
     Uses INTENT_PATTERNS from intent.py as Single Source of Truth.
     """
     patterns = _get_intent_patterns()
@@ -298,7 +298,7 @@ def detect_simple_intent(message: str) -> str | None:
         "COMPLAINT",
         "SIZE_HELP",
         "COLOR_HELP",
-        "REQUEST_PHOTO",     # Before THANKYOU to catch "покажи фото"
+        "REQUEST_PHOTO",  # Before THANKYOU to catch "покажи фото"
         "PRODUCT_CATEGORY",
         "THANKYOU_SMALLTALK",  # Last - catch "дякую", "ок" at end
     ]

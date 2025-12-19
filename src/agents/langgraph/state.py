@@ -43,6 +43,7 @@ def append_list(current: list, new: list) -> list:
         return current
     return current + [x for x in new if x not in current]
 
+
 def add_messages_capped(current: list, new: list) -> list:
     """Append messages but keep only the last N to prevent unbounded growth."""
     merged = add_messages(current, new)

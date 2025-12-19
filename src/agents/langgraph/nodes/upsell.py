@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 def _build_crm_status_message(state: dict[str, Any]) -> str:
     """Build CRM status message for user display."""
     crm_order_result = state.get("crm_order_result", {})
-    crm_external_id = state.get("crm_external_id", "")
 
     if not crm_order_result:
         return ""

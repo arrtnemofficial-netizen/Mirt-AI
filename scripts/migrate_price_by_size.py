@@ -8,29 +8,29 @@ Usage:
     python scripts/migrate_price_by_size.py
 """
 
-import asyncio
-import json
 import sys
 from pathlib import Path
 
 import yaml
 
+
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from supabase import create_client
+
 from src.conf.config import settings
 
 
 def load_prices_from_yaml() -> dict[str, dict]:
     """Завантажує ціни з products_master.yaml."""
     yaml_path = Path(__file__).parent.parent / "data" / "vision" / "products_master.yaml"
-    
-    with open(yaml_path, "r", encoding="utf-8") as f:
+
+    with open(yaml_path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    
+
     products = data.get("products", {})
-    
+
     # Збираємо ВСІ товари з prices_by_size
     prices_map = {}
     for key, product in products.items():
@@ -39,7 +39,7 @@ def load_prices_from_yaml() -> dict[str, dict]:
         if prices and name:
             prices_map[name] = prices
             print(f"  📦 {name}: {len(prices)} розмірів")
-    
+
     return prices_map
 
 
@@ -47,28 +47,25 @@ def main():
     print("=" * 60)
     print("МІГРАЦІЯ: price_by_size")
     print("=" * 60)
-    
+
     # 1. Завантажуємо ціни з YAML
     print("\n📂 Читаю products_master.yaml...")
     prices_map = load_prices_from_yaml()
     print(f"\n   Знайдено {len(prices_map)} товарів з варіативними цінами")
-    
+
     if not prices_map:
         print("❌ Немає товарів для оновлення!")
         sys.exit(1)
-    
+
     # 2. Підключаємось до Supabase
     print("\n🔌 Підключаюсь до Supabase...")
     try:
-        client = create_client(
-            settings.SUPABASE_URL,
-            settings.SUPABASE_API_KEY.get_secret_value()
-        )
+        client = create_client(settings.SUPABASE_URL, settings.SUPABASE_API_KEY.get_secret_value())
         print("   ✅ Підключено!")
     except Exception as e:
         print(f"❌ Помилка підключення: {e}")
         sys.exit(1)
-    
+
     # 2.5 Перевіряємо чи існує колонка price_by_size
     print("\n🔧 Перевіряю схему...")
     try:
@@ -95,51 +92,64 @@ COMMENT ON COLUMN products.price_by_size IS
             sys.exit(1)
         else:
             raise e
-    
+
     # 3. Оновлюємо кожен товар
     print("\n📝 Оновлюю товари...")
     updated = 0
     errors = []
-    
+
     for product_name, prices in prices_map.items():
         try:
             # Шукаємо всі товари з цією базовою назвою
             # Наприклад "Костюм Лагуна" -> "Костюм Лагуна (рожевий)", "Костюм Лагуна (жовтий)" тощо
-            result = client.table("products").select("id, name").ilike("name", f"{product_name}%").execute()
-            
+            result = (
+                client.table("products")
+                .select("id, name")
+                .ilike("name", f"{product_name}%")
+                .execute()
+            )
+
             if not result.data:
                 print(f"   ⚠️ {product_name}: не знайдено в БД")
                 continue
-            
+
             # Оновлюємо кожен знайдений товар
             for product in result.data:
-                update_result = client.table("products").update({
-                    "price_by_size": prices
-                }).eq("id", product["id"]).execute()
-                
+                update_result = (
+                    client.table("products")
+                    .update({"price_by_size": prices})
+                    .eq("id", product["id"])
+                    .execute()
+                )
+
                 if update_result.data:
                     print(f"   ✅ {product['name']}")
                     updated += 1
                 else:
                     errors.append(f"{product['name']}: update failed")
-                    
+
         except Exception as e:
             errors.append(f"{product_name}: {e}")
             print(f"   ❌ {product_name}: {e}")
-    
+
     # 4. Результат
     print("\n" + "=" * 60)
     print(f"РЕЗУЛЬТАТ: Оновлено {updated} товарів")
-    
+
     if errors:
         print(f"\n⚠️ Помилки ({len(errors)}):")
         for err in errors:
             print(f"   • {err}")
-    
+
     # 5. Перевірка
     print("\n🔍 Перевірка...")
-    result = client.table("products").select("name, price_by_size").not_.is_("price_by_size", "null").execute()
-    
+    result = (
+        client.table("products")
+        .select("name, price_by_size")
+        .not_.is_("price_by_size", "null")
+        .execute()
+    )
+
     if result.data:
         print(f"   Товарів з price_by_size: {len(result.data)}")
         for p in result.data[:3]:
@@ -149,7 +159,7 @@ COMMENT ON COLUMN products.price_by_size IS
     else:
         print("   ❌ Жодного товару з price_by_size!")
         sys.exit(1)
-    
+
     print("\n✅ МІГРАЦІЯ ЗАВЕРШЕНА!")
 
 

@@ -24,7 +24,9 @@ def _stagnant_state(session_id: str) -> dict:
 async def test_guardrails_soft_recovery_after_10_stagnant_turns():
     store = InMemorySessionStore()
     msg_store = InMemoryMessageStore()
-    handler = ConversationHandler(session_store=store, message_store=msg_store, runner=PassthroughRunner())
+    handler = ConversationHandler(
+        session_store=store, message_store=msg_store, runner=PassthroughRunner()
+    )
 
     session_id = "sess_guard_10"
 
@@ -46,7 +48,9 @@ async def test_guardrails_soft_recovery_after_10_stagnant_turns():
 async def test_guardrails_escalation_after_20_stagnant_turns():
     store = InMemorySessionStore()
     msg_store = InMemoryMessageStore()
-    handler = ConversationHandler(session_store=store, message_store=msg_store, runner=PassthroughRunner())
+    handler = ConversationHandler(
+        session_store=store, message_store=msg_store, runner=PassthroughRunner()
+    )
 
     session_id = "sess_guard_20"
 

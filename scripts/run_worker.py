@@ -45,7 +45,7 @@ def run_worker(queue: str | None = None, concurrency: int = 4):
         cmd.extend(["-Q", queue])
 
     print(f"Starting Celery worker: {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=PROJECT_ROOT)
+    subprocess.run(cmd, check=False, cwd=PROJECT_ROOT)
 
 
 def run_beat():
@@ -61,7 +61,7 @@ def run_beat():
     ]
 
     print(f"Starting Celery Beat: {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=PROJECT_ROOT)
+    subprocess.run(cmd, check=False, cwd=PROJECT_ROOT)
 
 
 def run_flower():
@@ -78,7 +78,7 @@ def run_flower():
 
     print(f"Starting Flower: {' '.join(cmd)}")
     print("Dashboard available at: http://localhost:5555")
-    subprocess.run(cmd, cwd=PROJECT_ROOT)
+    subprocess.run(cmd, check=False, cwd=PROJECT_ROOT)
 
 
 def main():

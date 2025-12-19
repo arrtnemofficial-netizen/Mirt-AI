@@ -154,6 +154,7 @@ class TestCatalogLoading:
         )
 
         import json
+
         with open(sample, encoding="utf-8") as f:
             data = json.load(f)
 
@@ -168,7 +169,9 @@ class TestCatalogLoading:
         # Create test products
         test_products = [
             ValidatedProduct(id=1, name="Сукня Анна", price=1850, photo_url="https://x.com/1.jpg"),
-            ValidatedProduct(id=2, name="Тренч Парижанка", price=2500, photo_url="https://x.com/2.jpg"),
+            ValidatedProduct(
+                id=2, name="Тренч Парижанка", price=2500, photo_url="https://x.com/2.jpg"
+            ),
         ]
 
         # Search by name

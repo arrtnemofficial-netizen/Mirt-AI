@@ -42,22 +42,12 @@ class TestDetermineStage:
 
     def test_escalation_in_agent_response(self):
         """Escalation in agent_response triggers escalation stage."""
-        state = {
-            "step_number": 5,
-            "agent_response": {
-                "escalation": {"reason": "USER_REQUEST"}
-            }
-        }
+        state = {"step_number": 5, "agent_response": {"escalation": {"reason": "USER_REQUEST"}}}
         assert determine_stage(state) == STAGE_ESCALATION
 
     def test_escalation_level_in_metadata(self):
         """Escalation level in metadata triggers escalation stage."""
-        state = {
-            "step_number": 5,
-            "agent_response": {
-                "metadata": {"escalation_level": "URGENT"}
-            }
-        }
+        state = {"step_number": 5, "agent_response": {"metadata": {"escalation_level": "URGENT"}}}
         assert determine_stage(state) == STAGE_ESCALATION
 
     def test_payment_state_show_payment_phase(self):
@@ -83,9 +73,7 @@ class TestDetermineStage:
         state = {
             "step_number": 5,
             "current_state": State.STATE_3_SIZE_COLOR.value,  # Not payment state
-            "messages": [
-                {"role": "assistant", "content": "Реквізити: IBAN UA1234567890"}
-            ]
+            "messages": [{"role": "assistant", "content": "Реквізити: IBAN UA1234567890"}],
         }
         assert determine_stage(state) == STAGE_GIVE_REQUISITES
 
@@ -100,22 +88,12 @@ class TestDetermineStage:
 
     def test_escalation_level_none_is_ignored(self):
         """Escalation level 'NONE' is treated as no escalation."""
-        state = {
-            "step_number": 5,
-            "agent_response": {
-                "metadata": {"escalation_level": "NONE"}
-            }
-        }
+        state = {"step_number": 5, "agent_response": {"metadata": {"escalation_level": "NONE"}}}
         assert determine_stage(state) is None
 
     def test_escalation_level_empty_is_ignored(self):
         """Empty escalation level is treated as no escalation."""
-        state = {
-            "step_number": 5,
-            "agent_response": {
-                "metadata": {"escalation_level": ""}
-            }
-        }
+        state = {"step_number": 5, "agent_response": {"metadata": {"escalation_level": ""}}}
         assert determine_stage(state) is None
 
 
@@ -134,9 +112,9 @@ class TestSitniksStatusNode:
             "step_number": 5,
             "current_state": State.STATE_3_SIZE_COLOR.value,
         }
-        
+
         result = await sitniks_status_node(state)
-        
+
         assert result.update["sitniks_status_updated"] is False
         assert result.goto == "__end__"
 
@@ -144,16 +122,16 @@ class TestSitniksStatusNode:
     async def test_service_not_enabled(self):
         """When service disabled, returns with error message."""
         state = {"is_first_message": True}
-        
+
         mock_service = MagicMock()
         mock_service.enabled = False
-        
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_status_node(state)
-        
+
         assert result.update["sitniks_status_updated"] is False
         assert result.update["sitniks_stage"] == STAGE_FIRST_TOUCH
         assert "not configured" in result.update.get("sitniks_error", "")
@@ -166,22 +144,21 @@ class TestSitniksStatusNode:
             "session_id": "sess_123",
             "metadata": {
                 "instagram_username": "test_user",
-            }
+            },
         }
-        
+
         mock_service = MagicMock()
         mock_service.enabled = True
-        mock_service.handle_first_touch = AsyncMock(return_value={
-            "success": True,
-            "chat_id": "chat_456"
-        })
-        
+        mock_service.handle_first_touch = AsyncMock(
+            return_value={"success": True, "chat_id": "chat_456"}
+        )
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_status_node(state)
-        
+
         mock_service.handle_first_touch.assert_called_once_with(
             user_id="sess_123",
             instagram_username="test_user",
@@ -199,17 +176,17 @@ class TestSitniksStatusNode:
             "dialog_phase": "SHOW_PAYMENT",
             "session_id": "sess_123",
         }
-        
+
         mock_service = MagicMock()
         mock_service.enabled = True
         mock_service.handle_invoice_sent = AsyncMock(return_value=True)
-        
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_status_node(state)
-        
+
         mock_service.handle_invoice_sent.assert_called_once_with("sess_123")
         assert result.update["sitniks_status_updated"] is True
         assert result.update["sitniks_stage"] == STAGE_GIVE_REQUISITES
@@ -222,20 +199,19 @@ class TestSitniksStatusNode:
             "agent_response": {"escalation": {"reason": "USER_REQUEST"}},
             "session_id": "sess_123",
         }
-        
+
         mock_service = MagicMock()
         mock_service.enabled = True
-        mock_service.handle_escalation = AsyncMock(return_value={
-            "success": True,
-            "manager_assigned": "Олена"
-        })
-        
+        mock_service.handle_escalation = AsyncMock(
+            return_value={"success": True, "manager_assigned": "Олена"}
+        )
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_status_node(state)
-        
+
         mock_service.handle_escalation.assert_called_once_with("sess_123")
         assert result.update["sitniks_stage"] == STAGE_ESCALATION
 
@@ -246,19 +222,17 @@ class TestSitniksStatusNode:
             "is_first_message": True,
             "session_id": "sess_123",
         }
-        
+
         mock_service = MagicMock()
         mock_service.enabled = True
-        mock_service.handle_first_touch = AsyncMock(
-            side_effect=Exception("API Error")
-        )
-        
+        mock_service.handle_first_touch = AsyncMock(side_effect=Exception("API Error"))
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_status_node(state)
-        
+
         # Should not raise, but log error
         assert result.update["sitniks_status_updated"] is False
         assert "API Error" in str(result.update.get("sitniks_result", {}).get("error", ""))
@@ -276,9 +250,9 @@ class TestSitniksPreResponseNode:
     async def test_skips_after_first_step(self):
         """Skips processing after step 1."""
         state = {"step_number": 5}
-        
+
         result = await sitniks_pre_response_node(state)
-        
+
         assert result.get("sitniks_first_touch_done") is False
 
     @pytest.mark.asyncio
@@ -288,9 +262,9 @@ class TestSitniksPreResponseNode:
             "step_number": 1,
             "sitniks_first_touch_done": True,
         }
-        
+
         result = await sitniks_pre_response_node(state)
-        
+
         assert result == {}
 
     @pytest.mark.asyncio
@@ -300,9 +274,9 @@ class TestSitniksPreResponseNode:
             "step_number": 1,
             "metadata": {},
         }
-        
+
         result = await sitniks_pre_response_node(state)
-        
+
         assert result.get("sitniks_first_touch_done") is True
         assert result.get("sitniks_no_username") is True
 
@@ -313,16 +287,16 @@ class TestSitniksPreResponseNode:
             "step_number": 1,
             "metadata": {"instagram_username": "test"},
         }
-        
+
         mock_service = MagicMock()
         mock_service.enabled = False
-        
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_pre_response_node(state)
-        
+
         assert result.get("sitniks_first_touch_done") is True
         assert result.get("sitniks_not_enabled") is True
 
@@ -334,20 +308,19 @@ class TestSitniksPreResponseNode:
             "session_id": "sess_123",
             "metadata": {"user_nickname": "telegram_user"},
         }
-        
+
         mock_service = MagicMock()
         mock_service.enabled = True
-        mock_service.handle_first_touch = AsyncMock(return_value={
-            "success": True,
-            "chat_id": "chat_789"
-        })
-        
+        mock_service.handle_first_touch = AsyncMock(
+            return_value={"success": True, "chat_id": "chat_789"}
+        )
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_pre_response_node(state)
-        
+
         assert result.get("sitniks_first_touch_done") is True
         assert result.get("sitniks_chat_id") == "chat_789"
 
@@ -359,18 +332,16 @@ class TestSitniksPreResponseNode:
             "session_id": "sess_123",
             "metadata": {"instagram_username": "test"},
         }
-        
+
         mock_service = MagicMock()
         mock_service.enabled = True
-        mock_service.handle_first_touch = AsyncMock(
-            side_effect=Exception("Connection Error")
-        )
-        
+        mock_service.handle_first_touch = AsyncMock(side_effect=Exception("Connection Error"))
+
         with patch(
             "src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service",
-            return_value=mock_service
+            return_value=mock_service,
         ):
             result = await sitniks_pre_response_node(state)
-        
+
         assert result.get("sitniks_first_touch_done") is True
         assert "Connection Error" in result.get("sitniks_first_touch_error", "")

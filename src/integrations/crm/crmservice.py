@@ -37,12 +37,12 @@ class CRMService:
         external_id: str | None = None,
     ) -> dict[str, Any]:
         """Create order in CRM with persistence and idempotency.
-        
+
         Args:
             session_id: Chat session identifier
             order_data: Order data dict (customer, items, source, etc.)
             external_id: Unique order ID (generated if not provided)
-            
+
         Returns:
             dict with creation result and CRM order ID
         """
@@ -54,8 +54,9 @@ class CRMService:
         # WARNING: This fallback is non-deterministic! Prefer passing deterministic external_id
         if not external_id:
             import hashlib
+
             # Use session_id + current day as fallback (still not ideal, but better than timestamp)
-            day_key = datetime.now(UTC).strftime('%Y-%m-%d')
+            day_key = datetime.now(UTC).strftime("%Y-%m-%d")
             fallback_hash = hashlib.sha256(f"{session_id}|{day_key}".encode()).hexdigest()[:16]
             external_id = f"{session_id}_{fallback_hash}"
             logger.warning(
@@ -99,10 +100,7 @@ class CRMService:
 
             # Update to queued status with task_id
             await self._update_order_status(
-                external_id=external_id,
-                status="queued",
-                task_id=task_result.id,
-                error_message=None
+                external_id=external_id, status="queued", task_id=task_result.id, error_message=None
             )
 
             logger.info(
@@ -140,7 +138,7 @@ class CRMService:
         status: str = "created",
     ) -> bool:
         """Update stored order with CRM order ID and status.
-        
+
         Called by Celery task after successful CRM creation.
         """
         try:
@@ -171,7 +169,7 @@ class CRMService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Handle status update from CRM webhook.
-        
+
         Updates local storage and triggers session sync if needed.
         """
         try:
@@ -194,9 +192,7 @@ class CRMService:
                 return {"status": "unchanged", "crm_order_id": crm_order_id}
 
             # Update status in database
-            await self._update_order_status(
-                order_record["external_id"], new_status, metadata
-            )
+            await self._update_order_status(order_record["external_id"], new_status, metadata)
 
             # Trigger session sync to notify user
             sync_order_status.delay(
@@ -282,15 +278,17 @@ class CRMService:
         order_data: dict[str, Any],
     ) -> None:
         """Store order mapping in Supabase."""
-        self.supabase.table("crm_orders").insert({
-            "session_id": session_id,
-            "external_id": external_id,
-            "crm_order_id": crm_order_id,
-            "status": status,
-            "order_data": order_data,
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
-        }).execute()
+        self.supabase.table("crm_orders").insert(
+            {
+                "session_id": session_id,
+                "external_id": external_id,
+                "crm_order_id": crm_order_id,
+                "status": status,
+                "order_data": order_data,
+                "created_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        ).execute()
 
     async def _update_order_mapping(
         self,
@@ -299,11 +297,13 @@ class CRMService:
         status: str,
     ) -> None:
         """Update order mapping with CRM order ID and status."""
-        self.supabase.table("crm_orders").update({
-            "crm_order_id": crm_order_id,
-            "status": status,
-            "updated_at": datetime.now(UTC).isoformat(),
-        }).eq("external_id", external_id).execute()
+        self.supabase.table("crm_orders").update(
+            {
+                "crm_order_id": crm_order_id,
+                "status": status,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        ).eq("external_id", external_id).execute()
 
     async def _update_order_status(
         self,

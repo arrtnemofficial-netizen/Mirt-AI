@@ -99,6 +99,7 @@ markers = [
 target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = ["data", "scripts", "test_*.py"]
 
 [tool.ruff.lint]
 select = [
@@ -124,6 +125,7 @@ ignore = [
     "PLR0913", # too many arguments
     "PLR2004", # magic value comparison
     "PLR0912", # too many branches
+    "PLR0911", # too many return statements
     "PLR0915", # too many statements
     "PLW0603", # global statement - used for singletons
     "PLW2901", # loop variable overwritten
@@ -140,6 +142,7 @@ ignore = [
     "SIM102",  # nested if
     "ERA001",  # commented code
     "F821",    # undefined name - false positive for TypeAlias
+    "RUF022",  # __all__ sorting noise
 ]
 
 [tool.ruff.lint.per-file-ignores]

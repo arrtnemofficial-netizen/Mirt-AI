@@ -17,7 +17,9 @@ import pytest
 # =============================================================================
 
 
-def create_test_state(session_id: str, message: str = "Привіт!", include_step_number: bool = True) -> dict[str, Any]:
+def create_test_state(
+    session_id: str, message: str = "Привіт!", include_step_number: bool = True
+) -> dict[str, Any]:
     """Create test state."""
     state = {
         "messages": [{"role": "user", "content": message}],
@@ -50,6 +52,7 @@ async def test_state_persists_with_same_thread_id():
     # Mock runner to avoid API calls
     async def mock_runner(msg, metadata):
         from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
+
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Привіт!")],
@@ -96,6 +99,7 @@ async def test_state_isolated_between_sessions():
 
     async def mock_runner(msg, metadata):
         from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
+
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Test")],
@@ -120,9 +124,9 @@ async def test_state_isolated_between_sessions():
     result_b = await graph.ainvoke(state_b, config=config_b)
 
     # Both should have their own progression
-    assert result_a.get("session_id") != result_b.get("session_id") or \
-           result_a.get("thread_id") != result_b.get("thread_id"), \
-           "Sessions should be isolated"
+    assert result_a.get("session_id") != result_b.get("session_id") or result_a.get(
+        "thread_id"
+    ) != result_b.get("thread_id"), "Sessions should be isolated"
 
 
 # =============================================================================
@@ -141,6 +145,7 @@ async def test_state_history_available():
 
     async def mock_runner(msg, metadata):
         from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
+
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Reply")],
@@ -186,6 +191,7 @@ async def test_graph_with_interrupt_before_payment():
 
     async def mock_runner(msg, metadata):
         from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
+
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Reply")],

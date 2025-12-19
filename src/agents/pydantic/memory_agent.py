@@ -5,7 +5,7 @@ Memory Agent - Titans-like Fact Classification.
 
 Аналізує повідомлення і вирішує:
 - Які факти запамʼятати (NewFact)
-- Які факти оновити (UpdateFact)  
+- Які факти оновити (UpdateFact)
 - Що ігнорувати (ignore_messages)
 
 КЛЮЧОВЕ: виставляє importance + surprise (як Titans Surprise Metric)
@@ -73,9 +73,11 @@ def _get_memory_prompt() -> str:
     """Get memory prompt from .md file with fallback."""
     try:
         from src.core.prompt_registry import registry
+
         return registry.get("system.memory").content
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning("Failed to load memory.md, using fallback: %s", e)
         return _MEMORY_PROMPT_FALLBACK
 
@@ -142,7 +144,9 @@ async def _add_existing_facts(ctx: RunContext[MemoryDeps]) -> str:
 
     lines = ["\n--- ВІДОМІ ФАКТИ (для перевірки дублів) ---"]
     for fact in facts[:15]:  # Max 15
-        lines.append(f"- [{fact.id}] [{fact.category}] {fact.content} (importance={fact.importance:.1f})")
+        lines.append(
+            f"- [{fact.id}] [{fact.category}] {fact.content} (importance={fact.importance:.1f})"
+        )
 
     return "\n".join(lines)
 
@@ -182,7 +186,11 @@ def _get_memory_model() -> OpenAIChatModel:
         else:
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
             base_url = settings.OPENROUTER_BASE_URL
-            model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+            model_name = (
+                settings.LLM_MODEL_GROK
+                if settings.LLM_PROVIDER == "openrouter"
+                else settings.AI_MODEL
+            )
 
         if not api_key:
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
@@ -235,16 +243,16 @@ async def analyze_for_memory(
 ) -> MemoryDecision:
     """
     Проаналізувати повідомлення і витягти факти для памʼяті.
-    
+
     Це те, що викликає memory_update_node.
-    
+
     Args:
         messages: Повідомлення для аналізу
         user_id: ID користувача
         session_id: ID сесії
         profile: Поточний профіль (для контексту)
         existing_facts: Існуючі факти (для перевірки дублів)
-        
+
     Returns:
         MemoryDecision з класифікованими фактами
     """
@@ -267,9 +275,7 @@ async def analyze_for_memory(
         return MemoryDecision(ignore_messages=True, reasoning="No user messages")
 
     # Combine last user messages for analysis
-    analysis_text = "\n".join(
-        m.get("content", "")[:500] for m in user_messages[-5:]
-    )
+    analysis_text = "\n".join(m.get("content", "")[:500] for m in user_messages[-5:])
 
     try:
         result = await asyncio.wait_for(
@@ -292,17 +298,11 @@ async def analyze_for_memory(
 
     except TimeoutError:
         logger.warning("Memory agent timeout for user %s", user_id)
-        return MemoryDecision(
-            ignore_messages=True,
-            reasoning="Timeout during analysis"
-        )
+        return MemoryDecision(ignore_messages=True, reasoning="Timeout during analysis")
 
     except Exception as e:
         logger.error("Memory agent error for user %s: %s", user_id, e)
-        return MemoryDecision(
-            ignore_messages=True,
-            reasoning=f"Error: {str(e)[:100]}"
-        )
+        return MemoryDecision(ignore_messages=True, reasoning=f"Error: {str(e)[:100]}")
 
 
 # =============================================================================
@@ -313,12 +313,12 @@ async def analyze_for_memory(
 def extract_quick_facts(message: str) -> list[dict[str, Any]]:
     """
     Швидкий regex-based витяг фактів (без LLM).
-    
+
     Для випадків коли потрібно швидко витягти очевидні факти:
     - Зріст: "128 см", "зріст 128"
     - Вік: "7 років", "доньці 7"
     - Місто: "з Харкова", "в Києві"
-    
+
     Returns:
         List of dicts with extracted facts (no importance/surprise - use LLM for that)
     """
@@ -338,13 +338,15 @@ def extract_quick_facts(message: str) -> list[dict[str, Any]]:
         if match:
             height = int(match.group(1))
             if 70 <= height <= 180:
-                facts.append({
-                    "content": f"Зріст дитини: {height} см",
-                    "fact_type": "child_info",
-                    "category": "child",
-                    "extracted_value": height,
-                    "field": "height_cm",
-                })
+                facts.append(
+                    {
+                        "content": f"Зріст дитини: {height} см",
+                        "fact_type": "child_info",
+                        "category": "child",
+                        "extracted_value": height,
+                        "field": "height_cm",
+                    }
+                )
                 break
 
     # Age patterns
@@ -360,44 +362,74 @@ def extract_quick_facts(message: str) -> list[dict[str, Any]]:
         if match:
             age = int(match.group(1))
             if 0 <= age <= 18:
-                facts.append({
-                    "content": f"Вік дитини: {age} років",
-                    "fact_type": "child_info",
-                    "category": "child",
-                    "extracted_value": age,
-                    "field": "age",
-                })
+                facts.append(
+                    {
+                        "content": f"Вік дитини: {age} років",
+                        "fact_type": "child_info",
+                        "category": "child",
+                        "extracted_value": age,
+                        "field": "age",
+                    }
+                )
                 break
 
     # Gender patterns (all Ukrainian cases/forms)
     girl_words = [
-        "донька", "доньки", "доньці", "доньку", "донькою",
-        "дочка", "дочки", "дочці", "дочку", "дочкою",
-        "дівчинка", "дівчинки", "дівчинці", "дівчинку", "дівчинкою",
-        "дівчини", "дівчині", "дівчину", "дівчиною",
+        "донька",
+        "доньки",
+        "доньці",
+        "доньку",
+        "донькою",
+        "дочка",
+        "дочки",
+        "дочці",
+        "дочку",
+        "дочкою",
+        "дівчинка",
+        "дівчинки",
+        "дівчинці",
+        "дівчинку",
+        "дівчинкою",
+        "дівчини",
+        "дівчині",
+        "дівчину",
+        "дівчиною",
     ]
     boy_words = [
-        "син", "сина", "сину", "синові", "сином",
-        "хлопчик", "хлопчика", "хлопчику", "хлопчиком",
-        "хлопця", "хлопцю", "хлопцем",
+        "син",
+        "сина",
+        "сину",
+        "синові",
+        "сином",
+        "хлопчик",
+        "хлопчика",
+        "хлопчику",
+        "хлопчиком",
+        "хлопця",
+        "хлопцю",
+        "хлопцем",
     ]
 
     if any(word in msg_lower for word in girl_words):
-        facts.append({
-            "content": "Стать: дівчинка",
-            "fact_type": "child_info",
-            "category": "child",
-            "extracted_value": "дівчинка",
-            "field": "gender",
-        })
+        facts.append(
+            {
+                "content": "Стать: дівчинка",
+                "fact_type": "child_info",
+                "category": "child",
+                "extracted_value": "дівчинка",
+                "field": "gender",
+            }
+        )
     elif any(word in msg_lower for word in boy_words):
-        facts.append({
-            "content": "Стать: хлопчик",
-            "fact_type": "child_info",
-            "category": "child",
-            "extracted_value": "хлопчик",
-            "field": "gender",
-        })
+        facts.append(
+            {
+                "content": "Стать: хлопчик",
+                "fact_type": "child_info",
+                "category": "child",
+                "extracted_value": "хлопчик",
+                "field": "gender",
+            }
+        )
 
     # City patterns (major Ukrainian cities with all cases/forms)
     # Format: (canonical, [variations])
@@ -427,13 +459,15 @@ def extract_quick_facts(message: str) -> list[dict[str, Any]]:
 
     for canonical, variations in city_variations:
         if any(var in msg_lower for var in variations):
-            facts.append({
-                "content": f"Місто: {canonical}",
-                "fact_type": "logistics",
-                "category": "delivery",
-                "extracted_value": canonical,
-                "field": "city",
-            })
+            facts.append(
+                {
+                    "content": f"Місто: {canonical}",
+                    "fact_type": "logistics",
+                    "category": "delivery",
+                    "extracted_value": canonical,
+                    "field": "city",
+                }
+            )
             break
 
     return facts

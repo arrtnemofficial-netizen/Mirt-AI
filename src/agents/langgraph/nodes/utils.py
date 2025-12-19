@@ -112,7 +112,7 @@ def extract_assistant_message(messages: list[Any]) -> str:
 def extract_height_from_text(text: str) -> int | None:
     """
     Витягує зріст з тексту повідомлення.
-    
+
     Приклади:
     - "какая цена на рост 147" -> 147
     - "зріст 120" -> 120
@@ -120,13 +120,14 @@ def extract_height_from_text(text: str) -> int | None:
     - "ціна" -> None
     """
     import re
+
     # Шукаємо числа 80-180 (реальний діапазон зросту дітей)
     patterns = [
-        r'\bрост\s*(\d{2,3})\b',  # рост 147
-        r'\bзріст\s*(\d{2,3})\b',  # зріст 120
-        r'\bна\s*(\d{2,3})\s*(см)?\b',  # на 128, на 128 см
-        r'\b(\d{2,3})\s*см\b',  # 120 см
-        r'\b(\d{3})\b',  # просто 147 (тризначне)
+        r"\bрост\s*(\d{2,3})\b",  # рост 147
+        r"\bзріст\s*(\d{2,3})\b",  # зріст 120
+        r"\bна\s*(\d{2,3})\s*(см)?\b",  # на 128, на 128 см
+        r"\b(\d{2,3})\s*см\b",  # 120 см
+        r"\b(\d{3})\b",  # просто 147 (тризначне)
     ]
     for pattern in patterns:
         match = re.search(pattern, text.lower())
@@ -137,10 +138,12 @@ def extract_height_from_text(text: str) -> int | None:
     return None
 
 
-def get_size_and_price_for_height(height: int, prices_by_size: dict | None = None) -> tuple[str, int]:
+def get_size_and_price_for_height(
+    height: int, prices_by_size: dict | None = None
+) -> tuple[str, int]:
     """
     Визначає розмір і ціну за зростом.
-    
+
     Повертає: (size_label, price)
     """
     # Стандартні ціни для Мрія/Лагуна

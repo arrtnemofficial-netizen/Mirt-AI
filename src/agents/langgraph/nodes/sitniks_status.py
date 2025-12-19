@@ -4,7 +4,7 @@ Post-response node that updates Sitniks CRM chat status based on conversation st
 
 Stage → Status mapping:
 - first_touch → "Взято в роботу" + assign AI Manager (Павло)
-- give_requisites → "Виставлено рахунок"  
+- give_requisites → "Виставлено рахунок"
 - escalation → "AI Увага" + assign human manager
 """
 
@@ -32,7 +32,7 @@ STAGE_ESCALATION = "escalation"
 
 def determine_stage(state: dict[str, Any]) -> str | None:
     """Determine current stage based on conversation state.
-    
+
     Returns:
         Stage name or None if no status update needed
     """
@@ -76,10 +76,10 @@ async def sitniks_status_node(
     state: dict[str, Any],
 ) -> Command[Literal["__end__"]]:
     """Update Sitniks CRM status based on conversation stage.
-    
+
     This node runs AFTER the agent response is generated but BEFORE
     the response is sent to the user.
-    
+
     Flow:
     1. Determine stage (first_touch, give_requisites, escalation)
     2. Call appropriate Sitniks API
@@ -168,10 +168,10 @@ async def sitniks_pre_response_node(
     state: dict[str, Any],
 ) -> dict[str, Any]:
     """Pre-response hook for first touch handling.
-    
+
     This should run BEFORE sending the first response to ensure
     status is set before user sees the message.
-    
+
     Only handles first_touch stage.
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))

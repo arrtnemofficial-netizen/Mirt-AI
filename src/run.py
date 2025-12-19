@@ -11,7 +11,7 @@ if __name__ == "__main__":
 
     # Get port from environment variable, default to 8000
     # This bypasses shell expansion issues completely
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", "8000"))
 
     print(f"Starting server on port {port}...")
 

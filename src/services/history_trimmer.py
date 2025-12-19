@@ -29,15 +29,15 @@ def trim_message_history(
 ) -> list[dict[str, Any]]:
     """
     Trim message history to prevent context overflow.
-    
+
     Args:
         messages: Full message history
         max_messages: Maximum messages to keep (uses config if None)
         preserve_system: Keep system messages at the start
-        
+
     Returns:
         Trimmed message list with most recent messages
-        
+
     Strategy:
         1. Keep all system messages (if preserve_system=True)
         2. Keep the last N user/assistant messages
@@ -92,6 +92,7 @@ def trim_message_history(
 
         # Track metric
         from src.services.observability import track_metric
+
         track_metric("history_messages_trimmed", trimmed_count)
 
     return system_messages + trimmed_conversation
@@ -117,17 +118,14 @@ def _get_message_role(msg: Any) -> str:
 def estimate_token_count(messages: list[dict[str, Any]]) -> int:
     """
     Rough estimate of token count for message list.
-    
+
     Uses simple heuristic: ~4 characters per token.
     Not accurate but good enough for trimming decisions.
     """
     total_chars = 0
 
     for msg in messages:
-        if isinstance(msg, dict):
-            content = msg.get("content", "")
-        else:
-            content = getattr(msg, "content", "")
+        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
 
         if isinstance(content, str):
             total_chars += len(content)
@@ -147,7 +145,7 @@ def should_trim(
 ) -> bool:
     """
     Check if trimming is needed.
-    
+
     Returns True if:
     - Message count exceeds max_messages
     - Estimated tokens exceed max_tokens
@@ -158,7 +156,4 @@ def should_trim(
     if len(messages) > max_messages:
         return True
 
-    if estimate_token_count(messages) > max_tokens:
-        return True
-
-    return False
+    return estimate_token_count(messages) > max_tokens

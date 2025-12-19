@@ -5,8 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-import src.server.main as main
 from src.integrations.manychat.webhook import ManychatPayloadError
+from src.server import main
 from src.server.main import app
 from src.services.session_store import InMemorySessionStore
 
@@ -53,15 +53,19 @@ def test_webhooks_manychat_accepts_x_manychat_token_and_schedules_task(
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
-    ), patch(
-        "src.services.supabase_client.get_supabase_client",
-        return_value=None,
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
+        patch(
+            "src.services.supabase_client.get_supabase_client",
+            return_value=None,
+        ),
     ):
         response = client.post(
             "/webhooks/manychat",
@@ -97,15 +101,19 @@ def test_webhooks_manychat_accepts_authorization_bearer_token(
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
-    ), patch(
-        "src.services.supabase_client.get_supabase_client",
-        return_value=None,
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
+        patch(
+            "src.services.supabase_client.get_supabase_client",
+            return_value=None,
+        ),
     ):
         response = client.post(
             "/webhooks/manychat",
@@ -140,15 +148,19 @@ def test_webhooks_manychat_accepts_image_only_in_push_mode(
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
-    ), patch(
-        "src.services.supabase_client.get_supabase_client",
-        return_value=None,
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
+        patch(
+            "src.services.supabase_client.get_supabase_client",
+            return_value=None,
+        ),
     ):
         response = client.post(
             "/webhooks/manychat",
@@ -261,18 +273,23 @@ def test_webhooks_manychat_push_mode_dedupes_by_message_id(
         "message": {"id": "m1", "text": "hi"},
     }
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
-    ), patch(
-        "src.services.supabase_client.get_supabase_client",
-        return_value=object(),
-    ), patch(
-        "src.services.webhook_dedupe.WebhookDedupeStore.check_and_mark",
-        side_effect=[False, True],
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
+        patch(
+            "src.services.supabase_client.get_supabase_client",
+            return_value=object(),
+        ),
+        patch(
+            "src.services.webhook_dedupe.WebhookDedupeStore.check_and_mark",
+            side_effect=[False, True],
+        ),
     ):
         r1 = client.post("/webhooks/manychat", json=payload)
         r2 = client.post("/webhooks/manychat", json=payload)

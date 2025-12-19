@@ -7,17 +7,16 @@ These tests MUST pass before any FSM changes are deployed.
 """
 
 import pytest
-from typing import Any
 
-from src.core.state_machine import State, Intent, TRANSITIONS, get_next_state
 from src.agents.langgraph.edges import (
-    route_after_intent,
-    route_after_vision,
-    route_after_agent,
-    route_after_offer,
     _resolve_intent_route,
+    route_after_agent,
+    route_after_intent,
+    route_after_offer,
+    route_after_vision,
 )
 from src.agents.langgraph.nodes.intent import detect_intent_from_text
+from src.core.state_machine import TRANSITIONS, Intent, State, get_next_state
 
 
 # =============================================================================
@@ -52,14 +51,15 @@ class TestStateValidity:
 # INVARIANT 1: has_image reset after vision
 # =============================================================================
 
+
 class TestHasImageInvariant:
     """has_image must be False after vision_node."""
 
     @pytest.mark.asyncio
     async def test_vision_node_resets_has_image(self):
         """Vision node must set has_image to False."""
-        from unittest.mock import patch, AsyncMock
-        
+        from unittest.mock import patch
+
         state = {
             "session_id": "test",
             "messages": [{"role": "user", "content": "Що це?"}],
@@ -69,30 +69,36 @@ class TestHasImageInvariant:
             "current_state": "STATE_2_VISION",
             "selected_products": [],
         }
-        
+
         # Mock run_vision
         async def mock_run_vision(message, deps):
             from src.agents.pydantic.models import VisionResponse
+
             return VisionResponse(
                 reply_to_user="Тест",
                 confidence=0.9,
                 needs_clarification=False,
             )
-        
+
         with patch("src.agents.pydantic.vision_agent.run_vision", new=mock_run_vision):
             import importlib
+
             import src.agents.langgraph.nodes.vision as vision_module
+
             importlib.reload(vision_module)
             output = await vision_module.vision_node(state)
-        
+
         # INVARIANT: has_image must be False after vision
         assert output.get("has_image") is False, "has_image must be False after vision_node"
-        assert output.get("metadata", {}).get("has_image") is False, "metadata.has_image must be False"
+        assert output.get("metadata", {}).get("has_image") is False, (
+            "metadata.has_image must be False"
+        )
 
 
 # =============================================================================
 # INVARIANT 2: current_state always valid
 # =============================================================================
+
 
 class TestStateValidityInvariant:
     """current_state must always be a valid STATE_* value."""
@@ -114,6 +120,7 @@ class TestStateValidityInvariant:
 # INVARIANT 3: OFFER + PAYMENT_DELIVERY → PAYMENT
 # =============================================================================
 
+
 class TestOfferToPaymentInvariant:
     """In STATE_4_OFFER, PAYMENT_DELIVERY must route to payment."""
 
@@ -127,17 +134,39 @@ class TestOfferToPaymentInvariant:
         route = route_after_intent(state)
         assert route == "payment", f"Expected 'payment', got '{route}'"
 
-    @pytest.mark.parametrize("confirmation", [
-        "так", "да", "yes", "ок", "добре", "згодна", "беру", "оформляємо",
-    ])
+    @pytest.mark.parametrize(
+        "confirmation",
+        [
+            "так",
+            "да",
+            "yes",
+            "ок",
+            "добре",
+            "згодна",
+            "беру",
+            "оформляємо",
+        ],
+    )
     def test_confirmation_words_trigger_payment_in_offer(self, confirmation):
         """Confirmation words in OFFER state must trigger PAYMENT_DELIVERY intent."""
-        intent = detect_intent_from_text(confirmation, has_image=False, current_state="STATE_4_OFFER")
-        assert intent == "PAYMENT_DELIVERY", f"'{confirmation}' should be PAYMENT_DELIVERY, got {intent}"
+        intent = detect_intent_from_text(
+            confirmation, has_image=False, current_state="STATE_4_OFFER"
+        )
+        assert intent == "PAYMENT_DELIVERY", (
+            f"'{confirmation}' should be PAYMENT_DELIVERY, got {intent}"
+        )
 
-    @pytest.mark.parametrize("product", [
-        "лагуна", "мрія", "ритм", "каприз", "валері", "мерея",
-    ])
+    @pytest.mark.parametrize(
+        "product",
+        [
+            "лагуна",
+            "мрія",
+            "ритм",
+            "каприз",
+            "валері",
+            "мерея",
+        ],
+    )
     def test_product_names_trigger_payment_in_offer(self, product):
         """Product names in OFFER state must trigger PAYMENT_DELIVERY intent."""
         intent = detect_intent_from_text(product, has_image=False, current_state="STATE_4_OFFER")
@@ -147,6 +176,7 @@ class TestOfferToPaymentInvariant:
 # =============================================================================
 # INVARIANT 4: COMPLAINT always escalates
 # =============================================================================
+
 
 class TestComplaintEscalationInvariant:
     """COMPLAINT intent must always route to escalation."""
@@ -162,6 +192,7 @@ class TestComplaintEscalationInvariant:
 # INVARIANT 5: PHOTO_IDENT always goes to vision
 # =============================================================================
 
+
 class TestPhotoIdentVisionInvariant:
     """PHOTO_IDENT intent must always route to vision."""
 
@@ -169,12 +200,15 @@ class TestPhotoIdentVisionInvariant:
     def test_photo_ident_routes_to_vision(self, current_state):
         """PHOTO_IDENT must route to vision from any state."""
         route = _resolve_intent_route("PHOTO_IDENT", current_state, {})
-        assert route == "vision", f"PHOTO_IDENT from {current_state} should go to vision, got {route}"
+        assert route == "vision", (
+            f"PHOTO_IDENT from {current_state} should go to vision, got {route}"
+        )
 
 
 # =============================================================================
 # TRANSITION TABLE COVERAGE
 # =============================================================================
+
 
 class TestTransitionTableCoverage:
     """Ensure all transitions in state_machine.py are valid."""
@@ -212,6 +246,7 @@ class TestTransitionTableCoverage:
 # ROUTING CONSISTENCY
 # =============================================================================
 
+
 class TestRoutingConsistency:
     """Ensure routing functions return valid values."""
 
@@ -226,11 +261,11 @@ class TestRoutingConsistency:
     def test_route_after_vision_returns_valid_route(self):
         """route_after_vision must return valid route."""
         valid_routes = {"offer", "agent", "validation", "end"}
-        
+
         # With products
         route = route_after_vision({"selected_products": [{"name": "Test"}]})
         assert route in valid_routes
-        
+
         # Without products
         route = route_after_vision({})
         assert route in valid_routes
@@ -238,14 +273,14 @@ class TestRoutingConsistency:
     def test_route_after_agent_returns_valid_route(self):
         """route_after_agent must return valid route."""
         valid_routes = {"validation", "offer", "end"}
-        
+
         route = route_after_agent({})
         assert route in valid_routes
 
     def test_route_after_offer_returns_valid_route(self):
         """route_after_offer must return valid route."""
         valid_routes = {"payment", "validation", "end"}
-        
+
         route = route_after_offer({"detected_intent": "PAYMENT_DELIVERY"})
         assert route in valid_routes
 
@@ -254,23 +289,26 @@ class TestRoutingConsistency:
 # PAYMENT STATE INVARIANTS
 # =============================================================================
 
+
 class TestPaymentStateInvariants:
     """Payment state specific invariants."""
 
     def test_payment_state_keeps_payment_intent(self):
         """In STATE_5_PAYMENT_DELIVERY, most inputs should stay PAYMENT_DELIVERY."""
         test_inputs = ["158", "Київ", "Нова пошта 5", "+380991234567", "Іванов Іван"]
-        
+
         for text in test_inputs:
             intent = detect_intent_from_text(
                 text, has_image=False, current_state="STATE_5_PAYMENT_DELIVERY"
             )
-            assert intent == "PAYMENT_DELIVERY", f"'{text}' in PAYMENT state should stay PAYMENT, got {intent}"
+            assert intent == "PAYMENT_DELIVERY", (
+                f"'{text}' in PAYMENT state should stay PAYMENT, got {intent}"
+            )
 
     def test_payment_state_allows_complaint_exit(self):
         """COMPLAINT in payment state should still be detected."""
         complaint_words = ["скарга", "верніть гроші", "обман"]
-        
+
         for word in complaint_words:
             intent = detect_intent_from_text(
                 word, has_image=False, current_state="STATE_5_PAYMENT_DELIVERY"
@@ -283,6 +321,7 @@ class TestPaymentStateInvariants:
 # =============================================================================
 # INIT STATE TRANSITIONS
 # =============================================================================
+
 
 class TestInitStateTransitions:
     """STATE_0_INIT transition tests."""

@@ -1,9 +1,12 @@
-import yaml
 from pathlib import Path
+
+import yaml
 
 
 def test_model_rules_yaml_integrity():
-    rules_path = Path(__file__).parent.parent.parent / "data" / "vision" / "generated" / "model_rules.yaml"
+    rules_path = (
+        Path(__file__).parent.parent.parent / "data" / "vision" / "generated" / "model_rules.yaml"
+    )
 
     with open(rules_path, encoding="utf-8") as f:
         rules = yaml.safe_load(f)
@@ -43,4 +46,6 @@ def test_model_rules_yaml_integrity():
     assert isinstance(decision_tree, str)
     assert decision_tree.strip(), "DECISION_TREE is empty"
 
-    assert any(m in decision_tree for m in model_names), "DECISION_TREE does not mention any known model"
+    assert any(m in decision_tree for m in model_names), (
+        "DECISION_TREE does not mention any known model"
+    )

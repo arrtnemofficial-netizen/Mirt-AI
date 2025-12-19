@@ -68,7 +68,9 @@ class DummyHandler:
         self.calls = []
 
     async def process_message(self, session_id: str, text: str, *, extra_metadata=None):
-        self.calls.append({"session_id": session_id, "text": text, "extra_metadata": extra_metadata})
+        self.calls.append(
+            {"session_id": session_id, "text": text, "extra_metadata": extra_metadata}
+        )
         return type(
             "Res",
             (),
@@ -146,7 +148,9 @@ def test_build_manychat_messages_preserves_inline_image_order():
 
 
 @pytest.mark.asyncio
-async def test_process_message_async_restart_clears_session_and_sends_text(monkeypatch: pytest.MonkeyPatch):
+async def test_process_message_async_restart_clears_session_and_sends_text(
+    monkeypatch: pytest.MonkeyPatch,
+):
     store = InMemorySessionStore()
     push_client = DummyPushClient()
 
@@ -155,7 +159,9 @@ async def test_process_message_async_restart_clears_session_and_sends_text(monke
     # Seed a session to ensure delete() returns True
     store.save("u2", {"messages": [], "metadata": {}, "current_state": "STATE_0_INIT"})
 
-    await svc.process_message_async(user_id="u2", text="/restart", image_url=None, channel="instagram")
+    await svc.process_message_async(
+        user_id="u2", text="/restart", image_url=None, channel="instagram"
+    )
 
     assert len(push_client.calls) == 1
     assert push_client.calls[0].get("send_text") is True

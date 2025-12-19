@@ -1,7 +1,8 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 from pydantic import SecretStr
-from unittest.mock import AsyncMock
-from types import SimpleNamespace
 
 from src.bot import telegram_bot
 from src.bot.telegram_bot import _dispatch_to_telegram, build_dispatcher
@@ -141,7 +142,9 @@ async def test_text_handler_delegates_to_debouncer(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_photo_handler_builds_telegram_file_url_and_delegates(monkeypatch: pytest.MonkeyPatch):
+async def test_photo_handler_builds_telegram_file_url_and_delegates(
+    monkeypatch: pytest.MonkeyPatch,
+):
     store = InMemorySessionStore()
     msg_store = InMemoryMessageStore()
 
@@ -159,7 +162,9 @@ async def test_photo_handler_builds_telegram_file_url_and_delegates(monkeypatch:
     photo = SimpleNamespace(file_id="file123")
     message.photo = [photo]
 
-    bot = SimpleNamespace(get_file=AsyncMock(return_value=SimpleNamespace(file_path="photos/p.jpg")))
+    bot = SimpleNamespace(
+        get_file=AsyncMock(return_value=SimpleNamespace(file_path="photos/p.jpg"))
+    )
     message.bot = bot
 
     await photo_handler(message)

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 def _get_escalation_response() -> str:
     """Get human-like escalation message."""
     from src.core.human_responses import get_human_response
+
     return get_human_response("escalation")
 
 
@@ -51,13 +52,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     # Build escalation response
     response = AgentResponse(
         event="escalation",
-        messages=[
-            Message(
-                content=(
-                    _get_escalation_response()
-                )
-            )
-        ],
+        messages=[Message(content=(_get_escalation_response()))],
         products=[],
         metadata=Metadata(
             session_id=session_id,

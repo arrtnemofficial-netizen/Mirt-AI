@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-import src.server.main as main
+from src.server import main
 from src.server.main import app
 from src.services.session_store import InMemorySessionStore
 
@@ -39,18 +39,23 @@ def test_api_v1_messages_rejects_invalid_token(client, monkeypatch: pytest.Monke
     assert response.status_code == 401
 
 
-def test_api_v1_messages_accepts_x_api_key_and_schedules_task(client, monkeypatch: pytest.MonkeyPatch):
+def test_api_v1_messages_accepts_x_api_key_and_schedules_task(
+    client, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "secret")
 
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
     ):
         response = client.post(
             "/api/v1/messages",
@@ -80,12 +85,15 @@ def test_api_v1_messages_accepts_bearer_token(client, monkeypatch: pytest.Monkey
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
     ):
         response = client.post(
             "/api/v1/messages",
@@ -114,12 +122,15 @@ def test_api_v1_messages_accepts_messages_alias(client, monkeypatch: pytest.Monk
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
     ):
         response = client.post(
             "/api/v1/messages",
@@ -148,12 +159,15 @@ def test_api_v1_messages_accepts_image_only(client, monkeypatch: pytest.MonkeyPa
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
     ):
         response = client.post(
             "/api/v1/messages",
@@ -176,18 +190,23 @@ def test_api_v1_messages_accepts_image_only(client, monkeypatch: pytest.MonkeyPa
     )
 
 
-def test_api_v1_messages_strips_manychat_prefix_dot_semicolon(client, monkeypatch: pytest.MonkeyPatch):
+def test_api_v1_messages_strips_manychat_prefix_dot_semicolon(
+    client, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "secret")
 
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
     ):
         response = client.post(
             "/api/v1/messages",
@@ -210,18 +229,23 @@ def test_api_v1_messages_strips_manychat_prefix_dot_semicolon(client, monkeypatc
     )
 
 
-def test_api_v1_messages_removes_embedded_image_url_from_text(client, monkeypatch: pytest.MonkeyPatch):
+def test_api_v1_messages_removes_embedded_image_url_from_text(
+    client, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "secret")
 
     process_message_async = AsyncMock(return_value=None)
     dummy_service = SimpleNamespace(process_message_async=process_message_async)
 
-    with patch(
-        "src.integrations.manychat.async_service.get_manychat_async_service",
-        return_value=dummy_service,
-    ), patch(
-        "src.server.dependencies.get_session_store",
-        return_value=InMemorySessionStore(),
+    with (
+        patch(
+            "src.integrations.manychat.async_service.get_manychat_async_service",
+            return_value=dummy_service,
+        ),
+        patch(
+            "src.server.dependencies.get_session_store",
+            return_value=InMemorySessionStore(),
+        ),
     ):
         response = client.post(
             "/api/v1/messages",
@@ -244,7 +268,9 @@ def test_api_v1_messages_removes_embedded_image_url_from_text(client, monkeypatc
     assert "lookaside.fbsbx.com" not in kwargs["text"].lower()
 
 
-def test_api_v1_messages_missing_message_and_image_returns_400(client, monkeypatch: pytest.MonkeyPatch):
+def test_api_v1_messages_missing_message_and_image_returns_400(
+    client, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(main.settings, "MANYCHAT_VERIFY_TOKEN", "")
 
     response = client.post(

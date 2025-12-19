@@ -31,9 +31,7 @@ async def test_push_client_sanitizes_messages():
 def test_push_client_build_actions_truncates_to_5():
     client = ManyChatPushClient(api_url="https://api.manychat.com", api_key="key")
 
-    set_field_values = [
-        {"field_name": f"f{i}", "field_value": str(i)} for i in range(4)
-    ]
+    set_field_values = [{"field_name": f"f{i}", "field_value": str(i)} for i in range(4)]
     add_tags = ["t1", "t2"]
 
     actions = client._build_actions(set_field_values, add_tags, remove_tags=None)
@@ -109,14 +107,15 @@ async def test_send_content_subscriber_id_casts_to_int(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
-async def test_send_content_instagram_split_send_sends_multiple_bubbles(monkeypatch: pytest.MonkeyPatch):
+async def test_send_content_instagram_split_send_sends_multiple_bubbles(
+    monkeypatch: pytest.MonkeyPatch,
+):
     client = ManyChatPushClient(api_url="https://api.manychat.com", api_key="key")
 
     sleeps: list[float] = []
 
     async def _no_sleep(seconds: float):
         sleeps.append(float(seconds))
-        return None
 
     monkeypatch.setattr(asyncio, "sleep", _no_sleep)
 

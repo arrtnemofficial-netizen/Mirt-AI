@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import suppress
 from typing import Any
 
 from src.services.exceptions import CatalogUnavailableError
@@ -192,10 +193,8 @@ class CatalogService:
             success = True
             result_count = len(data)
             # Cache the results
-            try:
+            with suppress(Exception):
                 self._cache[cache_key] = {"ts": time.time(), "data": list(data)}
-            except Exception:
-                pass
             return data
 
         except CatalogUnavailableError:
@@ -327,10 +326,8 @@ class CatalogService:
             success = True
             result_count = len(products)
             logger.info("Loaded %d products from DB for vision", len(products))
-            try:
+            with suppress(Exception):
                 self._cache[cache_key] = {"ts": time.time(), "data": list(products)}
-            except Exception:
-                pass
             return products
 
         except Exception as e:

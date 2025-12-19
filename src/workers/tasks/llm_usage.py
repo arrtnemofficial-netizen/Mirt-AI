@@ -241,8 +241,8 @@ def get_user_usage_summary(
             by_model[model]["count"] += 1
 
         # Convert Decimal to float for JSON serialization
-        for model in by_model:
-            by_model[model]["cost_usd"] = float(by_model[model]["cost_usd"])
+        for _model, stats in by_model.items():
+            stats["cost_usd"] = float(stats["cost_usd"])
 
         return {
             "status": "ok",

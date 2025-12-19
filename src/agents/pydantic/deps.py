@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from src.services.memory_service import MemoryService
-
     from .memory_models import Fact, UserProfile
     from .models import StateType
 
@@ -33,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 from src.services.catalog_service import CatalogService
+from src.services.memory_service import MemoryService
 from src.services.order_service import OrderService
 
 
@@ -157,7 +156,7 @@ class AgentDeps:
     def get_memory_context_prompt(self) -> str:
         """
         Get formatted memory context for prompt injection.
-        
+
         Returns pre-formatted string or generates from profile/facts.
         """
         # Use pre-formatted if available (set by memory_context_node)
@@ -171,31 +170,36 @@ class AgentDeps:
             p = self.profile
 
             # Child info
-            if hasattr(p, 'child_profile') and p.child_profile:
+            if hasattr(p, "child_profile") and p.child_profile:
                 child = p.child_profile
                 child_info = []
-                if hasattr(child, 'name') and child.name:
+                if hasattr(child, "name") and child.name:
                     child_info.append(f"імʼя: {child.name}")
-                if hasattr(child, 'age') and child.age:
+                if hasattr(child, "age") and child.age:
                     child_info.append(f"вік: {child.age}")
-                if hasattr(child, 'height_cm') and child.height_cm:
+                if hasattr(child, "height_cm") and child.height_cm:
                     child_info.append(f"зріст: {child.height_cm} см")
-                if hasattr(child, 'gender') and child.gender:
+                if hasattr(child, "gender") and child.gender:
                     child_info.append(f"стать: {child.gender}")
                 if child_info:
                     lines.append(f"Дитина: {', '.join(child_info)}")
 
             # Logistics from profile
-            if hasattr(p, 'logistics') and p.logistics:
-                if hasattr(p.logistics, 'city') and p.logistics.city:
+            if hasattr(p, "logistics") and p.logistics:
+                if hasattr(p.logistics, "city") and p.logistics.city:
                     lines.append(f"Місто: {p.logistics.city}")
-                if hasattr(p.logistics, 'favorite_branch') and p.logistics.favorite_branch:
+                if hasattr(p.logistics, "favorite_branch") and p.logistics.favorite_branch:
                     lines.append(f"НП: {p.logistics.favorite_branch}")
 
             # Style preferences
-            if hasattr(p, 'style_preferences') and p.style_preferences:
-                if hasattr(p.style_preferences, 'favorite_models') and p.style_preferences.favorite_models:
-                    lines.append(f"Улюблені моделі: {', '.join(p.style_preferences.favorite_models)}")
+            if hasattr(p, "style_preferences") and p.style_preferences:
+                if (
+                    hasattr(p.style_preferences, "favorite_models")
+                    and p.style_preferences.favorite_models
+                ):
+                    lines.append(
+                        f"Улюблені моделі: {', '.join(p.style_preferences.favorite_models)}"
+                    )
 
         # Add facts
         if self.facts:
@@ -223,7 +227,7 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
     Create AgentDeps from LangGraph state.
 
     This is the bridge between LangGraph and PydanticAI.
-    
+
     Memory fields (profile, facts, memory_context_prompt) are populated
     by memory_context_node before agent execution.
     """
@@ -277,14 +281,14 @@ async def create_deps_with_memory(
 ) -> AgentDeps:
     """
     Create AgentDeps with memory context loaded.
-    
+
     This is an async version that loads memory from Supabase.
     Use this when memory_context_node hasn't run yet.
-    
+
     Args:
         state: LangGraph state
         memory_service: Optional MemoryService (creates one if not provided)
-        
+
     Returns:
         AgentDeps with profile and facts loaded
     """

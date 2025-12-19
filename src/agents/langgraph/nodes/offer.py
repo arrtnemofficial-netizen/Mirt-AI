@@ -41,15 +41,11 @@ logger = logging.getLogger(__name__)
 # FALLBACK MESSAGES (коли deliberation failed)
 # =============================================================================
 FALLBACK_PRICE_MISMATCH = (
-    "Секундочку, уточнюю ціну по каталогу 🤍\n"
-    "---\n"
-    "Зараз напишу точну інформацію"
+    "Секундочку, уточнюю ціну по каталогу 🤍\n---\nЗараз напишу точну інформацію"
 )
 
 FALLBACK_LOW_CONFIDENCE = (
-    "Дайте подивлюсь ще раз по каталогу 🌸\n"
-    "---\n"
-    "Хочу переконатися що все точно"
+    "Дайте подивлюсь ще раз по каталогу 🌸\n---\nХочу переконатися що все точно"
 )
 
 
@@ -281,12 +277,11 @@ async def offer_node(
 
 
 async def _validate_prices_from_db(
-    products: list[dict[str, Any]],
-    session_id: str
+    products: list[dict[str, Any]], session_id: str
 ) -> tuple[list[dict[str, Any]], bool]:
     """
     Validate and correct product prices from database.
-    
+
     Returns:
         (validated_products, all_prices_correct)
         - validated_products: products with corrected prices from DB

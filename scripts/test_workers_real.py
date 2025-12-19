@@ -7,8 +7,6 @@ Usage:
     python scripts/test_workers_real.py
 """
 
-import asyncio
-import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,8 +24,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from src.conf.config import settings
 from src.services.followups import build_followup_message, next_followup_due_at, run_followups
-from src.services.message_store import MessageStore, StoredMessage, create_message_store
-from src.services.summarization import run_retention, summarise_messages
+from src.services.message_store import StoredMessage, create_message_store
+from src.services.summarization import summarise_messages
 from src.services.supabase_client import get_supabase_client
 
 
@@ -102,7 +100,7 @@ def test_followup_logic_1min():
     print(f"  Due at:        {due_at.isoformat() if due_at else 'None'}")
 
     is_due = due_at and now >= due_at
-    print_result("Follow-up is due", is_due, f"After 1 minute of inactivity")
+    print_result("Follow-up is due", is_due, "After 1 minute of inactivity")
 
     if is_due:
         followup = build_followup_message(session_id, index=1, now=now)
@@ -141,11 +139,11 @@ def test_summarization_logic():
     summary = summarise_messages(messages)
 
     print(f"  Input: {len(messages)} messages")
-    print(f"  Output summary:")
-    print(f"  ---")
+    print("  Output summary:")
+    print("  ---")
     for line in summary.split(" \n")[:3]:
         print(f"    {line[:60]}...")
-    print(f"  ---")
+    print("  ---")
 
     print_result("Summarization", len(summary) > 0, f"{len(summary)} chars generated")
     return True

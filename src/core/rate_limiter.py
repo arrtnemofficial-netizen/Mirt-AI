@@ -5,7 +5,7 @@ Token bucket rate limiter для обмеження запитів per user.
 
 Використання:
     from src.core.rate_limiter import RateLimiter, check_rate_limit
-    
+
     if not check_rate_limit(user_id):
         return "Too many requests"
 """
@@ -24,15 +24,16 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TokenBucket:
     """Token bucket для rate limiting."""
-    capacity: int = 10           # Max tokens
-    refill_rate: float = 1.0     # Tokens per second
+
+    capacity: int = 10  # Max tokens
+    refill_rate: float = 1.0  # Tokens per second
     tokens: float = field(default=10.0)
     last_refill: float = field(default_factory=time.time)
 
     def consume(self, tokens: int = 1) -> bool:
         """
         Спробувати використати tokens.
-        
+
         Returns:
             True якщо дозволено, False якщо rate limited
         """
@@ -58,7 +59,7 @@ class TokenBucket:
 class RateLimiter:
     """
     Rate limiter з per-user buckets.
-    
+
     Args:
         capacity: Max requests per window
         refill_rate: Requests per second to refill
@@ -80,11 +81,11 @@ class RateLimiter:
     def check(self, key: str, tokens: int = 1) -> bool:
         """
         Перевірити чи дозволений запит для key.
-        
+
         Args:
             key: User ID або інший ідентифікатор
             tokens: Кількість tokens для consume
-        
+
         Returns:
             True якщо дозволено, False якщо rate limited
         """
@@ -124,10 +125,7 @@ class RateLimiter:
         cutoff = now - self.cleanup_interval
 
         # Remove buckets that haven't been used recently
-        old_keys = [
-            k for k, v in self._buckets.items()
-            if v.last_refill < cutoff
-        ]
+        old_keys = [k for k, v in self._buckets.items() if v.last_refill < cutoff]
 
         for key in old_keys:
             del self._buckets[key]

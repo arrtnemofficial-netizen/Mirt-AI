@@ -22,11 +22,11 @@
 """
 
 import sys
-import json
-import yaml
-import asyncio
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import yaml
+
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -37,7 +37,7 @@ PRODUCTS_MASTER = PROJECT_ROOT / "data" / "vision" / "products_master.yaml"
 
 def load_yaml():
     """Load products_master.yaml."""
-    with open(PRODUCTS_MASTER, "r", encoding="utf-8") as f:
+    with open(PRODUCTS_MASTER, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -68,26 +68,53 @@ def generate_product_key(name: str) -> str:
     """Generate YAML key from product name."""
     # "Костюм Весна" -> "kostum_vesna"
     import re
+
     # Transliterate Ukrainian
     translit = {
-        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'є': 'ye',
-        'ж': 'zh', 'з': 'z', 'и': 'y', 'і': 'i', 'ї': 'yi', 'й': 'y', 'к': 'k',
-        'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's',
-        'т': 't', 'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh',
-        'щ': 'shch', 'ь': '', 'ю': 'yu', 'я': 'ya', "'": '', ' ': '_'
+        "а": "a",
+        "б": "b",
+        "в": "v",
+        "г": "g",
+        "д": "d",
+        "е": "e",
+        "є": "ye",
+        "ж": "zh",
+        "з": "z",
+        "и": "y",
+        "і": "i",
+        "ї": "yi",
+        "й": "y",
+        "к": "k",
+        "л": "l",
+        "м": "m",
+        "н": "n",
+        "о": "o",
+        "п": "p",
+        "р": "r",
+        "с": "s",
+        "т": "t",
+        "у": "u",
+        "ф": "f",
+        "х": "kh",
+        "ц": "ts",
+        "ч": "ch",
+        "ш": "sh",
+        "щ": "shch",
+        "ь": "",
+        "ю": "yu",
+        "я": "ya",
+        "'": "",
+        " ": "_",
     }
     result = ""
     for char in name.lower():
         result += translit.get(char, char)
-    return re.sub(r'[^a-z0-9_]', '', result)
+    return re.sub(r"[^a-z0-9_]", "", result)
 
 
 def get_standard_sizes() -> list[str]:
     """Return standard size options."""
-    return [
-        "80-92", "98-104", "110-116", "122-128", 
-        "134-140", "146-152", "158-164"
-    ]
+    return ["80-92", "98-104", "110-116", "122-128", "134-140", "146-152", "158-164"]
 
 
 def main():
@@ -95,39 +122,39 @@ def main():
     print("🛍️  ДОДАВАННЯ НОВОГО ПРОДУКТУ")
     print("=" * 60)
     print()
-    
+
     # 1. ОСНОВНІ ДАНІ
     print("📝 КРОК 1: Основні дані")
     print("-" * 40)
-    
+
     name = ask("Назва товару (напр. 'Костюм Весна')")
     if not name:
         print("❌ Назва обов'язкова!")
         sys.exit(1)
-    
+
     category = ask("Категорія", "костюми")
-    
+
     # 2. КОЛЬОРИ
     print()
     print("🎨 КРОК 2: Кольори")
     print("-" * 40)
-    
+
     colors_input = ask("Кольори через кому (напр. 'рожевий, голубий')")
     colors = [c.strip() for c in colors_input.split(",") if c.strip()]
-    
+
     if not colors:
         colors = ["універсальний"]
         print("   → Встановлено: універсальний")
-    
+
     # 3. ЦІНИ
     print()
     print("💰 КРОК 3: Ціни")
     print("-" * 40)
-    
+
     uniform_price = ask_yes_no("Ціна однакова для всіх розмірів?", default=True)
-    
+
     sizes = get_standard_sizes()
-    
+
     if uniform_price:
         price_str = ask("Ціна (грн)")
         try:
@@ -135,8 +162,8 @@ def main():
         except ValueError:
             print("❌ Невірний формат ціни!")
             sys.exit(1)
-        
-        prices_by_size = {size: price for size in sizes}
+
+        prices_by_size = dict.fromkeys(sizes, price)
     else:
         print("   Введіть ціни для кожного розміру:")
         prices_by_size = {}
@@ -147,28 +174,25 @@ def main():
             except ValueError:
                 print(f"❌ Невірний формат для {size}!")
                 sys.exit(1)
-    
+
     # 4. ФОТО (опціонально)
     print()
     print("📷 КРОК 4: Фото URL (опціонально)")
     print("-" * 40)
     print("   Вставте URL фото для кожного кольору або натисніть Enter щоб пропустити")
-    
+
     color_data = {}
     for color in colors:
         photo_url = ask(f"   URL для '{color}' (Enter = пропустити)")
         sku = f"{generate_product_key(name).upper()}-{color.upper()[:4]}"
-        color_data[color] = {
-            "photo_url": photo_url if photo_url else "",
-            "sku": sku
-        }
-    
+        color_data[color] = {"photo_url": photo_url if photo_url else "", "sku": sku}
+
     # 5. ГЕНЕРАЦІЯ СТРУКТУРИ
     print()
     print("⚙️  Генерую структуру...")
-    
+
     product_key = generate_product_key(name)
-    
+
     product = {
         "id": int(datetime.now().timestamp()),  # Унікальний ID
         "name": name,
@@ -178,62 +202,57 @@ def main():
         "colors": color_data,
         "visual": {
             "fabric_type": "тканина",
-            "key_markers": [
-                f"Характерні ознаки {name}"
-            ],
+            "key_markers": [f"Характерні ознаки {name}"],
             "recognition_by_angle": {
                 "front": "Вигляд спереду",
                 "back": "Вигляд ззаду",
                 "side": "Вигляд збоку",
-                "detail": "Деталі"
+                "detail": "Деталі",
             },
-            "low_quality_markers": [
-                "Ознаки на фото низької якості"
-            ],
-            "texture_description": "Опис текстури тканини"
+            "low_quality_markers": ["Ознаки на фото низької якості"],
+            "texture_description": "Опис текстури тканини",
         },
-        "distinction": {
-            "confused_with": [],
-            "unique_identifier": f"Унікальна ознака {name}"
-        }
+        "distinction": {"confused_with": [], "unique_identifier": f"Унікальна ознака {name}"},
     }
-    
+
     # 6. ЗБЕРІГАННЯ
     print("💾 Зберігаю в products_master.yaml...")
-    
+
     data = load_yaml()
     if "products" not in data:
         data["products"] = {}
-    
+
     data["products"][product_key] = product
     save_yaml(data)
-    
+
     print("   ✅ Збережено!")
-    
+
     # 7. ГЕНЕРАЦІЯ АРТЕФАКТІВ
     print()
     print("🔧 Генерую артефакти vision...")
-    
+
     try:
         from data.vision.generate import main as generate_artifacts
+
         generate_artifacts()
         print("   ✅ Артефакти згенеровано!")
     except Exception as e:
         print(f"   ⚠️ Помилка генерації: {e}")
         print("   Запустіть вручну: python scripts/generate_vision_artifacts.py")
-    
+
     # 8. ОНОВЛЕННЯ БД
     print()
     if ask_yes_no("Оновити БД Supabase?", default=True):
         print("🔌 Оновлюю БД...")
         try:
             from scripts.migrate_price_by_size import main as migrate
+
             migrate()
             print("   ✅ БД оновлено!")
         except Exception as e:
             print(f"   ⚠️ Помилка БД: {e}")
             print("   Запустіть вручну: python scripts/migrate_price_by_size.py")
-    
+
     # ГОТОВО
     print()
     print("=" * 60)

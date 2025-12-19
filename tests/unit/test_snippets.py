@@ -111,13 +111,17 @@ def _assert_rule(title: str, body: str, rule_id: str) -> None:
         # Either the snippet uses '---' separators, or it's a single short bubble.
         has_sep = "\n---\n" in body or body.strip() == "---" or body.strip().startswith("---\n")
         is_single = "\n" not in body.strip() and len(body.strip()) > 0
-        assert has_sep or is_single, f"Snippet '{title}' should be bubble-splittable via --- or be a single line"
+        assert has_sep or is_single, (
+            f"Snippet '{title}' should be bubble-splittable via --- or be a single line"
+        )
         return
 
     if rule_id == "no_other_fop":
         # Snippets can mention Kutnyi explicitly; forbid other common variants.
         lowered = body.lower()
-        assert "фоп" not in lowered or "кут" in lowered, f"Snippet '{title}' mentions FOP without Kutnyi"
+        assert "фоп" not in lowered or "кут" in lowered, (
+            f"Snippet '{title}' mentions FOP without Kutnyi"
+        )
         assert "ігорович" not in lowered or "не ігорович" in lowered
         return
 

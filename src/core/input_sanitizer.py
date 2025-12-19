@@ -5,7 +5,7 @@ Protects against attempts to manipulate AI behavior via user input.
 
 Attack patterns blocked:
 1. "Ignore previous instructions" - role manipulation
-2. "You are now X" - identity hijacking  
+2. "You are now X" - identity hijacking
 3. "System prompt:" - instruction injection
 4. Repeated special characters - encoding attacks
 5. Base64/hex encoded payloads - obfuscation
@@ -63,7 +63,11 @@ JAILBREAK_PATTERNS = [
 
 # Compile all patterns
 _DANGEROUS_PATTERNS: list[re.Pattern[str]] = []
-for pattern_list in [ROLE_MANIPULATION_PATTERNS, INSTRUCTION_INJECTION_PATTERNS, JAILBREAK_PATTERNS]:
+for pattern_list in [
+    ROLE_MANIPULATION_PATTERNS,
+    INSTRUCTION_INJECTION_PATTERNS,
+    JAILBREAK_PATTERNS,
+]:
     for pattern in pattern_list:
         _DANGEROUS_PATTERNS.append(re.compile(pattern, re.IGNORECASE))
 
@@ -78,10 +82,10 @@ SanitizeResult = Literal["clean", "suspicious", "blocked"]
 def check_input(text: str) -> tuple[SanitizeResult, str | None]:
     """
     Check user input for prompt injection attempts.
-    
+
     Args:
         text: User message text
-        
+
     Returns:
         (result, matched_pattern)
         - "clean": No issues found
@@ -119,10 +123,10 @@ def check_input(text: str) -> tuple[SanitizeResult, str | None]:
 def sanitize_input(text: str) -> str:
     """
     Sanitize user input by removing potentially dangerous content.
-    
+
     Args:
         text: User message text
-        
+
     Returns:
         Sanitized text (dangerous patterns removed)
     """
@@ -144,10 +148,10 @@ def sanitize_input(text: str) -> str:
 def is_safe_input(text: str) -> bool:
     """
     Quick check if input is safe to process.
-    
+
     Args:
         text: User message text
-        
+
     Returns:
         True if safe, False if blocked
     """
@@ -163,16 +167,16 @@ def is_safe_input(text: str) -> bool:
 def process_user_message(text: str) -> tuple[str, bool]:
     """
     Process user message with security checks.
-    
+
     Args:
         text: Raw user message
-        
+
     Returns:
         (processed_text, was_modified)
         - processed_text: Sanitized message
         - was_modified: True if message was changed
     """
-    result, pattern = check_input(text)
+    result, _pattern = check_input(text)
 
     if result == "clean":
         return (text, False)

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from copy import deepcopy
-from typing import Any, Callable
+from typing import TYPE_CHECKING
 
 from src.agents import ConversationState
 from src.conf.config import settings
@@ -17,17 +17,20 @@ from src.services.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 class CircuitBreaker:
     """Circuit breaker to prevent cascading failures when Supabase is down."""
-    
+
     def __init__(self, failure_threshold: int = 5, timeout: float = 60.0):
         self.failure_threshold = failure_threshold
         self.timeout = timeout
         self.failure_count = 0
         self.last_failure_time = 0
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
-    
+
     def call(self, func: Callable, *args, **kwargs):
         """Execute function with circuit breaker protection."""
         if self.state == "OPEN":
@@ -36,7 +39,7 @@ class CircuitBreaker:
                 logger.info("Circuit breaker entering HALF_OPEN state")
             else:
                 raise Exception("Circuit breaker OPEN - Supabase operations disabled")
-        
+
         try:
             result = func(*args, **kwargs)
             if self.state == "HALF_OPEN":
@@ -47,15 +50,15 @@ class CircuitBreaker:
         except Exception as e:
             self.failure_count += 1
             self.last_failure_time = time.time()
-            
+
             if self.failure_count >= self.failure_threshold:
                 self.state = "OPEN"
                 logger.error(
                     "Circuit breaker OPENED after %d failures. Supabase disabled for %.1fs",
                     self.failure_count,
-                    self.timeout
+                    self.timeout,
                 )
-            
+
             raise e
 
 
@@ -70,6 +73,7 @@ def retry_with_backoff(
     backoff_factor: float = 2.0,
 ) -> Callable:
     """Decorator for retrying database operations with exponential backoff."""
+
     def decorator(func: Callable) -> Callable:
         def _in_async_loop() -> bool:
             try:
@@ -80,7 +84,7 @@ def retry_with_backoff(
 
         async def async_wrapper(*args, **kwargs):
             last_exception = None
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     if asyncio.iscoroutinefunction(func):
@@ -89,51 +93,49 @@ def retry_with_backoff(
                         return func(*args, **kwargs)
                 except Exception as e:
                     last_exception = e
-                    
+
                     # Don't retry on certain errors
                     if "authentication" in str(e).lower() or "unauthorized" in str(e).lower():
                         break
-                        
+
                     if attempt < max_retries:
-                        delay = min(base_delay * (backoff_factor ** attempt), max_delay)
+                        delay = min(base_delay * (backoff_factor**attempt), max_delay)
                         logger.warning(
                             "Supabase operation failed (attempt %d/%d), retrying in %.1fs: %s",
                             attempt + 1,
                             max_retries + 1,
                             delay,
-                            e
+                            e,
                         )
                         await asyncio.sleep(delay)
                     else:
                         logger.error(
-                            "Supabase operation failed after %d attempts: %s",
-                            max_retries + 1,
-                            e
+                            "Supabase operation failed after %d attempts: %s", max_retries + 1, e
                         )
-            
+
             raise last_exception
-        
+
         def sync_wrapper(*args, **kwargs):
             last_exception = None
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
                     last_exception = e
-                    
+
                     # Don't retry on certain errors
                     if "authentication" in str(e).lower() or "unauthorized" in str(e).lower():
                         break
-                        
+
                     if attempt < max_retries:
-                        delay = min(base_delay * (backoff_factor ** attempt), max_delay)
+                        delay = min(base_delay * (backoff_factor**attempt), max_delay)
                         logger.warning(
                             "Supabase operation failed (attempt %d/%d), retrying in %.1fs: %s",
                             attempt + 1,
                             max_retries + 1,
                             delay,
-                            e
+                            e,
                         )
                         # IMPORTANT: get()/save() are called from async request handlers.
                         # Never block the asyncio event loop.
@@ -141,14 +143,13 @@ def retry_with_backoff(
                             time.sleep(delay)
                     else:
                         logger.error(
-                            "Supabase operation failed after %d attempts: %s",
-                            max_retries + 1,
-                            e
+                            "Supabase operation failed after %d attempts: %s", max_retries + 1, e
                         )
-            
+
             raise last_exception
-        
+
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
     return decorator
 
 
@@ -163,6 +164,7 @@ class SupabaseSessionStore:
         # or returns transient errors (e.g. 521 Web server is down).
         # This ensures UX is not broken even if remote persistence is unavailable.
         self._fallback_store: InMemorySessionStore = InMemorySessionStore()
+        self._bg_tasks: set[asyncio.Task] = set()
         logger.info("SupabaseSessionStore initialized with table '%s'", self.table_name)
 
     def _fetch_from_supabase(self, session_id: str) -> ConversationState | None:
@@ -195,7 +197,9 @@ class SupabaseSessionStore:
                 logger.error("Failed to fetch session %s from Supabase: %s", session_id, e)
             return None
 
-    @retry_with_backoff(max_retries=2, base_delay=0.3, max_delay=2.0)  # Reduced retries since circuit breaker handles failures
+    @retry_with_backoff(
+        max_retries=2, base_delay=0.3, max_delay=2.0
+    )  # Reduced retries since circuit breaker handles failures
     def get(self, session_id: str) -> ConversationState:
         """Return stored state or a fresh empty state."""
         supabase_state = self._fetch_from_supabase(session_id)
@@ -255,7 +259,9 @@ class SupabaseSessionStore:
                 logger.error("Failed to save session %s to Supabase: %s", session_id, e)
             return False
 
-    @retry_with_backoff(max_retries=2, base_delay=0.3, max_delay=2.0)  # Reduced retries since circuit breaker handles failures
+    @retry_with_backoff(
+        max_retries=2, base_delay=0.3, max_delay=2.0
+    )  # Reduced retries since circuit breaker handles failures
     def save(self, session_id: str, state: ConversationState) -> None:
         """Persist the current state for the session."""
         # Always keep in-memory fallback up to date so UX is stable even if
@@ -286,7 +292,7 @@ class SupabaseSessionStore:
                     asyncio.to_thread(self._save_to_supabase, session_id, state),
                     timeout=3.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "Supabase save timed out (>3s) for session %s; continuing without persistence",
                     session_id,
@@ -295,7 +301,9 @@ class SupabaseSessionStore:
                 # Observability only; _save_to_supabase already logs typical failures.
                 logger.debug("Supabase save background task failed for %s: %s", session_id, e)
 
-        loop.create_task(_save_bg())
+        task = loop.create_task(_save_bg())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     def delete(self, session_id: str) -> bool:
         """Delete session state. Returns True if session existed."""
@@ -311,12 +319,7 @@ class SupabaseSessionStore:
             return existed_in_fallback
 
         try:
-            response = (
-                client.table(self.table_name)
-                .delete()
-                .eq("session_id", session_id)
-                .execute()
-            )
+            response = client.table(self.table_name).delete().eq("session_id", session_id).execute()
             # Check if any rows were deleted
             existed_in_supabase = bool(response.data and len(response.data) > 0)
             logger.info(

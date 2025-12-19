@@ -200,7 +200,7 @@ def redact_pii(text: str) -> str:
 
 def detect_prompt_injection(text: str) -> bool:
     """Detect prompt injection attempts.
-    
+
     Catches:
     - 'ignore previous instructions'
     - 'you are now X'

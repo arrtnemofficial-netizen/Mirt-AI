@@ -48,10 +48,7 @@ def format_requisites_multiline() -> str:
 def format_requisites_short() -> str:
     """Short variant without purpose (for compact prompts)."""
 
-    return (
-        f"{BANK_REQUISITES.fop_name}\n"
-        f"IBAN: {BANK_REQUISITES.iban}"
-    )
+    return f"{BANK_REQUISITES.fop_name}\nIBAN: {BANK_REQUISITES.iban}"
 
 
 # =============================================================================
@@ -75,4 +72,3 @@ SUIT_PRICE_BY_SIZE: dict[str, int] = {
     "146-152": 2390,
     "158-164": 2390,
 }
-

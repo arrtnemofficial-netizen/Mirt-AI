@@ -335,6 +335,69 @@ class Settings(BaseSettings):
             "Use 'memory' for local Telegram polling if Supabase/Postgres is unstable."
         ),
     )
+    CHECKPOINTER_WARMUP: bool = Field(
+        default=True,
+        description="Warm up checkpointer pool during startup.",
+    )
+    CHECKPOINTER_WARMUP_TIMEOUT_SECONDS: float = Field(
+        default=15.0,
+        ge=0.0,
+        description="Timeout for checkpointer warmup preflight.",
+    )
+    CHECKPOINTER_POOL_MIN_SIZE: int = Field(
+        default=1,
+        ge=0,
+        description="Minimum size for checkpointer connection pool.",
+    )
+    CHECKPOINTER_POOL_MAX_SIZE: int = Field(
+        default=5,
+        ge=1,
+        description="Maximum size for checkpointer connection pool.",
+    )
+    CHECKPOINTER_POOL_TIMEOUT_SECONDS: float = Field(
+        default=15.0,
+        ge=0.0,
+        description="Pool acquisition timeout in seconds.",
+    )
+    CHECKPOINTER_POOL_MAX_IDLE_SECONDS: float = Field(
+        default=120.0,
+        ge=0.0,
+        description="Close idle connections after this many seconds.",
+    )
+    CHECKPOINTER_CONNECT_TIMEOUT_SECONDS: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="Connect timeout for Postgres pool connections.",
+    )
+    CHECKPOINTER_STATEMENT_TIMEOUT_MS: int = Field(
+        default=8000,
+        ge=0,
+        description="Postgres statement_timeout for checkpointer queries.",
+    )
+    CHECKPOINTER_LOCK_TIMEOUT_MS: int = Field(
+        default=2000,
+        ge=0,
+        description="Postgres lock_timeout for checkpointer queries.",
+    )
+    CHECKPOINTER_SLOW_LOG_SECONDS: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Log checkpointer operations slower than this threshold.",
+    )
+    CHECKPOINTER_MAX_MESSAGES: int = Field(
+        default=200,
+        ge=0,
+        description="Max messages to keep in checkpoint payload (0 disables trimming).",
+    )
+    CHECKPOINTER_MAX_MESSAGE_CHARS: int = Field(
+        default=4000,
+        ge=0,
+        description="Max characters per message to store in checkpoint payload.",
+    )
+    CHECKPOINTER_DROP_BASE64: bool = Field(
+        default=True,
+        description="Strip base64 image payloads from checkpoint state.",
+    )
 
     # =========================================================================
     # INTEGRATION FEATURE FLAGS
@@ -356,6 +419,22 @@ class Settings(BaseSettings):
             "Enable Sitniks CRM integration (order creation, status updates). "
             "Disable for local testing or when CRM is unavailable."
         ),
+    )
+
+    MANYCHAT_PUSH_MAX_RETRIES: int = Field(
+        default=2,
+        ge=0,
+        description="Max retries for transient ManyChat push failures.",
+    )
+    MANYCHAT_PUSH_RETRY_BASE_DELAY_SECONDS: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="Base delay for ManyChat push retry backoff.",
+    )
+    MANYCHAT_PUSH_RETRY_MAX_DELAY_SECONDS: float = Field(
+        default=3.0,
+        ge=0.0,
+        description="Maximum delay between ManyChat push retries.",
     )
 
     # =========================================================================

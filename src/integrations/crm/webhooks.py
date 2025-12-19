@@ -38,7 +38,7 @@ class SnitkixWebhookHandler:
 
     async def verify_webhook_signature(self, request: Request) -> bool:
         """Verify webhook request authenticity.
-        
+
         Checks:
         1. API key in X-API-Key header
         2. Optional signature verification (if Snitkix supports it)
@@ -63,7 +63,7 @@ class SnitkixWebhookHandler:
         self, request: Request, payload: dict[str, Any]
     ) -> dict[str, Any]:
         """Handle order status update from Snitkix CRM.
-        
+
         Expected payload format:
         {
             "order_id": "CRM-12345",
@@ -76,7 +76,6 @@ class SnitkixWebhookHandler:
         try:
             crm_order_id = payload.get("order_id")
             new_status = payload.get("status")
-            external_id = payload.get("external_id")
             metadata = payload.get("metadata", {})
 
             if not crm_order_id or not new_status:
@@ -84,8 +83,14 @@ class SnitkixWebhookHandler:
 
             # Validate status
             valid_statuses = {
-                "pending", "queued", "created", "processing",
-                "shipped", "delivered", "cancelled", "failed"
+                "pending",
+                "queued",
+                "created",
+                "processing",
+                "shipped",
+                "delivered",
+                "cancelled",
+                "failed",
             }
             if new_status not in valid_statuses:
                 raise ValueError(f"Invalid status: {new_status}")
@@ -125,7 +130,7 @@ class SnitkixWebhookHandler:
         self, request: Request, payload: dict[str, Any]
     ) -> dict[str, Any]:
         """Handle payment confirmation from Snitkix CRM.
-        
+
         Expected payload format:
         {
             "order_id": "CRM-12345",
@@ -194,7 +199,7 @@ class SnitkixWebhookHandler:
         self, request: Request, payload: dict[str, Any]
     ) -> dict[str, Any]:
         """Handle inventory/stock updates from Snitkix CRM.
-        
+
         Expected payload format:
         {
             "products": [
@@ -264,6 +269,7 @@ def get_webhook_handler() -> SnitkixWebhookHandler:
 
 
 # FastAPI endpoint functions
+
 
 async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
     """Handle order status updates from Snitkix CRM."""

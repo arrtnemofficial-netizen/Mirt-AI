@@ -17,12 +17,12 @@ With this:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
 from enum import Enum
 from typing import TYPE_CHECKING, Any
-import json
 
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -32,6 +32,167 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
 
 logger = logging.getLogger(__name__)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = (os.getenv(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except Exception:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.getenv(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(float(raw))
+    except Exception:
+        return default
+
+
+def _setting_float(settings: Any | None, name: str, default: float) -> float:
+    if settings is not None and hasattr(settings, name):
+        try:
+            return float(getattr(settings, name))
+        except Exception:
+            return default
+    return _env_float(name, default)
+
+
+def _setting_int(settings: Any | None, name: str, default: int) -> int:
+    if settings is not None and hasattr(settings, name):
+        try:
+            return int(float(getattr(settings, name)))
+        except Exception:
+            return default
+    return _env_int(name, default)
+
+
+def _setting_bool(settings: Any | None, name: str, default: bool) -> bool:
+    if settings is not None and hasattr(settings, name):
+        try:
+            return bool(getattr(settings, name))
+        except Exception:
+            return default
+    raw = (os.getenv(name, "") or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _extract_thread_id(config: Any | None) -> str:
+    if not isinstance(config, dict):
+        return "?"
+    configurable = config.get("configurable")
+    if isinstance(configurable, dict):
+        thread_id = configurable.get("thread_id")
+        if thread_id:
+            return str(thread_id)
+    return "?"
+
+
+def _checkpoint_stats(obj: Any) -> tuple[int | None, int | None]:
+    """Return (json_bytes, messages_count) best-effort."""
+    json_bytes: int | None = None
+    messages_count: int | None = None
+    try:
+        s = json.dumps(obj, ensure_ascii=False, default=str)
+        json_bytes = len(s.encode("utf-8", errors="ignore"))
+    except Exception:
+        json_bytes = None
+
+    try:
+        if isinstance(obj, dict):
+            # Common internal shapes used by LangGraph checkpointers.
+            for k in ("channel_values", "values", "state"):
+                v = obj.get(k)
+                if isinstance(v, dict) and "messages" in v:
+                    mv = v.get("messages")
+                    if isinstance(mv, list):
+                        messages_count = len(mv)
+                        break
+        if (
+            messages_count is None
+            and isinstance(obj, dict)
+            and isinstance(obj.get("messages"), list)
+        ):
+            messages_count = len(obj.get("messages"))
+    except Exception:
+        messages_count = None
+
+    return json_bytes, messages_count
+
+
+def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_base64: bool) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    compact = payload
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        if max_messages > 0 and len(messages) > max_messages:
+            messages = messages[-max_messages:]
+
+        if max_chars > 0:
+            trimmed: list[Any] = []
+            for m in messages:
+                if isinstance(m, dict):
+                    content = m.get("content")
+                    if isinstance(content, str) and len(content) > max_chars:
+                        m = {**m, "content": content[:max_chars] + "...[truncated]"}
+                trimmed.append(m)
+            messages = trimmed
+
+        compact = {**compact, "messages": messages}
+
+    if drop_base64:
+        image_url = compact.get("image_url")
+        if isinstance(image_url, str) and len(image_url) > 2000:
+            if image_url.startswith("data:") or "base64" in image_url:
+                compact = {**compact, "image_url": "<base64_stripped>"}
+
+    return compact
+
+
+def _log_if_slow(
+    op: str,
+    started_at: float,
+    config: Any | None,
+    *,
+    payload: Any | None,
+    slow_threshold_s: float,
+) -> None:
+    elapsed = time.perf_counter() - started_at
+    if elapsed < slow_threshold_s:
+        return
+    thread_id = _extract_thread_id(config)
+    level = logging.WARNING if elapsed >= max(10.0, slow_threshold_s * 10.0) else logging.INFO
+    extra = ""
+    if payload is not None:
+        size_b, msg_n = _checkpoint_stats(payload)
+        if size_b is not None or msg_n is not None:
+            extra = f" size_bytes={size_b} messages={msg_n}"
+    logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs%s", op, thread_id, elapsed, extra)
+
+
+async def _open_pool_on_demand(pool: Any | None) -> None:
+    if pool is None or not hasattr(pool, "open"):
+        return
+    try:
+        try:
+            await pool.open(wait=True)
+        except TypeError:
+            await pool.open()
+        logger.info("[CHECKPOINTER] pool opened on demand")
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "already" in msg and "open" in msg:
+            return
+        logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
 
 
 class SerializableMemorySaver(MemorySaver):
@@ -114,9 +275,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     settings = None
     # Try to get database URL from environment
     database_url = (
-        os.getenv("DATABASE_URL_POOLER")
-        or os.getenv("DATABASE_URL")
-        or os.getenv("POSTGRES_URL")
+        os.getenv("DATABASE_URL_POOLER") or os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
     )
 
     if not database_url:
@@ -199,39 +358,18 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             except Exception:
                 raise  # Connection is dead, pool will discard it
 
-        def _env_float(name: str, default: float) -> float:
-            raw = (os.getenv(name, "") or "").strip()
-            if not raw:
-                return default
-            try:
-                return float(raw)
-            except Exception:
-                return default
+        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 1)
+        pool_max_size = _setting_int(settings, "CHECKPOINTER_POOL_MAX_SIZE", 5)
+        pool_timeout_s = _setting_float(settings, "CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
+        pool_max_idle_s = _setting_float(settings, "CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
+        connect_timeout_s = _setting_float(settings, "CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 10.0)
 
-        def _env_int(name: str, default: int) -> int:
-            raw = (os.getenv(name, "") or "").strip()
-            if not raw:
-                return default
-            try:
-                return int(float(raw))
-            except Exception:
-                return default
+        statement_timeout_ms = _setting_int(settings, "CHECKPOINTER_STATEMENT_TIMEOUT_MS", 8000)
+        lock_timeout_ms = _setting_int(settings, "CHECKPOINTER_LOCK_TIMEOUT_MS", 2000)
 
-        pool_min_size = _env_int("CHECKPOINTER_POOL_MIN_SIZE", 1)
-        pool_max_size = _env_int("CHECKPOINTER_POOL_MAX_SIZE", 5)
-        pool_timeout_s = _env_float("CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
-        pool_max_idle_s = _env_float("CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
-        connect_timeout_s = _env_float("CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 10.0)
-
-        statement_timeout_ms = _env_int("CHECKPOINTER_STATEMENT_TIMEOUT_MS", 8000)
-        lock_timeout_ms = _env_int("CHECKPOINTER_LOCK_TIMEOUT_MS", 2000)
-
-        if pool_min_size < 0:
-            pool_min_size = 0
-        if pool_max_size < 1:
-            pool_max_size = 1
-        if pool_min_size > pool_max_size:
-            pool_min_size = pool_max_size
+        pool_min_size = max(pool_min_size, 0)
+        pool_max_size = max(pool_max_size, 1)
+        pool_min_size = min(pool_min_size, pool_max_size)
 
         options = None
         if statement_timeout_ms > 0 or lock_timeout_ms > 0:
@@ -271,114 +409,16 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 kwargs=pool_kwargs,
             )
 
-        slow_threshold_s = 1.0
-        try:
-            slow_threshold_s = float(os.getenv("CHECKPOINTER_SLOW_LOG_SECONDS", "1.0") or "1.0")
-        except Exception:
-            slow_threshold_s = 1.0
+        slow_threshold_s = _setting_float(settings, "CHECKPOINTER_SLOW_LOG_SECONDS", 1.0)
 
-        def _extract_thread_id(config: Any | None) -> str:
-            if not isinstance(config, dict):
-                return "?"
-            configurable = config.get("configurable")
-            if isinstance(configurable, dict):
-                thread_id = configurable.get("thread_id")
-                if thread_id:
-                    return str(thread_id)
-            return "?"
-
-        def _checkpoint_stats(obj: Any) -> tuple[int | None, int | None]:
-            """Return (json_bytes, messages_count) best-effort."""
-            json_bytes: int | None = None
-            messages_count: int | None = None
-            try:
-                s = json.dumps(obj, ensure_ascii=False, default=str)
-                json_bytes = len(s.encode("utf-8", errors="ignore"))
-            except Exception:
-                json_bytes = None
-
-            try:
-                if isinstance(obj, dict):
-                    # Common internal shapes used by LangGraph checkpointers.
-                    for k in ("channel_values", "values", "state"):
-                        v = obj.get(k)
-                        if isinstance(v, dict) and "messages" in v:
-                            mv = v.get("messages")
-                            if isinstance(mv, list):
-                                messages_count = len(mv)
-                                break
-                    if messages_count is None and isinstance(obj.get("messages"), list):
-                        messages_count = len(obj.get("messages"))
-            except Exception:
-                messages_count = None
-
-            return json_bytes, messages_count
-
-        def _compact_payload(payload: Any) -> Any:
-            if not isinstance(payload, dict):
-                return payload
-
-            compact = payload
-            messages = payload.get("messages")
-            if isinstance(messages, list):
-                max_messages = _env_int("CHECKPOINTER_MAX_MESSAGES", 200)
-                if max_messages > 0 and len(messages) > max_messages:
-                    messages = messages[-max_messages:]
-
-                max_chars = _env_int("CHECKPOINTER_MAX_MESSAGE_CHARS", 4000)
-                if max_chars > 0:
-                    trimmed: list[Any] = []
-                    for m in messages:
-                        if isinstance(m, dict):
-                            content = m.get("content")
-                            if isinstance(content, str) and len(content) > max_chars:
-                                m = {**m, "content": content[:max_chars] + "...[truncated]"}
-                        trimmed.append(m)
-                    messages = trimmed
-
-                compact = {**compact, "messages": messages}
-
-            raw_drop = (os.getenv("CHECKPOINTER_DROP_BASE64", "true") or "true").strip().lower()
-            drop_base64 = raw_drop in {"1", "true", "yes"}
-            if drop_base64:
-                image_url = compact.get("image_url")
-                if isinstance(image_url, str) and len(image_url) > 2000:
-                    if image_url.startswith("data:") or "base64" in image_url:
-                        compact = {**compact, "image_url": "<base64_stripped>"}
-
-            return compact
-
-        def _log_if_slow(op: str, started_at: float, config: Any | None, *, payload: Any | None = None) -> None:
-            elapsed = time.perf_counter() - started_at
-            if elapsed < slow_threshold_s:
-                return
-            thread_id = _extract_thread_id(config)
-            level = logging.WARNING if elapsed >= max(10.0, slow_threshold_s * 10.0) else logging.INFO
-            extra = ""
-            if payload is not None:
-                size_b, msg_n = _checkpoint_stats(payload)
-                if size_b is not None or msg_n is not None:
-                    extra = f" size_bytes={size_b} messages={msg_n}"
-            logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs%s", op, thread_id, elapsed, extra)
+        max_messages = _setting_int(settings, "CHECKPOINTER_MAX_MESSAGES", 200)
+        max_chars = _setting_int(settings, "CHECKPOINTER_MAX_MESSAGE_CHARS", 4000)
+        drop_base64 = _setting_bool(settings, "CHECKPOINTER_DROP_BASE64", True)
 
         class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
             async def _ensure_pool_open(self) -> None:
                 pool = getattr(self, "pool", None) or getattr(self, "conn", None)
-                if pool is None:
-                    return
-                if not hasattr(pool, "open"):
-                    return
-                try:
-                    try:
-                        await pool.open(wait=True)
-                    except TypeError:
-                        await pool.open()
-                    logger.info("[CHECKPOINTER] pool opened on demand")
-                except Exception as exc:
-                    msg = str(exc).lower()
-                    if "already" in msg and "open" in msg:
-                        return
-                    logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
+                await _open_pool_on_demand(pool)
 
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -390,39 +430,66 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     config = args[0] if args else None
                     payload = None
                     try:
-                        if isinstance(locals().get("result"), tuple) and len(locals()["result"]) > 0:
+                        if (
+                            isinstance(locals().get("result"), tuple)
+                            and len(locals()["result"]) > 0
+                        ):
                             payload = locals()["result"][0]
                         else:
                             payload = locals().get("result")
                     except Exception:
                         payload = None
-                    _log_if_slow("aget_tuple", _t0, config, payload=payload)
+                    _log_if_slow(
+                        "aget_tuple",
+                        _t0,
+                        config,
+                        payload=payload,
+                        slow_threshold_s=slow_threshold_s,
+                    )
 
             async def aput(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
                     await self._ensure_pool_open()
                     if len(args) > 1:
-                        payload = _compact_payload(args[1])
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
                         args = (args[0], payload, *args[2:])
                     return await super().aput(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
                     payload = args[1] if len(args) > 1 else None
-                    _log_if_slow("aput", _t0, config, payload=payload)
+                    _log_if_slow(
+                        "aput", _t0, config, payload=payload, slow_threshold_s=slow_threshold_s
+                    )
 
             async def aput_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
                     await self._ensure_pool_open()
                     if len(args) > 1:
-                        payload = _compact_payload(args[1])
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
                         args = (args[0], payload, *args[2:])
                     return await super().aput_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
                     payload = args[1] if len(args) > 1 else None
-                    _log_if_slow("aput_writes", _t0, config, payload=payload)
+                    _log_if_slow(
+                        "aput_writes",
+                        _t0,
+                        config,
+                        payload=payload,
+                        slow_threshold_s=slow_threshold_s,
+                    )
 
             def get_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -430,7 +497,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     return super().get_tuple(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
-                    _log_if_slow("get_tuple", _t0, config)
+                    _log_if_slow(
+                        "get_tuple", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                    )
 
             def put(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -438,7 +507,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     return super().put(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
-                    _log_if_slow("put", _t0, config)
+                    _log_if_slow(
+                        "put", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                    )
 
             def put_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -446,7 +517,9 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     return super().put_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
-                    _log_if_slow("put_writes", _t0, config)
+                    _log_if_slow(
+                        "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                    )
 
         checkpointer = InstrumentedAsyncPostgresSaver(pool)
 
@@ -462,6 +535,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         return SerializableMemorySaver()
 
     except Exception as e:
+
         def _sanitize_db_url(url: str) -> str:
             try:
                 # Keep scheme/host/db, strip password/userinfo.

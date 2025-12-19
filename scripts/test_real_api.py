@@ -18,12 +18,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -31,13 +31,15 @@ sys.path.insert(0, str(project_root))
 
 # Load environment BEFORE importing anything else
 from dotenv import load_dotenv
+
+
 load_dotenv(project_root / ".env")
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich import print as rprint
+from rich.table import Table
+
 
 console = Console()
 
@@ -57,6 +59,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TestCase:
     """Single test case definition."""
+
     name: str
     description: str
     messages: list[str]
@@ -90,7 +93,6 @@ HARDCORE_TESTS = [
         expected_state="STATE_1_DISCOVERY",
         expect_products=True,
     ),
-    
     # =========================================================================
     # 2. PRODUCT SEARCH - COMPLEX QUERIES
     # =========================================================================
@@ -126,7 +128,6 @@ HARDCORE_TESTS = [
         expect_products=True,
         current_state="STATE_1_DISCOVERY",
     ),
-    
     # =========================================================================
     # 3. SIZE RECOMMENDATION - EDGE CASES
     # =========================================================================
@@ -151,7 +152,6 @@ HARDCORE_TESTS = [
         expected_intent="SIZE_HELP",
         current_state="STATE_3_SIZE_COLOR",
     ),
-    
     # =========================================================================
     # 4. PAYMENT & DELIVERY FLOW
     # =========================================================================
@@ -161,7 +161,17 @@ HARDCORE_TESTS = [
         messages=["Хочу замовити сукню Анна голубу 122-128"],
         expected_intent="PAYMENT_DELIVERY",
         current_state="STATE_4_OFFER",
-        metadata={"selected_products": [{"id": 3443041, "name": "Сукня Анна", "size": "122-128", "color": "голубий", "price": 1850}]},
+        metadata={
+            "selected_products": [
+                {
+                    "id": 3443041,
+                    "name": "Сукня Анна",
+                    "size": "122-128",
+                    "color": "голубий",
+                    "price": 1850,
+                }
+            ]
+        },
     ),
     TestCase(
         name="Payment - With Delivery Data",
@@ -177,7 +187,6 @@ HARDCORE_TESTS = [
         expected_intent="PAYMENT_DELIVERY",
         current_state="STATE_5_PAYMENT_DELIVERY",
     ),
-    
     # =========================================================================
     # 5. COMPLAINTS & ESCALATION
     # =========================================================================
@@ -205,7 +214,6 @@ HARDCORE_TESTS = [
         expected_event="escalation",
         expect_escalation=True,
     ),
-    
     # =========================================================================
     # 6. OFF-TOPIC & IDENTITY
     # =========================================================================
@@ -229,7 +237,6 @@ HARDCORE_TESTS = [
         messages=["Розкажи смішний анекдот!"],
         expected_intent="OUT_OF_DOMAIN",
     ),
-    
     # =========================================================================
     # 7. EDGE CASES & STRESS TESTS
     # =========================================================================
@@ -257,7 +264,6 @@ HARDCORE_TESTS = [
         messages=["Скільки коштує сукня Анна? Які розміри є? А доставка безкоштовна?"],
         expected_intent="DISCOVERY_OR_QUESTION",
     ),
-    
     # =========================================================================
     # 8. MULTI-TURN CONVERSATION
     # =========================================================================
@@ -276,7 +282,6 @@ HARDCORE_TESTS = [
         current_state="STATE_4_OFFER",
         expect_products=True,
     ),
-    
     # =========================================================================
     # 9. HALLUCINATION PREVENTION
     # =========================================================================
@@ -293,7 +298,6 @@ HARDCORE_TESTS = [
         messages=["Ви сказали що сукня 2000 грн, але на сайті 1850?"],
         # Should acknowledge and check catalog
     ),
-    
     # =========================================================================
     # 10. UKRAINIAN LANGUAGE SPECIFICS
     # =========================================================================
@@ -319,9 +323,9 @@ HARDCORE_TESTS = [
 
 async def run_single_test(test: TestCase) -> dict[str, Any]:
     """Run a single test case and return results."""
-    from src.agents import run_support, AgentDeps, SupportResponse
+    from src.agents import AgentDeps, SupportResponse, run_support
     from src.agents.pydantic.models import SupportResponse
-    
+
     # Create deps
     deps = AgentDeps(
         session_id=f"test_{test.name.lower().replace(' ', '_')[:20]}",
@@ -330,12 +334,12 @@ async def run_single_test(test: TestCase) -> dict[str, Any]:
         channel="test",
         language="uk",
     )
-    
+
     # Add metadata if provided
     if test.metadata:
         if "selected_products" in test.metadata:
             deps.selected_products = test.metadata["selected_products"]
-    
+
     results = {
         "name": test.name,
         "description": test.description,
@@ -344,19 +348,19 @@ async def run_single_test(test: TestCase) -> dict[str, Any]:
         "response": None,
         "latency_ms": 0,
     }
-    
+
     try:
         # Run the agent
         start_time = time.perf_counter()
-        
+
         # Combine all messages into one (simulating conversation)
         message = " ".join(test.messages)
-        
+
         response: SupportResponse = await run_support(message, deps)
-        
+
         latency_ms = (time.perf_counter() - start_time) * 1000
         results["latency_ms"] = round(latency_ms, 2)
-        
+
         # Store response for analysis
         results["response"] = {
             "event": response.event,
@@ -369,85 +373,89 @@ async def run_single_test(test: TestCase) -> dict[str, Any]:
                 "escalation_level": response.metadata.escalation_level,
             },
             "escalation": response.escalation.reason if response.escalation else None,
-            "customer_data": response.customer_data.model_dump() if response.customer_data else None,
+            "customer_data": response.customer_data.model_dump()
+            if response.customer_data
+            else None,
         }
-        
+
         # Validate expectations
         if test.expected_intent and response.metadata.intent != test.expected_intent:
             results["errors"].append(
                 f"Intent mismatch: expected {test.expected_intent}, got {response.metadata.intent}"
             )
             results["passed"] = False
-        
+
         if test.expected_event and response.event != test.expected_event:
             results["errors"].append(
                 f"Event mismatch: expected {test.expected_event}, got {response.event}"
             )
             results["passed"] = False
-        
+
         if test.expect_products and len(response.products) == 0:
             results["errors"].append("Expected products but got none")
             results["passed"] = False
-        
+
         if test.expect_escalation and response.event != "escalation":
             results["errors"].append("Expected escalation but didn't get one")
             results["passed"] = False
-        
+
         # Check message quality
         if response.messages:
             msg_content = response.messages[0].content
-            
+
             # Check for markdown (forbidden)
             if "**" in msg_content or "##" in msg_content or "```" in msg_content:
                 results["errors"].append("Response contains forbidden markdown")
                 results["passed"] = False
-            
+
             # Check length
             if len(msg_content) > 900:
                 results["errors"].append(f"Response too long: {len(msg_content)} chars (max 900)")
                 results["passed"] = False
-        
+
     except Exception as e:
         results["passed"] = False
-        results["errors"].append(f"Exception: {str(e)}")
+        results["errors"].append(f"Exception: {e!s}")
         logger.exception("Test failed: %s", test.name)
-    
+
     return results
 
 
 async def run_all_tests() -> list[dict[str, Any]]:
     """Run all test cases."""
     from src.conf.config import settings
-    
+
     # Verify API key is configured
     api_key = settings.OPENROUTER_API_KEY.get_secret_value()
     if not api_key:
         console.print("[red]ERROR: OPENROUTER_API_KEY not configured in .env[/red]")
         sys.exit(1)
-    
-    console.print(Panel(
-        f"[bold green]🔥 HARDCORE API TEST[/bold green]\n\n"
-        f"Model: {settings.AI_MODEL}\n"
-        f"Provider: OpenRouter\n"
-        f"Tests: {len(HARDCORE_TESTS)}",
-        title="Test Configuration",
-    ))
-    
+
+    console.print(
+        Panel(
+            f"[bold green]🔥 HARDCORE API TEST[/bold green]\n\n"
+            f"Model: {settings.AI_MODEL}\n"
+            f"Provider: OpenRouter\n"
+            f"Tests: {len(HARDCORE_TESTS)}",
+            title="Test Configuration",
+        )
+    )
+
     results = []
-    
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
         task = progress.add_task("Running tests...", total=len(HARDCORE_TESTS))
-        
+
         for test in HARDCORE_TESTS:
             progress.update(task, description=f"Testing: {test.name}")
-            
+
             result = await run_single_test(test)
             results.append(result)
-            
+
             # Show immediate result
             if result["passed"]:
                 console.print(f"  [green]✓[/green] {test.name} ({result['latency_ms']}ms)")
@@ -455,12 +463,12 @@ async def run_all_tests() -> list[dict[str, Any]]:
                 console.print(f"  [red]✗[/red] {test.name}")
                 for error in result["errors"]:
                     console.print(f"    [red]→ {error}[/red]")
-            
+
             progress.advance(task)
-            
+
             # Small delay between tests to avoid rate limiting
             await asyncio.sleep(0.5)
-    
+
     return results
 
 
@@ -469,22 +477,22 @@ def print_summary(results: list[dict[str, Any]]) -> None:
     passed = sum(1 for r in results if r["passed"])
     failed = len(results) - passed
     avg_latency = sum(r["latency_ms"] for r in results) / len(results) if results else 0
-    
+
     console.print("\n")
-    
+
     # Summary table
     table = Table(title="📊 Test Summary")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="magenta")
-    
+
     table.add_row("Total Tests", str(len(results)))
     table.add_row("Passed", f"[green]{passed}[/green]")
     table.add_row("Failed", f"[red]{failed}[/red]" if failed else "0")
-    table.add_row("Pass Rate", f"{(passed/len(results)*100):.1f}%")
+    table.add_row("Pass Rate", f"{(passed / len(results) * 100):.1f}%")
     table.add_row("Avg Latency", f"{avg_latency:.0f}ms")
-    
+
     console.print(table)
-    
+
     # Failed tests details
     if failed > 0:
         console.print("\n[bold red]Failed Tests:[/bold red]")
@@ -497,8 +505,8 @@ def print_summary(results: list[dict[str, Any]]) -> None:
                 if r["response"]:
                     console.print(f"  Response event: {r['response']['event']}")
                     console.print(f"  Response intent: {r['response']['metadata']['intent']}")
-                    if r['response']['messages']:
-                        preview = r['response']['messages'][0][:100]
+                    if r["response"]["messages"]:
+                        preview = r["response"]["messages"][0][:100]
                         console.print(f"  Message preview: {preview}...")
 
 
@@ -506,27 +514,31 @@ def save_results(results: list[dict[str, Any]]) -> None:
     """Save results to JSON file."""
     output_dir = project_root / "test_results"
     output_dir.mkdir(exist_ok=True)
-    
+
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     output_file = output_dir / f"api_test_{timestamp}.json"
-    
+
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    
+
     console.print(f"\n[dim]Results saved to: {output_file}[/dim]")
 
 
 async def main():
     """Main entry point."""
-    console.print("\n[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]")
+    console.print(
+        "\n[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]"
+    )
     console.print("[bold cyan]   PydanticAI + LangGraph REAL API TEST   [/bold cyan]")
-    console.print("[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]\n")
-    
+    console.print(
+        "[bold cyan]═══════════════════════════════════════════════════════════[/bold cyan]\n"
+    )
+
     try:
         results = await run_all_tests()
         print_summary(results)
         save_results(results)
-        
+
         # Exit with error code if any test failed
         failed = sum(1 for r in results if not r["passed"])
         if failed > 0:
@@ -534,7 +546,7 @@ async def main():
             sys.exit(1)
         else:
             console.print("\n[green]✓ All tests passed![/green]")
-            
+
     except KeyboardInterrupt:
         console.print("\n[yellow]Test interrupted by user[/yellow]")
         sys.exit(130)

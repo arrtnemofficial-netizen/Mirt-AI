@@ -14,10 +14,10 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from src.conf.config import settings
-from src.conf.payment_config import PAYMENT_PREPAY_AMOUNT, format_requisites_multiline
-from src.core.human_responses import get_human_response
 from src.agents.langgraph.state_prompts import get_state_prompt
+from src.conf.config import settings
+from src.conf.payment_config import format_requisites_multiline
+from src.core.human_responses import get_human_response
 
 from .deps import AgentDeps
 from .models import PaymentResponse
@@ -73,9 +73,11 @@ def _get_payment_prompt() -> str:
     """Get payment prompt from .md file with fallback."""
     try:
         from src.core.prompt_registry import registry
+
         return registry.get("system.payment").content
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning("Failed to load payment.md, using fallback: %s", e)
         return _PAYMENT_PROMPT_FALLBACK
 

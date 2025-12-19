@@ -321,9 +321,30 @@ class TestEdgeCases:
             event="multi_option",
             messages=[MessageItem(content="Ось варіанти:")],
             products=[
-                ProductMatch(id=1, name="Product A", price=100, size="M", color="red", photo_url="https://a.com/1.jpg"),
-                ProductMatch(id=2, name="Product B", price=200, size="L", color="blue", photo_url="https://b.com/2.jpg"),
-                ProductMatch(id=3, name="Product C", price=300, size="XL", color="green", photo_url="https://c.com/3.jpg"),
+                ProductMatch(
+                    id=1,
+                    name="Product A",
+                    price=100,
+                    size="M",
+                    color="red",
+                    photo_url="https://a.com/1.jpg",
+                ),
+                ProductMatch(
+                    id=2,
+                    name="Product B",
+                    price=200,
+                    size="L",
+                    color="blue",
+                    photo_url="https://b.com/2.jpg",
+                ),
+                ProductMatch(
+                    id=3,
+                    name="Product C",
+                    price=300,
+                    size="XL",
+                    color="green",
+                    photo_url="https://c.com/3.jpg",
+                ),
             ],
             metadata=ResponseMetadata(
                 session_id="test",

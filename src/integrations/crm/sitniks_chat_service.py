@@ -5,7 +5,7 @@ Requires paid Sitniks plan for API access.
 
 Statuses flow:
 - "Взято в роботу" → first touch, AI starts handling
-- "Виставлено рахунок" → payment requisites sent  
+- "Виставлено рахунок" → payment requisites sent
 - "AI Увага" → escalation, needs human manager
 """
 
@@ -69,14 +69,14 @@ class SitniksChatService:
         lookback_minutes: int = 5,
     ) -> str | None:
         """Find Sitniks chat ID by username.
-        
+
         Searches recent chats (last N minutes) and matches by userNickName.
-        
+
         Args:
             instagram_username: Instagram @username (without @)
             telegram_username: Telegram @username (without @)
             lookback_minutes: How far back to search for chats
-            
+
         Returns:
             Sitniks chat ID if found, None otherwise
         """
@@ -133,9 +133,7 @@ class SitniksChatService:
                     return None
 
                 elif response.status_code == 403:
-                    logger.error(
-                        "[SITNIKS] API access forbidden (403). Need paid plan."
-                    )
+                    logger.error("[SITNIKS] API access forbidden (403). Need paid plan.")
                     return None
                 else:
                     logger.error(
@@ -155,11 +153,11 @@ class SitniksChatService:
         status: str,
     ) -> bool:
         """Update chat status in Sitniks CRM.
-        
+
         Args:
             chat_id: Sitniks chat ID
             status: New status name (e.g. "Взято в роботу")
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -254,7 +252,7 @@ class SitniksChatService:
         manager_id: int,
     ) -> bool:
         """Assign a manager to a chat.
-        
+
         Note: The exact API endpoint for this may vary.
         Check Sitniks documentation for the correct endpoint.
         """
@@ -297,14 +295,14 @@ class SitniksChatService:
         telegram_username: str | None = None,
     ) -> dict[str, Any]:
         """Handle first touch: find chat, set status, assign AI manager.
-        
+
         This should be called BEFORE sending the first response to a new user.
-        
+
         Args:
             user_id: MIRT user ID (session_id)
             instagram_username: Instagram username
             telegram_username: Telegram username
-            
+
         Returns:
             Result dict with chat_id and success status
         """
@@ -370,7 +368,7 @@ class SitniksChatService:
 
     async def handle_escalation(self, user_id: str) -> dict[str, Any]:
         """Handle escalation: set AI Attention status, assign to human manager.
-        
+
         Returns:
             Result with success status and manager assignment info
         """

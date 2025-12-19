@@ -3,7 +3,7 @@ Circuit Breaker - захист від каскадних відмов.
 ==============================================
 Патерн Circuit Breaker для зовнішніх API:
 - ManyChat API
-- Supabase  
+- Supabase
 - LLM (Grok/GPT)
 
 Стани:
@@ -13,7 +13,7 @@ Circuit Breaker - захист від каскадних відмов.
 
 Використання:
     from src.core.circuit_breaker import circuit_breaker, CircuitState
-    
+
     @circuit_breaker("manychat", failure_threshold=3, recovery_timeout=30)
     async def call_manychat_api():
         ...
@@ -24,11 +24,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 logger = logging.getLogger(__name__)
@@ -36,8 +39,9 @@ logger = logging.getLogger(__name__)
 
 class CircuitState(Enum):
     """Стан circuit breaker."""
-    CLOSED = "closed"      # Нормальна робота
-    OPEN = "open"          # Відмова, блокуємо запити
+
+    CLOSED = "closed"  # Нормальна робота
+    OPEN = "open"  # Відмова, блокуємо запити
     HALF_OPEN = "half_open"  # Тестуємо відновлення
 
 
@@ -45,13 +49,14 @@ class CircuitState(Enum):
 class CircuitBreaker:
     """
     Circuit Breaker для захисту від каскадних відмов.
-    
+
     Args:
         name: Ім'я сервісу (для логування)
         failure_threshold: Кількість помилок до відкриття
         recovery_timeout: Секунди до спроби відновлення
         success_threshold: Успішних запитів для закриття
     """
+
     name: str
     failure_threshold: int = 3
     recovery_timeout: float = 30.0
@@ -66,7 +71,9 @@ class CircuitBreaker:
     def __post_init__(self):
         logger.info(
             "CircuitBreaker[%s] initialized: threshold=%d, recovery=%ds",
-            self.name, self.failure_threshold, self.recovery_timeout
+            self.name,
+            self.failure_threshold,
+            self.recovery_timeout,
         )
 
     def can_execute(self) -> bool:
@@ -101,8 +108,10 @@ class CircuitBreaker:
 
         logger.warning(
             "CircuitBreaker[%s] failure %d/%d: %s",
-            self.name, self.failure_count, self.failure_threshold,
-            str(error)[:100] if error else "unknown"
+            self.name,
+            self.failure_count,
+            self.failure_threshold,
+            str(error)[:100] if error else "unknown",
         )
 
         if self.state == CircuitState.HALF_OPEN:
@@ -123,8 +132,7 @@ class CircuitBreaker:
             self.success_count = 0
 
         logger.info(
-            "CircuitBreaker[%s] state: %s → %s",
-            self.name, old_state.value, new_state.value
+            "CircuitBreaker[%s] state: %s → %s", self.name, old_state.value, new_state.value
         )
 
     def reset(self) -> None:
@@ -172,6 +180,7 @@ T = TypeVar("T")
 
 class CircuitOpenError(Exception):
     """Raised when circuit is open and request is blocked."""
+
     def __init__(self, breaker_name: str):
         self.breaker_name = breaker_name
         super().__init__(f"Circuit breaker '{breaker_name}' is OPEN")
@@ -185,13 +194,13 @@ def circuit_breaker(
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator для захисту функції circuit breaker'ом.
-    
+
     Args:
         name: Ім'я breaker'а
         failure_threshold: Кількість помилок до відкриття
         recovery_timeout: Секунди до спроби відновлення
         fallback: Fallback функція при відкритому circuit
-    
+
     Usage:
         @circuit_breaker("manychat", failure_threshold=3, fallback=lambda: {"ok": False})
         async def call_manychat():
@@ -204,8 +213,7 @@ def circuit_breaker(
         async def async_wrapper(*args: Any, **kwargs: Any) -> T:
             if not breaker.can_execute():
                 logger.warning(
-                    "CircuitBreaker[%s] OPEN - returning fallback for %s",
-                    name, func.__name__
+                    "CircuitBreaker[%s] OPEN - returning fallback for %s", name, func.__name__
                 )
                 if fallback:
                     return fallback(*args, **kwargs)
@@ -225,8 +233,7 @@ def circuit_breaker(
         def sync_wrapper(*args: Any, **kwargs: Any) -> T:
             if not breaker.can_execute():
                 logger.warning(
-                    "CircuitBreaker[%s] OPEN - returning fallback for %s",
-                    name, func.__name__
+                    "CircuitBreaker[%s] OPEN - returning fallback for %s", name, func.__name__
                 )
                 if fallback:
                     return fallback(*args, **kwargs)
@@ -252,6 +259,7 @@ def circuit_breaker(
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
 
 def get_all_breaker_states() -> dict[str, dict[str, Any]]:
     """Отримати стан всіх circuit breakers (для health check)."""

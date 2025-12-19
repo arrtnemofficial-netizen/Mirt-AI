@@ -34,12 +34,13 @@ class OrderService:
             Created order ID (str) or None if failed
         """
         if not self.client:
-            logger.error("[ORDER] CRITICAL: Supabase client not available - order will NOT be saved!")
+            logger.error(
+                "[ORDER] CRITICAL: Supabase client not available - order will NOT be saved!"
+            )
             # Don't silently fail - raise so caller knows order wasn't created
             from src.services.exceptions import ServiceUnavailableError
-            raise ServiceUnavailableError("database", "Cannot save order - database unavailable")
 
-        session_id = order_data.get("external_id")
+            raise ServiceUnavailableError("database", "Cannot save order - database unavailable")
 
         try:
             # 1. Prepare Order Payload
@@ -55,7 +56,8 @@ class OrderService:
                 "customer_city": customer.get("city"),
                 "delivery_method": order_data.get("delivery_method"),
                 # Support both "nova_poshta_branch" and "delivery_address"
-                "delivery_address": customer.get("nova_poshta_branch") or customer.get("delivery_address"),
+                "delivery_address": customer.get("nova_poshta_branch")
+                or customer.get("delivery_address"),
                 "status": order_data.get("status", "new"),
                 "total_amount": totals.get("total", 0),
                 "notes": order_data.get("notes"),
@@ -64,10 +66,11 @@ class OrderService:
             }
 
             # 2. Upsert Order (handles duplicates atomically)
-            response = self.client.table("orders").upsert(
-                order_payload,
-                on_conflict="session_id"
-            ).execute()
+            response = (
+                self.client.table("orders")
+                .upsert(order_payload, on_conflict="session_id")
+                .execute()
+            )
 
             if not response.data:
                 logger.error("Failed to upsert order, no data returned")

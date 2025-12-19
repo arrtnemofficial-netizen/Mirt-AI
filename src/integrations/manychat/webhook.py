@@ -18,21 +18,13 @@ from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.services.conversation import create_conversation_handler
 from src.services.debouncer import BufferedMessage, MessageDebouncer
 from src.services.message_store import MessageStore, create_message_store
-from src.services.renderer import render_agent_response_text
 
-from .constants import (
+from .constants import (  # noqa: F401
     FIELD_AI_INTENT,
     FIELD_AI_STATE,
-    FIELD_CLIENT_CITY,
-    FIELD_CLIENT_NAME,
-    FIELD_CLIENT_NP,
-    FIELD_CLIENT_PHONE,
     FIELD_LAST_PRODUCT,
-    FIELD_ORDER_SUM,
     TAG_AI_RESPONDED,
     TAG_NEEDS_HUMAN,
-    TAG_ORDER_PAID,
-    TAG_ORDER_STARTED,
 )
 from .response_builder import (
     build_manychat_field_values,
@@ -100,10 +92,7 @@ class ManychatWebhook:
         # DEBOUNCING LOGIC
         # ---------------------------------------------------------------------
         buffered_msg = BufferedMessage(
-            text=text,
-            has_image=bool(image_url),
-            image_url=image_url,
-            extra_metadata=extra_metadata
+            text=text, has_image=bool(image_url), image_url=image_url, extra_metadata=extra_metadata
         )
 
         # Wait for aggregation.
@@ -119,7 +108,7 @@ class ManychatWebhook:
                     "messages": [],
                     "actions": [],
                     "quick_replies": [],
-                }
+                },
             }
 
         # ---------------------------------------------------------------------
@@ -131,7 +120,9 @@ class ManychatWebhook:
         logger.info("[MANYCHAT:%s] Processing AGGREGATED: text='%s'", user_id, final_text[:50])
 
         # Use centralized handler with error handling
-        result = await self._handler.process_message(user_id, final_text, extra_metadata=final_metadata)
+        result = await self._handler.process_message(
+            user_id, final_text, extra_metadata=final_metadata
+        )
 
         if result.is_fallback:
             logger.warning(
@@ -145,7 +136,7 @@ class ManychatWebhook:
     @staticmethod
     def _extract_user_text_and_image(payload: dict[str, Any]) -> tuple[str, str, str | None]:
         """Extract user ID, text, and optional image URL from ManyChat payload.
-        
+
         ManyChat image formats:
         - message.attachments[].payload.url (Instagram images)
         - message.image (direct image URL)
@@ -217,7 +208,7 @@ class ManychatWebhook:
         agent_response: AgentResponse,
     ) -> list[dict[str, Any]]:
         """Build Custom Field values from AgentResponse.
-        
+
         Note: Customer data (name, phone, city, NP) is now stored in session state
         by LLM and accessed via conversation.py, not parsed here.
         Values preserve their types (str, int, float) for ManyChat compatibility.

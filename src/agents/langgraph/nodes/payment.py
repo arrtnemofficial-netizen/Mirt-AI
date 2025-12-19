@@ -320,18 +320,19 @@ async def _handle_delivery_data(
 ) -> Command[Literal["upsell", "end", "agent"]]:
     """
     Handle delivery data when HITL is disabled.
-    
+
     User has sent their delivery info (ПІБ, phone, НП address).
     We process it through the agent to extract and confirm, then go to upsell.
     """
     from .utils import extract_user_message
-    
+
     user_message = extract_user_message(state.get("messages", []))
     products = state.get("selected_products", []) or state.get("offered_products", [])
     products = await _ensure_prices_from_catalog(products, session_id=session_id)
-    total_price = sum(p.get("price", 0) for p in products)
 
-    has_image_now = bool(state.get("has_image", False) or state.get("metadata", {}).get("has_image", False))
+    has_image_now = bool(
+        state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+    )
 
     user_text_for_proof = user_message if isinstance(user_message, str) else str(user_message)
     user_text_lower_for_proof = user_text_for_proof.lower()
@@ -348,17 +349,21 @@ async def _handle_delivery_data(
         "скрин",
         "готово",
     )
-    has_payment_url = ("http://" in user_text_lower_for_proof) or ("https://" in user_text_lower_for_proof)
-    has_payment_proof_pre = has_image_now or has_payment_url or any(
-        k in user_text_lower_for_proof for k in payment_confirm_keywords
+    has_payment_url = ("http://" in user_text_lower_for_proof) or (
+        "https://" in user_text_lower_for_proof
     )
-    
+    has_payment_proof_pre = (
+        has_image_now
+        or has_payment_url
+        or any(k in user_text_lower_for_proof for k in payment_confirm_keywords)
+    )
+
     logger.info(
         "[SESSION %s] Processing delivery data: '%s'",
         session_id,
         user_message[:50] if user_message else "(empty)",
     )
-    
+
     # Create deps for agent
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
@@ -373,7 +378,7 @@ async def _handle_delivery_data(
             deps.payment_sub_phase = "THANK_YOU"
     except Exception:
         deps.payment_sub_phase = deps.payment_sub_phase
-    
+
     try:
         # Use payment agent to process delivery data
         response = await run_payment(
@@ -457,7 +462,9 @@ async def _handle_delivery_data(
                 extra={
                     "trace_id": trace_id,
                     "payment_proof_received": True,
-                    "payment_proof_via": "image" if has_image_now else ("url" if has_payment_url else "text"),
+                    "payment_proof_via": "image"
+                    if has_image_now
+                    else ("url" if has_payment_url else "text"),
                 },
             )
             cmd = Command(
@@ -539,7 +546,7 @@ async def _handle_delivery_data(
                 response_preview=response_text,
             )
         return cmd
-            
+
     except Exception as e:
         logger.error("[SESSION %s] Delivery data processing error: %s", session_id, e)
         if settings.DEBUG_TRACE_LOGS:
@@ -552,9 +559,12 @@ async def _handle_delivery_data(
         return Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                "messages": [{"role": "assistant", "content": 
-                    "Будь ласка, надішліть:\n📝 ПІБ\n📱 Телефон\n🏙️ Місто та відділення НП"
-                }],
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "Будь ласка, надішліть:\n📝 ПІБ\n📱 Телефон\n🏙️ Місто та відділення НП",
+                    }
+                ],
                 "agent_response": {
                     "event": "simple_answer",
                     "messages": [
@@ -638,7 +648,9 @@ async def _persist_order_and_queue_crm(
         import hashlib
 
         products_str = "|".join(sorted(p.get("name", "") for p in products))
-        idempotency_data = f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
+        idempotency_data = (
+            f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
+        )
         idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
         deterministic_external_id = f"{session_id}_{idempotency_hash}"
 
@@ -726,7 +738,9 @@ async def _handle_approval_response(
                     "current_state": State.STATE_6_UPSELL.value,
                     "dialog_phase": "UPSELL_OFFERED",
                     "crm_order_result": crm_order_result,
-                    "crm_external_id": crm_order_result.get("external_id") if crm_order_result else None,
+                    "crm_external_id": crm_order_result.get("external_id")
+                    if crm_order_result
+                    else None,
                     "step_number": state.get("step_number", 0) + 1,
                 },
                 goto="upsell",

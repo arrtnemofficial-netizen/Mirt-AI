@@ -6,7 +6,7 @@ Memory Nodes - AGI-Style Memory Layer (Titans-like).
 1. memory_context_node - завантажує profile + facts ПЕРЕД агентами
    - Не блокує UX (швидкий read з Supabase)
    - Додає контекст в state для AgentDeps
-   
+
 2. memory_update_node - тихо оновлює памʼять ПІСЛЯ ключових стейтів
    - Запускає MemoryAgent для класифікації фактів
    - Застосовує gating (importance >= 0.6, surprise >= 0.4)
@@ -41,16 +41,16 @@ logger = logging.getLogger(__name__)
 async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     Завантажити контекст памʼяті перед агентами.
-    
+
     Цей node:
     1. Завантажує UserProfile (Persistent Memory)
     2. Завантажує top-K Facts (Fluid Memory)
     3. Генерує форматований контекст для промпта
     4. Зберігає все в state для AgentDeps
-    
+
     Args:
         state: Current LangGraph state
-        
+
     Returns:
         State update with memory context
     """
@@ -164,17 +164,17 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
 # Phases that trigger memory update
 # IMPORTANT: Trigger on EVERY phase to capture facts early!
 MEMORY_TRIGGER_PHASES = {
-    "INIT",                 # STATE_0: Новий діалог
-    "DISCOVERY",            # STATE_1: Збір контексту
-    "VISION_DONE",          # STATE_2: Vision впізнав товар
-    "WAITING_FOR_SIZE",     # STATE_3: Потрібен розмір
-    "WAITING_FOR_COLOR",    # STATE_3: Потрібен колір
-    "SIZE_COLOR_DONE",      # STATE_3→4: Готові до offer
-    "OFFER_MADE",           # STATE_4: Пропозиція зроблена
+    "INIT",  # STATE_0: Новий діалог
+    "DISCOVERY",  # STATE_1: Збір контексту
+    "VISION_DONE",  # STATE_2: Vision впізнав товар
+    "WAITING_FOR_SIZE",  # STATE_3: Потрібен розмір
+    "WAITING_FOR_COLOR",  # STATE_3: Потрібен колір
+    "SIZE_COLOR_DONE",  # STATE_3→4: Готові до offer
+    "OFFER_MADE",  # STATE_4: Пропозиція зроблена
     "WAITING_FOR_DELIVERY_DATA",  # STATE_5: Чекаємо дані доставки
     "WAITING_FOR_PAYMENT_PROOF",  # STATE_5: Payment flow
-    "COMPLETED",            # STATE_7: Діалог завершено
-    "COMPLAINT",            # STATE_8: Скарга
+    "COMPLETED",  # STATE_7: Діалог завершено
+    "COMPLAINT",  # STATE_8: Скарга
 }
 
 # States that trigger memory update
@@ -193,19 +193,19 @@ MEMORY_TRIGGER_STATES = {
 async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     Тихе оновлення памʼяті після ключових стейтів.
-    
+
     Цей node:
     1. Перевіряє чи потрібне оновлення (trigger phases)
     2. Запускає MemoryAgent для класифікації фактів
     3. Застосовує gating (importance >= 0.6, surprise >= 0.4)
     4. Зберігає нові факти / оновлює існуючі
-    
+
     ВАЖЛИВО: Не впливає на відповідь користувачу!
     Latency цього node не блокує UX.
-    
+
     Args:
         state: Current LangGraph state
-        
+
     Returns:
         State update (minimal, just step_number)
     """
@@ -233,15 +233,14 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
         return {"step_number": state.get("step_number", 0) + 1}
 
     # Check if we should trigger memory update
-    should_trigger = (
-        dialog_phase in MEMORY_TRIGGER_PHASES or
-        current_state in MEMORY_TRIGGER_STATES
-    )
+    should_trigger = dialog_phase in MEMORY_TRIGGER_PHASES or current_state in MEMORY_TRIGGER_STATES
 
     if not should_trigger:
         logger.debug(
             "[SESSION %s] Skipping memory update (phase=%s, state=%s)",
-            session_id, dialog_phase, current_state
+            session_id,
+            dialog_phase,
+            current_state,
         )
         return {"step_number": state.get("step_number", 0) + 1}
 
@@ -262,10 +261,12 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
             if isinstance(msg, dict):
                 message_dicts.append(msg)
             elif hasattr(msg, "content") and hasattr(msg, "type"):
-                message_dicts.append({
-                    "role": getattr(msg, "type", "unknown"),
-                    "content": getattr(msg, "content", ""),
-                })
+                message_dicts.append(
+                    {
+                        "role": getattr(msg, "type", "unknown"),
+                        "content": getattr(msg, "content", ""),
+                    }
+                )
 
         # =====================================================================
         # OPTION 1: Quick facts extraction (no LLM, fast)
@@ -285,7 +286,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
                 fact_type=qf["fact_type"],
                 category=qf["category"],
                 importance=0.9,  # High importance for extracted facts
-                surprise=0.7,   # Medium-high surprise
+                surprise=0.7,  # Medium-high surprise
                 ttl_days=None,  # No expiry
             )
             result = await memory_service.store_fact(
@@ -299,15 +300,9 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
                     field = qf["field"]
                     value = qf["extracted_value"]
                     if field in ["height_cm", "age", "gender", "name"]:
-                        await memory_service.update_profile(
-                            user_id,
-                            child_profile={field: value}
-                        )
+                        await memory_service.update_profile(user_id, child_profile={field: value})
                     elif field == "city":
-                        await memory_service.update_profile(
-                            user_id,
-                            logistics={"city": value}
-                        )
+                        await memory_service.update_profile(user_id, logistics={"city": value})
 
         # =====================================================================
         # OPTION 2: Full LLM analysis (for complex facts)
@@ -382,7 +377,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
 def should_load_memory(state: dict[str, Any]) -> bool:
     """
     Визначити чи потрібно завантажувати памʼять.
-    
+
     Returns True якщо:
     - Є user_id
     - Це не перше повідомлення (є хоч якась історія)
@@ -393,16 +388,13 @@ def should_load_memory(state: dict[str, Any]) -> bool:
         return False
 
     dialog_phase = state.get("dialog_phase", "INIT")
-    if dialog_phase in {"COMPLAINT", "OUT_OF_DOMAIN"}:
-        return False
-
-    return True
+    return dialog_phase not in {"COMPLAINT", "OUT_OF_DOMAIN"}
 
 
 def should_update_memory(state: dict[str, Any]) -> bool:
     """
     Визначити чи потрібно оновлювати памʼять.
-    
+
     Returns True якщо:
     - Є user_id
     - Знаходимось в trigger phase/state
@@ -414,7 +406,4 @@ def should_update_memory(state: dict[str, Any]) -> bool:
     dialog_phase = state.get("dialog_phase", "")
     current_state = state.get("current_state", "")
 
-    return (
-        dialog_phase in MEMORY_TRIGGER_PHASES or
-        current_state in MEMORY_TRIGGER_STATES
-    )
+    return dialog_phase in MEMORY_TRIGGER_PHASES or current_state in MEMORY_TRIGGER_STATES

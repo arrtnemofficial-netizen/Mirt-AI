@@ -7,21 +7,21 @@ by providing a single ConversationHandler that manages the full message lifecycl
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
-import hashlib
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from src.agents import ConversationState
+from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
+from src.core.debug_logger import debug_log
 from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
 from src.services.message_store import MessageStore, StoredMessage
-from src.core.debug_logger import debug_log
-from src.conf.config import settings
 from src.services.observability import track_metric
 
 
@@ -205,7 +205,11 @@ def _apply_transition_guardrails(
         after_state["metadata"] = meta
 
     dialog_phase = after_state.get("dialog_phase", "INIT")
-    if not dialog_phase or not isinstance(dialog_phase, str) or dialog_phase not in _ALLOWED_DIALOG_PHASES:
+    if (
+        not dialog_phase
+        or not isinstance(dialog_phase, str)
+        or dialog_phase not in _ALLOWED_DIALOG_PHASES
+    ):
         logger.error(
             "[SESSION %s] Guardrail: invalid dialog_phase=%r -> INIT",
             session_id,
@@ -333,30 +337,16 @@ def _apply_transition_guardrails(
     if isinstance(agent_response, dict):
         messages = agent_response.get("messages")
         if isinstance(messages, list):
-            text_messages = [m for m in messages if isinstance(m, dict) and (m.get("type") in (None, "text"))]
+            text_messages = [
+                m for m in messages if isinstance(m, dict) and (m.get("type") in (None, "text"))
+            ]
             first = text_messages[0] if text_messages else None
             first_content = first.get("content") if isinstance(first, dict) else None
             if isinstance(first_content, str):
-                normalized_user = (user_text or "").strip().lower()
-                user_is_greeting = any(
-                    kw in normalized_user
-                    for kw in (
-                        "привіт",
-                        "вітаю",
-                        "вітаю",
-                        "доброго дня",
-                        "добрий день",
-                        "hello",
-                        "hi",
-                    )
-                )
-
-                before_step = int(before_state.get("step_number") or 0)
-                before_current = str(before_state.get("current_state") or "")
+                pass
 
                 # TODO: Review this guardrail - it overwrites LLM responses even when using snippets
                 # DISABLED for now to allow snippet-based responses
-                # if before_step <= 1 and before_current == State.STATE_0_INIT.value:
                 #     if "соф" not in first_content.lower() and "менеджер" not in first_content.lower():
                 #         first["content"] = "Вітаю 🎀\n---\nЗ вами MIRT_UA, менеджер Софія)"
 
@@ -427,9 +417,11 @@ class ConversationHandler:
     fallback_message: str = field(default="")  # Will use human_responses dynamically
     max_retries: int = field(default=2)
     retry_delay: float = field(default=1.0)
+    _bg_tasks: set[asyncio.Task] = field(default_factory=set)
 
     def _get_fallback(self) -> str:
         from src.core.human_responses import get_human_response
+
         return get_human_response("timeout")
 
     async def process_message(
@@ -454,11 +446,13 @@ class ConversationHandler:
         """
         state: ConversationState | None = None
         import time as _time
+
         _proc_start = _time.time()
 
         try:
             # SECURITY: Sanitize input against prompt injection
             from src.core.input_sanitizer import process_user_message
+
             text, was_sanitized = process_user_message(text)
             if was_sanitized:
                 logger.warning("[SECURITY] Message sanitized for session %s", session_id)
@@ -477,7 +471,7 @@ class ConversationHandler:
                     session_id,
                     _time.time() - _get_start,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "[SESSION %s] session_store.get timed out (>2.5s); continuing with empty state",
                     session_id,
@@ -508,12 +502,14 @@ class ConversationHandler:
                 state["metadata"] = {"session_id": session_id, "vision_greeted": False}
             # Ensure core identifiers are present
             state["metadata"].setdefault("session_id", session_id)
-            state["metadata"].setdefault("thread_id", state["metadata"].get("thread_id", session_id))
+            state["metadata"].setdefault(
+                "thread_id", state["metadata"].get("thread_id", session_id)
+            )
 
             # Ensure top-level session_id is always present (some routers read it directly)
             state.setdefault("session_id", session_id)
             state["messages"].append({"role": "user", "content": text})
-            
+
             # CRITICAL: Reset image flags at start of EVERY new message
             # This prevents stale image_url from previous messages affecting routing
             # See: https://github.com/... routing bug where text messages went to vision
@@ -521,7 +517,7 @@ class ConversationHandler:
             state["image_url"] = None
             state["metadata"]["has_image"] = False
             state["metadata"]["image_url"] = None
-            
+
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
                 # Mirror critical flags to top-level so routers can see them
@@ -555,11 +551,17 @@ class ConversationHandler:
             self._persist_user_message(session_id, text)
 
             # Invoke the agent
-            logger.info("[SESSION %s] ⏱️ Starting _invoke_agent (%.2fs since process_message start)", session_id, _time.time() - _proc_start)
+            logger.info(
+                "[SESSION %s] ⏱️ Starting _invoke_agent (%.2fs since process_message start)",
+                session_id,
+                _time.time() - _proc_start,
+            )
             before_invoke_state = deepcopy(state)
             _invoke_start = _time.time()
             result_state = await self._invoke_agent(state)
-            logger.info("[SESSION %s] ⏱️ _invoke_agent took %.2fs", session_id, _time.time() - _invoke_start)
+            logger.info(
+                "[SESSION %s] ⏱️ _invoke_agent took %.2fs", session_id, _time.time() - _invoke_start
+            )
 
             result_state = _apply_transition_guardrails(
                 session_id=session_id,
@@ -631,7 +633,9 @@ class ConversationHandler:
 
                     # Provide product summary (for manager context)
                     try:
-                        details["products"] = [p.model_dump() for p in (agent_response.products or [])]
+                        details["products"] = [
+                            p.model_dump() for p in (agent_response.products or [])
+                        ]
                     except Exception:
                         details["products"] = []
 
@@ -864,7 +868,9 @@ class ConversationHandler:
                     e,
                 )
 
-        loop.create_task(_bg())
+        task = loop.create_task(_bg())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     def _persist_assistant_message(self, session_id: str, response: AgentResponse) -> None:
         """Store the assistant response with appropriate tags."""
@@ -899,7 +905,9 @@ class ConversationHandler:
                     e,
                 )
 
-        loop.create_task(_bg())
+        task = loop.create_task(_bg())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     def _build_fallback_result(
         self,

@@ -18,9 +18,9 @@
 """
 
 import sys
-import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, UTC
+
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -44,6 +44,7 @@ def print_result(name: str, success: bool, details: str = ""):
 # =============================================================================
 # 1. HEALTH CHECK
 # =============================================================================
+
 
 def test_health():
     """Test worker health check (no external dependencies)."""
@@ -72,10 +73,11 @@ def test_health():
 # 2. SUMMARIZATION
 # =============================================================================
 
+
 def test_summarization():
     """Test summarization service (without Celery)."""
     print_header("SUMMARIZATION")
-    
+
     try:
         from src.services.summarization import (
             call_summarize_inactive_users,
@@ -93,17 +95,18 @@ def test_summarization():
         # 2) Перевірити, кого треба сумаризувати
         users = get_users_needing_summary()
         print_result("get_users_needing_summary", True, f"Found {len(users)} users")
-        
+
         if users:
             print("\n   Users needing summary:")
             for user in users[:3]:
                 print(f"   - user_id: {user.get('id')}, last_active: {user.get('last_active_at')}")
-        
+
         return True
-        
+
     except Exception as e:
         print_result("summarization", False, f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -112,16 +115,17 @@ def test_summarization():
 # 3. FOLLOWUPS
 # =============================================================================
 
+
 def test_followups():
     """Test followup service (without Celery)."""
     print_header("FOLLOWUPS")
-    
+
     try:
         from datetime import timedelta
 
+        from src.conf.config import settings
         from src.services.followups import next_followup_due_at, run_followups
         from src.services.message_store import InMemoryMessageStore, StoredMessage
-        from src.conf.config import settings
 
         print(f"   FOLLOWUP_DELAYS_HOURS: {settings.FOLLOWUP_DELAYS_HOURS}")
         print(f"   Parsed schedule: {settings.followup_schedule_hours}")
@@ -159,10 +163,11 @@ def test_followups():
         )
 
         return True
-        
+
     except Exception as e:
         print_result("followups", False, f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -171,13 +176,14 @@ def test_followups():
 # 4. CRM
 # =============================================================================
 
+
 def test_crm():
     """Test CRM service (without Celery)."""
     print_header("CRM (Snitkix)")
-    
+
     try:
         from src.conf.config import settings
-        
+
         print(f"   snitkix_enabled: {settings.snitkix_enabled}")
 
         # Якщо CRM не налаштований – це НЕ помилка для локального тесту
@@ -196,6 +202,7 @@ def test_crm():
     except Exception as e:
         print_result("crm", False, f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -204,12 +211,13 @@ def test_crm():
 # 5. LLM USAGE
 # =============================================================================
 
+
 def test_llm_usage():
     """Test LLM usage tracking."""
     print_header("LLM USAGE TRACKING")
-    
+
     try:
-        from src.services.observability import track_metric, get_metrics_summary
+        from src.services.observability import get_metrics_summary, track_metric
 
         # Track a test metric
         track_metric("test_worker_run", 1)
@@ -230,10 +238,11 @@ def test_llm_usage():
 # 6. MESSAGE STORE
 # =============================================================================
 
+
 def test_message_store():
     """Test message store operations."""
     print_header("MESSAGE STORE")
-    
+
     try:
         from src.services.message_store import create_message_store
 
@@ -250,6 +259,7 @@ def test_message_store():
     except Exception as e:
         print_result("message_store", False, f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -258,16 +268,19 @@ def test_message_store():
 # 7. CELERY CONNECTION (optional)
 # =============================================================================
 
+
 def test_celery_connection():
     """Test Celery broker connection (optional)."""
     print_header("CELERY BROKER (optional)")
-    
+
     try:
         from src.conf.config import settings
 
         # У цій утиліті ми НЕ вимагаємо запущений Celery – це опційно.
         if not settings.CELERY_ENABLED:
-            print_result("celery", True, "CELERY_ENABLED=False – воркери вимкнені (OK для локального тесту)")
+            print_result(
+                "celery", True, "CELERY_ENABLED=False – воркери вимкнені (OK для локального тесту)"
+            )
             return True
 
         # Якщо CELERY_ENABLED=True – тут можна було б додати ping брокера,
@@ -285,14 +298,15 @@ def test_celery_connection():
 # MAIN
 # =============================================================================
 
+
 def run_all_tests():
     """Run all worker tests."""
     print("\n" + "🔧" * 30)
     print("   ТЕСТУВАННЯ ВОРКЕРІВ MIRT-AI")
     print("🔧" * 30)
-    
+
     results = {}
-    
+
     results["health"] = test_health()
     results["message_store"] = test_message_store()
     results["llm_usage"] = test_llm_usage()
@@ -300,25 +314,25 @@ def run_all_tests():
     results["followups"] = test_followups()
     results["crm"] = test_crm()
     results["celery"] = test_celery_connection()
-    
+
     # Summary
     print_header("SUMMARY")
-    
+
     passed = sum(1 for v in results.values() if v)
     total = len(results)
-    
+
     for name, success in results.items():
         status = "✅ PASS" if success else "❌ FAIL"
         print(f"   {name}: {status}")
-    
+
     print()
     print(f"   Total: {passed}/{total} passed")
-    
+
     if passed == total:
         print("\n   🎉 ВСІ ВОРКЕРИ ПРАЦЮЮТЬ!")
     else:
         print("\n   ⚠️ Деякі тести не пройшли")
-    
+
     return passed == total
 
 
@@ -326,7 +340,7 @@ def main():
     """Main entry point."""
     if len(sys.argv) > 1:
         test_name = sys.argv[1].lower()
-        
+
         if test_name == "all":
             run_all_tests()
         elif test_name == "health":

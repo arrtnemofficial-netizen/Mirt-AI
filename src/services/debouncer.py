@@ -7,6 +7,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class BufferedMessage:
     text: str = ""
@@ -15,10 +16,11 @@ class BufferedMessage:
     extra_metadata: dict[str, Any] = field(default_factory=dict)
     original_message: Any = None  # Aiogram Message object for replying
 
+
 class MessageDebouncer:
     """
     Aggregates multiple messages from the same user into a single processing event.
-    
+
     Supports two modes:
     1. Callback mode (Telegram): wait for delay, then call a function.
     2. Await mode (Webhooks): await result, returns None if superseded by newer message.
@@ -33,7 +35,9 @@ class MessageDebouncer:
 
     # --- Callback Mode (Telegram) ---
 
-    def register_callback(self, session_id: str, callback: Callable[[str, BufferedMessage], Coroutine]):
+    def register_callback(
+        self, session_id: str, callback: Callable[[str, BufferedMessage], Coroutine]
+    ):
         """Register the async function to call when debounce timer expires."""
         self.processing_callbacks[session_id] = callback
 
@@ -41,7 +45,7 @@ class MessageDebouncer:
         self,
         session_id: str,
         message: BufferedMessage,
-        callback: Callable[[str, BufferedMessage], Coroutine]
+        callback: Callable[[str, BufferedMessage], Coroutine],
     ):
         """Add a message to the buffer and reset the timer (Callback Mode)."""
 
@@ -54,17 +58,17 @@ class MessageDebouncer:
         # Reset timer
         self._reset_timer(session_id)
 
-        logger.info(f"[DEBOUNCER] {session_id}: Message buffered (Callback Mode). Timer reset to {self.delay}s.")
+        logger.info(
+            f"[DEBOUNCER] {session_id}: Message buffered (Callback Mode). Timer reset to {self.delay}s."
+        )
 
     # --- Await Mode (ManyChat/Webhooks) ---
 
     async def wait_for_debounce(
-        self,
-        session_id: str,
-        message: BufferedMessage
+        self, session_id: str, message: BufferedMessage
     ) -> BufferedMessage | None:
         """
-        Add message and wait. 
+        Add message and wait.
         Returns aggregated message if this request triggered the processing.
         Returns None if this request was superseded by a newer one.
         """
@@ -82,7 +86,7 @@ class MessageDebouncer:
         self.active_futures[session_id] = future
 
         # Reset timer
-        self._reset_timer(session_id, mode='await')
+        self._reset_timer(session_id, mode="await")
 
         logger.info(f"[DEBOUNCER] {session_id}: Message buffered (Await Mode). Waiting...")
 
@@ -98,7 +102,7 @@ class MessageDebouncer:
             self.buffers[session_id] = []
         self.buffers[session_id].append(message)
 
-    def _reset_timer(self, session_id: str, mode: str = 'callback'):
+    def _reset_timer(self, session_id: str, mode: str = "callback"):
         # Cancel existing timer
         if session_id in self.timers:
             self.timers[session_id].cancel()
@@ -111,7 +115,7 @@ class MessageDebouncer:
         try:
             await asyncio.sleep(self.delay)
 
-            if mode == 'callback':
+            if mode == "callback":
                 await self._process_callback(session_id)
             else:
                 self._process_future(session_id)
@@ -182,6 +186,7 @@ class MessageDebouncer:
         # Track metrics
         try:
             from src.services.observability import track_metric
+
             track_metric("debouncer_messages_aggregated", len(messages))
             if has_image:
                 track_metric("debouncer_has_image", 1)
@@ -193,7 +198,7 @@ class MessageDebouncer:
             has_image=has_image,
             image_url=last_image_url,
             extra_metadata=merged_metadata,
-            original_message=last_original_message
+            original_message=last_original_message,
         )
 
     def _cleanup(self, session_id: str):
@@ -208,4 +213,3 @@ class MessageDebouncer:
         if session_id in self.timers:
             self.timers[session_id].cancel()
         self._cleanup(session_id)
-

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.core.models import AgentResponse
+
+if TYPE_CHECKING:
+    from src.core.models import AgentResponse
 
 from .constants import (
     FIELD_AI_INTENT,
@@ -74,7 +76,9 @@ def build_manychat_tags(agent_response: AgentResponse) -> tuple[list[str], list[
         add_tags.append(TAG_ORDER_STARTED)
 
     if current_state == "STATE_7_END" and agent_response.event == "escalation":
-        if agent_response.escalation and "ORDER_CONFIRMED" in (agent_response.escalation.reason or ""):
+        if agent_response.escalation and "ORDER_CONFIRMED" in (
+            agent_response.escalation.reason or ""
+        ):
             add_tags.append(TAG_ORDER_PAID)
 
     return add_tags, remove_tags
@@ -112,7 +116,9 @@ def build_manychat_v2_response(
             "event": agent_response.event,
             "current_state": agent_response.metadata.current_state,
             "intent": agent_response.metadata.intent,
-            "escalation": agent_response.escalation.model_dump() if agent_response.escalation else None,
+            "escalation": agent_response.escalation.model_dump()
+            if agent_response.escalation
+            else None,
         }
 
     return response

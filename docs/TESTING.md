@@ -62,7 +62,20 @@ pytest tests/unit/test_prompt_compliance.py
 
 ---
 
-## 5. Vision & Catalog Tests
+## 5. CI Checks (Ruff + Pytest)
+
+```bash
+ruff format .
+ruff check .
+pytest
+```
+
+Note: chaos DB verification tests are skipped unless `SUPABASE_URL` and
+`SUPABASE_API_KEY` are set.
+
+---
+
+## 6. Vision & Catalog Tests
 
 Коли змінюєш **master-каталог** (`data/vision/products_master.yaml`) або логіку Vision/каталогу, проганяй ці тести:
 

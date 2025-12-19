@@ -6,12 +6,14 @@ These tests verify:
 3. Content quality (Ukrainian, No placeholders)
 """
 
-from pathlib import Path
 import pytest
+
 from src.core.prompt_registry import PromptRegistry
+
 
 # Load Registry
 registry = PromptRegistry()
+
 
 class TestSystemPromptBasics:
     """Test system/main.md content."""
@@ -54,6 +56,7 @@ class TestSystemPromptBasics:
         """Prompt should use markdown headers."""
         assert "# " in prompt_content
 
+
 class TestStatePromptsBasics:
     """Test reliability of state prompts."""
 
@@ -79,12 +82,14 @@ class TestStatePromptsBasics:
     def test_all_states_from_enum_have_prompts(self):
         """Every state in State enum must have a prompt file."""
         from src.core.prompt_registry import validate_all_states_have_prompts
+
         missing = validate_all_states_have_prompts()
         assert not missing, f"Missing prompt files for states: {missing}"
 
     def test_state_prompts_have_transitions(self):
         """State prompts should document transitions."""
         from src.core.state_machine import State
+
         for state in State:
             content = registry.get(f"state.{state.value}").content
             assert "## TRANSITIONS" in content, f"{state.value} missing TRANSITIONS section"
@@ -92,6 +97,7 @@ class TestStatePromptsBasics:
     def test_state_prompts_have_examples(self):
         """State prompts should have examples."""
         from src.core.state_machine import State
+
         for state in State:
             content = registry.get(f"state.{state.value}").content
             assert "## EXAMPLES" in content, f"{state.value} missing EXAMPLES section"

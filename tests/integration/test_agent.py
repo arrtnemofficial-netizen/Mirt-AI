@@ -4,7 +4,6 @@ Tests for PydanticAI agents (run_support, run_vision).
 Updated for new architecture with PydanticAI 1.23+
 """
 
-
 import pytest
 
 from src.agents import (

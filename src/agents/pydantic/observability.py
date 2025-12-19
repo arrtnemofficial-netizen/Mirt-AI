@@ -35,7 +35,7 @@ def configure_logfire() -> bool:
     logfire_token = os.getenv("LOGFIRE_TOKEN")
     if not logfire_token:
         logger.warning(
-            "LOGFIRE_TOKEN not set. Observability disabled. " "Set LOGFIRE_TOKEN to enable tracing."
+            "LOGFIRE_TOKEN not set. Observability disabled. Set LOGFIRE_TOKEN to enable tracing."
         )
         return False
 

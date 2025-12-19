@@ -170,7 +170,9 @@ class TestAgentNode:
             ),
         )
 
-        with patch("src.agents.langgraph.nodes.agent.run_support", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "src.agents.langgraph.nodes.agent.run_support", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.return_value = mock_response
 
             result = await agent_node(state_with_user_message)
@@ -181,7 +183,9 @@ class TestAgentNode:
     @pytest.mark.asyncio
     async def test_agent_node_handles_error(self, state_with_user_message):
         """Agent node should handle errors gracefully."""
-        with patch("src.agents.langgraph.nodes.agent.run_support", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "src.agents.langgraph.nodes.agent.run_support", new_callable=AsyncMock
+        ) as mock_run:
             mock_run.side_effect = Exception("Test error")
 
             result = await agent_node(state_with_user_message)
@@ -200,6 +204,7 @@ class TestGraphStructure:
 
     def test_graph_builds_successfully(self):
         """Graph should build without errors."""
+
         async def mock_runner(msg: str, metadata: dict) -> dict:
             return {
                 "event": "simple_answer",
@@ -219,13 +224,14 @@ class TestGraphStructure:
 
     def test_graph_has_correct_nodes(self):
         """Graph should have all required nodes."""
+
         async def mock_runner(msg: str, metadata: dict) -> dict:
             return {}
 
         graph = build_production_graph(mock_runner)
 
         # Check nodes exist
-        node_names = list(graph.nodes.keys()) if hasattr(graph, 'nodes') else []
+        node_names = list(graph.nodes.keys()) if hasattr(graph, "nodes") else []
 
         expected_nodes = ["moderation", "intent", "agent", "validation", "escalation"]
         for node in expected_nodes:

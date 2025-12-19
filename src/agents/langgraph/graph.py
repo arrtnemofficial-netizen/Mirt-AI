@@ -16,6 +16,8 @@ This graph is designed to SURVIVE in production.
 from __future__ import annotations
 
 import logging
+import os
+import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -282,7 +284,7 @@ def build_production_graph(
 # SINGLETON MANAGEMENT
 # =============================================================================
 
-_production_graph: CompiledGraph | None = None
+_production_graph_ref: weakref.ReferenceType[CompiledGraph] | None = None
 
 
 def get_production_graph(
@@ -299,9 +301,11 @@ def get_production_graph(
     Returns:
         Compiled production graph
     """
-    global _production_graph
+    global _production_graph_ref
+    force_new = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    graph = None if force_new else (_production_graph_ref() if _production_graph_ref else None)
 
-    if _production_graph is None:
+    if graph is None:
         # Validate prompt files exist for all states (fail-fast)
         from src.core.prompt_registry import validate_all_states_have_prompts
 
@@ -314,7 +318,9 @@ def get_production_graph(
 
             missing_payment = validate_payment_subphase_prompts()
             if missing_payment:
-                logger.warning("Graph starting with missing payment sub-phase prompts: %s", missing_payment)
+                logger.warning(
+                    "Graph starting with missing payment sub-phase prompts: %s", missing_payment
+                )
         except Exception:
             logger.debug("Unable to validate payment sub-phase prompts", exc_info=True)
 
@@ -328,18 +334,19 @@ def get_production_graph(
             result = await run_support(msg, deps)
             return result.model_dump()
 
-        _production_graph = build_production_graph(
+        graph = build_production_graph(
             runner or _default_runner,
             checkpointer,
         )
+        _production_graph_ref = weakref.ref(graph)
 
-    return _production_graph
+    return graph
 
 
 def reset_graph() -> None:
     """Reset the graph singleton (useful for testing)."""
-    global _production_graph
-    _production_graph = None
+    global _production_graph_ref
+    _production_graph_ref = None
 
 
 # =============================================================================

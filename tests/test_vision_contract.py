@@ -9,15 +9,18 @@ INVARIANTS:
 3. needs_clarification=True → clarification_question MUST NOT be empty
 """
 
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch
 
-from src.agents.pydantic.models import VisionResponse, ProductMatch as IdentifiedProduct
+import pytest
+
+from src.agents.pydantic.models import ProductMatch as IdentifiedProduct
+from src.agents.pydantic.models import VisionResponse
 
 
 # =============================================================================
 # CONTRACT: VisionResponse Schema
 # =============================================================================
+
 
 class TestVisionResponseSchema:
     """VisionResponse schema validation."""
@@ -67,6 +70,7 @@ class TestVisionResponseSchema:
 # INVARIANT 1: High confidence → product identified
 # =============================================================================
 
+
 class TestHighConfidenceProductInvariant:
     """If confidence >= 0.5, identified_product.name MUST NOT be null."""
 
@@ -75,7 +79,7 @@ class TestHighConfidenceProductInvariant:
         """High confidence responses should have identified_product."""
         # This is a specification test - it validates the contract
         # In real usage, the LLM should follow this rule
-        
+
         # Valid case: high confidence WITH product
         response = VisionResponse(
             reply_to_user="Знайдено товар",
@@ -105,14 +109,14 @@ class TestHighConfidenceProductInvariant:
 # INVARIANT 2: Product data from Supabase (enrichment test)
 # =============================================================================
 
+
 class TestProductEnrichmentInvariant:
     """Product price/color MUST be enriched from Supabase."""
 
     @pytest.mark.asyncio
     async def test_vision_node_enriches_product_from_db(self):
         """vision_node should enrich product data from Supabase."""
-        from unittest.mock import patch, AsyncMock
-        
+
         # Mock run_vision to return product with price=0 (LLM doesn't know price)
         async def mock_run_vision(message, deps):
             return VisionResponse(
@@ -125,7 +129,7 @@ class TestProductEnrichmentInvariant:
                     color="",  # LLM doesn't know real color
                 ),
             )
-        
+
         # Mock DB enrichment
         async def mock_enrich(name):
             return {
@@ -134,13 +138,17 @@ class TestProductEnrichmentInvariant:
                 "photo_url": "https://supabase.com/real_photo.jpg",
                 "id": 123,
             }
-        
+
         with patch("src.agents.pydantic.vision_agent.run_vision", new=mock_run_vision):
-            with patch("src.agents.langgraph.nodes.vision._enrich_product_from_db", new=mock_enrich):
+            with patch(
+                "src.agents.langgraph.nodes.vision._enrich_product_from_db", new=mock_enrich
+            ):
                 import importlib
+
                 import src.agents.langgraph.nodes.vision as vision_module
+
                 importlib.reload(vision_module)
-                
+
                 state = {
                     "session_id": "test",
                     "messages": [{"role": "user", "content": "Що це?"}],
@@ -150,9 +158,9 @@ class TestProductEnrichmentInvariant:
                     "current_state": "STATE_2_VISION",
                     "selected_products": [],
                 }
-                
+
                 output = await vision_module.vision_node(state)
-                
+
                 # After enrichment, product should have real price from DB
                 products = output.get("selected_products", [])
                 if products:
@@ -164,50 +172,54 @@ class TestProductEnrichmentInvariant:
 # MODEL-SPECIFIC TESTS
 # =============================================================================
 
+
 class TestKeyProductModels:
     """Tests for key product models from MIRT catalog."""
 
     # Повний список продуктів з каталогу з правильними кольорами та цінами
-    @pytest.mark.parametrize("product_name,color,price", [
-        # Сукня Анна - 7 варіантів кольорів, ціна 1850 грн
-        ("Сукня Анна", "голубий", 1850),
-        ("Сукня Анна", "малина", 1850),
-        ("Сукня Анна", "чорний", 1850),
-        ("Сукня Анна", "червоний", 1850),
-        ("Сукня Анна", "коричневий", 1850),
-        ("Сукня Анна", "рожевий", 1850),
-        ("Сукня Анна", "сірий", 1850),
-        # Костюм Валері - універсальний, ціна 1950 грн
-        ("Костюм Валері", "універсальний", 1950),
-        # Костюм Ритм - 3 кольори, ціна 1975 грн
-        ("Костюм Ритм", "рожевий", 1975),
-        ("Костюм Ритм", "коричневий", 1975),
-        ("Костюм Ритм", "бордовий", 1975),
-        # Костюм Каприз - 3 кольори, ціна 1885 грн
-        ("Костюм Каприз", "рожевий", 1885),
-        ("Костюм Каприз", "бордовий", 1885),
-        ("Костюм Каприз", "коричневий", 1885),
-        # Костюм Лагуна - 4 кольори, ціна 1590-2390 грн (mid: 2190)
-        ("Костюм Лагуна", "рожевий", 2190),
-        ("Костюм Лагуна", "помаранчевий", 2190),
-        ("Костюм Лагуна", "жовтий", 2190),
-        ("Костюм Лагуна", "сірий", 2190),
-        # Костюм Мрія - 4 кольори, ціна 1590-2390 грн (mid: 2190)
-        ("Костюм Мрія", "жовтий", 2190),
-        ("Костюм Мрія", "рожевий", 2190),
-        ("Костюм Мрія", "помаранчевий", 2190),
-        ("Костюм Мрія", "сірий", 2190),
-        # Костюм Мерея - 1 колір, ціна 1985-2150 грн
-        ("Костюм Мерея", "молочний", 1985),
-        # Тренч екошкіра - 3 кольори, ціна 2180 грн
-        ("Тренч екошкіра", "капучіно", 2180),
-        ("Тренч екошкіра", "молочний", 2180),
-        ("Тренч екошкіра", "чорний", 2180),
-        # Тренч тканинний - 3 кольори, ціна 2380 грн
-        ("Тренч", "рожевий", 2380),
-        ("Тренч", "голубий", 2380),
-        ("Тренч", "темно синій", 2380),
-    ])
+    @pytest.mark.parametrize(
+        "product_name,color,price",
+        [
+            # Сукня Анна - 7 варіантів кольорів, ціна 1850 грн
+            ("Сукня Анна", "голубий", 1850),
+            ("Сукня Анна", "малина", 1850),
+            ("Сукня Анна", "чорний", 1850),
+            ("Сукня Анна", "червоний", 1850),
+            ("Сукня Анна", "коричневий", 1850),
+            ("Сукня Анна", "рожевий", 1850),
+            ("Сукня Анна", "сірий", 1850),
+            # Костюм Валері - універсальний, ціна 1950 грн
+            ("Костюм Валері", "універсальний", 1950),
+            # Костюм Ритм - 3 кольори, ціна 1975 грн
+            ("Костюм Ритм", "рожевий", 1975),
+            ("Костюм Ритм", "коричневий", 1975),
+            ("Костюм Ритм", "бордовий", 1975),
+            # Костюм Каприз - 3 кольори, ціна 1885 грн
+            ("Костюм Каприз", "рожевий", 1885),
+            ("Костюм Каприз", "бордовий", 1885),
+            ("Костюм Каприз", "коричневий", 1885),
+            # Костюм Лагуна - 4 кольори, ціна 1590-2390 грн (mid: 2190)
+            ("Костюм Лагуна", "рожевий", 2190),
+            ("Костюм Лагуна", "помаранчевий", 2190),
+            ("Костюм Лагуна", "жовтий", 2190),
+            ("Костюм Лагуна", "сірий", 2190),
+            # Костюм Мрія - 4 кольори, ціна 1590-2390 грн (mid: 2190)
+            ("Костюм Мрія", "жовтий", 2190),
+            ("Костюм Мрія", "рожевий", 2190),
+            ("Костюм Мрія", "помаранчевий", 2190),
+            ("Костюм Мрія", "сірий", 2190),
+            # Костюм Мерея - 1 колір, ціна 1985-2150 грн
+            ("Костюм Мерея", "молочний", 1985),
+            # Тренч екошкіра - 3 кольори, ціна 2180 грн
+            ("Тренч екошкіра", "капучіно", 2180),
+            ("Тренч екошкіра", "молочний", 2180),
+            ("Тренч екошкіра", "чорний", 2180),
+            # Тренч тканинний - 3 кольори, ціна 2380 грн
+            ("Тренч", "рожевий", 2380),
+            ("Тренч", "голубий", 2380),
+            ("Тренч", "темно синій", 2380),
+        ],
+    )
     def test_product_model_can_be_identified(self, product_name, color, price):
         """All MIRT catalog products should be representable in VisionResponse."""
         response = VisionResponse(
@@ -228,6 +240,7 @@ class TestKeyProductModels:
 # =============================================================================
 # ERROR HANDLING
 # =============================================================================
+
 
 class TestVisionErrorHandling:
     """Vision error handling tests."""
@@ -250,6 +263,7 @@ class TestVisionErrorHandling:
 # DISTINGUISHING SIMILAR PRODUCTS
 # =============================================================================
 
+
 class TestSimilarProductDistinction:
     """Tests for distinguishing similar products (Лагуна vs Мрія)."""
 
@@ -265,7 +279,7 @@ class TestSimilarProductDistinction:
         "жовтий": "https://cdn.sitniks.com/cmp-2065/products/2025-10-03/f214ab/db1af9-1759510737823.jpeg",
         "сірий": "https://cdn.sitniks.com/cmp-2065/products/2025-10-04/8c971b/eeb929-1759603663596.jpeg",
     }
-    
+
     MRIYA_PHOTOS = {
         "жовтий": "https://cdn.sitniks.com/cmp-2065/products/2025-10-03/2539e6/3ea571-1759512282615.jpeg",
         "рожевий": "https://cdn.sitniks.com/cmp-2065/products/2025-10-07/e1541d/59aa110-1759848560466.jpeg",
@@ -313,18 +327,18 @@ class TestSimilarProductDistinction:
         """Both Лагуна and Мрія have SAME price - zipper is ONLY distinction."""
         # Однакова ціна для однакового розміру!
         laguna = IdentifiedProduct(
-            name="Костюм Лагуна", 
-            price=2190, 
+            name="Костюм Лагуна",
+            price=2190,
             color="рожевий",
             photo_url="https://cdn.sitniks.com/cmp-2065/products/2025-10-03/8542510/12a6cc-1759503080447.jpeg",
         )
         mriya = IdentifiedProduct(
-            name="Костюм Мрія", 
-            price=2190, 
+            name="Костюм Мрія",
+            price=2190,
             color="рожевий",
             photo_url="https://cdn.sitniks.com/cmp-2065/products/2025-10-07/e1541d/59aa110-1759848560466.jpeg",
         )
-        
+
         # Names MUST be different
         assert laguna.name != mriya.name
         # Same color is valid for both
@@ -355,6 +369,7 @@ class TestSimilarProductDistinction:
 # DISTINGUISHING RITM vs KAPRIZ (обидва бавовняні, схожі кольори!)
 # =============================================================================
 
+
 class TestRitmKaprizDistinction:
     """Tests for distinguishing Ритм vs Каприз - both cotton, same colors!"""
 
@@ -369,7 +384,7 @@ class TestRitmKaprizDistinction:
         "коричневий": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/f11460/bdea2d-1758524955446.jpeg",
         "бордовий": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/785182/a5c11d-1758525112738.jpeg",
     }
-    
+
     KAPRIZ_PHOTOS = {
         "рожевий": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/6915c4/c6faad-1758534106660.jpeg",
         "бордовий": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/2e181f/973828-1758534352656.jpeg",
@@ -426,7 +441,7 @@ class TestRitmKaprizDistinction:
             color="рожевий",
             photo_url="https://cdn.sitniks.com/cmp-2065/products/2025-09-22/6915c4/c6faad-1758534106660.jpeg",
         )
-        
+
         # Names MUST be different
         assert ritm.name != kapriz.name
         # Same colors possible
@@ -454,10 +469,10 @@ class TestRitmKaprizDistinction:
             "bottom": "palazzo (широкі)",
             "price": 1885,
         }
-        
+
         # Головна відмінність - капюшон!
         assert ritm_features["has_hood"] is True
         assert kapriz_features["has_hood"] is False
-        
+
         # Додаткова відмінність - тип штанів
         assert ritm_features["bottom"] != kapriz_features["bottom"]

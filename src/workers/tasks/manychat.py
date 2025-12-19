@@ -9,6 +9,7 @@ from celery import shared_task
 
 from src.workers.sync_utils import run_sync
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +30,7 @@ def process_manychat_message(
     trace_id: str | None = None,
 ) -> dict[str, Any]:
     """Process ManyChat message through AI and push response.
-    
+
     This task replaces BackgroundTasks for durable processing.
     """
     from src.integrations.manychat.async_service import get_manychat_async_service
@@ -45,7 +46,7 @@ def process_manychat_message(
         # Get services
         store = get_session_store()
         service = get_manychat_async_service(store)
-        
+
         # Process message and push response
         coro = service.process_message_async(
             user_id=user_id,
@@ -55,20 +56,20 @@ def process_manychat_message(
             subscriber_data=subscriber_data,
             trace_id=trace_id,
         )
-        result = run_sync(coro)
-        
+        run_sync(coro)
+
         logger.info(
             "[MANYCHAT_TASK] Processed message for user=%s channel=%s",
             user_id,
             channel,
         )
-        
+
         return {
             "status": "success",
             "user_id": user_id,
             "response_sent": True,
         }
-        
+
     except Exception as e:
         logger.error(
             "[MANYCHAT_TASK] Failed to process message for user=%s: %s",
@@ -76,7 +77,7 @@ def process_manychat_message(
             e,
             exc_info=True,
         )
-        
+
         # In production, you might want to retry or send error notification
         return {
             "status": "error",

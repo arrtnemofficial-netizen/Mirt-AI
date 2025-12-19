@@ -85,7 +85,6 @@ def main():
         from src.services.followups import (
             build_followup_message,
             next_followup_due_at,
-            run_followups,
         )
         from src.services.message_store import StoredMessage
 

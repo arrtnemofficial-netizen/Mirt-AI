@@ -4,7 +4,6 @@ Tests for state machine transitions and validation.
 Updated for new architecture with centralized state_machine.py
 """
 
-
 from src.core.state_machine import (
     TRANSITIONS,
     Intent,

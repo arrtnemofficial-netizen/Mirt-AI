@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-import src.server.main as main
+from src.server import main
 from src.server.main import app
 
 

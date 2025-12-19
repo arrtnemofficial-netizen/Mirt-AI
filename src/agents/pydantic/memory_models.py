@@ -1,3 +1,4 @@
+# ruff: noqa: TC003
 """
 Memory Models - Titans-like Memory System для MIRT AI.
 ========================================================
@@ -23,22 +24,22 @@ from pydantic import BaseModel, Field, field_validator
 # =============================================================================
 
 FactType = Literal[
-    "preference",   # Вподобання (колір, стиль, модель)
-    "constraint",   # Обмеження (алергія, не носить синтетику)
-    "logistics",    # Логістика (місто, НП, адреса)
-    "behavior",     # Поведінка (часто повертає, завжди купує акційне)
-    "feedback",     # Зворотний звʼязок (скарги, похвала)
-    "child_info",   # Інфо про дитину (вік, зріст, стать)
+    "preference",  # Вподобання (колір, стиль, модель)
+    "constraint",  # Обмеження (алергія, не носить синтетику)
+    "logistics",  # Логістика (місто, НП, адреса)
+    "behavior",  # Поведінка (часто повертає, завжди купує акційне)
+    "feedback",  # Зворотний звʼязок (скарги, похвала)
+    "child_info",  # Інфо про дитину (вік, зріст, стать)
 ]
 
 FactCategory = Literal[
-    "child",        # Інфо про дитину
-    "style",        # Стиль і вподобання
-    "delivery",     # Доставка
-    "payment",      # Оплата
-    "product",      # Конкретний товар
-    "complaint",    # Скарги
-    "general",      # Загальне
+    "child",  # Інфо про дитину
+    "style",  # Стиль і вподобання
+    "delivery",  # Доставка
+    "payment",  # Оплата
+    "product",  # Конкретний товар
+    "complaint",  # Скарги
+    "general",  # Загальне
 ]
 
 
@@ -54,39 +55,27 @@ class ChildProfile(BaseModel):
     age: int | None = Field(default=None, ge=0, le=18, description="Вік дитини")
     height_cm: int | None = Field(default=None, ge=50, le=200, description="Зріст в см")
     height_history: list[dict] = Field(
-        default_factory=list,
-        description="Історія змін зросту: [{date: '2024-01', height: 122}]"
+        default_factory=list, description="Історія змін зросту: [{date: '2024-01', height: 122}]"
     )
     body_type: Literal["стандартна", "худорлява", "повненька"] | None = Field(
         default=None, description="Тип статури"
     )
-    gender: Literal["хлопчик", "дівчинка"] | None = Field(
-        default=None, description="Стать дитини"
-    )
+    gender: Literal["хлопчик", "дівчинка"] | None = Field(default=None, description="Стать дитини")
 
 
 class StylePreferences(BaseModel):
     """Вподобання щодо стилю."""
 
     favorite_models: list[str] = Field(
-        default_factory=list,
-        description="Улюблені моделі: ['Лагуна', 'Ритм', 'Веселка']"
+        default_factory=list, description="Улюблені моделі: ['Лагуна', 'Ритм', 'Веселка']"
     )
     preferred_styles: list[str] = Field(
-        default_factory=list,
-        description="Улюблені стилі: ['спортивний', 'святковий']"
+        default_factory=list, description="Улюблені стилі: ['спортивний', 'святковий']"
     )
-    favorite_colors: list[str] = Field(
-        default_factory=list,
-        description="Улюблені кольори"
-    )
-    avoided_colors: list[str] = Field(
-        default_factory=list,
-        description="Кольори яких уникає"
-    )
+    favorite_colors: list[str] = Field(default_factory=list, description="Улюблені кольори")
+    avoided_colors: list[str] = Field(default_factory=list, description="Кольори яких уникає")
     fabric_preferences: list[str] = Field(
-        default_factory=list,
-        description="Вподобання тканин: ['бавовна', 'не синтетика']"
+        default_factory=list, description="Вподобання тканин: ['бавовна', 'не синтетика']"
     )
 
 
@@ -97,9 +86,7 @@ class LogisticsInfo(BaseModel):
     delivery_type: Literal["nova_poshta", "ukrposhta", "courier", "self_pickup"] | None = Field(
         default=None, description="Тип доставки"
     )
-    favorite_branch: str | None = Field(
-        default=None, description="Улюблене відділення НП"
-    )
+    favorite_branch: str | None = Field(default=None, description="Улюблене відділення НП")
     address: str | None = Field(default=None, description="Адреса для курʼєра")
 
 
@@ -121,7 +108,7 @@ class CommerceInfo(BaseModel):
 class UserProfile(BaseModel):
     """
     Persistent Memory - повний профіль користувача.
-    
+
     Це те, що завантажується ЗАВЖДИ перед кожною сесією.
     Аналог Persistent Memory в Titans: те, що майже ніколи не забувається.
     """
@@ -148,7 +135,7 @@ class UserProfile(BaseModel):
 class Fact(BaseModel):
     """
     Атомарний факт з Fluid Memory.
-    
+
     Ключові метрики для Titans-like gating:
     - importance: наскільки факт впливає на рекомендації (0-1)
     - surprise: наскільки це нова інформація (0-1)
@@ -164,22 +151,16 @@ class Fact(BaseModel):
 
     # Titans-like metrics
     importance: float = Field(
-        default=0.5, ge=0.0, le=1.0,
-        description="Вплив на рекомендації (0=ігнорувати, 1=критичний)"
+        default=0.5, ge=0.0, le=1.0, description="Вплив на рекомендації (0=ігнорувати, 1=критичний)"
     )
     surprise: float = Field(
-        default=0.5, ge=0.0, le=1.0,
-        description="Новизна (0=очікувано, 1=дуже неочікувано)"
+        default=0.5, ge=0.0, le=1.0, description="Новизна (0=очікувано, 1=дуже неочікувано)"
     )
-    confidence: float = Field(
-        default=0.8, ge=0.0, le=1.0,
-        description="Впевненість у факті"
-    )
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0, description="Впевненість у факті")
 
     # Time-based
     ttl_days: int | None = Field(
-        default=None,
-        description="Через скільки днів видалити (None = вічний)"
+        default=None, description="Через скільки днів видалити (None = вічний)"
     )
 
     # Lifecycle
@@ -191,27 +172,24 @@ class Fact(BaseModel):
 class NewFact(BaseModel):
     """
     Новий факт для запису в память.
-    
+
     MemoryAgent генерує це коли знаходить НОВУ інформацію.
     Gating rule: записуємо тільки якщо importance >= 0.6 AND surprise >= 0.4
     """
 
     content: str = Field(description="Текст факту")
-    fact_type: FactType = Field(description="preference/constraint/logistics/behavior/feedback/child_info")
-    category: FactCategory = Field(description="child/style/delivery/payment/product/complaint/general")
+    fact_type: FactType = Field(
+        description="preference/constraint/logistics/behavior/feedback/child_info"
+    )
+    category: FactCategory = Field(
+        description="child/style/delivery/payment/product/complaint/general"
+    )
 
-    importance: float = Field(
-        ge=0.0, le=1.0,
-        description="0-1: наскільки впливає на рекомендації"
-    )
-    surprise: float = Field(
-        ge=0.0, le=1.0,
-        description="0-1: наскільки це нова інформація"
-    )
+    importance: float = Field(ge=0.0, le=1.0, description="0-1: наскільки впливає на рекомендації")
+    surprise: float = Field(ge=0.0, le=1.0, description="0-1: наскільки це нова інформація")
 
     ttl_days: int | None = Field(
-        default=None,
-        description="Через скільки днів видалити (None = вічний)"
+        default=None, description="Через скільки днів видалити (None = вічний)"
     )
 
     @field_validator("importance", "surprise")
@@ -223,7 +201,7 @@ class NewFact(BaseModel):
 class UpdateFact(BaseModel):
     """
     Оновлення існуючого факту.
-    
+
     MemoryAgent генерує це коли КОНФЛІКТ:
     - Нове місто (переїхали)
     - Новий зріст дитини (виросла)
@@ -233,14 +211,8 @@ class UpdateFact(BaseModel):
     fact_id: UUID = Field(description="ID існуючого факту для оновлення")
     new_content: str = Field(description="Новий текст факту")
 
-    importance: float = Field(
-        ge=0.0, le=1.0,
-        description="Нова важливість"
-    )
-    surprise: float = Field(
-        ge=0.0, le=1.0,
-        description="Surprise що факт змінився"
-    )
+    importance: float = Field(ge=0.0, le=1.0, description="Нова важливість")
+    surprise: float = Field(ge=0.0, le=1.0, description="Surprise що факт змінився")
 
 
 class DeleteFact(BaseModel):
@@ -258,44 +230,31 @@ class DeleteFact(BaseModel):
 class MemoryDecision(BaseModel):
     """
     Output від MemoryAgent.
-    
+
     MemoryAgent аналізує діалог і вирішує:
     - Які нові факти запамʼятати
     - Які існуючі факти оновити
     - Що можна проігнорувати
-    
+
     Це прикладний аналог Titans Surprise Metric + Gating.
     """
 
-    new_facts: list[NewFact] = Field(
-        default_factory=list,
-        description="Нові факти для запису"
-    )
+    new_facts: list[NewFact] = Field(default_factory=list, description="Нові факти для запису")
 
-    updates: list[UpdateFact] = Field(
-        default_factory=list,
-        description="Оновлення існуючих фактів"
-    )
+    updates: list[UpdateFact] = Field(default_factory=list, description="Оновлення існуючих фактів")
 
-    deletes: list[DeleteFact] = Field(
-        default_factory=list,
-        description="Факти для видалення"
-    )
+    deletes: list[DeleteFact] = Field(default_factory=list, description="Факти для видалення")
 
     profile_updates: dict = Field(
         default_factory=dict,
-        description="Оновлення до профілю (child_profile, style_preferences, etc.)"
+        description="Оновлення до профілю (child_profile, style_preferences, etc.)",
     )
 
     ignore_messages: bool = Field(
-        default=False,
-        description="True якщо повідомлення не містять нової інформації"
+        default=False, description="True якщо повідомлення не містять нової інформації"
     )
 
-    reasoning: str | None = Field(
-        default=None,
-        description="Пояснення рішень (для debug)"
-    )
+    reasoning: str | None = Field(default=None, description="Пояснення рішень (для debug)")
 
 
 # =============================================================================
@@ -306,32 +265,21 @@ class MemoryDecision(BaseModel):
 class MemorySummary(BaseModel):
     """
     Summary для зменшення токенів в промпті.
-    
+
     Замість 100 фактів даємо 2-3 стислі блоки.
     """
 
-    summary_type: Literal["user", "product", "session"] = Field(
-        description="Тип summary"
-    )
+    summary_type: Literal["user", "product", "session"] = Field(description="Тип summary")
 
-    summary_text: str = Field(
-        description="Стислий текст summary"
-    )
+    summary_text: str = Field(description="Стислий текст summary")
 
     key_facts: list[str] = Field(
-        default_factory=list,
-        description="Ключові факти (для quick access)"
+        default_factory=list, description="Ключові факти (для quick access)"
     )
 
-    facts_count: int = Field(
-        default=0, ge=0,
-        description="Скільки фактів узагальнено"
-    )
+    facts_count: int = Field(default=0, ge=0, description="Скільки фактів узагальнено")
 
-    is_current: bool = Field(
-        default=True,
-        description="Чи це актуальний summary"
-    )
+    is_current: bool = Field(default=True, description="Чи це актуальний summary")
 
 
 # =============================================================================
@@ -342,7 +290,7 @@ class MemorySummary(BaseModel):
 class MemoryContext(BaseModel):
     """
     Контекст памʼяті для передачі в агенти.
-    
+
     Це те, що додається до промпта перед кожним викликом агента:
     - profile: persistent memory
     - facts: top-K fluid memories
@@ -350,24 +298,19 @@ class MemoryContext(BaseModel):
     """
 
     profile: UserProfile | None = Field(
-        default=None,
-        description="Профіль користувача (Persistent Memory)"
+        default=None, description="Профіль користувача (Persistent Memory)"
     )
 
     facts: list[Fact] = Field(
-        default_factory=list,
-        description="Релевантні факти (Fluid Memory, top-K)"
+        default_factory=list, description="Релевантні факти (Fluid Memory, top-K)"
     )
 
-    summary: MemorySummary | None = Field(
-        default=None,
-        description="Summary (Compressed Memory)"
-    )
+    summary: MemorySummary | None = Field(default=None, description="Summary (Compressed Memory)")
 
     def to_prompt_block(self) -> str:
         """
         Форматує контекст памʼяті для вставки в промпт.
-        
+
         Returns:
             Форматований текст для system/state prompt
         """
@@ -396,7 +339,9 @@ class MemoryContext(BaseModel):
             if p.style_preferences.favorite_models:
                 lines.append(f"- Улюблені моделі: {', '.join(p.style_preferences.favorite_models)}")
             if p.style_preferences.favorite_colors:
-                lines.append(f"- Улюблені кольори: {', '.join(p.style_preferences.favorite_colors)}")
+                lines.append(
+                    f"- Улюблені кольори: {', '.join(p.style_preferences.favorite_colors)}"
+                )
             if p.style_preferences.avoided_colors:
                 lines.append(f"- Уникає кольорів: {', '.join(p.style_preferences.avoided_colors)}")
 
@@ -425,7 +370,7 @@ class MemoryContext(BaseModel):
                 if len(content) > MAX_FACT_LENGTH:
                     # Try to cut at word boundary, else hard cut
                     truncated = content[:MAX_FACT_LENGTH]
-                    space_idx = truncated.rfind(' ')
+                    space_idx = truncated.rfind(" ")
                     if space_idx > MAX_FACT_LENGTH // 2:
                         content = truncated[:space_idx] + "..."
                     else:
@@ -461,8 +406,8 @@ class MemoryContext(BaseModel):
     def is_empty(self) -> bool:
         """Перевіряє чи є хоч якийсь контекст."""
         has_profile = self.profile and (
-            self.profile.child_profile.height_cm or
-            self.profile.logistics.city or
-            self.profile.commerce.total_orders > 0
+            self.profile.child_profile.height_cm
+            or self.profile.logistics.city
+            or self.profile.commerce.total_orders > 0
         )
         return not has_profile and not self.facts and not self.summary

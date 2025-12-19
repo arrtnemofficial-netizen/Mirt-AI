@@ -7,15 +7,16 @@ do NOT change without explicit review.
 RULE: Schema changes require incrementing version and migration plan.
 """
 
-import pytest
-from pydantic import BaseModel
-
 from src.agents.pydantic.models import (
+    MessageItem as ChatMessage,
+)
+from src.agents.pydantic.models import (
+    ProductMatch as IdentifiedProduct,
+)
+from src.agents.pydantic.models import (
+    ResponseMetadata,
     SupportResponse,
     VisionResponse,
-    ProductMatch as IdentifiedProduct,
-    ResponseMetadata,
-    MessageItem as ChatMessage,
 )
 
 
@@ -62,6 +63,7 @@ IDENTIFIED_PRODUCT_FIELDS = {
 # SCHEMA FREEZE TESTS
 # =============================================================================
 
+
 class TestSupportResponseContract:
     """SupportResponse schema must match frozen definition."""
 
@@ -81,15 +83,16 @@ class TestSupportResponseContract:
         """No unexpected required fields should be added."""
         all_expected = SUPPORT_RESPONSE_REQUIRED_FIELDS | SUPPORT_RESPONSE_OPTIONAL_FIELDS
         model_fields = set(SupportResponse.model_fields.keys())
-        
+
         unexpected = model_fields - all_expected
         # Allow new optional fields, but warn
         for field in unexpected:
             field_info = SupportResponse.model_fields[field]
             # Check if it's optional (has default or is not required)
             is_optional = not field_info.is_required()
-            assert is_optional, \
+            assert is_optional, (
                 f"Unexpected required field added: {field}. Schema changes require review!"
+            )
 
     def test_event_field_is_string_like(self):
         """Event field must be string-like (Literal or str)."""
@@ -154,6 +157,7 @@ class TestIdentifiedProductContract:
 # SERIALIZATION TESTS
 # =============================================================================
 
+
 class TestSerialization:
     """Test that models serialize correctly."""
 
@@ -168,7 +172,7 @@ class TestSerialization:
             ),
         )
         data = response.model_dump()
-        
+
         assert "event" in data
         assert "messages" in data
         assert data["event"] == "simple_answer"
@@ -182,7 +186,7 @@ class TestSerialization:
             identified_product=IdentifiedProduct(name="Test", price=1000),
         )
         data = response.model_dump()
-        
+
         assert "reply_to_user" in data
         assert "confidence" in data
         assert data["confidence"] == 0.9
@@ -195,7 +199,7 @@ class TestSerialization:
             "metadata": {"current_state": "STATE_0_INIT", "intent": "GREETING_ONLY"},
         }
         response = SupportResponse.model_validate(data)
-        
+
         assert response.event == "simple_answer"
         assert len(response.messages) == 1
 
@@ -207,7 +211,7 @@ class TestSerialization:
             "needs_clarification": True,
         }
         response = VisionResponse.model_validate(data)
-        
+
         assert response.reply_to_user == "Test"
         assert response.confidence == 0.8
 
@@ -215,6 +219,7 @@ class TestSerialization:
 # =============================================================================
 # BACKWARD COMPATIBILITY
 # =============================================================================
+
 
 class TestBackwardCompatibility:
     """Test that old response formats still work."""

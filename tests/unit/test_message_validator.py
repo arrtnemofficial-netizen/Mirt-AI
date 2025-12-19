@@ -4,7 +4,6 @@ Tests for input validator (InputMetadata, WebhookInput).
 Updated for new architecture with input_validator.py
 """
 
-
 from src.core.input_validator import (
     InputMetadata,
     WebhookInput,

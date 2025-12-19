@@ -38,20 +38,24 @@ def mock_sitniks_service():
     with patch("src.integrations.crm.sitniks_chat_service.get_sitniks_chat_service") as mock_get:
         service = MagicMock()
         service.enabled = True
-        service.handle_first_touch = AsyncMock(return_value={
-            "success": True,
-            "chat_id": "chat_123",
-            "status_set": True,
-            "manager_assigned": True,
-            "error": None,
-        })
+        service.handle_first_touch = AsyncMock(
+            return_value={
+                "success": True,
+                "chat_id": "chat_123",
+                "status_set": True,
+                "manager_assigned": True,
+                "error": None,
+            }
+        )
         service.handle_invoice_sent = AsyncMock(return_value=True)
-        service.handle_escalation = AsyncMock(return_value={
-            "success": True,
-            "chat_id": "chat_123",
-            "status_set": True,
-            "manager_assigned": True,
-        })
+        service.handle_escalation = AsyncMock(
+            return_value={
+                "success": True,
+                "chat_id": "chat_123",
+                "status_set": True,
+                "manager_assigned": True,
+            }
+        )
         mock_get.return_value = service
         yield service
 
@@ -59,10 +63,13 @@ def mock_sitniks_service():
 @pytest.fixture
 def client(mock_settings):
     """Create test client with mocked settings."""
-    with patch("src.server.main.get_bot"), \
-         patch("src.server.main.setup_middleware"), \
-         patch("src.services.supabase_client.get_supabase_client", return_value=None):
+    with (
+        patch("src.server.main.get_bot"),
+        patch("src.server.main.setup_middleware"),
+        patch("src.services.supabase_client.get_supabase_client", return_value=None),
+    ):
         from src.server.main import app
+
         with TestClient(app, raise_server_exceptions=False) as client:
             yield client
 
@@ -73,7 +80,7 @@ class TestSitniksUpdateStatusEndpoint:
     def test_auth_required(self, client, mock_settings):
         """Test that authentication is required."""
         mock_settings.MANYCHAT_VERIFY_TOKEN = "secret-token"
-        
+
         response = client.post(
             "/api/v1/sitniks/update-status",
             json={
@@ -82,7 +89,7 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "wrong-token"},
         )
-        
+
         assert response.status_code == 401
 
     def test_auth_with_bearer_token(self, client, mock_settings, mock_sitniks_service):
@@ -96,7 +103,7 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"Authorization": "Bearer test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -112,7 +119,7 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -120,7 +127,7 @@ class TestSitniksUpdateStatusEndpoint:
         assert data["chat_id"] == "chat_123"
         assert data["status_set"] is True
         assert data["manager_assigned"] is True
-        
+
         mock_sitniks_service.handle_first_touch.assert_called_once_with(
             user_id="12345",
             instagram_username="testuser",
@@ -137,12 +144,12 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert data["stage"] == "give_requisites"
-        
+
         mock_sitniks_service.handle_invoice_sent.assert_called_once_with("12345")
 
     def test_invoice_alias(self, client, mock_settings, mock_sitniks_service):
@@ -155,7 +162,7 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "test-token"},
         )
-        
+
         assert response.status_code == 200
         mock_sitniks_service.handle_invoice_sent.assert_called_once()
 
@@ -169,13 +176,13 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert data["stage"] == "escalation"
         assert data["manager_assigned"] is True
-        
+
         mock_sitniks_service.handle_escalation.assert_called_once_with("12345")
 
     def test_unknown_stage(self, client, mock_settings, mock_sitniks_service):
@@ -188,7 +195,7 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is False
@@ -197,7 +204,7 @@ class TestSitniksUpdateStatusEndpoint:
     def test_service_not_enabled(self, client, mock_settings, mock_sitniks_service):
         """Test response when Sitniks service is not enabled."""
         mock_sitniks_service.enabled = False
-        
+
         response = client.post(
             "/api/v1/sitniks/update-status",
             json={
@@ -206,7 +213,7 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is False
@@ -223,7 +230,7 @@ class TestSitniksUpdateStatusEndpoint:
             },
             headers={"X-API-Key": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -237,12 +244,14 @@ class TestCreateOrderIdempotency:
         """Mock CRMService used by /webhooks/manychat/create-order."""
         with patch("src.integrations.crm.crmservice.CRMService") as mock_cls:
             service = MagicMock()
-            service.create_order_with_persistence = AsyncMock(return_value={
-                "status": "created",
-                "crm_order_id": "crm_order_456",
-                "task_id": None,
-                "external_id": "ext",
-            })
+            service.create_order_with_persistence = AsyncMock(
+                return_value={
+                    "status": "created",
+                    "crm_order_id": "crm_order_456",
+                    "task_id": None,
+                    "external_id": "ext",
+                }
+            )
             mock_cls.return_value = service
             yield service
 
@@ -252,7 +261,9 @@ class TestCreateOrderIdempotency:
         with patch("src.services.supabase_client.get_supabase_client") as mock_get:
             client = MagicMock()
             # Default: no existing order
-            client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+            client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
             client.table.return_value.upsert.return_value.execute.return_value = MagicMock(data=[])
             mock_get.return_value = client
             yield client
@@ -267,7 +278,9 @@ class TestCreateOrderIdempotency:
             )
             yield mock
 
-    def test_new_order_created(self, client, mock_settings, mock_crm, mock_supabase, mock_validation):
+    def test_new_order_created(
+        self, client, mock_settings, mock_crm, mock_supabase, mock_validation
+    ):
         """Test that new order is created when no duplicate exists."""
         response = client.post(
             "/webhooks/manychat/create-order",
@@ -284,27 +297,31 @@ class TestCreateOrderIdempotency:
             },
             headers={"X-Manychat-Token": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert data["order_id"] == "crm_order_456"
         assert "duplicate" not in data or data["duplicate"] is False
-        
+
         # Verify CRMService was called
         mock_crm.create_order_with_persistence.assert_called_once()
 
-    def test_duplicate_order_detected(self, client, mock_settings, mock_crm, mock_supabase, mock_validation):
+    def test_duplicate_order_detected(
+        self, client, mock_settings, mock_crm, mock_supabase, mock_validation
+    ):
         """Test that duplicate order returns existing order."""
         # Setup: existing order in DB
         mock_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=[{
-                "id": "existing_id",
-                "crm_order_id": "existing_crm_123",
-                "status": "created",
-            }]
+            data=[
+                {
+                    "id": "existing_id",
+                    "crm_order_id": "existing_crm_123",
+                    "status": "created",
+                }
+            ]
         )
-        
+
         response = client.post(
             "/webhooks/manychat/create-order",
             json={
@@ -320,29 +337,31 @@ class TestCreateOrderIdempotency:
             },
             headers={"X-Manychat-Token": "test-token"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert data["duplicate"] is True
         assert data["order_id"] == "existing_crm_123"
-        
+
         # Verify CRM was NOT called (duplicate detected)
         mock_crm.create_order_with_persistence.assert_not_called()
 
-    def test_idempotency_key_deterministic(self, client, mock_settings, mock_crm, mock_supabase, mock_validation):
+    def test_idempotency_key_deterministic(
+        self, client, mock_settings, mock_crm, mock_supabase, mock_validation
+    ):
         """Test that same input produces same idempotency key."""
         import hashlib
-        
+
         user_id = "12345"
         product_name = "Сукня Анна"
         price = 1200.0
-        
+
         # Calculate expected key
         idempotency_data = f"{user_id}|{product_name.lower().strip()}|{int(price * 100)}"
         idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
         expected_external_id = f"mc_{user_id}_{idempotency_hash}"
-        
+
         response = client.post(
             "/webhooks/manychat/create-order",
             json={
@@ -358,9 +377,9 @@ class TestCreateOrderIdempotency:
             },
             headers={"X-Manychat-Token": "test-token"},
         )
-        
+
         assert response.status_code == 200
-        
+
         # Verify the external_id was checked correctly
         call_args = mock_supabase.table.return_value.select.return_value.eq.call_args
         assert call_args[0][1] == expected_external_id
@@ -368,18 +387,18 @@ class TestCreateOrderIdempotency:
     def test_different_product_different_key(self, mock_settings):
         """Test that different product produces different idempotency key."""
         import hashlib
-        
+
         user_id = "12345"
         price = 1200.0
-        
+
         # Key for product A
         data_a = f"{user_id}|сукня анна|{int(price * 100)}"
         key_a = hashlib.sha256(data_a.encode()).hexdigest()[:16]
-        
+
         # Key for product B
         data_b = f"{user_id}|сукня марія|{int(price * 100)}"
         key_b = hashlib.sha256(data_b.encode()).hexdigest()[:16]
-        
+
         assert key_a != key_b
 
 
@@ -402,19 +421,19 @@ class TestSitniksChatServiceMapping:
             mock_settings.SNITKIX_API_URL = "https://api.test.com"
             mock_settings.SNITKIX_API_KEY = MagicMock()
             mock_settings.SNITKIX_API_KEY.get_secret_value.return_value = "test-key"
-            
+
             from src.integrations.crm.sitniks_chat_service import SitniksChatService
-            
+
             service = SitniksChatService()
             service.supabase = mock_supabase_for_service
-            
+
             await service._save_chat_mapping(
                 user_id="user_123",
                 chat_id="chat_456",
                 instagram_username="testuser",
                 telegram_username=None,
             )
-            
+
             # Verify upsert was called with on_conflict="user_id"
             upsert_call = mock_supabase_for_service.table.return_value.upsert.call_args
             assert upsert_call[1]["on_conflict"] == "user_id"

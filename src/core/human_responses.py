@@ -117,10 +117,10 @@ _RESPONSE_MAP: dict[ResponseType, list[str]] = {
 def get_human_response(response_type: ResponseType) -> str:
     """
     Get a random human-like response for the given situation.
-    
+
     Args:
         response_type: Type of response needed
-        
+
     Returns:
         Random human-like message from the appropriate category
     """
@@ -136,11 +136,11 @@ def get_typing_indicator() -> str:
 def add_human_touch(text: str, typo_chance: float = 0.05) -> str:
     """
     Optionally add small human touches to text.
-    
+
     Args:
         text: Original text
         typo_chance: Probability of adding a "typo" (0.0-1.0)
-        
+
     Returns:
         Text with optional human touches
     """
@@ -168,10 +168,10 @@ TYPING_DELAY_PER_CHAR = 0.02  # Additional delay per character in response
 def calculate_typing_delay(response_length: int) -> float:
     """
     Calculate realistic typing delay based on response length.
-    
+
     Args:
         response_length: Number of characters in response
-        
+
     Returns:
         Delay in seconds
     """

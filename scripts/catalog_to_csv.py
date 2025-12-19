@@ -8,6 +8,7 @@ If OPENAI_API_KEY is set, embeddings are requested from OpenAI. Otherwise a
 stable hash-based vector is used so the pipeline can run offline, but you
 should regenerate with a real key for production.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -15,8 +16,9 @@ import csv
 import hashlib
 import json
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List, Optional
+
 
 try:
     from openai import OpenAI
@@ -66,7 +68,9 @@ def flatten_products(catalog) -> Iterable[dict]:
                     "material": product.get("material"),
                     "price_uniform": product.get("price_uniform"),
                     "price_all_sizes": product.get("price_all_sizes"),
-                    "price_by_size": json.dumps(product.get("price_by_size", {}), ensure_ascii=False),
+                    "price_by_size": json.dumps(
+                        product.get("price_by_size", {}), ensure_ascii=False
+                    ),
                     "color": color_name,
                     "color_description": color_data.get("description"),
                     "photo_url": color_data.get("photo_url"),
@@ -74,7 +78,7 @@ def flatten_products(catalog) -> Iterable[dict]:
                 }
 
 
-def hash_embed(text: str, dims: int = 64) -> List[float]:
+def hash_embed(text: str, dims: int = 64) -> list[float]:
     """Deterministic pseudo-embedding for offline use."""
     digest = hashlib.sha256(text.encode("utf-8")).digest()
     # repeat digest to fill dims*4 bytes
@@ -87,7 +91,7 @@ def hash_embed(text: str, dims: int = 64) -> List[float]:
     return vec
 
 
-def get_client(api_key: Optional[str]) -> Optional[OpenAI]:
+def get_client(api_key: str | None) -> OpenAI | None:
     if not api_key or OpenAI is None:
         return None
     try:
@@ -96,7 +100,7 @@ def get_client(api_key: Optional[str]) -> Optional[OpenAI]:
         return None
 
 
-def embed_text(client: Optional[OpenAI], model: str, text: str) -> List[float]:
+def embed_text(client: OpenAI | None, model: str, text: str) -> list[float]:
     if client is None:
         return hash_embed(text)
     try:
@@ -127,14 +131,24 @@ def main() -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            text_parts = [row.get("name") or "", row.get("variant") or "", row.get("category") or "", row.get("subcategory") or "", row.get("color") or "", row.get("color_description") or "", row.get("material") or ""]
+            text_parts = [
+                row.get("name") or "",
+                row.get("variant") or "",
+                row.get("category") or "",
+                row.get("subcategory") or "",
+                row.get("color") or "",
+                row.get("color_description") or "",
+                row.get("material") or "",
+            ]
             text = " | ".join(part for part in text_parts if part)
             embedding = embed_text(client, args.model, text)
             row["embedding_model"] = args.model if client else "hash://sha256-64d"
             row["embedding"] = json.dumps(embedding)
             writer.writerow(row)
 
-    print(f"Wrote {len(rows)} rows to {output_path} using {'OpenAI' if client else 'hash'} embeddings")
+    print(
+        f"Wrote {len(rows)} rows to {output_path} using {'OpenAI' if client else 'hash'} embeddings"
+    )
 
 
 if __name__ == "__main__":

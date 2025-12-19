@@ -11,7 +11,7 @@ Fallback відповіді коли зовнішні сервіси недос�
 
 Використання:
     from src.core.fallbacks import get_fallback_response, FallbackType
-    
+
     response = get_fallback_response(FallbackType.LLM_UNAVAILABLE)
 """
 
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class FallbackType(Enum):
     """Типи fallback сценаріїв."""
+
     LLM_UNAVAILABLE = "llm_unavailable"
     LLM_TIMEOUT = "llm_timeout"
     SUPABASE_UNAVAILABLE = "supabase_unavailable"
@@ -54,10 +55,7 @@ FALLBACK_MESSAGES: dict[FallbackType, dict[str, Any]] = {
         "retry_after_seconds": 60,
     },
     FallbackType.LLM_TIMEOUT: {
-        "text": (
-            "Ой, щось довго думаю... 🤔\n"
-            "Давайте спробуємо ще раз? Повторіть ваше питання."
-        ),
+        "text": ("Ой, щось довго думаю... 🤔\nДавайте спробуємо ще раз? Повторіть ваше питання."),
         "quick_replies": ["Повторити"],
         "should_escalate": False,
         "retry_after_seconds": 30,
@@ -105,27 +103,20 @@ FALLBACK_MESSAGES: dict[FallbackType, dict[str, Any]] = {
         "retry_after_seconds": 0,
     },
     FallbackType.CRM_UNAVAILABLE: {
-        "text": (
-            "Замовлення прийнято! ✅\n"
-            "Менеджер зв'яжеться з вами для підтвердження."
-        ),
+        "text": ("Замовлення прийнято! ✅\nМенеджер зв'яжеться з вами для підтвердження."),
         "quick_replies": [],
         "should_escalate": True,  # Notify manager
         "retry_after_seconds": 300,
     },
     FallbackType.RATE_LIMITED: {
-        "text": (
-            "Занадто багато повідомлень 😅\n"
-            "Зачекайте трохи і спробуйте знову."
-        ),
+        "text": ("Занадто багато повідомлень 😅\nЗачекайте трохи і спробуйте знову."),
         "quick_replies": [],
         "should_escalate": False,
         "retry_after_seconds": 30,
     },
     FallbackType.UNKNOWN_ERROR: {
         "text": (
-            "Щось пішло не так 😔\n"
-            "Спробуйте ще раз або напишіть /restart щоб почати спочатку."
+            "Щось пішло не так 😔\nСпробуйте ще раз або напишіть /restart щоб почати спочатку."
         ),
         "quick_replies": ["Спробувати ще раз", "/restart"],
         "should_escalate": False,
@@ -138,17 +129,18 @@ FALLBACK_MESSAGES: dict[FallbackType, dict[str, Any]] = {
 # FALLBACK FUNCTIONS
 # =============================================================================
 
+
 def get_fallback_response(
     fallback_type: FallbackType,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Отримати fallback відповідь для типу помилки.
-    
+
     Args:
         fallback_type: Тип fallback сценарію
         context: Додатковий контекст (user_id, session_id тощо)
-    
+
     Returns:
         Dict з text, quick_replies, should_escalate, retry_after_seconds
     """
@@ -186,6 +178,7 @@ def should_escalate(fallback_type: FallbackType) -> bool:
 # CONTEXTUAL FALLBACKS
 # =============================================================================
 
+
 def get_contextual_fallback(
     error: Exception,
     current_state: str | None = None,
@@ -193,12 +186,12 @@ def get_contextual_fallback(
 ) -> dict[str, Any]:
     """
     Визначити тип fallback на основі помилки та контексту.
-    
+
     Args:
         error: Виняток що стався
         current_state: Поточний стан діалогу
         intent: Intent користувача
-    
+
     Returns:
         Fallback response dict
     """

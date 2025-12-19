@@ -14,16 +14,16 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 from aiogram.types import Update
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from starlette.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from starlette.responses import StreamingResponse
 
 from src.conf.config import settings
 from src.core.logging import log_event, safe_preview, setup_logging
 from src.integrations.manychat.webhook import ManychatPayloadError
-from src.services.webhook_dedupe import WebhookDedupeStore
 from src.server.dependencies import (
     MessageStoreDep,
     get_bot,
@@ -31,8 +31,7 @@ from src.server.dependencies import (
     get_cached_manychat_handler,
 )
 from src.server.middleware import setup_middleware
-
-import httpx
+from src.services.webhook_dedupe import WebhookDedupeStore
 
 
 logger = logging.getLogger(__name__)
@@ -135,11 +134,14 @@ async def lifespan(app: FastAPI):
     try:
         from src.agents.langgraph import get_production_graph
         from src.agents.langgraph.checkpointer import warmup_checkpointer_pool
+
         logger.info("Warming up LangGraph (this may take 10-20 seconds on first deploy)...")
         _graph = get_production_graph()
         warmup_ok = await warmup_checkpointer_pool()
         if not warmup_ok:
-            required = (os.getenv("CHECKPOINTER_WARMUP_REQUIRED", "false") or "false").strip().lower()
+            required = (
+                (os.getenv("CHECKPOINTER_WARMUP_REQUIRED", "false") or "false").strip().lower()
+            )
             if required in {"1", "true", "yes"}:
                 raise RuntimeError("Checkpointer warmup required but failed")
             logger.warning("LangGraph warmup incomplete; continuing without warm pool")
@@ -225,19 +227,20 @@ setup_middleware(app, enable_rate_limit=True, enable_logging=True)
 # - Instagram CDN: cdn.instagram.com, fbcdn, scontent
 # - Instagram DM images: lookaside.fbsbx.com/ig_messaging_cdn
 _IMAGE_URL_PATTERN = re.compile(
-    r'(https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp|svg)|'
-    r'https?://(?:cdn\.)?(?:instagram|fbcdn|scontent|lookaside\.fbsbx)[^\s]+)',
-    re.IGNORECASE
+    r"(https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp|svg)|"
+    r"https?://(?:cdn\.)?(?:instagram|fbcdn|scontent|lookaside\.fbsbx)[^\s]+)",
+    re.IGNORECASE,
 )
 
 
 class ApiV1MessageRequest(BaseModel):
     """Request model for /api/v1/messages endpoint.
-    
+
     Supports multiple formats:
     - ManyChat External Request: {type, clientId, message, image_url}
     - n8n format: {sessionId, name, message} where message may contain image URL
     """
+
     type: str = Field(default="instagram")
     message: str = Field(default="", validation_alias=AliasChoices("message", "messages"))
     client_id: str = Field(
@@ -272,7 +275,7 @@ class ApiV1MessageRequest(BaseModel):
     @model_validator(mode="after")
     def extract_image_from_message(self) -> ApiV1MessageRequest:
         """Extract image URL from message text if not provided separately.
-        
+
         This handles the n8n format where message field contains the image URL.
         Also strips ManyChat/n8n prefix '.;' from messages.
         """
@@ -407,7 +410,7 @@ async def api_v1_messages(
     authorization: str | None = Header(default=None),
 ) -> dict[str, str]:
     """Handle messages from ManyChat External Request.
-    
+
     Supports formats:
     - {type, clientId, message, image_url}
     - {sessionId, name, message} (n8n format)
@@ -421,6 +424,7 @@ async def api_v1_messages(
     )
 
     import json
+
     try:
         raw_json = json.loads(raw_body)
         logger.debug("[API_V1] RAW keys=%s", list(raw_json.keys()))
@@ -461,7 +465,11 @@ async def api_v1_messages(
             inbound_token = auth_value
 
     if verify_token and verify_token != inbound_token:
-        logger.warning("[API_V1] ⛔ Auth failed: expected=%s, got=%s", verify_token[:10] if verify_token else None, inbound_token[:10] if inbound_token else None)
+        logger.warning(
+            "[API_V1] ⛔ Auth failed: expected=%s, got=%s",
+            verify_token[:10] if verify_token else None,
+            inbound_token[:10] if inbound_token else None,
+        )
         raise HTTPException(status_code=401, detail="Invalid API token")
 
     # === STEP 4: Schedule background processing ===
@@ -509,7 +517,7 @@ async def manychat_webhook(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Handle incoming ManyChat webhook payloads.
-    
+
     Supports two modes:
     - Push mode (MANYCHAT_PUSH_MODE=true): Returns 202 immediately, processes async
     - Response mode (MANYCHAT_PUSH_MODE=false): Waits for AI, returns response
@@ -604,7 +612,7 @@ async def manychat_webhook(
             if settings.CELERY_ENABLED and getattr(settings, "MANYCHAT_USE_CELERY", False):
                 # Use durable Celery task
                 from src.workers.tasks.manychat import process_manychat_message
-                
+
                 task = process_manychat_message.delay(
                     user_id=user_id,
                     text=text or "",
@@ -613,7 +621,7 @@ async def manychat_webhook(
                     subscriber_data=subscriber,
                     trace_id=trace_id,
                 )
-                
+
                 log_event(
                     logger,
                     event="manychat_task_scheduled",
@@ -622,7 +630,7 @@ async def manychat_webhook(
                     channel=channel,
                     task_id=task.id,
                 )
-                
+
                 return {"status": "accepted"}
             else:
                 # Fallback to BackgroundTasks (not durable)
@@ -638,7 +646,7 @@ async def manychat_webhook(
                     subscriber_data=subscriber,  # Pass subscriber data for username
                     trace_id=trace_id,
                 )
-                
+
                 log_event(
                     logger,
                     event="manychat_task_scheduled",
@@ -675,10 +683,12 @@ async def manychat_webhook(
 # SNITKIX CRM WEBHOOK ENDPOINTS
 # =============================================================================
 
+
 @app.post("/webhooks/snitkix/order-status")
 async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
     """Handle order status updates from Snitkix CRM."""
     from src.integrations.crm.webhooks import snitkix_order_status_webhook as webhook_handler
+
     return await webhook_handler(request)
 
 
@@ -686,6 +696,7 @@ async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
 async def snitkix_payment_webhook(request: Request) -> JSONResponse:
     """Handle payment confirmation from Snitkix CRM."""
     from src.integrations.crm.webhooks import snitkix_payment_webhook as webhook_handler
+
     return await webhook_handler(request)
 
 
@@ -693,6 +704,7 @@ async def snitkix_payment_webhook(request: Request) -> JSONResponse:
 async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
     """Handle inventory updates from Snitkix CRM."""
     from src.integrations.crm.webhooks import snitkix_inventory_webhook as webhook_handler
+
     return await webhook_handler(request)
 
 
@@ -700,14 +712,16 @@ async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
 # SITNIKS STATUS UPDATE ENDPOINT (for external JS node / n8n / ManyChat)
 # =============================================================================
 
+
 class SitniksUpdateRequest(BaseModel):
     """Request for updating Sitniks chat status from external systems."""
-    stage: str = Field(
-        description="Stage: first_touch, give_requisites, escalation"
-    )
+
+    stage: str = Field(description="Stage: first_touch, give_requisites, escalation")
     user_id: str = Field(
         description="MIRT user/session ID",
-        validation_alias=AliasChoices("user_id", "userId", "session_id", "sessionId", "client_id", "clientId"),
+        validation_alias=AliasChoices(
+            "user_id", "userId", "session_id", "sessionId", "client_id", "clientId"
+        ),
     )
     instagram_username: str | None = Field(
         default=None,
@@ -728,18 +742,18 @@ async def sitniks_update_status(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Update Sitniks CRM chat status from external JS node.
-    
+
     This endpoint allows ManyChat/n8n JS nodes to trigger status updates
     after the agent response is generated.
-    
+
     Stages:
     - first_touch: Set "Взято в роботу" + assign AI Manager
-    - give_requisites: Set "Виставлено рахунок"  
+    - give_requisites: Set "Виставлено рахунок"
     - escalation: Set "AI Увага" + assign human manager
-    
+
     Auth: X-API-Key header or Authorization: Bearer token
     (uses MANYCHAT_VERIFY_TOKEN)
-    
+
     Example JS (n8n):
     ```javascript
     const response = await fetch('https://your-server/api/v1/sitniks/update-status', {
@@ -1017,9 +1031,6 @@ async def manychat_create_order(
 
     from src.integrations.crm.crmservice import CRMService
     from src.services.order_model import (
-        CustomerInfo,
-        Order,
-        OrderItem,
         build_missing_data_prompt,
         validate_order_data,
     )
@@ -1104,11 +1115,19 @@ async def manychat_create_order(
                     "message": "Замовлення вже створено! 🎉",
                     "duplicate": True,
                     "set_field_values": [
-                        {"field_name": "order_status", "field_value": order_data.get("status", "created")},
+                        {
+                            "field_name": "order_status",
+                            "field_value": order_data.get("status", "created"),
+                        },
                         {"field_name": "crm_external_id", "field_value": external_id},
-                        {"field_name": "crm_order_id", "field_value": order_data.get("crm_order_id") or ""},
+                        {
+                            "field_name": "crm_order_id",
+                            "field_value": order_data.get("crm_order_id") or "",
+                        },
                     ],
-                    "add_tag": ["order_created"] if order_data.get("status") == "created" else ["order_queued"],
+                    "add_tag": ["order_created"]
+                    if order_data.get("status") == "created"
+                    else ["order_queued"],
                 }
         except Exception as e:
             logger.warning("[CREATE_ORDER] Failed to check for duplicate: %s", e)
@@ -1117,7 +1136,7 @@ async def manychat_create_order(
     try:
         # Initialize CRMService
         crm_service = CRMService()
-        
+
         # Prepare order data
         order_data = {
             "customer": {
@@ -1127,30 +1146,30 @@ async def manychat_create_order(
                 "nova_poshta_branch": nova_poshta,
                 "manychat_id": user_id,
             },
-            "items": [{
-                "product_id": 1,
-                "product_name": product_name,
-                "size": "",
-                "color": "",
-                "price": price,
-            }],
+            "items": [
+                {
+                    "product_id": 1,
+                    "product_name": product_name,
+                    "size": "",
+                    "color": "",
+                    "price": price,
+                }
+            ],
             "source": "manychat",
             "source_id": user_id,
         }
-        
+
         # Create order with persistence
         result = await crm_service.create_order_with_persistence(
-            session_id=user_id,
-            external_id=external_id,
-            order_data=order_data
+            session_id=user_id, external_id=external_id, order_data=order_data
         )
-        
+
         if result.get("status") in ["queued", "created"]:
             logger.info(
                 "[CREATE_ORDER] Order created successfully: %s",
                 result.get("crm_order_id"),
             )
-            
+
             return {
                 "success": True,
                 "order_id": result.get("crm_order_id"),
@@ -1164,7 +1183,9 @@ async def manychat_create_order(
                     {"field_name": "crm_order_id", "field_value": result.get("crm_order_id") or ""},
                     {"field_name": "crm_task_id", "field_value": result.get("task_id") or ""},
                 ],
-                "add_tag": ["order_created"] if result.get("status") == "created" else ["order_queued"],
+                "add_tag": ["order_created"]
+                if result.get("status") == "created"
+                else ["order_queued"],
             }
         else:
             logger.error(
@@ -1179,7 +1200,7 @@ async def manychat_create_order(
                     {"field_name": "order_status", "field_value": "failed"},
                 ],
             }
-            
+
     except Exception as e:
         logger.exception("[CREATE_ORDER] Failed to create order: %s", e)
         return {

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
 from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
@@ -22,10 +23,10 @@ from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
 # PydanticAI imports
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
-from src.core.state_machine import State
-from src.services.observability import log_agent_step, log_trace, track_metric
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
+from src.core.state_machine import State
+from src.services.observability import log_agent_step, log_trace, track_metric
 from src.services.product_matcher import extract_requested_color
 
 # State prompts and transition logic
@@ -53,7 +54,8 @@ _OFFER_CONFIRMATION_KEYWORDS = [
     "оформлюємо",
     "оформляємо",
     "хочу замовити",
-] + _CONFIRMATION_BASE
+    *_CONFIRMATION_BASE,
+]
 
 
 # =============================================================================
@@ -63,17 +65,17 @@ _OFFER_CONFIRMATION_KEYWORDS = [
 # Common Ukrainian size patterns
 _SIZE_PATTERNS = [
     r"розмір\s*(\d{2,3}[-–]\d{2,3})",  # "розмір 146-152"
-    r"раджу\s*(\d{2,3}[-–]\d{2,3})",   # "раджу 146-152"
-    r"підійде\s*(\d{2,3}[-–]\d{2,3})", # "підійде 122-128"
-    r"(\d{2,3}[-–]\d{2,3})\s*см",      # "146-152 см"
-    r"розмір\s*(\d{2,3})",              # "розмір 140"
+    r"раджу\s*(\d{2,3}[-–]\d{2,3})",  # "раджу 146-152"
+    r"підійде\s*(\d{2,3}[-–]\d{2,3})",  # "підійде 122-128"
+    r"(\d{2,3}[-–]\d{2,3})\s*см",  # "146-152 см"
+    r"розмір\s*(\d{2,3})",  # "розмір 140"
 ]
 
 
 def _extract_size_from_response(messages: list) -> str | None:
     """
     Extract size from LLM response messages.
-    
+
     Fallback when LLM forgets to include size in products[].
     Looks for patterns like "раджу 146-152" or "розмір 122-128".
     """
@@ -135,13 +137,16 @@ async def agent_node(
             if isinstance(available_colors, list) and available_colors:
                 requested = extract_requested_color(user_message)
                 if requested:
+
                     def _norm(s: str) -> str:
                         return " ".join((s or "").lower().strip().split())
 
                     options = [str(c).strip() for c in available_colors if str(c).strip()]
                     option_norms = {_norm(c) for c in options}
                     if option_norms and (_norm(requested) not in option_norms):
-                        session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+                        session_id = state.get(
+                            "session_id", state.get("metadata", {}).get("session_id", "")
+                        )
                         trace_id = state.get("trace_id", "")
 
                         options_text = ", ".join(options[:8])
@@ -178,7 +183,7 @@ async def agent_node(
                             },
                         }
 
-                        try:
+                        with suppress(Exception):
                             log_agent_step(
                                 session_id=session_id,
                                 state=current_state,
@@ -187,8 +192,6 @@ async def agent_node(
                                 latency_ms=0.0,
                                 extra={"trace_id": trace_id, "blocked_color": requested},
                             )
-                        except Exception:
-                            pass
 
                         return {
                             "current_state": current_state,
@@ -278,8 +281,7 @@ async def agent_node(
         # DETAILED LOGGING: What did the agent return?
         first_msg = response.messages[0].content[:100] if response.messages else "None"
         logger.info(
-            "Agent response for session %s: event=%s, state=%s->%s, intent=%s, "
-            "products=%d, msg=%s",
+            "Agent response for session %s: event=%s, state=%s->%s, intent=%s, products=%d, msg=%s",
             session_id,
             response.event,
             current_state,
@@ -353,7 +355,9 @@ async def agent_node(
                 "другу",
                 "+",
             )
-            should_append = bool(selected_products) and any(k in user_text_lower for k in add_keywords)
+            should_append = bool(selected_products) and any(
+                k in user_text_lower for k in add_keywords
+            )
 
             if should_append:
                 merged: list[dict[str, Any]] = []

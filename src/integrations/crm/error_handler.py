@@ -59,7 +59,7 @@ class CRMErrorHandler:
         retry_count: int = 0,
     ) -> dict[str, Any]:
         """Handle CRM operation failure and determine recovery strategy.
-        
+
         Returns:
             dict with error handling strategy and user message
         """
@@ -299,6 +299,7 @@ def get_crm_error_handler() -> CRMErrorHandler:
 
 
 # Integration functions for LangGraph
+
 
 async def handle_crm_error_in_state(
     state: dict[str, Any],

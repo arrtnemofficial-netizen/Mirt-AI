@@ -23,7 +23,7 @@ def main():
         sys.exit(1)
 
     print(f"🔧 Running: {generator.relative_to(project_root)}")
-    result = subprocess.run([sys.executable, str(generator)], cwd=project_root)
+    result = subprocess.run([sys.executable, str(generator)], check=False, cwd=project_root)
     sys.exit(result.returncode)
 
 

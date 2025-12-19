@@ -7,10 +7,11 @@ Import in conftest.py:
     from tests.conftest_memory import *
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 from uuid import uuid4
+
+import pytest
 
 from src.agents.pydantic.memory_models import (
     ChildProfile,
@@ -30,6 +31,7 @@ from src.agents.pydantic.memory_models import (
 # =============================================================================
 # USER PROFILE FIXTURES
 # =============================================================================
+
 
 @pytest.fixture
 def empty_profile():
@@ -88,6 +90,7 @@ def kyiv_profile():
 # =============================================================================
 # FACT FIXTURES
 # =============================================================================
+
 
 @pytest.fixture
 def high_importance_fact():
@@ -180,6 +183,7 @@ def multiple_facts():
 # MEMORY DECISION FIXTURES
 # =============================================================================
 
+
 @pytest.fixture
 def ignore_decision():
     """Decision to ignore messages."""
@@ -219,6 +223,7 @@ def update_decision(stored_fact):
 # MEMORY CONTEXT FIXTURES
 # =============================================================================
 
+
 @pytest.fixture
 def empty_context():
     """Empty memory context."""
@@ -243,6 +248,7 @@ def full_context(full_profile, multiple_facts):
 # =============================================================================
 # STATE FIXTURES
 # =============================================================================
+
 
 @pytest.fixture
 def base_state():
@@ -293,6 +299,7 @@ def state_with_memory(base_state, full_profile, multiple_facts):
 # MOCK FIXTURES
 # =============================================================================
 
+
 @pytest.fixture
 def mock_supabase():
     """Mock Supabase client."""
@@ -318,7 +325,7 @@ def mock_supabase():
 def mock_memory_service(mock_supabase):
     """Mock MemoryService."""
     from src.services.memory_service import MemoryService
-    
+
     service = MemoryService(client=mock_supabase)
     return service
 
@@ -326,6 +333,7 @@ def mock_memory_service(mock_supabase):
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
 
 def make_fact(
     content: str,

@@ -189,12 +189,11 @@ async def test_intent_node_with_photo():
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(
-    not pytest.importorskip("openai", reason="OpenAI not installed"),
-    reason="Requires OpenAI API"
+    not pytest.importorskip("openai", reason="OpenAI not installed"), reason="Requires OpenAI API"
 )
 async def test_vision_node_deps_have_image_url():
     """Test that vision node correctly passes image_url to deps."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     state = create_vision_state()
 
@@ -206,6 +205,7 @@ async def test_vision_node_deps_have_image_url():
         captured_deps = deps
         # Return minimal valid response
         from src.agents.pydantic.models import VisionResponse
+
         return VisionResponse(
             reply_to_user="Тест",
             confidence=0.5,
@@ -216,15 +216,18 @@ async def test_vision_node_deps_have_image_url():
     with patch("src.agents.pydantic.vision_agent.run_vision", new=mock_run_vision):
         # Import inside patch context to ensure mock is used
         import importlib
+
         import src.agents.langgraph.nodes.vision as vision_module
+
         importlib.reload(vision_module)
         output = await vision_module.vision_node(state)
 
     # CRITICAL CHECK: Did image_url reach deps?
     assert captured_deps is not None, "run_vision was not called"
     assert captured_deps.has_image is True, "has_image not set in deps"
-    assert captured_deps.image_url == "https://example.com/test_image.jpg", \
+    assert captured_deps.image_url == "https://example.com/test_image.jpg", (
         f"image_url not passed correctly: {captured_deps.image_url}"
+    )
 
     errors = validate_node_output(output, "vision_node")
     assert not errors, f"Validation errors: {errors}"
@@ -237,8 +240,7 @@ async def test_vision_node_deps_have_image_url():
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(
-    not pytest.importorskip("openai", reason="OpenAI not installed"),
-    reason="Requires OpenAI API"
+    not pytest.importorskip("openai", reason="OpenAI not installed"), reason="Requires OpenAI API"
 )
 async def test_agent_node_returns_valid_state():
     """Test agent node returns valid ConversationState."""
@@ -255,6 +257,7 @@ async def test_agent_node_returns_valid_state():
             ResponseMetadata,
             SupportResponse,
         )
+
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Привіт! Чим можу допомогти?")],
@@ -294,6 +297,7 @@ async def test_offer_node_with_products():
     # Mock run_support
     async def mock_run_support(message, deps, message_history):
         from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
+
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Чудовий вибір! Сукня Еліт - 1300 грн")],
@@ -332,13 +336,25 @@ async def test_agent_node_appends_products_to_cart_on_add_keywords():
     ]
 
     async def mock_run_support(message, deps, message_history):
-        from src.agents.pydantic.models import MessageItem, ProductMatch, ResponseMetadata, SupportResponse
+        from src.agents.pydantic.models import (
+            MessageItem,
+            ProductMatch,
+            ResponseMetadata,
+            SupportResponse,
+        )
 
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Ок")],
             products=[
-                ProductMatch(id=2, name="Товар 2", price=900, size="122", color="білий", photo_url="https://x/y.jpg")
+                ProductMatch(
+                    id=2,
+                    name="Товар 2",
+                    price=900,
+                    size="122",
+                    color="білий",
+                    photo_url="https://x/y.jpg",
+                )
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id,
@@ -374,14 +390,33 @@ async def test_upsell_node_merges_products_into_cart_dedup():
     state["offered_products"] = state["selected_products"]
 
     async def mock_run_support(message, deps, message_history):
-        from src.agents.pydantic.models import MessageItem, ProductMatch, ResponseMetadata, SupportResponse
+        from src.agents.pydantic.models import (
+            MessageItem,
+            ProductMatch,
+            ResponseMetadata,
+            SupportResponse,
+        )
 
         return SupportResponse(
             event="simple_answer",
             messages=[MessageItem(type="text", content="Додала")],
             products=[
-                ProductMatch(id=1, name="Товар 1", price=1000, size="122", color="чорний", photo_url="https://x/1.jpg"),
-                ProductMatch(id=3, name="Товар 3", price=500, size="128", color="сірий", photo_url="https://x/3.jpg"),
+                ProductMatch(
+                    id=1,
+                    name="Товар 1",
+                    price=1000,
+                    size="122",
+                    color="чорний",
+                    photo_url="https://x/1.jpg",
+                ),
+                ProductMatch(
+                    id=3,
+                    name="Товар 3",
+                    price=500,
+                    size="128",
+                    color="сірий",
+                    photo_url="https://x/3.jpg",
+                ),
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id,

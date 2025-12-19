@@ -126,6 +126,7 @@ def process_message(
 
         if not response_text:
             from src.core.human_responses import get_human_response
+
             response_text = get_human_response("timeout")
 
         # Store assistant response

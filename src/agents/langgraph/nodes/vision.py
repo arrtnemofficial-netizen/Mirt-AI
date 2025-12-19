@@ -15,9 +15,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from src.conf.config import settings
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.vision_agent import run_vision
 from src.core.state_machine import State
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_BG_TASKS: set[asyncio.Task] = set()
 
 
 # =============================================================================
@@ -48,24 +49,25 @@ logger = logging.getLogger(__name__)
 
 def _get_snippet_by_header(header_name: str) -> list[str] | None:
     """Get snippet by exact header name from snippets.md.
-    
+
     Returns list of bubbles (split by ---) or None if not found.
     """
     try:
         from src.core.prompt_registry import registry
+
         content = registry.get("system.snippets").content
     except Exception:
         return None
-    
+
     if not content:
         return None
-    
+
     # Parse snippets.md - find section with exact header
     lines = content.split("\n")
     i = 0
     while i < len(lines):
         line = lines[i]
-        
+
         # Look for ### header with exact match
         if line.startswith("### ") and line[4:].strip() == header_name:
             # Found exact match! Extract the snippet body
@@ -74,7 +76,7 @@ def _get_snippet_by_header(header_name: str) -> list[str] | None:
             while i < len(lines) and not lines[i].startswith("### "):
                 body_lines.append(lines[i])
                 i += 1
-            
+
             # Parse body: skip КОЛИ/НЕ КОЛИ lines, split by ---
             text_lines = []
             for bl in body_lines:
@@ -82,28 +84,28 @@ def _get_snippet_by_header(header_name: str) -> list[str] | None:
                 if bl_stripped.startswith("КОЛИ:") or bl_stripped.startswith("НЕ КОЛИ:"):
                     continue
                 text_lines.append(bl_stripped)
-            
+
             # Join and split by ---
             full_text = "\n".join(text_lines).strip()
             if not full_text:
                 return None
-            
+
             bubbles = [b.strip() for b in full_text.split("---") if b.strip()]
             if bubbles:
                 logger.info("📋 Found snippet '%s': %d bubbles", header_name, len(bubbles))
                 return bubbles
             return None
         i += 1
-    
+
     return None
 
 
 def _get_product_snippet(product_name: str) -> list[str] | None:
     """Get presentation snippet for a product from snippets.md.
-    
+
     Returns list of bubbles (split by ---) or None if not found.
     Universal: works for ANY product that has a snippet in snippets.md.
-    
+
     Format in snippets.md:
         ### Сукня Анна — преміум-презентація
         КОЛИ: ...
@@ -113,33 +115,34 @@ def _get_product_snippet(product_name: str) -> list[str] | None:
     """
     try:
         from src.core.prompt_registry import registry
+
         content = registry.get("system.snippets").content
     except Exception:
         return None
-    
+
     if not content:
         return None
-    
+
     # Normalize product name for matching
     pn_lower = (product_name or "").lower().strip()
     if not pn_lower:
         return None
-    
+
     # Extract key words (e.g., "сукня анна" -> ["сукня", "анна"])
     keywords = [w for w in pn_lower.split() if len(w) > 2]
     if not keywords:
         return None
-    
+
     # Parse snippets.md - find sections matching product
     lines = content.split("\n")
     i = 0
     while i < len(lines):
         line = lines[i]
-        
+
         # Look for ### headers that contain product keywords
         if line.startswith("### "):
             header_lower = line[4:].lower()
-            
+
             # Check if this header matches our product (all keywords present)
             if all(kw in header_lower for kw in keywords):
                 # Found a match! Look for "презентація" or first snippet for this product
@@ -150,31 +153,39 @@ def _get_product_snippet(product_name: str) -> list[str] | None:
                     while i < len(lines) and not lines[i].startswith("### "):
                         body_lines.append(lines[i])
                         i += 1
-                    
+
                     # Parse body: skip КОЛИ/НЕ КОЛИ lines, split by ---
                     text_lines = []
                     for bl in body_lines:
                         bl_stripped = bl.strip()
-                        if bl_stripped.startswith("КОЛИ:") or bl_stripped.startswith("НЕ КОЛИ:") or bl_stripped.startswith("ПРІОРИТЕТ:"):
+                        if (
+                            bl_stripped.startswith("КОЛИ:")
+                            or bl_stripped.startswith("НЕ КОЛИ:")
+                            or bl_stripped.startswith("ПРІОРИТЕТ:")
+                        ):
                             continue
                         text_lines.append(bl_stripped)
-                    
+
                     # Join and split by ---
                     full_text = "\n".join(text_lines).strip()
                     if not full_text:
                         return None
-                    
+
                     bubbles = [b.strip() for b in full_text.split("---") if b.strip()]
                     if bubbles:
-                        logger.info("📋 Found snippet for '%s': %d bubbles", product_name, len(bubbles))
+                        logger.info(
+                            "📋 Found snippet for '%s': %d bubbles", product_name, len(bubbles)
+                        )
                         return bubbles
                     return None
         i += 1
-    
+
     return None
 
 
-async def _enrich_product_from_db(product_name: str, color: str | None = None) -> dict[str, Any] | None:
+async def _enrich_product_from_db(
+    product_name: str, color: str | None = None
+) -> dict[str, Any] | None:
     """Lookup product in DB by name (and color if provided) and return enriched data.
 
     Використовується, коли Vision повернув назву без ціни/фото.
@@ -194,7 +205,11 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
 
         # Якщо колір вже в назві (наприклад "Костюм Ритм (рожевий)") - не дублюємо
         search_query = product_name
-        if color and f"({color})" not in product_name.lower() and color.lower() not in product_name.lower():
+        if (
+            color
+            and f"({color})" not in product_name.lower()
+            and color.lower() not in product_name.lower()
+        ):
             # Спробуємо знайти точний match з кольором
             search_query = f"{product_name} ({color})"
 
@@ -277,15 +292,15 @@ async def _enrich_product_from_db(product_name: str, color: str | None = None) -
             ambiguous_color = bool((not color) and len(color_options) >= 2)
             if ambiguous_color:
                 photo_url = ""
-                try:
+                with suppress(Exception):
                     product["_color_options"] = color_options
-                except Exception:
-                    pass
 
             logger.info(
                 "📦 Enriched from DB: %s (color=%s) -> %s, photo=%s",
-                product_name, color, price_display,
-                photo_url[:50] if photo_url else "<no photo>"
+                product_name,
+                color,
+                price_display,
+                photo_url[:50] if photo_url else "<no photo>",
             )
             return {
                 "id": product.get("id", 0),
@@ -315,7 +330,7 @@ def _extract_products(
     existing: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Extract products from VisionResponse into state format.
-    
+
     Logic:
     - If confidence >= 85% → show ONLY identified product (no alternatives)
     - If confidence < 85% → show identified + alternatives for user to choose
@@ -325,18 +340,26 @@ def _extract_products(
 
     if response.identified_product:
         products = [response.identified_product.model_dump()]
-        logger.info("Vision identified: %s (confidence=%.0f%%)",
-                   response.identified_product.name, confidence * 100)
+        logger.info(
+            "Vision identified: %s (confidence=%.0f%%)",
+            response.identified_product.name,
+            confidence * 100,
+        )
 
     # Only show alternatives if NOT confident enough
     # High confidence = we know what it is, no need to confuse user with options
     if response.alternative_products and confidence < 0.85:
         products.extend([p.model_dump() for p in response.alternative_products])
-        logger.info("Vision alternatives: %d (showing because confidence < 85%%)",
-                   len(response.alternative_products))
+        logger.info(
+            "Vision alternatives: %d (showing because confidence < 85%%)",
+            len(response.alternative_products),
+        )
     elif response.alternative_products:
-        logger.info("Vision: skipping %d alternatives (confidence=%.0f%% >= 85%%)",
-                   len(response.alternative_products), confidence * 100)
+        logger.info(
+            "Vision: skipping %d alternatives (confidence=%.0f%% >= 85%%)",
+            len(response.alternative_products),
+            confidence * 100,
+        )
 
     return products
 
@@ -395,10 +418,7 @@ def _build_vision_messages(
 
         # Check if color is already in the name (e.g., "Костюм Ритм (рожевий)")
         # to avoid duplication like "Костюм Ритм (рожевий) у кольорі рожевий"
-        color_already_in_name = (
-            product.color and
-            product.color.lower() in product_name.lower()
-        )
+        color_already_in_name = product.color and product.color.lower() in product_name.lower()
 
         prefix = "Це наш"
         if confidence < 0.5:
@@ -407,7 +427,9 @@ def _build_vision_messages(
         color_options: list[str] = []
         try:
             if catalog_product and isinstance(catalog_product.get("_color_options"), list):
-                color_options = [str(x) for x in (catalog_product.get("_color_options") or []) if str(x).strip()]
+                color_options = [
+                    str(x) for x in (catalog_product.get("_color_options") or []) if str(x).strip()
+                ]
         except Exception:
             color_options = []
 
@@ -417,10 +439,7 @@ def _build_vision_messages(
             and (
                 (not product.color)
                 or _is_ambiguous_color(product.color)
-                or (
-                    option_norms
-                    and (_norm_color(product.color) not in option_norms)
-                )
+                or (option_norms and (_norm_color(product.color) not in option_norms))
             )
         )
 
@@ -473,7 +492,9 @@ def _build_vision_messages(
 
         if needs_color_confirmation:
             options_text = ", ".join(color_options[:5])
-            messages.append(text_msg(f"Підкажіть, будь ласка, який колір обираєте: {options_text}? 🤍"))
+            messages.append(
+                text_msg(f"Підкажіть, будь ласка, який колір обираєте: {options_text}? 🤍")
+            )
 
         # БАБЛА 3: Якщо зріст вже в тексті (фото + текст разом) - показуємо ціну одразу!
         # Інакше питаємо зріст, і agent_node обробить відповідь
@@ -482,10 +503,8 @@ def _build_vision_messages(
             # Зріст є в тексті разом з фото - показуємо ціну одразу!
             size_label, price = get_size_and_price_for_height(height)
             if catalog_product:
-                try:
+                with suppress(Exception):
                     price = int(CatalogService.get_price_for_size(catalog_product, size_label))
-                except Exception:
-                    pass
             messages.append(text_msg(f"На {height} см підійде розмір {size_label}"))
             messages.append(text_msg(f"Ціна {price} грн"))
             messages.append(text_msg("Оформлюємо? 🌸"))
@@ -497,11 +516,17 @@ def _build_vision_messages(
     elif response.clarification_question:
         messages.append(text_msg(response.clarification_question.strip()))
     elif response.needs_clarification:
-        messages.append(text_msg("Не можу точно визначити модель. Підкажіть, будь ласка, що це за товар? 🤍"))
+        messages.append(
+            text_msg("Не можу точно визначити модель. Підкажіть, будь ласка, що це за товар? 🤍")
+        )
 
     # If we still have no product and no clarification - this is likely NOT our product
     # Use "Невідомий товар" snippet from snippets.md
-    if (not response.identified_product) and (not response.clarification_question) and (not response.needs_clarification):
+    if (
+        (not response.identified_product)
+        and (not response.clarification_question)
+        and (not response.needs_clarification)
+    ):
         # Try to get snippet for unknown product
         unknown_snippet = _get_snippet_by_header("Невідомий товар (ескалація)")
         if unknown_snippet:
@@ -511,7 +536,9 @@ def _build_vision_messages(
             # Fallback if snippet not found
             messages.append(text_msg("Це не наша модель 🤍"))
             messages.append(text_msg("Але стиль дуже схожий на наші костюми/сукні!"))
-            messages.append(text_msg("Показати наші варіанти? Підкажіть, що шукаєте і на який зріст 🌸"))
+            messages.append(
+                text_msg("Показати наші варіанти? Підкажіть, що шукаєте і на який зріст 🌸")
+            )
 
     # 5. Fallback - use "Помилка розпізнавання фото" snippet
     if not messages:
@@ -595,7 +622,9 @@ async def vision_node(
             except Exception as notif_err:
                 logger.warning("Failed to send Telegram notification: %s", notif_err)
 
-        asyncio.create_task(_send_notification_background())
+        task = asyncio.create_task(_send_notification_background())
+        _BG_TASKS.add(task)
+        task.add_done_callback(_BG_TASKS.discard)
 
         return {
             "current_state": State.STATE_0_INIT.value,
@@ -642,7 +671,6 @@ async def vision_node(
     catalog_row: dict[str, Any] | None = None
     if response.identified_product:
         try:
-            catalog = CatalogService()
             enriched_row = await _enrich_product_from_db(
                 response.identified_product.name,
                 color=response.identified_product.color,
@@ -669,25 +697,22 @@ async def vision_node(
         # In ALL cases: DO NOT guess, ESCALATE to manager!
         # =====================================================
         confidence = response.confidence or 0.0
-        
+
         # Case 1: AI "identified" product but it's NOT in catalog (hallucination/competitor)
-        product_not_in_catalog = (
-            response.identified_product is not None
-            and catalog_row is None
-        )
-        
+        product_not_in_catalog = response.identified_product is not None and catalog_row is None
+
         # Case 2: AI couldn't identify anything (product is None or "<not identified>")
-        no_product_identified = (
-            response.identified_product is None
-            or (response.identified_product and response.identified_product.name in ("<not identified>", "<none>", ""))
+        no_product_identified = response.identified_product is None or (
+            response.identified_product
+            and response.identified_product.name in ("<not identified>", "<none>", "")
         )
-        
+
         # Case 3: Low confidence - don't trust the result
         low_confidence = confidence < 0.5
-        
+
         # ESCALATE if: not in catalog OR (no product AND low confidence)
         should_escalate = product_not_in_catalog or (no_product_identified and low_confidence)
-        
+
         if should_escalate:
             logger.warning(
                 "🚨 [SESSION %s] ESCALATION: Product not in catalog or low confidence! "
@@ -705,12 +730,13 @@ async def vision_node(
                 text_msg("Вітаю 🎀"),
                 text_msg("Секундочку, уточню інформацію по цьому товару 🙌🏻"),
             ]
-            
+
             # Send Telegram notification to manager in background (fire-and-forget)
             # This must NOT block the response to the customer!
             async def _send_notification_background():
                 try:
                     from src.services.notification_service import NotificationService
+
                     notification = NotificationService()
                     await notification.send_escalation_alert(
                         session_id=session_id or "unknown",
@@ -728,10 +754,12 @@ async def vision_node(
                     logger.info("📲 [SESSION %s] Telegram notification sent to manager", session_id)
                 except Exception as notif_err:
                     logger.warning("Failed to send Telegram notification: %s", notif_err)
-            
+
             # Fire and forget - don't await, just schedule
-            asyncio.create_task(_send_notification_background())
-            
+            task = asyncio.create_task(_send_notification_background())
+            _BG_TASKS.add(task)
+            task.add_done_callback(_BG_TASKS.discard)
+
             # Return IMMEDIATELY to customer - don't wait for notification
             return {
                 "current_state": State.STATE_0_INIT.value,
@@ -770,7 +798,9 @@ async def vision_node(
             vision_color_raw = response.identified_product.color
             vision_color = vision_color_raw
             try:
-                if vision_color_raw and ("/" in vision_color_raw or " або " in vision_color_raw.lower()):
+                if vision_color_raw and (
+                    "/" in vision_color_raw or " або " in vision_color_raw.lower()
+                ):
                     vision_color = ""
                     response.identified_product.color = ""
             except Exception:
@@ -800,204 +830,197 @@ async def vision_node(
                 # Ціна залежить від розміру, тому питаємо розмір спочатку.
                 # _build_vision_messages() створює правильну відповідь.
 
-        # Log response with clear visibility
-        product_name = (
-            response.identified_product.name if response.identified_product else "<not identified>"
-        )
-        product_price = response.identified_product.price if response.identified_product else 0
-        logger.info(
-            "🖼️ [SESSION %s] Vision RESULT: product='%s' price=%s confidence=%.0f%%",
-            session_id,
-            product_name,
-            product_price,
-            response.confidence * 100,
-        )
+    # Log response with clear visibility
+    product_name = (
+        response.identified_product.name if response.identified_product else "<not identified>"
+    )
+    product_price = response.identified_product.price if response.identified_product else 0
+    logger.info(
+        "🖼️ [SESSION %s] Vision RESULT: product='%s' price=%s confidence=%.0f%%",
+        session_id,
+        product_name,
+        product_price,
+        response.confidence * 100,
+    )
 
-        # Async trace logging (disabled by default via AsyncTracingService flag)
-        try:
-            await log_trace(
-                session_id=session_id or "",
-                trace_id=f"vision:{session_id}:{int(start_time * 1000)}",
-                node_name="vision_node",
-                state_name=State.STATE_2_VISION.value,
-                prompt_key="vision_main",
-                input_snapshot={
-                    "message": user_message,
-                    "image_url": deps.image_url,
-                },
-                output_snapshot={
-                    "product_name": product_name,
-                    "price": product_price,
-                    "confidence": response.confidence,
-                },
-                latency_ms=(time.perf_counter() - start_time) * 1000,
-                model_name=None,
-            )
-        except Exception as trace_error:  # Observability must not break main flow
-            logger.debug("Vision trace logging skipped: %s", trace_error)
-
-        # Extract products and build messages using helpers
-        selected_products = _extract_products(response, state.get("selected_products", []))
-
-        metadata = state.get("metadata", {})
-        vision_greeted_before = bool(metadata.get("vision_greeted", False))
-        assistant_messages = _build_vision_messages(
-            response,
-            messages,
-            vision_greeted=vision_greeted_before,
-            user_message=user_message,  # Передаємо текст для витягування зросту!
-            catalog_product=catalog_row,
-        )
-
-        available_colors: list[str] = []
-        try:
-            if isinstance(catalog_row, dict):
-                if isinstance(catalog_row.get("_color_options"), list):
-                    available_colors = [
-                        str(x).strip()
-                        for x in (catalog_row.get("_color_options") or [])
-                        if str(x).strip()
-                    ]
-                elif isinstance(catalog_row.get("colors"), list):
-                    available_colors = [
-                        str(x).strip()
-                        for x in (catalog_row.get("colors") or [])
-                        if str(x).strip()
-                    ]
-                elif isinstance(catalog_row.get("colors"), str):
-                    s = str(catalog_row.get("colors") or "").strip()
-                    if s:
-                        available_colors = [s]
-                elif isinstance(catalog_row.get("color"), str):
-                    s = str(catalog_row.get("color") or "").strip()
-                    if s:
-                        available_colors = [s]
-        except Exception:
-            available_colors = []
-
-        height_in_text = extract_height_from_text(user_message)
-        if response.identified_product and height_in_text:
-            size_label, _ = get_size_and_price_for_height(height_in_text)
-            response.identified_product.size = size_label
-            if catalog_row:
-                try:
-                    response.identified_product.price = CatalogService.get_price_for_size(
-                        catalog_row,
-                        size_label,
-                    )
-                except Exception:
-                    pass
-
-            if selected_products:
-                first = dict(selected_products[0])
-                first["size"] = size_label
-                if catalog_row:
-                    try:
-                        first["price"] = CatalogService.get_price_for_size(catalog_row, size_label)
-                    except Exception:
-                        pass
-                    if not first.get("photo_url"):
-                        first["photo_url"] = (
-                            catalog_row.get("photo_url")
-                            or catalog_row.get("image_url")
-                            or catalog_row.get("photo")
-                            or catalog_row.get("image")
-                            or first.get("photo_url")
-                            or ""
-                        )
-                    if not first.get("id"):
-                        first["id"] = catalog_row.get("id") or first.get("id")
-                selected_products[0] = first
-
-        # Metrics
-        latency_ms = (time.perf_counter() - start_time) * 1000
-        log_agent_step(
-            session_id=session_id,
-            state=State.STATE_2_VISION.value,
-            intent="PHOTO_IDENT",
-            event="vision_complete",
-            latency_ms=latency_ms,
-            extra={
-                "trace_id": trace_id,
-                "products_count": len(selected_products),
+    # Async trace logging (disabled by default via AsyncTracingService flag)
+    try:
+        await log_trace(
+            session_id=session_id or "",
+            trace_id=f"vision:{session_id}:{int(start_time * 1000)}",
+            node_name="vision_node",
+            state_name=State.STATE_2_VISION.value,
+            prompt_key="vision_main",
+            input_snapshot={
+                "message": user_message,
+                "image_url": deps.image_url,
+            },
+            output_snapshot={
+                "product_name": product_name,
+                "price": product_price,
                 "confidence": response.confidence,
             },
+            latency_ms=(time.perf_counter() - start_time) * 1000,
+            model_name=None,
         )
-        track_metric("vision_node_latency_ms", latency_ms)
+    except Exception as trace_error:  # Observability must not break main flow
+        logger.debug("Vision trace logging skipped: %s", trace_error)
 
-        # =====================================================
-        # DIALOG PHASE (Turn-Based State Machine)
-        # =====================================================
-        # Визначаємо наступну фазу на основі результату Vision:
-        #
-        # 1. Товар впізнано → WAITING_FOR_SIZE (STATE_3)
-        #    - Вже показали товар, питаємо зріст
-        #    - Наступне повідомлення юзера йде в agent
-        #
-        # 2. Товар НЕ впізнано → VISION_DONE
-        #    - Потрібно уточнення від юзера
-        #
-        # 3. needs_clarification → VISION_DONE
-        #    - Vision не впевнений, питає уточнення
-        # =====================================================
+    # Extract products and build messages using helpers
+    selected_products = _extract_products(response, state.get("selected_products", []))
+
+    metadata = state.get("metadata", {})
+    vision_greeted_before = bool(metadata.get("vision_greeted", False))
+    assistant_messages = _build_vision_messages(
+        response,
+        messages,
+        vision_greeted=vision_greeted_before,
+        user_message=user_message,  # Передаємо текст для витягування зросту!
+        catalog_product=catalog_row,
+    )
+
+    available_colors: list[str] = []
+    try:
+        if isinstance(catalog_row, dict):
+            if isinstance(catalog_row.get("_color_options"), list):
+                available_colors = [
+                    str(x).strip()
+                    for x in (catalog_row.get("_color_options") or [])
+                    if str(x).strip()
+                ]
+            elif isinstance(catalog_row.get("colors"), list):
+                available_colors = [
+                    str(x).strip() for x in (catalog_row.get("colors") or []) if str(x).strip()
+                ]
+            elif isinstance(catalog_row.get("colors"), str):
+                s = str(catalog_row.get("colors") or "").strip()
+                if s:
+                    available_colors = [s]
+            elif isinstance(catalog_row.get("color"), str):
+                s = str(catalog_row.get("color") or "").strip()
+                if s:
+                    available_colors = [s]
+    except Exception:
+        available_colors = []
+
+    height_in_text = extract_height_from_text(user_message)
+    if response.identified_product and height_in_text:
+        size_label, _ = get_size_and_price_for_height(height_in_text)
+        response.identified_product.size = size_label
+        if catalog_row:
+            with suppress(Exception):
+                response.identified_product.price = CatalogService.get_price_for_size(
+                    catalog_row,
+                    size_label,
+                )
+
         if selected_products:
-            if height_in_text:
-                # Зріст вже є - готові до оформлення!
-                next_phase = "SIZE_COLOR_DONE"
-                next_state = State.STATE_4_OFFER.value
-            else:
-                # Тільки фото - чекаємо зріст
-                next_phase = "WAITING_FOR_SIZE"
-                next_state = State.STATE_3_SIZE_COLOR.value
-        elif response.needs_clarification:
-            next_phase = "VISION_DONE"
-            next_state = State.STATE_2_VISION.value
+            first = dict(selected_products[0])
+            first["size"] = size_label
+            if catalog_row:
+                with suppress(Exception):
+                    first["price"] = CatalogService.get_price_for_size(catalog_row, size_label)
+                if not first.get("photo_url"):
+                    first["photo_url"] = (
+                        catalog_row.get("photo_url")
+                        or catalog_row.get("image_url")
+                        or catalog_row.get("photo")
+                        or catalog_row.get("image")
+                        or first.get("photo_url")
+                        or ""
+                    )
+                if not first.get("id"):
+                    first["id"] = catalog_row.get("id") or first.get("id")
+            selected_products[0] = first
+
+    # Metrics
+    latency_ms = (time.perf_counter() - start_time) * 1000
+    log_agent_step(
+        session_id=session_id,
+        state=State.STATE_2_VISION.value,
+        intent="PHOTO_IDENT",
+        event="vision_complete",
+        latency_ms=latency_ms,
+        extra={
+            "trace_id": trace_id,
+            "products_count": len(selected_products),
+            "confidence": response.confidence,
+        },
+    )
+    track_metric("vision_node_latency_ms", latency_ms)
+
+    # =====================================================
+    # DIALOG PHASE (Turn-Based State Machine)
+    # =====================================================
+    # Визначаємо наступну фазу на основі результату Vision:
+    #
+    # 1. Товар впізнано → WAITING_FOR_SIZE (STATE_3)
+    #    - Вже показали товар, питаємо зріст
+    #    - Наступне повідомлення юзера йде в agent
+    #
+    # 2. Товар НЕ впізнано → VISION_DONE
+    #    - Потрібно уточнення від юзера
+    #
+    # 3. needs_clarification → VISION_DONE
+    #    - Vision не впевнений, питає уточнення
+    # =====================================================
+    if selected_products:
+        if height_in_text:
+            # Зріст вже є - готові до оформлення!
+            next_phase = "SIZE_COLOR_DONE"
+            next_state = State.STATE_4_OFFER.value
         else:
-            # Unknown product - escalate to manager!
-            next_phase = "ESCALATED"
-            next_state = State.STATE_0_INIT.value
+            # Тільки фото - чекаємо зріст
+            next_phase = "WAITING_FOR_SIZE"
+            next_state = State.STATE_3_SIZE_COLOR.value
+    elif response.needs_clarification:
+        next_phase = "VISION_DONE"
+        next_state = State.STATE_2_VISION.value
+    else:
+        # Unknown product - escalate to manager!
+        next_phase = "ESCALATED"
+        next_state = State.STATE_0_INIT.value
 
-        # Determine escalation level
-        escalation_level = "NONE"
-        if not selected_products and not response.needs_clarification:
-            # Product not identified and not asking for clarification = escalate
-            escalation_level = "SOFT"  # Manager will see this in CRM
+    # Determine escalation level
+    escalation_level = "NONE"
+    if not selected_products and not response.needs_clarification:
+        # Product not identified and not asking for clarification = escalate
+        escalation_level = "SOFT"  # Manager will see this in CRM
 
-        return {
-            "current_state": next_state,
-            "messages": assistant_messages,
-            "selected_products": selected_products,
-            "dialog_phase": next_phase,
-            # ВАЖЛИВО: Скидаємо has_image після обробки!
-            # Це запобігає повторному входу в vision при наступних текстових повідомленнях
-            "has_image": False,
-            "escalation_level": escalation_level,  # For CRM tracking
+    return {
+        "current_state": next_state,
+        "messages": assistant_messages,
+        "selected_products": selected_products,
+        "dialog_phase": next_phase,
+        # ВАЖЛИВО: Скидаємо has_image після обробки!
+        # Це запобігає повторному входу в vision при наступних текстових повідомленнях
+        "has_image": False,
+        "escalation_level": escalation_level,  # For CRM tracking
+        "metadata": {
+            **state.get("metadata", {}),
+            "vision_confidence": response.confidence,
+            "needs_clarification": response.needs_clarification,
+            "has_image": False,  # Також в metadata
+            "vision_greeted": True,  # greeting уже відправлено
+            "available_colors": available_colors,
+            "escalation_level": escalation_level,
+        },
+        # Lightweight agent_response so renderers (Telegram/ManyChat) можуть показати фото/текст
+        "agent_response": {
+            "event": "simple_answer",
+            "messages": [
+                {"type": str(m.get("type") or "text"), "content": str(m.get("content") or "")}
+                for m in assistant_messages
+                if str(m.get("type") or "text") in ("text", "image")
+            ],
+            "products": selected_products,
             "metadata": {
-                **state.get("metadata", {}),
-                "vision_confidence": response.confidence,
-                "needs_clarification": response.needs_clarification,
-                "has_image": False,  # Також в metadata
-                "vision_greeted": True,  # greeting уже відправлено
-                "available_colors": available_colors,
+                "session_id": session_id,
+                "current_state": next_state,
+                "intent": "PHOTO_IDENT",
                 "escalation_level": escalation_level,
             },
-            # Lightweight agent_response so renderers (Telegram/ManyChat) можуть показати фото/текст
-            "agent_response": {
-                "event": "simple_answer",
-                "messages": [
-                    {"type": str(m.get("type") or "text"), "content": str(m.get("content") or "")}
-                    for m in assistant_messages
-                    if str(m.get("type") or "text") in ("text", "image")
-                ],
-                "products": selected_products,
-                "metadata": {
-                    "session_id": session_id,
-                    "current_state": next_state,
-                    "intent": "PHOTO_IDENT",
-                    "escalation_level": escalation_level,
-                },
-            },
-            "step_number": state.get("step_number", 0) + 1,
-            "last_error": None,
-        }
-
+        },
+        "step_number": state.get("step_number", 0) + 1,
+        "last_error": None,
+    }

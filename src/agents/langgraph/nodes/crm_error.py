@@ -122,11 +122,15 @@ async def _analyze_and_present_error(
         },
     }
 
-    track_metric("crm_error_presented", 1, {
-        "session_id": session_id,
-        "strategy": error_result.get("strategy"),
-        "retry_count": crm_retry_count,
-    })
+    track_metric(
+        "crm_error_presented",
+        1,
+        {
+            "session_id": session_id,
+            "strategy": error_result.get("strategy"),
+            "retry_count": crm_retry_count,
+        },
+    )
 
     # Update state and wait for user choice
     return Command(
@@ -149,8 +153,6 @@ async def _handle_user_choice(
     from .utils import extract_user_message
 
     user_message = extract_user_message(state.get("messages", []))
-    crm_external_id = state.get("crm_external_id", "")
-    crm_error_result = state.get("crm_error_result", {})
 
     logger.info(
         "[CRM:ERROR] User choice for session %s: '%s'",
@@ -201,7 +203,9 @@ async def _handle_retry_choice(
         )
     else:
         # Retry failed - show error again
-        error_message = retry_result.get("crm_retry_result", {}).get("message", "❌ Повторна спроба не вдалася")
+        error_message = retry_result.get("crm_retry_result", {}).get(
+            "message", "❌ Повторна спроба не вдалася"
+        )
 
         return Command(
             update={

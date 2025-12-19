@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
+from src.conf.config import settings
+from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 
 from .nodes.intent import INTENT_PATTERNS
@@ -17,8 +19,6 @@ from .nodes.intent import INTENT_PATTERNS
 # Import for intent detection
 from .state_prompts import detect_simple_intent
 
-from src.core.debug_logger import debug_log
-from src.conf.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,9 @@ def _route_debug(
 
 
 # Type aliases for routing destinations
-MasterRoute = Literal["moderation", "agent", "offer", "payment", "upsell", "escalation", "end", "crm_error"]
+MasterRoute = Literal[
+    "moderation", "agent", "offer", "payment", "upsell", "escalation", "end", "crm_error"
+]
 ModerationRoute = Literal["intent", "escalation"]
 IntentRoute = Literal["vision", "agent", "offer", "payment", "escalation"]
 ValidationRoute = Literal["agent", "escalation", "end"]
@@ -237,8 +239,6 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
     # STATE_4: Offer made - чекаємо "Беру" або підтвердження
     if dialog_phase == "OFFER_MADE":
-        current_state = state.get("current_state", State.STATE_0_INIT.value)
-
         # User confirms order ("беру", "да", "так") → payment flow
         if detected_intent == "PAYMENT_DELIVERY":
             _route_debug(
@@ -395,7 +395,7 @@ def route_after_intent(state: dict[str, Any]) -> IntentRoute:
         return "escalation"
 
     intent = state.get("detected_intent", "DISCOVERY_OR_QUESTION")
-    current_state = state.get("current_state", State.STATE_0_INIT.value)
+    current_state = state.get("current_state", "")
 
     route = _resolve_intent_route(intent, current_state, state)
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", "?"))
@@ -497,16 +497,16 @@ def route_after_agent(state: dict[str, Any]) -> AgentRoute:
     # Turn-Based: Phases that require waiting for user input → END
     # =========================================================================
     waiting_phases = {
-        "DISCOVERY",                   # Чекаємо зріст/тип речі
-        "VISION_DONE",                 # Чекаємо уточнення після фото
-        "WAITING_FOR_SIZE",            # Чекаємо зріст
-        "WAITING_FOR_COLOR",           # Чекаємо вибір кольору
-        "OFFER_MADE",                  # Чекаємо "Беру"
-        "WAITING_FOR_DELIVERY_DATA",   # Чекаємо ПІБ, НП
+        "DISCOVERY",  # Чекаємо зріст/тип речі
+        "VISION_DONE",  # Чекаємо уточнення після фото
+        "WAITING_FOR_SIZE",  # Чекаємо зріст
+        "WAITING_FOR_COLOR",  # Чекаємо вибір кольору
+        "OFFER_MADE",  # Чекаємо "Беру"
+        "WAITING_FOR_DELIVERY_DATA",  # Чекаємо ПІБ, НП
         "WAITING_FOR_PAYMENT_METHOD",  # Чекаємо спосіб оплати
-        "WAITING_FOR_PAYMENT_PROOF",   # Чекаємо скрін
-        "UPSELL_OFFERED",              # Чекаємо відповідь на допродаж
-        "COMPLETED",                   # Діалог завершено
+        "WAITING_FOR_PAYMENT_PROOF",  # Чекаємо скрін
+        "UPSELL_OFFERED",  # Чекаємо відповідь на допродаж
+        "COMPLETED",  # Діалог завершено
     }
 
     if dialog_phase in waiting_phases:
@@ -586,7 +586,7 @@ def route_after_payment(state: dict[str, Any]) -> Literal["upsell", "end", "vali
 
 def get_moderation_routes() -> dict[str, str]:
     """Get route map for moderation node.
-    
+
     Memory System: moderation → memory_context → intent
     """
     return {
