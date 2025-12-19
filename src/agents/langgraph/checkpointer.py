@@ -16,8 +16,10 @@ With this:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -205,7 +207,80 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             },
         )
 
-        checkpointer = AsyncPostgresSaver(pool)
+        slow_threshold_s = 1.0
+        try:
+            slow_threshold_s = float(os.getenv("CHECKPOINTER_SLOW_LOG_SECONDS", "1.0") or "1.0")
+        except Exception:
+            slow_threshold_s = 1.0
+
+        def _extract_thread_id(config: Any | None) -> str:
+            if not isinstance(config, dict):
+                return "?"
+            configurable = config.get("configurable")
+            if isinstance(configurable, dict):
+                thread_id = configurable.get("thread_id")
+                if thread_id:
+                    return str(thread_id)
+            return "?"
+
+        def _log_if_slow(op: str, started_at: float, config: Any | None) -> None:
+            elapsed = time.perf_counter() - started_at
+            if elapsed < slow_threshold_s:
+                return
+            thread_id = _extract_thread_id(config)
+            level = logging.WARNING if elapsed >= max(10.0, slow_threshold_s * 10.0) else logging.INFO
+            logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs", op, thread_id, elapsed)
+
+        class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
+            async def aget_tuple(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return await super().aget_tuple(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow("aget_tuple", _t0, config)
+
+            async def aput(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return await super().aput(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow("aput", _t0, config)
+
+            async def aput_writes(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return await super().aput_writes(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow("aput_writes", _t0, config)
+
+            def get_tuple(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return super().get_tuple(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow("get_tuple", _t0, config)
+
+            def put(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return super().put(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow("put", _t0, config)
+
+            def put_writes(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return super().put_writes(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow("put_writes", _t0, config)
+
+        checkpointer = InstrumentedAsyncPostgresSaver(pool)
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
         return checkpointer
@@ -348,6 +423,55 @@ def get_checkpointer(
 def get_current_checkpointer_type() -> CheckpointerType | None:
     """Get the type of the current checkpointer."""
     return _checkpointer_type
+
+
+async def warmup_checkpointer_pool() -> None:
+    raw_enabled = (os.getenv("CHECKPOINTER_WARMUP", "true") or "true").strip().lower()
+    if raw_enabled in {"0", "false", "no"}:
+        return
+
+    try:
+        timeout_s = float(os.getenv("CHECKPOINTER_WARMUP_TIMEOUT_SECONDS", "15") or "15")
+    except Exception:
+        timeout_s = 15.0
+
+    checkpointer = get_checkpointer()
+    pool = getattr(checkpointer, "pool", None)
+    if pool is None:
+        return
+
+    _t0 = time.perf_counter()
+    try:
+        try:
+            await asyncio.wait_for(pool.open(wait=False), timeout=timeout_s)
+        except TypeError:
+            await asyncio.wait_for(pool.open(), timeout=timeout_s)
+    except Exception as e:
+        logger.warning(
+            "[CHECKPOINTER] pool warmup failed after %.2fs: %s",
+            time.perf_counter() - _t0,
+            e,
+        )
+        return
+
+    logger.info("[CHECKPOINTER] pool open triggered in %.2fs", time.perf_counter() - _t0)
+
+    async def _preflight() -> None:
+        async with pool.connection() as conn:
+            await conn.execute("SELECT 1")
+
+    _t1 = time.perf_counter()
+    try:
+        await asyncio.wait_for(_preflight(), timeout=timeout_s)
+    except Exception as e:
+        logger.warning(
+            "[CHECKPOINTER] pool preflight failed after %.2fs: %s",
+            time.perf_counter() - _t1,
+            e,
+        )
+        return
+
+    logger.info("[CHECKPOINTER] pool preflight ok in %.2fs", time.perf_counter() - _t1)
 
 
 def is_persistent() -> bool:

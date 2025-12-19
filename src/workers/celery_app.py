@@ -231,6 +231,17 @@ def worker_init_handler(sender=None, **kwargs):
     logger.info("[CELERY] Worker initialized: %s", sender)
 
 
+@signals.worker_process_init.connect
+def worker_process_init_handler(sender=None, **kwargs):
+    try:
+        from src.agents.langgraph.checkpointer import warmup_checkpointer_pool
+        from src.workers.sync_utils import run_sync
+
+        run_sync(warmup_checkpointer_pool())
+    except Exception as e:
+        logger.warning("[CELERY] Checkpointer warmup skipped/failed: %s", e)
+
+
 @signals.worker_shutdown.connect
 def worker_shutdown_handler(sender=None, **kwargs):
     """Called when worker process shuts down."""
