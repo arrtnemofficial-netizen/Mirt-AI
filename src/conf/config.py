@@ -455,6 +455,12 @@ class Settings(BaseSettings):
         description="Delay before processing aggregated messages in Telegram",
     )
 
+    STATE_MAX_MESSAGES: int = Field(
+        default=100,
+        ge=0,
+        description="Max number of messages retained in LangGraph state (0 disables trimming).",
+    )
+
     # =========================================================================
     # OBSERVABILITY
     # =========================================================================

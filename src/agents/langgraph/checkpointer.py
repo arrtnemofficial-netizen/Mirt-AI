@@ -131,29 +131,38 @@ def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_ba
     if not isinstance(payload, dict):
         return payload
 
-    compact = payload
-    messages = payload.get("messages")
-    if isinstance(messages, list):
-        if max_messages > 0 and len(messages) > max_messages:
-            messages = messages[-max_messages:]
+    def _compact_dict(data: dict[str, Any]) -> dict[str, Any]:
+        compact = data
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            if max_messages > 0 and len(messages) > max_messages:
+                messages = messages[-max_messages:]
 
-        if max_chars > 0:
-            trimmed: list[Any] = []
-            for m in messages:
-                if isinstance(m, dict):
-                    content = m.get("content")
-                    if isinstance(content, str) and len(content) > max_chars:
-                        m = {**m, "content": content[:max_chars] + "...[truncated]"}
-                trimmed.append(m)
-            messages = trimmed
+            if max_chars > 0:
+                trimmed: list[Any] = []
+                for m in messages:
+                    if isinstance(m, dict):
+                        content = m.get("content")
+                        if isinstance(content, str) and len(content) > max_chars:
+                            m = {**m, "content": content[:max_chars] + "...[truncated]"}
+                    trimmed.append(m)
+                messages = trimmed
 
-        compact = {**compact, "messages": messages}
+            compact = {**compact, "messages": messages}
 
-    if drop_base64:
-        image_url = compact.get("image_url")
-        if isinstance(image_url, str) and len(image_url) > 2000:
-            if image_url.startswith("data:") or "base64" in image_url:
-                compact = {**compact, "image_url": "<base64_stripped>"}
+        if drop_base64:
+            image_url = compact.get("image_url")
+            if isinstance(image_url, str) and len(image_url) > 2000:
+                if image_url.startswith("data:") or "base64" in image_url:
+                    compact = {**compact, "image_url": "<base64_stripped>"}
+
+        return compact
+
+    compact = _compact_dict(payload)
+    for key in ("channel_values", "values", "state"):
+        nested = compact.get(key)
+        if isinstance(nested, dict):
+            compact = {**compact, key: _compact_dict(nested)}
 
     return compact
 

@@ -7,13 +7,17 @@ Uses TypedDict with Annotated reducers for proper LangGraph integration.
 
 from __future__ import annotations
 
-import os
+import logging
 from typing import Annotated, Any, Literal
 
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
+from src.conf.config import settings
 from src.core.state_machine import State
+
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -47,11 +51,20 @@ def append_list(current: list, new: list) -> list:
 def add_messages_capped(current: list, new: list) -> list:
     """Append messages but keep only the last N to prevent unbounded growth."""
     merged = add_messages(current, new)
-    try:
-        max_messages = int(os.getenv("STATE_MAX_MESSAGES", "100") or "100")
-    except Exception:
-        max_messages = 100
+    max_messages = settings.STATE_MAX_MESSAGES
     if max_messages > 0 and len(merged) > max_messages:
+        trimmed_count = len(merged) - max_messages
+        try:
+            from src.services.observability import track_metric
+
+            track_metric("state_messages_trimmed", trimmed_count)
+        except Exception:
+            pass
+        logger.info(
+            "[STATE] Trimmed messages: trimmed=%d kept=%d",
+            trimmed_count,
+            max_messages,
+        )
         return merged[-max_messages:]
     return merged
 
