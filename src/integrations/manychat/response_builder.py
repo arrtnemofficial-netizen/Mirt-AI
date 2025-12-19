@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.core.models import AgentResponse
 
+from src.core.state_machine import EscalationLevel, State, get_keyboard_for_state
+
 from .constants import (
     FIELD_AI_INTENT,
     FIELD_AI_STATE,
@@ -82,6 +84,29 @@ def build_manychat_tags(agent_response: AgentResponse) -> tuple[list[str], list[
             add_tags.append(TAG_ORDER_PAID)
 
     return add_tags, remove_tags
+
+
+def build_manychat_quick_replies(agent_response: AgentResponse) -> list[dict[str, str]]:
+    """Build Quick Reply buttons based on current state."""
+    current_state = agent_response.metadata.current_state
+    escalation_value = agent_response.metadata.escalation_level or "NONE"
+
+    try:
+        escalation_level = EscalationLevel(escalation_value)
+    except ValueError:
+        escalation_level = EscalationLevel.NONE
+
+    state_enum = State.from_string(current_state)
+    keyboard = get_keyboard_for_state(state_enum, escalation_level)
+    if not keyboard:
+        return []
+
+    return [
+        {"type": "text", "caption": caption}
+        for row in keyboard.buttons
+        for caption in row
+        if caption
+    ]
 
 
 def build_manychat_v2_response(

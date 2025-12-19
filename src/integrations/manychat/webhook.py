@@ -27,8 +27,7 @@ from .constants import (  # noqa: F401
     TAG_NEEDS_HUMAN,
 )
 from .response_builder import (
-    build_manychat_field_values,
-    build_manychat_tags,
+    build_manychat_quick_replies,
     build_manychat_v2_response,
 )
 
@@ -190,11 +189,11 @@ class ManychatWebhook:
         - tags: Tags to add/remove
         - quick_replies: Quick reply buttons (optional)
         """
-        # Add product images only для PHOTO_IDENT, щоб не дублювати фото в подальших стейтах
+        # Add product images only for PHOTO_IDENT responses.
         include_product_images = agent_response.metadata.intent == "PHOTO_IDENT"
 
         # Build quick replies based on state
-        quick_replies = self._build_quick_replies(agent_response)
+        quick_replies = build_manychat_quick_replies(agent_response)
 
         return build_manychat_v2_response(
             agent_response,
@@ -202,56 +201,3 @@ class ManychatWebhook:
             quick_replies=quick_replies,
             include_debug=True,
         )
-
-    @staticmethod
-    def _build_field_values(
-        agent_response: AgentResponse,
-    ) -> list[dict[str, Any]]:
-        """Build Custom Field values from AgentResponse.
-
-        Note: Customer data (name, phone, city, NP) is now stored in session state
-        by LLM and accessed via conversation.py, not parsed here.
-        Values preserve their types (str, int, float) for ManyChat compatibility.
-        """
-        return build_manychat_field_values(agent_response)
-
-    @staticmethod
-    def _build_tags(agent_response: AgentResponse) -> tuple[list[str], list[str]]:
-        """Build tags to add/remove based on AgentResponse."""
-        return build_manychat_tags(agent_response)
-
-    @staticmethod
-    def _build_quick_replies(agent_response: AgentResponse) -> list[dict[str, str]]:
-        """Build Quick Reply buttons based on current state."""
-        current_state = agent_response.metadata.current_state
-        replies: list[dict[str, str]] = []
-
-        # State-specific quick replies
-        if current_state in ("STATE_0_INIT", "STATE_1_DISCOVERY"):
-            replies = [
-                {"type": "text", "caption": "👗 Сукні"},
-                {"type": "text", "caption": "👔 Костюми"},
-                {"type": "text", "caption": "🧥 Тренчі"},
-            ]
-        elif current_state == "STATE_3_SIZE_COLOR":
-            replies = [
-                {"type": "text", "caption": "📏 Розмірна сітка"},
-                {"type": "text", "caption": "🎨 Інші кольори"},
-            ]
-        elif current_state == "STATE_4_OFFER":
-            replies = [
-                {"type": "text", "caption": "✅ Беру!"},
-                {"type": "text", "caption": "🎨 Інший колір"},
-                {"type": "text", "caption": "📏 Інший розмір"},
-            ]
-        elif current_state == "STATE_5_PAYMENT_DELIVERY":
-            replies = [
-                {"type": "text", "caption": "💳 Повна оплата"},
-                {"type": "text", "caption": "💵 Передплата 200 грн"},
-            ]
-
-        # Always add manager button for complex cases
-        if agent_response.metadata.escalation_level != "NONE":
-            replies = [{"type": "text", "caption": "👩 Зв'язок з менеджером"}]
-
-        return replies

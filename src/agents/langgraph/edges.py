@@ -15,6 +15,7 @@ from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 
 from .nodes.intent import INTENT_PATTERNS
+from .nodes.utils import extract_user_message
 
 # Import for intent detection
 from .state_prompts import detect_simple_intent
@@ -84,17 +85,6 @@ OfferRoute = Literal["payment", "validation", "end"]
 # =============================================================================
 
 
-def _extract_user_message(state: dict[str, Any]) -> str:
-    """Extract last user message text from state."""
-    messages = state.get("messages", [])
-    for m in reversed(messages):
-        if isinstance(m, dict) and m.get("role") == "user":
-            return m.get("content", "")
-        elif hasattr(m, "type") and m.type == "human":
-            return m.content if hasattr(m, "content") else ""
-    return ""
-
-
 def master_router(state: dict[str, Any]) -> MasterRoute:
     """
     Master router - checks dialog_phase to determine where to continue.
@@ -112,7 +102,7 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     has_image = state.get("has_image", False) or metadata.get("has_image", False)
 
     # QUALITY: Отримуємо останнє повідомлення для аналізу intent
-    user_message = _extract_user_message(state)
+    user_message = extract_user_message(state.get("messages", []))
     detected_intent = detect_simple_intent(user_message) if user_message else None
 
     logger.info(

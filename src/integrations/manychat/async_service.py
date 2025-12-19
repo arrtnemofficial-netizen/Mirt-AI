@@ -687,20 +687,6 @@ class ManyChatAsyncService:
         )
 
     @staticmethod
-    def _build_field_values(agent_response: AgentResponse) -> list[dict[str, Any]]:
-        """Build Custom Field values from AgentResponse.
-
-        Note: Values preserve their types (str, int, float) for ManyChat compatibility.
-        ManyChat Number fields require numeric values, not strings.
-        """
-        return build_manychat_field_values(agent_response)
-
-    @staticmethod
-    def _build_tags(agent_response: AgentResponse) -> tuple[list[str], list[str]]:
-        """Build tags to add/remove based on AgentResponse."""
-        return build_manychat_tags(agent_response)
-
-    @staticmethod
     def _build_quick_replies(_agent_response: AgentResponse) -> list[dict[str, str]]:
         """Build Quick Reply buttons based on current state.
 
