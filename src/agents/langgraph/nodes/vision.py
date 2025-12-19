@@ -640,8 +640,8 @@ async def vision_node(
             response.needs_clarification = False  # Don't ask clarification, escalate!
             # Force escalation message - HUMAN STYLE (no AI mentions!)
             escalation_messages = [
-                {"type": "text", "content": "Вітаю 🎀"},
-                {"type": "text", "content": "Секундочку, уточню інформацію по цьому товару 🙌🏻"},
+                text_msg("Вітаю 🎀"),
+                text_msg("Секундочку, уточню інформацію по цьому товару 🙌🏻"),
             ]
             
             # Send Telegram notification to manager in background (fire-and-forget)

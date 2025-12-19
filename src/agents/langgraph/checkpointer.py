@@ -294,7 +294,27 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         return SerializableMemorySaver()
 
     except Exception as e:
-        logger.error("Failed to create PostgreSQL checkpointer: %s", e)
+        def _sanitize_db_url(url: str) -> str:
+            try:
+                # Keep scheme/host/db, strip password/userinfo.
+                # postgresql://user:pass@host:5432/db -> postgresql://***@host:5432/db
+                from urllib.parse import urlsplit, urlunsplit
+
+                parts = urlsplit(url)
+                netloc = parts.netloc
+                if "@" in netloc:
+                    netloc = "***@" + netloc.split("@", 1)[1]
+                return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
+            except Exception:
+                return "<unavailable>"
+
+        raw_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or ""
+        logger.error(
+            "Failed to create PostgreSQL checkpointer: %s (db_url=%s)",
+            e,
+            _sanitize_db_url(raw_url) if raw_url else "<empty>",
+            exc_info=True,
+        )
         logger.warning("Falling back to MemorySaver - NOT PRODUCTION READY!")
         return SerializableMemorySaver()
 
@@ -414,9 +434,19 @@ def get_checkpointer(
         )
         _checkpointer = SerializableMemorySaver()
 
-    logger.info("Checkpointer selected: %s", checkpointer_type)
+    # If Postgres saver construction failed we may have fallen back to memory.
+    actual_type = checkpointer_type
+    if checkpointer_type == CheckpointerType.POSTGRES:
+        if isinstance(_checkpointer, MemorySaver):
+            actual_type = CheckpointerType.MEMORY
+            logger.warning(
+                "Postgres checkpointer requested but fallback to MemorySaver occurred. "
+                "Persistence is DISABLED until Postgres checkpointer is fixed."
+            )
 
-    _checkpointer_type = checkpointer_type
+    logger.info("Checkpointer selected: %s", actual_type)
+
+    _checkpointer_type = actual_type
     return _checkpointer
 
 
