@@ -49,6 +49,57 @@ FALLBACK_LOW_CONFIDENCE = (
 )
 
 
+def _merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Merge product dicts while preserving non-empty existing fields."""
+    merged = dict(existing)
+    for key, new_value in incoming.items():
+        if key == "price":
+            if isinstance(new_value, (int, float)) and new_value > 0:
+                merged[key] = new_value
+            elif key not in merged:
+                merged[key] = new_value
+            continue
+        if key in {"size", "color", "photo_url", "description"}:
+            if isinstance(new_value, str) and new_value.strip():
+                merged[key] = new_value
+            elif key not in merged:
+                merged[key] = new_value
+            continue
+        merged[key] = new_value
+    return merged
+
+
+def _merge_products(
+    existing: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge product lists, preserving details like size/color/price."""
+    by_id: dict[int, dict[str, Any]] = {}
+    by_name: dict[str, dict[str, Any]] = {}
+    for item in existing:
+        pid = item.get("id")
+        name = str(item.get("name") or "").strip().lower()
+        if isinstance(pid, int) and pid > 0:
+            by_id[pid] = item
+        if name:
+            by_name[name] = item
+
+    merged_incoming: list[dict[str, Any]] = []
+    for item in incoming:
+        pid = item.get("id")
+        name = str(item.get("name") or "").strip().lower()
+        existing_item = None
+        if isinstance(pid, int) and pid > 0:
+            existing_item = by_id.get(pid)
+        if existing_item is None and name:
+            existing_item = by_name.get(name)
+        merged_incoming.append(
+            _merge_product_fields(existing_item or {}, item) if existing_item else item
+        )
+
+    return merged_incoming
+
+
 async def offer_node(
     state: dict[str, Any],
     runner: Callable[..., Any] | None = None,  # Kept for signature compatibility
@@ -225,9 +276,10 @@ async def offer_node(
         if not assistant_messages:
             assistant_messages = [{"role": "assistant", "content": ""}]
 
-        # Update selected_products if agent returned new products
+        # Update selected_products if agent returned new products (preserve size/color/price).
         if response.products:
-            validated_products = [p.model_dump() for p in response.products]
+            incoming_products = [p.model_dump() for p in response.products]
+            validated_products = _merge_products(validated_products, incoming_products)
 
         # =====================================================
         # DIALOG PHASE (Turn-Based State Machine)
@@ -244,7 +296,7 @@ async def offer_node(
         return {
             "current_state": State.STATE_4_OFFER.value,
             "messages": assistant_messages,
-            "metadata": response.metadata.model_dump(),
+            "metadata": {**state.get("metadata", {}), **response.metadata.model_dump()},
             "selected_products": validated_products,
             "offered_products": offered_products,
             "agent_response": response.model_dump(),

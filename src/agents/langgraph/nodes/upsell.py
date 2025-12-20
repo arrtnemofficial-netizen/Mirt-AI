@@ -11,6 +11,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
+from src.agents.langgraph.state_prompts import detect_simple_intent
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.conf.config import settings
@@ -26,6 +28,40 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+_UPSELL_CONFIRMATION = INTENT_PATTERNS.get("CONFIRMATION", [])
+_UPSELL_DECLINE = (
+    "нет",
+    "ні",
+    "не потрібно",
+    "не треба",
+    "не хочу",
+    "не цікаво",
+    "не интересует",
+    "не интересна",
+)
+
+
+def _contains_any(text: str, keywords: tuple[str, ...] | list[str]) -> bool:
+    return any(k in text for k in keywords)
+
+
+def _should_restart_flow(user_message: str) -> bool:
+    text = (user_message or "").strip().lower()
+    if not text:
+        return False
+    if _contains_any(text, _UPSELL_DECLINE):
+        return False
+    if _contains_any(text, _UPSELL_CONFIRMATION):
+        return False
+    intent_hint = detect_simple_intent(text)
+    return intent_hint in {
+        "REQUEST_PHOTO",
+        "PRODUCT_CATEGORY",
+        "DISCOVERY_OR_QUESTION",
+        "SIZE_HELP",
+        "COLOR_HELP",
+    }
 
 
 def _build_crm_status_message(state: dict[str, Any]) -> str:
@@ -93,6 +129,41 @@ async def upsell_node(
 
     # Check CRM order status and build status message
     crm_status_message = _build_crm_status_message(state)
+
+    if _should_restart_flow(user_message):
+        restart_text = (
+            "Супер! Давайте підберемо ще одну модель 🌸\n"
+            "Напишіть, що саме хочете, або надішліть фото."
+        )
+        metadata_update = state.get("metadata", {}).copy()
+        metadata_update.update(
+            {
+                "current_state": State.STATE_1_DISCOVERY.value,
+                "intent": "DISCOVERY_OR_QUESTION",
+                "upsell_flow_active": True,
+                "upsell_base_products": ordered_products,
+            }
+        )
+        return {
+            "current_state": State.STATE_1_DISCOVERY.value,
+            "messages": [{"role": "assistant", "content": restart_text}],
+            "metadata": metadata_update,
+            "selected_products": [],
+            "offered_products": [],
+            "agent_response": {
+                "event": "simple_answer",
+                "messages": [{"type": "text", "content": restart_text}],
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_1_DISCOVERY.value,
+                    "intent": "DISCOVERY_OR_QUESTION",
+                    "escalation_level": "NONE",
+                },
+            },
+            "dialog_phase": "DISCOVERY",
+            "step_number": state.get("step_number", 0) + 1,
+            "last_error": None,
+        }
 
     # Create deps with upsell context
     deps = create_deps_from_state(state)
@@ -178,7 +249,7 @@ async def upsell_node(
         return {
             "current_state": State.STATE_7_END.value,
             "messages": [{"role": "assistant", "content": assistant_content}],
-            "metadata": response.metadata.model_dump(),
+            "metadata": {**state.get("metadata", {}), **response.metadata.model_dump()},
             "agent_response": response.model_dump(),
             "selected_products": updated_cart,
             "offered_products": updated_cart,

@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from src.core.input_validator import validate_input_metadata
+from src.core.state_machine import State
 
 
 logger = logging.getLogger(__name__)
@@ -336,6 +337,9 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     This runs BEFORE LLM to enable conditional edges.
     Fast and lightweight - no API calls.
     """
+    dialog_phase = state.get("dialog_phase", "")
+    reset_for_new = dialog_phase == "COMPLETED"
+
     # Check for image FIRST - photo identification has highest priority
     metadata = state.get("metadata", {})
     has_image_early = state.get("has_image", False) or metadata.get("has_image", False)
@@ -343,13 +347,30 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     if has_image_early:
         # Photo always goes to vision, ignore old escalation flags
         logger.info("Intent: PHOTO_IDENT (has_image=True, overrides escalation)")
-        return {
+        update = {
             "detected_intent": "PHOTO_IDENT",
             "has_image": True,
             "image_url": metadata.get("image_url"),
             "metadata": {**metadata, "has_image": True},
             "step_number": state.get("step_number", 0) + 1,
         }
+        if reset_for_new:
+            update.update(
+                {
+                    "current_state": State.STATE_0_INIT.value,
+                    "dialog_phase": "INIT",
+                    "selected_products": [],
+                    "offered_products": [],
+                    "metadata": {
+                        **metadata,
+                        "has_image": True,
+                        "current_state": State.STATE_0_INIT.value,
+                        "upsell_flow_active": False,
+                        "upsell_base_products": [],
+                    },
+                }
+            )
+        return update
 
     # Skip if already escalating (only for non-photo messages)
     if state.get("should_escalate"):
@@ -385,7 +406,8 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         metadata.current_state.value,
     )
 
-    return {
+    reset_now = reset_for_new and detected_intent != "THANKYOU_SMALLTALK"
+    update = {
         "detected_intent": detected_intent,
         "has_image": has_image,
         "image_url": image_url,
@@ -396,3 +418,22 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         },
         "step_number": state.get("step_number", 0) + 1,
     }
+    if reset_now:
+        update.update(
+            {
+                "current_state": State.STATE_0_INIT.value,
+                "dialog_phase": "INIT",
+                "selected_products": [],
+                "offered_products": [],
+                "metadata": {
+                    **state.get("metadata", {}),
+                    "has_image": has_image,
+                    "image_url": image_url,
+                    "current_state": State.STATE_0_INIT.value,
+                    "intent": detected_intent,
+                    "upsell_flow_active": False,
+                    "upsell_base_products": [],
+                },
+            }
+        )
+    return update

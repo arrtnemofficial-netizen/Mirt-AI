@@ -1,99 +1,76 @@
-# Mirt-AI 🤖
+# 🤖 MIRT AI — Enterprise Implementation
 
-AI-стиліст для бренду дитячого одягу **MIRT**.
-Побудований на **LangGraph**, **Pydantic AI**, **Prompt Registry** та **Celery**.
+<div align="center">
 
-[![Tests](https://img.shields.io/badge/tests-passed-brightgreen.svg)]()
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Architecture](https://img.shields.io/badge/architecture-v4.0-orange.svg)]()
+<img src="https://img.shields.io/badge/version-5.0-blue?style=flat-square" alt="Version">
+<img src="https://img.shields.io/badge/architecture-LangGraph_v2-FF6B6B?style=flat-square" alt="Architecture">
+<img src="https://img.shields.io/badge/integration-ManyChat_+_CRM-success?style=flat-square" alt="Integrations">
 
-## 🏗 Архітектура v4.0 (Agentic System)
+**Production-Ready AI Stylist for MIRT Clothing Brand**
 
-Система перейшла на **File-Based Prompting** та **Strict Testing**.
+[📖 Implementation Docs](DOCUMENTATION.md) • [🏗️ Architecture](docs/ARCHITECTURE.md) • [⚙️ Deployment](docs/DEPLOYMENT.md)
 
-### 🌟 Ключові зміни
-1. **Prompt Registry** (`src/core/prompt_registry.py`): Всі промпти лежать в `data/prompts/` (Markdown/YAML) замість одного гігантського файлу.
-2. **Golden Suite Testing** (`tests/data/golden_data.yaml`): Набір "золотих" сценаріїв, затверджених бізнесом (розмірна сітка 119см, оплата, кольори).
-3. **Strict Validation**: Regex-перевірка кожного промпта на наявність критичних бізнес-правил (UnitTest).
-4. **Celery Scalability**: Асинхронна обробка черг (LLM, CRM, Followups).
-5. **Agentic LangGraph + PydanticAI**: багатовузловий граф (moderation, intent, vision, agent, offer, payment, upsell, validation, escalation, crm_error, memory) + строгі моделі OUTPUT_CONTRACT.
+</div>
 
-### Структура проекту
+---
 
-```
-src/
-├── core/                      # Kernel
-│   ├── prompt_registry.py     # ⭐ SSOT: Завантажує промпти з md/yaml
-│   ├── state_machine.py       # FSM: State logic
-│   └── models.py              # Pydantic models
-│
-├── agents/                    # AI Brain
-│   ├── pydantic/              # Pydantic AI агенти (Support/Vision/Payment)
-│   └── langgraph/             # LangGraph оркестрація
-│       ├── graph.py           # Production Graph Builder
-│       ├── state.py           # ConversationState + reducers
-│       ├── edges.py           # master_router + routing
-│       └── nodes/             # Ноди: moderation, intent, vision, agent, offer, payment, upsell, crm_error, validation, escalation, memory
-│
-├── workers/                   # Background Tasks
-│   └── tasks/messages.py      # AI processing
-│
-data/
-├── prompts/                   # 🧠 Prompt Knowledge Base
-│   ├── system/main.md         # Головний промпт (Role, Tone, Rules)
-│   ├── states/STATE_*.md      # Промпти для кожного стану FSM
-│   └── vision/                # Vision Rules
-│
-tests/                         # 🛡️ Production QA
-├── data/golden_data.yaml      # "Truth" Source
-├── unit/                      # Prompt & Logic tests
-└── integration/               # Agent simulation
-```
+## 🔥 Implementation Highlights
 
-### Ключові компоненти
+This repository contains the **v5.0 Enterprise Implementation** of MIRT AI.
 
-| Модуль | Призначення |
-| :--- | :--- |
-| **PromptRegistry** | Керує версійністю та завантаженням всіх промптів. |
-| **LangGraph Graph** | Керує діалогом через багатовузловий граф (Moderation, Intent, Vision, Agent, Offer, Payment, Upsell, Validation, Escalation, CRM Error, Memory). |
-| **Golden Suite** | Гарантує, що AI ніколи не порушить критичні правила (напр. "білий=молочний"). |
+- **Orchestrator:** `src.agents.langgraph.graph` (12 Nodes, Cyclic Graph).
+- **Concurrency:** Celery Workers (`src.workers`) handling 5 distinct queues.
+- **Integrations:**
+  - **ManyChat:** Async Push Mode (`src.integrations.manychat`).
+  - **CRM:** Snitkix Adapter (`src.integrations.crm`).
+  - **Vision:** OpenAI GPT-4o (`src.agents.langgraph.nodes.vision`).
 
-## 🚀 Testing Strategy "Golden Suite"
+---
 
-Ми використовуємо підхід **Truth-Driven Development**:
+## 🛠️ Quick Start (Developer)
 
-1. **Golden Data** (`tests/data/golden_data.yaml`): Бізнес пише правила тут.
-2. **Unit Tests** (`tests/unit/`): Перевіряють, що промпти містять точні формулювання.
-3. **Integration Tests** (`tests/integration/`): Емулюють повний цикл діалогу.
+### 1. Requirements
+- Python 3.11+
+- Redis (Broker)
+- PostgreSQL (Persistence)
 
-Запуск тестів:
+### 2. Run Local
 ```bash
-pytest
+# Install
+pip install -r requirements.txt
+
+# Start Web Server (FastAPI)
+uvicorn src.server.main:app --reload
+
+# Start Worker (Terminal 2)
+celery -A src.workers.celery_app worker -l info
 ```
 
-## 📚 Документація
+---
 
-Повний індекс документації: **[DOCUMENTATION.md](DOCUMENTATION.md)**
+## 📚 Documentation Index
 
-| Документ | Опис |
-|----------|------|
-| [PRD.md](PRD.md) | Product Requirements Document |
-| [docs/DEV_SYSTEM_GUIDE.md](docs/DEV_SYSTEM_GUIDE.md) | Повний гайд розробника |
-| [docs/STATUS_REPORT.md](docs/STATUS_REPORT.md) | Поточний статус реалізації |
-| [docs/AGENTS_ARCHITECTURE.md](docs/AGENTS_ARCHITECTURE.md) | Архітектура агентів |
-| [.rules/rulesllm.md](.rules/rulesllm.md) | Правила для AI/LLM |
+| File | Description | Source Code Link |
+|:-----|:------------|:-----------------|
+| [**ARCHITECTURE.md**](docs/ARCHITECTURE.md) | High-level system design | `src/core/` |
+| [**AGENTS_ARCHITECTURE.md**](docs/AGENTS_ARCHITECTURE.md) | Node-by-node graph logic | `src/agents/langgraph/` |
+| [**CELERY.md**](docs/CELERY.md) | Queue & Schedule config | `src/workers/celery_app.py` |
+| [**MANYCHAT_SETUP.md**](docs/MANYCHAT_SETUP.md) | Pipeline configuration | `src/integrations/manychat/` |
+| [**SITNIKS_INTEGRATION.md**](docs/SITNIKS_INTEGRATION.md) | CRM payloads & logic | `src/integrations/crm/` |
+| [**DEPLOYMENT.md**](docs/DEPLOYMENT.md) | Production setup | `Dockerfile` |
 
-## 🛠 Технології
+---
 
-- **LLM**: GPT-4o / Gemini 1.5 Pro
-- **Framework**: LangGraph v2 + Pydantic AI
-- **Backend**: FastAPI + Celery + Redis
-- **Data**: Supabase (PostgreSQL)
+## 🧪 Testing
 
-## 📦 Deployment (Railway)
+We achieve reliability through the **Test Pyramid**:
 
-Всі змінні середовища налаштовані через `railway.json`.
-Для запуску локально:
-```bash
-docker-compose up -d
-```
+- **Unit:** `pytest tests/unit` (Fast logic checks)
+- **Integration:** `pytest tests/integration` (DB/Redis checks)
+- **Golden:** `pytest -m golden` (Quality assurance)
+
+---
+
+<div align="center">
+Built with ❤️ by MIRT Team
+</div>

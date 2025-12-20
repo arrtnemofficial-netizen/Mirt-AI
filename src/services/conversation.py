@@ -197,7 +197,12 @@ def _apply_transition_guardrails(
     after_state: ConversationState,
     user_text: str,
 ) -> ConversationState:
-    from src.core.state_machine import State
+    from src.core.state_machine import (
+        Intent,
+        State,
+        expected_state_for_phase,
+        is_transition_allowed,
+    )
 
     meta = after_state.get("metadata")
     if not isinstance(meta, dict):
@@ -216,6 +221,12 @@ def _apply_transition_guardrails(
             dialog_phase,
         )
         after_state["dialog_phase"] = "INIT"
+        dialog_phase = "INIT"
+
+    if dialog_phase == "ESCALATED":
+        logger.warning("[SESSION %s] Guardrail: ESCALATED -> COMPLETED", session_id)
+        after_state["dialog_phase"] = "COMPLETED"
+        dialog_phase = "COMPLETED"
 
     current_state = after_state.get("current_state", State.STATE_0_INIT.value)
     normalized_state = State.from_string(str(current_state)).value
@@ -227,6 +238,66 @@ def _apply_transition_guardrails(
             normalized_state,
         )
         after_state["current_state"] = normalized_state
+
+    expected_state = expected_state_for_phase(dialog_phase)
+    if expected_state and after_state.get("current_state") != expected_state.value:
+        logger.warning(
+            "[SESSION %s] FSM guard: phase=%s expected_state=%s got=%s",
+            session_id,
+            dialog_phase,
+            expected_state.value,
+            after_state.get("current_state"),
+        )
+        track_metric(
+            "fsm_guard_phase_override",
+            1,
+            {
+                "phase": str(dialog_phase),
+                "expected_state": expected_state.value,
+                "actual_state": str(after_state.get("current_state") or ""),
+            },
+        )
+        after_state["current_state"] = expected_state.value
+        meta["current_state"] = expected_state.value
+
+    before_state_enum = State.from_string(str(before_state.get("current_state")))
+    after_state_enum = State.from_string(str(after_state.get("current_state")))
+    intent_raw = (
+        after_state.get("detected_intent")
+        or meta.get("intent")
+        or before_state.get("detected_intent")
+        or ""
+    )
+    intent_enum = Intent.from_string(str(intent_raw))
+
+    if not is_transition_allowed(
+        from_state=before_state_enum,
+        to_state=after_state_enum,
+        intent=intent_enum,
+        dialog_phase=dialog_phase,
+    ):
+        fallback_state = expected_state or before_state_enum
+        logger.error(
+            "[SESSION %s] FSM guard: blocked transition %s -> %s (intent=%s phase=%s), fallback=%s",
+            session_id,
+            before_state_enum.value,
+            after_state_enum.value,
+            intent_enum.value,
+            dialog_phase,
+            fallback_state.value,
+        )
+        track_metric(
+            "fsm_guard_transition_blocked",
+            1,
+            {
+                "from_state": before_state_enum.value,
+                "to_state": after_state_enum.value,
+                "intent": intent_enum.value,
+                "phase": str(dialog_phase),
+            },
+        )
+        after_state["current_state"] = fallback_state.value
+        meta["current_state"] = fallback_state.value
 
     guard = meta.get("_guard")
     if not isinstance(guard, dict):
@@ -287,7 +358,21 @@ def _apply_transition_guardrails(
                 message=f"Soft recovery to INIT (count={count})",
             )
 
-    if count >= 20:
+    if count >= settings.LOOP_GUARD_WARNING_THRESHOLD:
+        if settings.DEBUG_TRACE_LOGS:
+             debug_log.warning(
+                session_id=session_id,
+                message=f"Loop warning (phase={current_phase}, count={count})"
+            )
+            
+    if count >= settings.LOOP_GUARD_SOFT_RESET and count < settings.LOOP_GUARD_ESCALATION:
+        if settings.DEBUG_TRACE_LOGS:
+             debug_log.warning(
+                session_id=session_id,
+                message=f"Loop soft reset (phase={current_phase}, count={count})"
+            )
+
+    if count >= settings.LOOP_GUARD_ESCALATION:
         track_metric(
             "loop_guard_escalation",
             1,
@@ -343,26 +428,20 @@ def _apply_transition_guardrails(
             first = text_messages[0] if text_messages else None
             first_content = first.get("content") if isinstance(first, dict) else None
             if isinstance(first_content, str):
-                pass
-
-                # TODO: Review this guardrail - it overwrites LLM responses even when using snippets
-                # DISABLED for now to allow snippet-based responses
-                #     if "соф" not in first_content.lower() and "менеджер" not in first_content.lower():
-                #         first["content"] = "Вітаю 🎀\n---\nЗ вами MIRT_UA, менеджер Софія)"
-
-                # TODO: Review this guardrail - it removes messages even when using snippets
-                # DISABLED for now to allow snippet-based responses
-                # if before_step >= 1 and not user_is_greeting:
-                #     lowered_first = first_content.strip().lower()
-                #     if lowered_first.startswith("вітаю") or lowered_first.startswith("вітаємо") or lowered_first.startswith("доброго"):
-                #         if len(messages) > 1:
-                #             messages.remove(first)
+                # Defense-in-Depth log (Trace only)
+                if settings.DEBUG_TRACE_LOGS:
+                     debug_log.node_exit(
+                        session_id=session_id,
+                        node_name="guardrail_check",
+                        goto="end",
+                        new_phase=after_state.get("dialog_phase"),
+                        response_preview=str(first_content)[:50]
+                    )
 
     return after_state
 
 
 class ConversationError(Exception):
-    """Base exception for conversation processing errors."""
 
     def __init__(self, message: str, session_id: str, recoverable: bool = True):
         super().__init__(message)

@@ -59,6 +59,7 @@ class ManyChatAsyncService:
         self.runner = runner or get_active_graph()
         self.message_store = message_store or create_message_store()
         self.push_client = push_client or get_manychat_push_client()
+        self._restart_inflight: set[str] = set()
         self._handler = create_conversation_handler(
             session_store=store,
             message_store=self.message_store,
@@ -80,7 +81,7 @@ class ManyChatAsyncService:
 
     @staticmethod
     def _is_restart_command(first_token: str) -> bool:
-        return first_token in ("/restart", "/start", "restart", "start")
+        return first_token == "/restart"
 
     def _log_process_start(
         self,
@@ -300,7 +301,6 @@ class ManyChatAsyncService:
 
         Commands:
             /restart - Clear session and respond "Сесія очищена!"
-            /start - Same as /restart (alias)
 
         Args:
             user_id: ManyChat subscriber ID
@@ -586,70 +586,102 @@ class ManyChatAsyncService:
         import time as _time
 
         _restart_start = _time.time()
-
-        # Clear any pending debouncer buffers/timers so no stale aggregated message
-        # is processed after restart.
-        try:
-            self.debouncer.clear_session(user_id)
-        except Exception:
-            logger.debug("[MANYCHAT:%s] Failed to clear debouncer session", user_id, exc_info=True)
-
-        # CRITICAL: Also reset LangGraph checkpointer state for this thread.
-        # Otherwise, persistent checkpointers (Postgres) will restore an old dialog_phase
-        # (e.g., WAITING_FOR_PAYMENT_PROOF) even after SessionStore is cleared.
-        # NOTE: This is OPTIONAL - skip if it takes too long (>5 sec timeout)
-        try:
-            from src.agents.langgraph.state import create_initial_state
-
-            reset_state = create_initial_state(
-                session_id=user_id,
-                metadata={"channel": channel},
+        if user_id in self._restart_inflight:
+            logger.info("[MANYCHAT:%s] /restart already in progress", user_id)
+            await self._safe_send_text(
+                subscriber_id=user_id,
+                text="Сесія очищується. Напишіть, будь ласка, запит ще раз 🙂",
+                channel=channel,
             )
-            _lg_start = _time.time()
-            # Use timeout to prevent blocking - checkpointer reset is optional
-            await asyncio.wait_for(
-                self.runner.aupdate_state(
-                    {"configurable": {"thread_id": user_id}},
-                    reset_state,
-                ),
-                timeout=5.0,  # Max 5 seconds for checkpointer reset
-            )
+            return
+
+        self._restart_inflight.add(user_id)
+        try:
+            # Clear any pending debouncer buffers/timers so no stale aggregated message
+            # is processed after restart.
+            try:
+                self.debouncer.clear_session(user_id)
+            except Exception:
+                logger.debug(
+                    "[MANYCHAT:%s] Failed to clear debouncer session", user_id, exc_info=True
+                )
+
+            # CRITICAL: Also reset LangGraph checkpointer state for this thread.
+            # Otherwise, persistent checkpointers (Postgres) will restore an old dialog_phase
+            # (e.g., WAITING_FOR_PAYMENT_PROOF) even after SessionStore is cleared.
+            # NOTE: This is OPTIONAL - skip if it takes too long (>5 sec timeout)
+            try:
+                from src.agents.langgraph.state import create_initial_state
+
+                reset_state = create_initial_state(
+                    session_id=user_id,
+                    metadata={"channel": channel},
+                )
+                _lg_start = _time.time()
+                # Use timeout to prevent blocking - checkpointer reset is optional
+                await asyncio.wait_for(
+                    self.runner.aupdate_state(
+                        {"configurable": {"thread_id": user_id}},
+                        reset_state,
+                    ),
+                    timeout=5.0,  # Max 5 seconds for checkpointer reset
+                )
+                logger.info(
+                    "[MANYCHAT:%s] LangGraph state reset via /restart (%.2fs)",
+                    user_id,
+                    _time.time() - _lg_start,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "[MANYCHAT:%s] LangGraph state reset timed out (>5s), skipping",
+                    user_id,
+                )
+            except Exception:
+                logger.debug(
+                    "[MANYCHAT:%s] Failed to reset LangGraph state via /restart",
+                    user_id,
+                    exc_info=True,
+                )
+
+            # Delete session from store
+            # CRITICAL: Use to_thread() to avoid blocking event loop!
+            _del_start = _time.time()
+            deleted = await asyncio.to_thread(self.store.delete, user_id)
             logger.info(
-                "[MANYCHAT:%s] LangGraph state reset via /restart (%.2fs)",
+                "[MANYCHAT:%s] store.delete took %.2fs",
                 user_id,
-                _time.time() - _lg_start,
-            )
-        except TimeoutError:
-            logger.warning(
-                "[MANYCHAT:%s] LangGraph state reset timed out (>5s), skipping",
-                user_id,
-            )
-        except Exception:
-            logger.debug(
-                "[MANYCHAT:%s] Failed to reset LangGraph state via /restart",
-                user_id,
-                exc_info=True,
+                _time.time() - _del_start,
             )
 
-        # Delete session from store
-        # CRITICAL: Use to_thread() to avoid blocking event loop!
-        _del_start = _time.time()
-        deleted = await asyncio.to_thread(self.store.delete, user_id)
-        logger.info("[MANYCHAT:%s] store.delete took %.2fs", user_id, _time.time() - _del_start)
+            # Clear message history for this session (idempotent).
+            try:
+                await asyncio.to_thread(self.message_store.delete, user_id)
+            except Exception:
+                logger.debug(
+                    "[MANYCHAT:%s] Failed to clear message store via /restart",
+                    user_id,
+                    exc_info=True,
+                )
 
-        if deleted:
-            logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
-            response_text = "Сесія очищена. Можемо почати спочатку. Напишіть, що вас цікавить 😊"
-        else:
-            logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
-            response_text = "Сесія вже була порожня. Напишіть, що вас цікавить 😊"
+            if deleted:
+                logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
+                response_text = (
+                    "Сесія очищена. Розкажіть, будь ласка, що саме вас цікавить 🙂"
+                )
+            else:
+                logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
+                response_text = (
+                    "Сесія вже була очищена. Напишіть, будь ласка, що саме вас цікавить 🙂"
+                )
 
-        # Push confirmation
-        await self._safe_send_text(
-            subscriber_id=user_id,
-            text=response_text,
-            channel=channel,
-        )
+            # Push confirmation
+            await self._safe_send_text(
+                subscriber_id=user_id,
+                text=response_text,
+                channel=channel,
+            )
+        finally:
+            self._restart_inflight.discard(user_id)
 
     @staticmethod
     def _build_quick_replies(_agent_response: AgentResponse) -> list[dict[str, str]]:

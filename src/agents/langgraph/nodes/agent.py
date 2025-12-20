@@ -25,7 +25,7 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
-from src.core.state_machine import State
+from src.core.state_machine import State, expected_state_for_phase
 from src.services.observability import log_agent_step, log_trace, track_metric
 from src.services.product_matcher import extract_requested_color
 
@@ -70,6 +70,102 @@ _SIZE_PATTERNS = [
     r"(\d{2,3}[-–]\d{2,3})\s*см",  # "146-152 см"
     r"розмір\s*(\d{2,3})",  # "розмір 140"
 ]
+
+
+def _merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Merge product dicts while preserving non-empty existing fields."""
+    merged = dict(existing)
+    for key, new_value in incoming.items():
+        if key == "price":
+            if isinstance(new_value, (int, float)) and new_value > 0:
+                merged[key] = new_value
+            elif key not in merged:
+                merged[key] = new_value
+            continue
+        if key in {"size", "color", "photo_url", "description"}:
+            if isinstance(new_value, str) and new_value.strip():
+                merged[key] = new_value
+            elif key not in merged:
+                merged[key] = new_value
+            continue
+        merged[key] = new_value
+    return merged
+
+
+def _merge_products(
+    existing: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+    *,
+    append: bool,
+) -> list[dict[str, Any]]:
+    """Merge product lists, preserving details like size/color/price."""
+    by_id: dict[int, dict[str, Any]] = {}
+    by_name: dict[str, dict[str, Any]] = {}
+    for item in existing:
+        pid = item.get("id")
+        name = str(item.get("name") or "").strip().lower()
+        if isinstance(pid, int) and pid > 0:
+            by_id[pid] = item
+        if name:
+            by_name[name] = item
+
+    merged_existing = list(existing)
+    merged_incoming: list[dict[str, Any]] = []
+    for item in incoming:
+        pid = item.get("id")
+        name = str(item.get("name") or "").strip().lower()
+        existing_item = None
+        if isinstance(pid, int) and pid > 0:
+            existing_item = by_id.get(pid)
+        if existing_item is None and name:
+            existing_item = by_name.get(name)
+        merged_incoming.append(
+            _merge_product_fields(existing_item or {}, item) if existing_item else item
+        )
+
+    if not append:
+        return merged_incoming
+
+    seen_keys: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for item in [*merged_existing, *merged_incoming]:
+        pid = item.get("id")
+        name = str(item.get("name") or "").strip().lower()
+        size = str(item.get("size") or "").strip().lower()
+        color = str(item.get("color") or "").strip().lower()
+        key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        result.append(item)
+    return result
+
+
+def _apply_height_to_products(
+    products: list[dict[str, Any]],
+    height_cm: int,
+) -> list[dict[str, Any]]:
+    """Apply size to products when height is known but size is missing."""
+    from .utils import get_size_and_price_for_height
+
+    if not products:
+        return products
+
+    size_label, _ = get_size_and_price_for_height(height_cm)
+    updated = [dict(p) for p in products]
+    for product in updated:
+        if not product.get("size"):
+            product["size"] = size_label
+    return updated
+
+
+def _product_match_key(item: dict[str, Any]) -> str:
+    """Stable key for product matching (id preferred, else name)."""
+    pid = item.get("id")
+    if isinstance(pid, int) and pid > 0:
+        return f"id:{pid}"
+    name = str(item.get("name") or "").strip().lower()
+    return f"name:{name}" if name else ""
 
 
 def _extract_size_from_response(messages: list) -> str | None:
@@ -206,6 +302,21 @@ async def agent_node(
                             "last_error": None,
                             "agent_response": agent_response_payload,
                         }
+                    if option_norms and (_norm(requested) in option_norms):
+                        selected_products = state.get("selected_products", []) or []
+                        if selected_products:
+                            first = dict(selected_products[0])
+                            if not first.get("color"):
+                                first["color"] = requested
+                            selected_products = [first, *selected_products[1:]]
+                            state = {
+                                **state,
+                                "selected_products": selected_products,
+                                "metadata": {
+                                    **state.get("metadata", {}),
+                                    "selected_color": requested,
+                                },
+                            }
         except Exception:
             pass
 
@@ -313,6 +424,7 @@ async def agent_node(
         # If LLM still makes mistakes, improve the prompt, not add patches.
         # =====================================================================
         intent = response.metadata.intent
+        upsell_flow_active = bool(state.get("metadata", {}).get("upsell_flow_active"))
 
         # Extract from OUTPUT_CONTRACT structure
         new_state_str = response.metadata.current_state
@@ -343,6 +455,8 @@ async def agent_node(
             new_products = [p.model_dump() for p in response.products]
             user_text = user_message if isinstance(user_message, str) else str(user_message)
             user_text_lower = user_text.lower()
+            metadata_flags = state.get("metadata", {}) or {}
+            upsell_base_products = metadata_flags.get("upsell_base_products") or []
             add_keywords = (
                 "ще",
                 "додай",
@@ -358,28 +472,43 @@ async def agent_node(
             should_append = bool(selected_products) and any(
                 k in user_text_lower for k in add_keywords
             )
+            if upsell_flow_active:
+                should_append = True
 
             if should_append:
-                merged: list[dict[str, Any]] = []
-                seen: set[str] = set()
-                for item in [*selected_products, *new_products]:
-                    pid = item.get("id")
-                    name = str(item.get("name") or "").strip().lower()
-                    size = str(item.get("size") or "").strip().lower()
-                    color = str(item.get("color") or "").strip().lower()
-                    key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    merged.append(item)
-                selected_products = merged
+                base_products = selected_products
+                used_upsell_base = False
+                if not base_products and upsell_base_products:
+                    base_products = upsell_base_products
+                    used_upsell_base = True
+                selected_products = _merge_products(
+                    base_products,
+                    new_products,
+                    append=True,
+                )
+                if used_upsell_base:
+                    new_keys = {_product_match_key(p) for p in new_products if _product_match_key(p)}
+                    if new_keys:
+                        selected_products = [
+                            p
+                            for p in selected_products
+                            if _product_match_key(p) in new_keys
+                        ] + [
+                            p
+                            for p in selected_products
+                            if _product_match_key(p) not in new_keys
+                        ]
                 logger.info(
                     "Agent appended products to cart: now=%d (added=%d)",
                     len(selected_products),
                     len(new_products),
                 )
             else:
-                selected_products = new_products
+                selected_products = _merge_products(
+                    selected_products,
+                    new_products,
+                    append=False,
+                )
                 logger.info("Agent found products: %s", [p.name for p in response.products])
 
         # =====================================================================
@@ -408,6 +537,14 @@ async def agent_node(
                     first_product["color"],
                 )
 
+        # Apply height from user message to avoid re-asking for size.
+        from .utils import extract_height_from_text
+
+        height_in_text = extract_height_from_text(user_message)
+        height_from_context = height_in_text or state.get("metadata", {}).get("height_cm")
+        if height_from_context and selected_products:
+            selected_products = _apply_height_to_products(selected_products, height_from_context)
+
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         # Log
@@ -429,6 +566,8 @@ async def agent_node(
         metadata_update = state.get("metadata", {}).copy()
         metadata_update["current_state"] = new_state_str
         metadata_update["intent"] = intent
+        if height_in_text:
+            metadata_update["height_cm"] = height_in_text
 
         if response.customer_data:
             if response.customer_data.name:
@@ -439,6 +578,10 @@ async def agent_node(
                 metadata_update["customer_city"] = response.customer_data.city
             if response.customer_data.nova_poshta:
                 metadata_update["customer_nova_poshta"] = response.customer_data.nova_poshta
+
+        # Clear upsell flow flag once we actually added new products.
+        if upsell_flow_active and response.products:
+            metadata_update["upsell_flow_active"] = False
 
         # =====================================================
         # DIALOG PHASE (Turn-Based State Machine)
@@ -454,6 +597,35 @@ async def agent_node(
             metadata=response.metadata,
             state=state,  # Передаємо state для payment sub-phase detection
         )
+        if (
+            dialog_phase == "DISCOVERY"
+            and new_state_str == State.STATE_2_VISION.value
+            and not selected_products
+        ):
+            new_state_str = State.STATE_1_DISCOVERY.value
+            response.metadata.current_state = new_state_str
+            metadata_update["current_state"] = new_state_str
+        expected_state = expected_state_for_phase(dialog_phase)
+        if expected_state and new_state_str != expected_state.value:
+            logger.warning(
+                "FSM guard override: phase=%s expected_state=%s got=%s (session=%s)",
+                dialog_phase,
+                expected_state.value,
+                new_state_str,
+                session_id,
+            )
+            track_metric(
+                "fsm_guard_override",
+                1,
+                {
+                    "phase": dialog_phase,
+                    "expected_state": expected_state.value,
+                    "actual_state": new_state_str,
+                },
+            )
+            new_state_str = expected_state.value
+            response.metadata.current_state = new_state_str
+            metadata_update["current_state"] = new_state_str
 
         # Build assistant message (OUTPUT_CONTRACT format) **after** all overrides
         assistant_content = {

@@ -1,33 +1,89 @@
-﻿# Деплой (Railway)
+﻿# 🚀 Deployment Guide (Railway & Docker)
 
-## Сервіси
+> **Version:** 5.0 (Implementation)  
+> **Source:** `Dockerfile` & `railway.toml`  
+> **Updated:** 20 December 2025
 
-- Web (FastAPI)
-- Worker (Celery)
-- Beat (Celery beat)
-- Redis (керований або окремий контейнер)
+---
 
-## Основні env
+## 🚂 Railway Configuration
 
-- `PUBLIC_BASE_URL` — повний HTTPS URL
-- `OPENAI_API_KEY` / інші LLM ключі
-- `DATABASE_URL` або `DATABASE_URL_POOLER`
-- `SUPABASE_URL`, `SUPABASE_API_KEY`
-- `REDIS_URL`
-- `MANYCHAT_*`
+MIRT AI is optimized for Railway using **Nixpacks**.
 
-## ManyChat режими
+### Service: `web` (FastAPI)
+- **Start Command:**
+  ```bash
+  uvicorn src.server.main:app --host 0.0.0.0 --port $PORT
+  ```
+- **Healthcheck:** `/health` (Timeout: 30s)
 
-- `MANYCHAT_PUSH_MODE=true` — async push (202 + фонова обробка)
-- `MANYCHAT_USE_CELERY=true` — використати Celery для push
+### Service: `worker` (Celery)
+- **Start Command:**
+  ```bash
+  celery -A src.workers.celery_app worker -l info -c 4 -Q llm,webhooks,followups,crm,summarization,default
+  ```
+- **Critical Env Vars:**
+  - `CELERY_ENABLED=true`
+  - `REDIS_TLS=false` (Railway Internal Redis usually doesn't need TLS, external does)
 
-## Production рекомендації
+### Service: `beat` (Scheduler)
+- **Start Command:**
+  ```bash
+  celery -A src.workers.celery_app beat -l info
+  ```
 
-- Налаштувати `CHECKPOINTER_*` (pool/timeout/statement_timeout).
-- Увімкнути media proxy для Vision (якщо CDN блокує).
-- Заповнити `SITNIKS_HUMAN_MANAGER_ID` (int).
+---
 
-## Типові помилки
+## 🐳 Docker Deployment
 
-- Забутий `PUBLIC_BASE_URL` → https webhook не підтверджується.
-- Некоректні типи в env → падіння pydantic settings (перевіряйте інти/булі).
+Based on standard `python:3.11-slim` image.
+
+### Recommended `docker-compose.yml`
+
+```yaml
+services:
+  web:
+    build: .
+    command: uvicorn src.server.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on: [redis, postgres]
+
+  worker:
+    build: .
+    command: celery -A src.workers.celery_app worker -l info -Q llm,webhooks,followups,crm,summarization,default
+    env_file: .env
+    depends_on: [redis]
+
+  beat:
+    build: .
+    command: celery -A src.workers.celery_app beat -l info
+    env_file: .env
+    depends_on: [redis]
+```
+
+---
+
+## 🔑 Critical Environment Variables
+
+These variables are actively used in `src/conf/config.py`:
+
+| Variable | Required? | Description |
+|:---------|:----------|:------------|
+| `PUBLIC_BASE_URL` | YES | Used for webhook verification logic. |
+| `OPENAI_API_KEY` | YES | Core intelligence (GPT-4o). |
+| `DATABASE_URL_POOLER` | YES | Connection pooling for Checkpointer (Supavisor). |
+| `REDIS_URL` | YES | Celery Broker & Debounce Lock. |
+| `MANYCHAT_API_KEY` | YES | For sending responses. |
+| `MANYCHAT_PUSH_MODE` | NO | Set `true` for async processing. |
+| `SITNIKS_API_KEY` | NO | If CRM integration is enabled. |
+
+---
+
+## 🛡️ SSL & Security
+
+- **Webhooks:** Telegram REQUIRE HTTPS.
+- **ManyChat:** Requires a valid SSL certificate.
+- **Railway:** Provides automatic SSL for `*.up.railway.app` domains.
+
+---

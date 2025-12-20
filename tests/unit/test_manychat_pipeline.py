@@ -93,12 +93,12 @@ async def test_pipeline_debounced_calls_handler_and_emits_hook():
 
 @pytest.mark.asyncio
 async def test_pipeline_timeout_raises():
-    class SlowHandler(FakeHandler):
+    class HangingHandler(FakeHandler):
         async def process_message(self, session_id: str, text: str, *, extra_metadata=None):
-            await asyncio.sleep(1.1)
-            return await super().process_message(session_id, text, extra_metadata=extra_metadata)
+            # Hang forever without sleeping (simulate stuck process)
+            await asyncio.Future()
 
-    handler = SlowHandler()
+    handler = HangingHandler()
     buffered = BufferedMessage(text="Hi", has_image=False, image_url=None, extra_metadata={})
     debouncer = FakeDebouncer(result=buffered)
 
@@ -110,5 +110,5 @@ async def test_pipeline_timeout_raises():
             text="Hi",
             image_url=None,
             extra_metadata={},
-            time_budget_provider=lambda _has_image: 0.01,
+            time_budget_provider=lambda _has_image: 0.001,
         )

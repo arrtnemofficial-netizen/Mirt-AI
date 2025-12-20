@@ -77,13 +77,33 @@ class DummyHandler:
             {"response": self.response, "state": {}, "error": None, "is_fallback": False},
         )()
 
+class DummyMessageStore:
+    def __init__(self):
+        self.delete_calls = []
+
+    def append(self, message):
+        pass
+
+    def list(self, session_id: str):
+        return []
+
+    def delete(self, session_id: str) -> None:
+        self.delete_calls.append(session_id)
+
+
 
 @pytest.mark.asyncio
 async def test_push_response_builds_text_and_image_messages(monkeypatch: pytest.MonkeyPatch):
     store = InMemorySessionStore()
     push_client = DummyPushClient()
+    message_store = DummyMessageStore()
 
-    svc = ManyChatAsyncService(store, runner=object(), push_client=push_client)
+    svc = ManyChatAsyncService(
+        store,
+        runner=object(),
+        push_client=push_client,
+        message_store=message_store,
+    )
 
     agent_response = AgentResponse(
         event="simple_answer",
@@ -153,8 +173,14 @@ async def test_process_message_async_restart_clears_session_and_sends_text(
 ):
     store = InMemorySessionStore()
     push_client = DummyPushClient()
+    message_store = DummyMessageStore()
 
-    svc = ManyChatAsyncService(store, runner=object(), push_client=push_client)
+    svc = ManyChatAsyncService(
+        store,
+        runner=object(),
+        push_client=push_client,
+        message_store=message_store,
+    )
 
     # Seed a session to ensure delete() returns True
     store.save("u2", {"messages": [], "metadata": {}, "current_state": "STATE_0_INIT"})
@@ -165,15 +191,35 @@ async def test_process_message_async_restart_clears_session_and_sends_text(
 
     assert len(push_client.calls) == 1
     assert push_client.calls[0].get("send_text") is True
+    assert message_store.delete_calls == ["u2"]
     assert "Сесія очищена" in push_client.calls[0]["messages"][0]["text"]
+
+
+def test_restart_command_only_exact_token():
+    def _first_token(text: str) -> str:
+        return ManyChatAsyncService._normalize_command_text(text)[2]
+
+    true_cases = ["/restart", "/Restart", ".; /restart", "  /restart now"]
+    for text in true_cases:
+        assert ManyChatAsyncService._is_restart_command(_first_token(text)) is True
+
+    false_cases = ["/start", "restart", "/restart123", "/restart/now", "/restar"]
+    for text in false_cases:
+        assert ManyChatAsyncService._is_restart_command(_first_token(text)) is False
 
 
 @pytest.mark.asyncio
 async def test_process_message_async_uses_debouncer_and_handler(monkeypatch: pytest.MonkeyPatch):
     store = InMemorySessionStore()
     push_client = DummyPushClient()
+    message_store = DummyMessageStore()
 
-    svc = ManyChatAsyncService(store, runner=object(), push_client=push_client)
+    svc = ManyChatAsyncService(
+        store,
+        runner=object(),
+        push_client=push_client,
+        message_store=message_store,
+    )
 
     aggregated = type(
         "Agg",
@@ -213,8 +259,14 @@ async def test_process_message_async_uses_debouncer_and_handler(monkeypatch: pyt
 async def test_process_message_async_superseded_request_is_silent(monkeypatch: pytest.MonkeyPatch):
     store = InMemorySessionStore()
     push_client = DummyPushClient()
+    message_store = DummyMessageStore()
 
-    svc = ManyChatAsyncService(store, runner=object(), push_client=push_client)
+    svc = ManyChatAsyncService(
+        store,
+        runner=object(),
+        push_client=push_client,
+        message_store=message_store,
+    )
 
     svc.debouncer = DummyDebouncer(aggregated=None)
 

@@ -1,77 +1,126 @@
-﻿# ???????????
+﻿# 🏗️ MIRT AI — Enterprise Architecture
 
-## ??????????
+> **Version:** 5.0 (Implementation)  
+> **SSOT:** `src/core/` & `src/agents/langgraph/`  
+> **Updated:** 20 December 2025
 
-- **Web API (FastAPI)**: ?????? webhook/HTTP????????.
-- **ManyChat ??????????**: push/response ?????, debounce, time budget.
-- **LangGraph**: ??????? ??????????? ???????.
-- **Checkpointer (Postgres)**: persistence ????? LangGraph.
-- **Supabase Session Store**: ?????????? ???? ?????/???????????.
-- **Celery + Redis**: ?????? ??????, follow?up, ??????? ?????.
+---
 
-## ????? ManyChat (push)
+## 🦅 High-Level System Overview
 
-1) ManyChat ? `/webhooks/manychat` (202)
-2) Async pipeline: debounce ? handler ? LangGraph
-3) Push ????? ManyChat API
+MIRT AI is an event-driven, stateful agentic system built on **LangGraph v2** and **Celery**. It processes user interactions from Telegram and Instagram (ManyChat) through a centralized pipeline.
 
-## ????? ManyChat (response)
+```mermaid
+flowchart TB
+    subgraph Inputs["📥 Ingestion Layer"]
+        Tg[Telegram Webhook]
+        Mc[ManyChat Webhook]
+    end
 
-1) ManyChat ? `/webhooks/manychat`
-2) Debounce + handler ? ????????? v2
+    subgraph API["⚙️ API Layer (FastAPI)"]
+        R_Tg["/webhooks/telegram"]
+        R_Mc["/webhooks/manychat"]
+        Debounce[Debounce Middleware]
+    end
 
-## ????? Telegram (???? ?????????)
+    subgraph Workers["👷 Worker Layer (Celery)"]
+        Q_LLM[Queue: llm]
+        Q_Web[Queue: webhooks]
+        Q_CRM[Queue: crm]
+        Worker[Celery Process]
+    end
 
-1) Telegram webhook ? ????????
-2) Debounce ? handler ? LangGraph
-3) ????????? ????? ? Telegram
+    subgraph Core["🧠 Intelligence Layer"]
+        LG[LangGraph Orchestrator]
+        Nodes[[12 Specialized Nodes]]
+        Mem[Titans Memory]
+    end
 
-## ??????? ??????
+    subgraph Storage["💾 Persistence"]
+        PG[(PostgreSQL\nCheckpointer)]
+        Redis[(Redis\nBroker & Cache)]
+        Sup[(Supabase\nSession Store)]
+    end
 
-- `src/integrations/manychat/pipeline.py` ? ?????? ???????? debounce + handler
-- `src/integrations/manychat/async_service.py` ? push ?????
-- `src/integrations/manychat/webhook.py` ? response ?????
-- `src/agents/langgraph/*` ? ????, ?????, checkpointer
-- `src/services/trim_policy.py` ? ????? ??????/trim
+    Tg & Mc --> API
+    R_Mc --> Debounce
+    Debounce --> Q_LLM
+    R_Tg --> Q_LLM
+    
+    Q_LLM --> Worker
+    Worker --> LG
+    LG --> Nodes
+    Nodes --> Mem
+    LG <--> PG
+    LG --> Sup
+    
+    Nodes --> Q_CRM
+    Nodes --> Q_Web
+```
 
-## ?????? ?? ???????
+---
 
-???? ?????? ??????? ? ????? ?????????? ? ????? ?????????? ? ?????????.
+## 🧩 Component Implementation Details
 
-# Архітектура MIRT AI
+### 1. Ingestion & API (`src.server`)
+- **Framework:** FastAPI
+- **Endpoints:**
+  - `POST /webhooks/manychat`: Implements `process_manychat_pipeline` with debouncing (window: 2s).
+  - `POST /webhooks/telegram`: Direct dispatch to Celery.
+- **Middleware:** Custom `MessageDebouncer` using Redis locks to merge rapid inputs.
 
-## Головні компоненти
+### 2. Message Processing (`src.workers.tasks.messages`)
+- **Task:** `process_message`
+- **Queue:** `llm` (Time limit: 90s soft / 120s hard)
+- **Logic:**
+  1. Loads/Creates `ConversationState`.
+  2. Invokes `graph.ainvoke` with `checkpoint_id`.
+  3. Handles `Event` outputs (e.g., `SendResponse`, `UpdateCRM`).
 
-- **Web API (FastAPI)** – приймає вебхуки (ManyChat/Telegram/Snitkix) і REST-запити.
-- **ManyChat інтеграція** – окремі режими push та response; керує debounce, time budget.
-- **LangGraph** – основна оркестрація станів, HITL, інтеррапти.
-- **Postgres Checkpointer** – зберігає повний стан LangGraph для resume/time-travel.
-- **Supabase Session Store** – довготривале збереження клієнтських сесій/метаданих.
-- **Celery + Redis** – фонові задачі (LLM воркери, follow-up, відправка ManyChat pushів).
+### 3. Intelligence Engine (`src.agents.langgraph`)
+- **Graph:** `StateGraph(ConversationState)`
+- **Router:** `master_router` determines flow based on `dialog_phase`.
+- **Persistence:** `AsyncPostgresSaver` (optimized connection pool).
+- **HITL:** `interrupt_before=["payment"]` for human verification.
 
-## Потік ManyChat (push mode)
-1. ManyChat викликає `/webhooks/manychat` → одразу 202.
-2. `ManyChatAsyncService` через debounce збирає повідомлення.
-3. LangGraph обробляє діалог → push-відповідь через ManyChat API.
+### 4. Integrations
+- **ManyChat:** Push Mode (Async). See `src.integrations.manychat`.
+- **CRM:** Snitkix API adapter. See `src.integrations.crm.snitkix`.
+- **Vision:** OpenAI GPT-4o via `vision_node`.
 
-## Потік ManyChat (response mode)
-1. ManyChat викликає `/webhooks/manychat`.
-2. Debounce + LangGraph.
-3. Формуємо ManyChat v2 envelope та повертаємо у відповідь (sync).
+---
 
-## Telegram (полегшений режим)
-1. Telegram webhook потрапляє до Bot/Dispatcher.
-2. Debounce → LangGraph.
-3. Відправка результату через Telegram Bot API.
+## 💾 Data Flow & Storage
 
-## Ключові модулі
+### PostgreSQL (Supabase)
+Used for **Long-term State** and **Analytics**.
+- `agent_sessions`: Stores LangGraph checkpoints (base64 serialized).
+- `messages`: User and AI interaction history.
+- `mirt_memories`: Vector embeddings (1536 dims) for Titans memory.
 
-- `src/integrations/manychat/pipeline.py` – спільний пайплайн debounce + handler.
-- `src/integrations/manychat/async_service.py` – push mode.
-- `src/integrations/manychat/webhook.py` – response mode.
-- `src/agents/langgraph/*` – стан, граф, checkpointer, вузли.
-- `src/services/trim_policy.py` – soft/hard-limits для state/messages.
+### Redis
+Used for **Hot Data** and **Queues**.
+- **Broker:** Celery task transport (db 0).
+- **Debounce:** Ephemeral locks for message merging.
+- **Cache:** User profiles and product catalog cache.
 
-## Що ще важливо
+---
 
-Ця схема працює лише разом із Observability (див. `docs/OBSERVABILITY_RUNBOOK.md`) та FSM (див. `docs/FSM_TRANSITION_TABLE.md`), бо всі сервіси синхронізують `dialog_phase` і rely на спільних метриках.
+## 🛡️ Fault Tolerance
+
+| Failure Mode | Mechanism | Implementation |
+|:-------------|:----------|:---------------|
+| **LLM Failure** | Retry/Fallback | `invoke_with_retry` (3 attempts, exp backoff) |
+| **Worker Crash** | Task Recovery | `task_reject_on_worker_lost=True`, `acks_late=True` |
+| **Rate Limits** | Backoff | `RateLimitError` handling in Celery |
+| **CRM Outage** | Async Queue | `crm` queue with independent retry |
+
+---
+
+## 📚 Related Documents
+
+- [AGENTS_ARCHITECTURE.md](AGENTS_ARCHITECTURE.md) - Deep dive into nodes.
+- [CELERY.md](CELERY.md) - Queue configuration.
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Railwail setup.
+
+---

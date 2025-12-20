@@ -468,6 +468,26 @@ class Settings(BaseSettings):
         default=True,
         description="Enable detailed logging with tags (state/intent/tool)",
     )
+    
+    # =========================================================================
+    # SAFETY / LOOP GUARDS
+    # =========================================================================
+    LOOP_GUARD_WARNING_THRESHOLD: int = Field(
+        default=5,
+        ge=1,
+        description="Number of recursive steps before warning is logged.",
+    )
+    LOOP_GUARD_SOFT_RESET: int = Field(
+        default=10,
+        ge=1,
+        description="Number of recursive steps before soft reset (clearing phase).",
+    )
+    LOOP_GUARD_ESCALATION: int = Field(
+        default=20,
+        ge=1,
+        description="Number of recursive steps before hard escalation to human.",
+    )
+
     # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
     # - LangGraph v2 is now the only architecture
     # - PydanticAI handles tool planning automatically
