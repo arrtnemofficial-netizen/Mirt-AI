@@ -23,7 +23,9 @@ os.environ["CELERY_EAGER"] = "true"  # Enable eager mode for tests
 
 # Setup Paths
 TESTS_DIR = Path(__file__).parent
-GOLDEN_DATA_PATH = TESTS_DIR / "data" / "golden_data.yaml"
+GOLDEN_DATA_PATH = TESTS_DIR / "golden_data.yaml"
+
+# No shared pytest plugins loaded (mocks are disabled)
 
 
 @dataclass

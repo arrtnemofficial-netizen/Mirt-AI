@@ -63,11 +63,11 @@ celery -A src.workers.celery_app worker -l info
 
 ## 🧪 Testing
 
-We achieve reliability through the **Test Pyramid**:
+We achieve reliability through the **Test Pyramid** (flat `tests/` layout):
 
-- **Unit:** `pytest tests/unit` (Fast logic checks)
-- **Integration:** `pytest tests/integration` (DB/Redis checks)
-- **Golden:** `pytest -m golden` (Quality assurance)
+- **Core:** `pytest tests` (No mocks in tests; no env required)
+- **Live:** `pytest live_test` (Real services only; env required)
+- **Golden:** `pytest tests -m golden` (Quality assurance)
 
 ---
 

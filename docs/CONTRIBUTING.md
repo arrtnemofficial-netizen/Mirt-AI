@@ -124,7 +124,7 @@ pre-commit install
 | New prompt | `data/prompts/` |
 | New integration | `src/integrations/` |
 | New service | `src/services/` |
-| New test | `tests/unit/` or `tests/integration/` |
+| New test | `tests/` (no mocks) or `live_test/` (real services) |
 
 ---
 

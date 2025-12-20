@@ -1,4 +1,4 @@
-﻿# 🧪 Testing Strategy (Implementation)
+﻿# ?? Testing Strategy (Implementation)
 
 > **Version:** 5.0 (Implementation)  
 > **Source:** `tests/`  
@@ -6,31 +6,24 @@
 
 ---
 
-## 🏗️ Test Pyramid Implementation
+## ??? Test Pyramid Implementation
 
-### 1. Unit Tests (`tests/unit/`)
-Focus on isolated components.
+### 1. Core Tests (flat `tests/`)
+No mocks allowed. No env required.
 
-- **FSM logic:** `tests/unit/core/test_state_machine.py`
-  - Validates `State.from_string` and transition correctness.
-- **Validators:** `tests/unit/services/test_validators.py`
-  - Checks if `OrderValidator` correctly catches missing phone numbers.
+- Example: `pytest tests`
 
-### 2. Integration Tests (`tests/integration/`)
-Focus on component interaction (Requires Docker).
+### 2. Live Tests (`live_test/`)
+Real services only. Env required.
 
-- **ManyChat Pipeline:** `tests/integration/manychat/test_pipeline.py`
-  - Mocks Redis, sends `BufferedMessage`, verifies `PipelineResult`.
-- **CRM Sync:** `tests/integration/crm/test_snitkix.py`
-  - Mocks HTTP interactions with `respx` to test retry logic.
+- Example: `pytest live_test`
 
-### 3. Golden Data (`tests/data/golden/`)
-Contains JSON lines with expected LLM outputs.
-- `sizing_golden.jsonl`: "Height 116" -> "Size 116-122".
+### 3. Golden Data (flat `tests/`)
+Golden flows are stored alongside tests.
 
 ---
 
-## 🛠️ Conftest Fixtures (`tests/conftest.py`)
+## ??? Conftest Fixtures (`tests/conftest.py`)
 
 - `mock_redis`: `fakeredis` instance for state locking.
 - `mock_db`: Async session rollback for Postgres.
@@ -38,7 +31,7 @@ Contains JSON lines with expected LLM outputs.
 
 ---
 
-## 📊 Coverage Goals
+## ?? Coverage Goals
 
 We enforce coverage via `pyproject.toml`:
 

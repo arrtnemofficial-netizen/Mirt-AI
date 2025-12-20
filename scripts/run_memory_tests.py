@@ -27,25 +27,25 @@ def run_tests(args: argparse.Namespace) -> int:
     if args.unit:
         cmd.extend(
             [
-                "tests/unit/test_memory_models.py",
-                "tests/unit/test_memory_service.py",
+                "tests/test_memory_models.py",
+                "tests/test_memory_service.py",
             ]
         )
     elif args.e2e:
         cmd.extend(
             [
-                "tests/integration/test_memory_integration.py",
-                "tests/integration/test_memory_e2e.py",
+                "tests/test_memory_integration.py",
+                "tests/test_memory_e2e.py",
             ]
         )
     else:
         # All memory tests
         cmd.extend(
             [
-                "tests/unit/test_memory_models.py",
-                "tests/unit/test_memory_service.py",
-                "tests/integration/test_memory_integration.py",
-                "tests/integration/test_memory_e2e.py",
+                "tests/test_memory_models.py",
+                "tests/test_memory_service.py",
+                "tests/test_memory_integration.py",
+                "tests/test_memory_e2e.py",
             ]
         )
 

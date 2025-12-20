@@ -54,17 +54,16 @@ celery -A src.workers.celery_app beat -l info
 
 Based on `tests/` folder structure.
 
-### Unit Tests
+### Core Tests
 ```bash
-# Runs fast tests
-pytest tests/unit/
+# No mocks; no env required
+pytest tests
 ```
 
-### Integration Tests
-Requires running DB/Redis.
+### Live Tests
+Requires real services and env variables.
 ```bash
-# Runs full pipeline tests
-pytest tests/integration/
+pytest live_test
 ```
 
 ### Formatting (Ruff)
