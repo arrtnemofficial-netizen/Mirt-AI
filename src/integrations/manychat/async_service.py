@@ -665,9 +665,7 @@ class ManyChatAsyncService:
 
             if deleted:
                 logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
-                response_text = (
-                    "Сесія очищена. Розкажіть, будь ласка, що саме вас цікавить 🙂"
-                )
+                response_text = "Сесія очищена. Розкажіть, будь ласка, що саме вас цікавить 🙂"
             else:
                 logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
                 response_text = (

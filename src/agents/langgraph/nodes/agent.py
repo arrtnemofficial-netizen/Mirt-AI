@@ -483,17 +483,13 @@ async def agent_node(
                     append=True,
                 )
                 if used_upsell_base:
-                    new_keys = {_product_match_key(p) for p in new_products if _product_match_key(p)}
+                    new_keys = {
+                        _product_match_key(p) for p in new_products if _product_match_key(p)
+                    }
                     if new_keys:
                         selected_products = [
-                            p
-                            for p in selected_products
-                            if _product_match_key(p) in new_keys
-                        ] + [
-                            p
-                            for p in selected_products
-                            if _product_match_key(p) not in new_keys
-                        ]
+                            p for p in selected_products if _product_match_key(p) in new_keys
+                        ] + [p for p in selected_products if _product_match_key(p) not in new_keys]
                 logger.info(
                     "Agent appended products to cart: now=%d (added=%d)",
                     len(selected_products),

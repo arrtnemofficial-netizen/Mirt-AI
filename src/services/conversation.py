@@ -360,16 +360,16 @@ def _apply_transition_guardrails(
 
     if count >= settings.LOOP_GUARD_WARNING_THRESHOLD:
         if settings.DEBUG_TRACE_LOGS:
-             debug_log.warning(
+            debug_log.warning(
                 session_id=session_id,
-                message=f"Loop warning (phase={current_phase}, count={count})"
+                message=f"Loop warning (phase={current_phase}, count={count})",
             )
 
     if count >= settings.LOOP_GUARD_SOFT_RESET and count < settings.LOOP_GUARD_ESCALATION:
         if settings.DEBUG_TRACE_LOGS:
-             debug_log.warning(
+            debug_log.warning(
                 session_id=session_id,
-                message=f"Loop soft reset (phase={current_phase}, count={count})"
+                message=f"Loop soft reset (phase={current_phase}, count={count})",
             )
 
     if count >= settings.LOOP_GUARD_ESCALATION:
@@ -430,19 +430,18 @@ def _apply_transition_guardrails(
             if isinstance(first_content, str):
                 # Defense-in-Depth log (Trace only)
                 if settings.DEBUG_TRACE_LOGS:
-                     debug_log.node_exit(
+                    debug_log.node_exit(
                         session_id=session_id,
                         node_name="guardrail_check",
                         goto="end",
                         new_phase=after_state.get("dialog_phase"),
-                        response_preview=str(first_content)[:50]
+                        response_preview=str(first_content)[:50],
                     )
 
     return after_state
 
 
 class ConversationError(Exception):
-
     def __init__(self, message: str, session_id: str, recoverable: bool = True):
         super().__init__(message)
         self.session_id = session_id
