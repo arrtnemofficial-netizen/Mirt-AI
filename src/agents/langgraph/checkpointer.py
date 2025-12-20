@@ -213,19 +213,19 @@ async def _open_pool_on_demand(pool: Any | None) -> None:
         return
     is_open = _pool_is_open(pool)
     if is_open is True:
-        setattr(pool, "_mirt_opened", True)
+        pool._mirt_opened = True
         return
     try:
         try:
             await pool.open(wait=True)
         except TypeError:
             await pool.open()
-        setattr(pool, "_mirt_opened", True)
+        pool._mirt_opened = True
         logger.info("[CHECKPOINTER] pool opened on demand")
     except Exception as exc:
         msg = str(exc).lower()
         if "already" in msg and "open" in msg:
-            setattr(pool, "_mirt_opened", True)
+            pool._mirt_opened = True
             return
         logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
 

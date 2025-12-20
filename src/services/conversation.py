@@ -364,7 +364,7 @@ def _apply_transition_guardrails(
                 session_id=session_id,
                 message=f"Loop warning (phase={current_phase}, count={count})"
             )
-            
+
     if count >= settings.LOOP_GUARD_SOFT_RESET and count < settings.LOOP_GUARD_ESCALATION:
         if settings.DEBUG_TRACE_LOGS:
              debug_log.warning(

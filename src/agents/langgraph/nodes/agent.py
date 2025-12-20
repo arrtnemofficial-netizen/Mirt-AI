@@ -77,15 +77,11 @@ def _merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) ->
     merged = dict(existing)
     for key, new_value in incoming.items():
         if key == "price":
-            if isinstance(new_value, (int, float)) and new_value > 0:
-                merged[key] = new_value
-            elif key not in merged:
+            if (isinstance(new_value, (int, float)) and new_value > 0) or key not in merged:
                 merged[key] = new_value
             continue
         if key in {"size", "color", "photo_url", "description"}:
-            if isinstance(new_value, str) and new_value.strip():
-                merged[key] = new_value
-            elif key not in merged:
+            if (isinstance(new_value, str) and new_value.strip()) or key not in merged:
                 merged[key] = new_value
             continue
         merged[key] = new_value

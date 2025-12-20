@@ -468,7 +468,7 @@ class Settings(BaseSettings):
         default=True,
         description="Enable detailed logging with tags (state/intent/tool)",
     )
-    
+
     # =========================================================================
     # SAFETY / LOOP GUARDS
     # =========================================================================
