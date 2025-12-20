@@ -1,111 +1,126 @@
-# MIRT AI Architecture
+﻿# 🏗️ MIRT AI — Enterprise Architecture
 
-## Overview
-
-MIRT AI is an intelligent shopping assistant for children's clothing, built on a modern, type-safe stack. It combines **LangGraph** for orchestration and **PydanticAI** for strict structured outputs.
-
-## Tech Stack
-
-- **Orchestration**: LangGraph (StateGraph, checkpointer, nodes)
-- **Agents**: PydanticAI (Type-safe LLM wrapper)
-- **Runtime**: FastAPI (Webhooks, REST API)
-- **Persistence**: PostgreSQL (via Supabase)
-- **Background Tasks**: Celery + Redis
-- **Observability**: Logfire + Sentry
+> **Version:** 5.0 (Implementation)  
+> **SSOT:** `src/core/` & `src/agents/langgraph/`  
+> **Updated:** 20 December 2025
 
 ---
 
-## 🏗️ High-Level Architecture
+## 🦅 High-Level System Overview
+
+MIRT AI is an event-driven, stateful agentic system built on **LangGraph v2** and **Celery**. It processes user interactions from Telegram and Instagram (ManyChat) through a centralized pipeline.
 
 ```mermaid
-graph TD
-    User((User)) -->|Message| Telegram[Telegram/ManyChat]
-    Telegram -->|Webhook| FastAPI[FastAPI Server]
-    
-    subgraph "AI Core (LangGraph)"
-        FastAPI -->|Invoke| Graph[LangGraph Orchestrator]
-        
-        Graph -->|Check| Moderation[Moderation Node]
-        Moderation -->|Allowed| Intent[Intent Node]
-        Moderation -->|Blocked| Escalation[Escalation Node]
-        
-        Intent -->|Routing| Router{Router}
-        
-        Router -->|Support| Agent[Support Agent (PydanticAI)]
-        Router -->|Payment| Payment[Payment Node]
-        Router -->|Vision| Vision[Vision Agent (PydanticAI)]
-        
-        Agent -->|Tool Call| Tools[Catalog/CRM Tools]
-        
-        Payment -->|HITL| Human[Human Review]
+flowchart TB
+    subgraph Inputs["📥 Ingestion Layer"]
+        Tg[Telegram Webhook]
+        Mc[ManyChat Webhook]
     end
-    
-    subgraph "Data Layer"
-        Graph -->|State| Postgres[(Supabase DB)]
-        Agent -->|Catalog| JSON[Catalog.json]
-        Tools -->|Orders| CRM[Snitkix CRM]
+
+    subgraph API["⚙️ API Layer (FastAPI)"]
+        R_Tg["/webhooks/telegram"]
+        R_Mc["/webhooks/manychat"]
+        Debounce[Debounce Middleware]
     end
+
+    subgraph Workers["👷 Worker Layer (Celery)"]
+        Q_LLM[Queue: llm]
+        Q_Web[Queue: webhooks]
+        Q_CRM[Queue: crm]
+        Worker[Celery Process]
+    end
+
+    subgraph Core["🧠 Intelligence Layer"]
+        LG[LangGraph Orchestrator]
+        Nodes[[12 Specialized Nodes]]
+        Mem[Titans Memory]
+    end
+
+    subgraph Storage["💾 Persistence"]
+        PG[(PostgreSQL\nCheckpointer)]
+        Redis[(Redis\nBroker & Cache)]
+        Sup[(Supabase\nSession Store)]
+    end
+
+    Tg & Mc --> API
+    R_Mc --> Debounce
+    Debounce --> Q_LLM
+    R_Tg --> Q_LLM
+    
+    Q_LLM --> Worker
+    Worker --> LG
+    LG --> Nodes
+    Nodes --> Mem
+    LG <--> PG
+    LG --> Sup
+    
+    Nodes --> Q_CRM
+    Nodes --> Q_Web
 ```
 
 ---
 
-## 🧩 Key Components
+## 🧩 Component Implementation Details
 
-### 1. Agents Layer (`src/agents/pydantic/`)
-Powered by **PydanticAI**. Ensures 100% schema compliance for LLM outputs.
+### 1. Ingestion & API (`src.server`)
+- **Framework:** FastAPI
+- **Endpoints:**
+  - `POST /webhooks/manychat`: Implements `process_manychat_pipeline` with debouncing (window: 2s).
+  - `POST /webhooks/telegram`: Direct dispatch to Celery.
+- **Middleware:** Custom `MessageDebouncer` using Redis locks to merge rapid inputs.
 
-- **Support Agent**: Main conversationalist. Handles sizing, product questions.
-- **Vision Agent**: Analyzes photos (receipts, product issues).
-- **Payment Agent**: Processes orders and payments.
+### 2. Message Processing (`src.workers.tasks.messages`)
+- **Task:** `process_message`
+- **Queue:** `llm` (Time limit: 90s soft / 120s hard)
+- **Logic:**
+  1. Loads/Creates `ConversationState`.
+  2. Invokes `graph.ainvoke` with `checkpoint_id`.
+  3. Handles `Event` outputs (e.g., `SendResponse`, `UpdateCRM`).
 
-### 2. Orchestration Layer (`src/agents/langgraph/`)
-Powered by **LangGraph**. Manages conversation flow and state.
+### 3. Intelligence Engine (`src.agents.langgraph`)
+- **Graph:** `StateGraph(ConversationState)`
+- **Router:** `master_router` determines flow based on `dialog_phase`.
+- **Persistence:** `AsyncPostgresSaver` (optimized connection pool).
+- **HITL:** `interrupt_before=["payment"]` for human verification.
 
-- **Graph**: Defines the DAG (Directed Acyclic Graph) of the conversation.
-- **State**: `ConversationState` (TypedDict) holding messages and metadata.
-- **Persistence**: `PostgresSaver` stores state in Supabase.
-
-### 3. Service Layer (`src/services/`)
-Business logic decoupled from the AI core.
-
-- `message_store.py`: Logs raw messages.
-- `client_data_parser.py`: Parses ManyChat payloads.
-- `moderation.py`: Safety checks.
-- `order_model.py`: CRM data contracts.
-
-### 4. Worker Layer (`src/workers/`)
-Background processing via Celery.
-
-- `tasks/crm.py`: Async order creation.
-- `tasks/messages.py`: Async message processing.
-- `dispatcher.py`: Routes tasks (Sync vs Async support).
+### 4. Integrations
+- **ManyChat:** Push Mode (Async). See `src.integrations.manychat`.
+- **CRM:** Snitkix API adapter. See `src.integrations.crm.snitkix`.
+- **Vision:** OpenAI GPT-4o via `vision_node`.
 
 ---
 
-## 🔄 Data Flow
+## 💾 Data Flow & Storage
 
-1. **Webhook**: Received by `src/server/main.py`.
-2. **Persist**: User message saved to `message_store`.
-3. **Invoke**: `get_active_graph().ainvoke()` called.
-4. **Process**: 
-   - Moderation check.
-   - Intent classification.
-   - Agent execution (LLM inference).
-   - Tool execution (if needed).
-5. **Response**: Structured `SupportResponse` returned.
-6. **Render**: Converted to text/images for platform (Telegram/ManyChat).
+### PostgreSQL (Supabase)
+Used for **Long-term State** and **Analytics**.
+- `agent_sessions`: Stores LangGraph checkpoints (base64 serialized).
+- `messages`: User and AI interaction history.
+- `mirt_memories`: Vector embeddings (1536 dims) for Titans memory.
+
+### Redis
+Used for **Hot Data** and **Queues**.
+- **Broker:** Celery task transport (db 0).
+- **Debounce:** Ephemeral locks for message merging.
+- **Cache:** User profiles and product catalog cache.
 
 ---
 
-## 🛡️ Type Safety
+## 🛡️ Fault Tolerance
 
-We use strict typing everywhere:
-- **Pydantic Models**: Define all data contracts (`src/core/models.py`, `src/agents/pydantic/models.py`).
-- **Mypy**: Enforced strict mode in CI.
-- **Ruff**: Enforced linting rules.
+| Failure Mode | Mechanism | Implementation |
+|:-------------|:----------|:---------------|
+| **LLM Failure** | Retry/Fallback | `invoke_with_retry` (3 attempts, exp backoff) |
+| **Worker Crash** | Task Recovery | `task_reject_on_worker_lost=True`, `acks_late=True` |
+| **Rate Limits** | Backoff | `RateLimitError` handling in Celery |
+| **CRM Outage** | Async Queue | `crm` queue with independent retry |
 
-## 🚀 Deployment
+---
 
-- **Platform**: Railway / Docker
-- **Config**: Environment variables (see `.env.example`)
-- **CI/CD**: GitHub Actions (Lint -> Test -> Deploy)
+## 📚 Related Documents
+
+- [AGENTS_ARCHITECTURE.md](AGENTS_ARCHITECTURE.md) - Deep dive into nodes.
+- [CELERY.md](CELERY.md) - Queue configuration.
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Railwail setup.
+
+---

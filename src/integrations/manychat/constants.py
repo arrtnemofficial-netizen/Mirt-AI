@@ -1,0 +1,13 @@
+FIELD_AI_STATE = "ai_state"
+FIELD_AI_INTENT = "ai_intent"
+FIELD_LAST_PRODUCT = "last_product"
+FIELD_ORDER_SUM = "order_sum"
+FIELD_CLIENT_NAME = "client_name"
+FIELD_CLIENT_PHONE = "client_phone"
+FIELD_CLIENT_CITY = "client_city"
+FIELD_CLIENT_NP = "client_nova_poshta"
+
+TAG_AI_RESPONDED = "ai_responded"
+TAG_NEEDS_HUMAN = "needs_human"
+TAG_ORDER_STARTED = "order_started"
+TAG_ORDER_PAID = "order_paid"

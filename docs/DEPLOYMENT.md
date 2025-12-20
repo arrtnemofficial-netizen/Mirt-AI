@@ -1,83 +1,89 @@
-# Deployment Guide
+﻿# 🚀 Deployment Guide (Railway & Docker)
 
-## 🚀 Quick Start
+> **Version:** 5.0 (Implementation)  
+> **Source:** `Dockerfile` & `railway.toml`  
+> **Updated:** 20 December 2025
 
-### Prerequisites
-- Python 3.11+
-- Docker & Docker Compose
-- Supabase Account (or local Postgres)
-- OpenRouter API Key
+---
 
-### Local Development
+## 🚂 Railway Configuration
 
-1. **Setup Environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys
-   ```
+MIRT AI is optimized for Railway using **Nixpacks**.
 
-2. **Install Dependencies**
-   ```bash
-   make setup
-   ```
+### Service: `web` (FastAPI)
+- **Start Command:**
+  ```bash
+  uvicorn src.server.main:app --host 0.0.0.0 --port $PORT
+  ```
+- **Healthcheck:** `/health` (Timeout: 30s)
 
-3. **Run Server**
-   ```bash
-   # Starts FastAPI on port 8000
-   python src/run.py
-   ```
+### Service: `worker` (Celery)
+- **Start Command:**
+  ```bash
+  celery -A src.workers.celery_app worker -l info -c 4 -Q llm,webhooks,followups,crm,summarization,default
+  ```
+- **Critical Env Vars:**
+  - `CELERY_ENABLED=true`
+  - `REDIS_TLS=false` (Railway Internal Redis usually doesn't need TLS, external does)
 
-4. **Run Workers (Optional)**
-   ```bash
-   # Starts Celery worker
-   python scripts/run_worker.py
-   ```
+### Service: `beat` (Scheduler)
+- **Start Command:**
+  ```bash
+  celery -A src.workers.celery_app beat -l info
+  ```
 
 ---
 
 ## 🐳 Docker Deployment
 
-We use a multi-stage Dockerfile for minimal production images.
+Based on standard `python:3.11-slim` image.
 
-### Build & Run
-```bash
-docker-compose up -d --build
+### Recommended `docker-compose.yml`
+
+```yaml
+services:
+  web:
+    build: .
+    command: uvicorn src.server.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on: [redis, postgres]
+
+  worker:
+    build: .
+    command: celery -A src.workers.celery_app worker -l info -Q llm,webhooks,followups,crm,summarization,default
+    env_file: .env
+    depends_on: [redis]
+
+  beat:
+    build: .
+    command: celery -A src.workers.celery_app beat -l info
+    env_file: .env
+    depends_on: [redis]
 ```
 
-This starts:
-- `app`: FastAPI server (Port 8000)
-- `worker`: Celery worker
-- `redis`: Message broker
+---
+
+## 🔑 Critical Environment Variables
+
+These variables are actively used in `src/conf/config.py`:
+
+| Variable | Required? | Description |
+|:---------|:----------|:------------|
+| `PUBLIC_BASE_URL` | YES | Used for webhook verification logic. |
+| `OPENAI_API_KEY` | YES | Core intelligence (GPT-4o). |
+| `DATABASE_URL_POOLER` | YES | Connection pooling for Checkpointer (Supavisor). |
+| `REDIS_URL` | YES | Celery Broker & Debounce Lock. |
+| `MANYCHAT_API_KEY` | YES | For sending responses. |
+| `MANYCHAT_PUSH_MODE` | NO | Set `true` for async processing. |
+| `SITNIKS_API_KEY` | NO | If CRM integration is enabled. |
 
 ---
 
-## 🚂 Railway Deployment
+## 🛡️ SSL & Security
 
-The project is configured for one-click deployment on [Railway](https://railway.app).
-
-- **Config**: `railway.toml` handles build and deploy settings.
-- **Entrypoint**: `python src/run.py` (automatically picks up `$PORT`).
-- **Build**: Uses `nixpacks` or `Dockerfile` (configured in `railway.toml`).
-
-### Environment Variables
-Ensure these are set in Railway dashboard:
-- `OPENROUTER_API_KEY`
-- `SUPABASE_URL`
-- `SUPABASE_API_KEY`
-- `TELEGRAM_BOT_TOKEN` (if using Telegram)
-- `PUBLIC_BASE_URL` (Your Railway URL)
+- **Webhooks:** Telegram REQUIRE HTTPS.
+- **ManyChat:** Requires a valid SSL certificate.
+- **Railway:** Provides automatic SSL for `*.up.railway.app` domains.
 
 ---
-
-## 🔄 Webhooks
-
-### Telegram
-Set the webhook automatically on startup by configuring:
-`PUBLIC_BASE_URL=https://your-app.up.railway.app`
-
-### ManyChat
-Point your ManyChat "External Request" to:
-`https://your-app.up.railway.app/webhooks/manychat`
-
-Headers:
-- `X-ManyChat-Token`: (Your configured secret)

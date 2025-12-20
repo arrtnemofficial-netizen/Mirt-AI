@@ -16,17 +16,23 @@ This graph is designed to SURVIVE in production.
 from __future__ import annotations
 
 import logging
+import os
+import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, START, StateGraph
 
+from src.conf.config import settings
+
 from .checkpointer import get_checkpointer
 from .edges import (
     get_agent_routes,
     get_intent_routes,
+    get_master_routes,
     get_moderation_routes,
     get_validation_routes,
+    master_router,
     route_after_agent,
     route_after_intent,
     route_after_moderation,
@@ -35,8 +41,11 @@ from .edges import (
 )
 from .nodes import (
     agent_node,
+    crm_error_node,
     escalation_node,
     intent_detection_node,
+    memory_context_node,
+    memory_update_node,
     moderation_node,
     offer_node,
     payment_node,
@@ -114,9 +123,23 @@ def build_production_graph(
     async def _validation(state: dict[str, Any]) -> dict[str, Any]:
         return await validation_node(state)
 
+    async def _crm_error(state: dict[str, Any]) -> dict[str, Any]:
+        return await crm_error_node(state)
+
     async def _end(state: dict[str, Any]) -> dict[str, Any]:
         """Terminal node - just returns empty update."""
         return {"step_number": state.get("step_number", 0) + 1}
+
+    # =========================================================================
+    # MEMORY NODES (Titans-like Memory System)
+    # =========================================================================
+    async def _memory_context(state: dict[str, Any]) -> dict[str, Any]:
+        """Load memory context before agents."""
+        return await memory_context_node(state)
+
+    async def _memory_update(state: dict[str, Any]) -> dict[str, Any]:
+        """Silently update memory after key states."""
+        return await memory_update_node(state)
 
     # Build the graph with TYPED state (enables reducers!)
     graph = StateGraph(ConversationState)
@@ -125,6 +148,7 @@ def build_production_graph(
     # ADD NODES
     # =========================================================================
     graph.add_node("moderation", _moderation)
+    graph.add_node("memory_context", _memory_context)  # Memory: load before agents
     graph.add_node("intent", _intent)
     graph.add_node("vision", _vision)
     graph.add_node("agent", _agent)
@@ -133,12 +157,34 @@ def build_production_graph(
     graph.add_node("upsell", _upsell)
     graph.add_node("escalation", _escalation)
     graph.add_node("validation", _validation)
+    graph.add_node("crm_error", _crm_error)
+    graph.add_node("memory_update", _memory_update)  # Memory: update after key states
     graph.add_node("end", _end)
 
     # =========================================================================
-    # ENTRY POINT
+    # ENTRY POINT (Master Router for Turn-Based Conversation)
     # =========================================================================
-    graph.add_edge(START, "moderation")
+    # Повна відповідність n8n state machine:
+    #
+    # dialog_phase          → node
+    # ─────────────────────────────────────
+    # INIT                  → moderation (повний pipeline)
+    # DISCOVERY             → agent (STATE_1)
+    # VISION_DONE           → agent (STATE_2→3)
+    # WAITING_FOR_SIZE      → agent (STATE_3)
+    # WAITING_FOR_COLOR     → agent (STATE_3)
+    # SIZE_COLOR_DONE       → offer (STATE_4)
+    # OFFER_MADE            → payment (STATE_5)
+    # WAITING_FOR_*         → payment (STATE_5)
+    # UPSELL_OFFERED        → upsell (STATE_6)
+    # COMPLETED             → end (STATE_7)
+    # COMPLAINT/OOD         → escalation (STATE_8/9)
+    # =========================================================================
+    graph.add_conditional_edges(
+        START,
+        master_router,
+        get_master_routes(),
+    )
 
     # =========================================================================
     # CONDITIONAL EDGES (Smart Routing)
@@ -174,28 +220,45 @@ def build_production_graph(
     )
 
     # =========================================================================
+    # MEMORY EDGES (Titans-like Memory System)
+    # =========================================================================
+    # memory_context runs AFTER moderation, BEFORE intent
+    # memory_update runs AFTER offer/upsell, BEFORE end
+
+    graph.add_edge("memory_context", "intent")  # Memory → Intent
+
+    # =========================================================================
     # SIMPLE EDGES
     # =========================================================================
 
-    # Vision -> offer (photo found product)
+    # Vision -> end (return multi-bubble response to user after product identification)
     graph.add_conditional_edges(
         "vision",
         route_after_vision,
-        {"offer": "offer", "agent": "agent", "validation": "validation"},
+        {"offer": "offer", "agent": "agent", "validation": "validation", "end": "end"},
     )
 
-    # Offer -> validation (check before sending)
-    graph.add_edge("offer", "validation")
+    # Agent -> memory_update -> END (capture facts from early conversation)
+    graph.add_edge("agent", "memory_update")
+
+    # Offer -> memory_update -> END (Turn-Based: wait for user confirmation)
+    # Memory update runs silently after offer is made
+    graph.add_edge("offer", "memory_update")
 
     # Payment uses Command for routing (handled internally)
-    # But we need edges for the graph structure
-    graph.add_edge("payment", "upsell")  # Default path
+    # IMPORTANT: Do NOT add static edge here!
+    # payment_node returns Command(goto="end"|"upsell"|"payment") which controls routing.
+    # A static edge would override Command.goto and cause step_number conflicts.
+    # See: InvalidUpdateError when both payment and upsell update step_number in same tick.
 
-    # Upsell -> end
-    graph.add_edge("upsell", "end")
+    # Upsell -> memory_update -> end
+    graph.add_edge("upsell", "memory_update")
 
     # Escalation -> end
     graph.add_edge("escalation", "end")
+
+    # Memory update -> end (after offer/upsell)
+    graph.add_edge("memory_update", "end")
 
     # End -> END
     graph.add_edge("end", END)
@@ -210,7 +273,7 @@ def build_production_graph(
     # Without this, the graph won't pause before payment!
     compiled = graph.compile(
         checkpointer=checkpointer,
-        interrupt_before=["payment"],  # HITL: pause before payment node
+        interrupt_before=["payment"] if settings.ENABLE_PAYMENT_HITL else [],
     )
     logger.info("Production graph built with HITL interrupt_before=['payment']")
 
@@ -221,7 +284,7 @@ def build_production_graph(
 # SINGLETON MANAGEMENT
 # =============================================================================
 
-_production_graph: CompiledGraph | None = None
+_production_graph_ref: weakref.ReferenceType[CompiledGraph] | None = None
 
 
 def get_production_graph(
@@ -238,30 +301,52 @@ def get_production_graph(
     Returns:
         Compiled production graph
     """
-    global _production_graph
+    global _production_graph_ref
+    force_new = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    graph = None if force_new else (_production_graph_ref() if _production_graph_ref else None)
 
-    if _production_graph is None:
+    if graph is None:
+        # Validate prompt files exist for all states (fail-fast)
+        from src.core.prompt_registry import validate_all_states_have_prompts
+
+        missing = validate_all_states_have_prompts()
+        if missing:
+            logger.warning("Graph starting with missing state prompts: %s", missing)
+
+        try:
+            from src.agents.langgraph.state_prompts import validate_payment_subphase_prompts
+
+            missing_payment = validate_payment_subphase_prompts()
+            if missing_payment:
+                logger.warning(
+                    "Graph starting with missing payment sub-phase prompts: %s", missing_payment
+                )
+        except Exception:
+            logger.debug("Unable to validate payment sub-phase prompts", exc_info=True)
+
         from src.agents.pydantic.support_agent import run_support
 
         # Create a wrapper that matches the runner signature
         async def _default_runner(msg: str, metadata: dict[str, Any]) -> dict[str, Any]:
             from src.agents.pydantic.deps import create_deps_from_state
+
             deps = create_deps_from_state(metadata)
             result = await run_support(msg, deps)
             return result.model_dump()
 
-        _production_graph = build_production_graph(
+        graph = build_production_graph(
             runner or _default_runner,
             checkpointer,
         )
+        _production_graph_ref = weakref.ref(graph)
 
-    return _production_graph
+    return graph
 
 
 def reset_graph() -> None:
     """Reset the graph singleton (useful for testing)."""
-    global _production_graph
-    _production_graph = None
+    global _production_graph_ref
+    _production_graph_ref = None
 
 
 # =============================================================================

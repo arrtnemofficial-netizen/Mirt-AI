@@ -7,12 +7,17 @@ Uses TypedDict with Annotated reducers for proper LangGraph integration.
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any, Literal
 
-from langgraph.graph.message import add_messages  # noqa: TCH002 - required at runtime
+from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
+from src.conf.config import settings
 from src.core.state_machine import State
+
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -43,6 +48,27 @@ def append_list(current: list, new: list) -> list:
     return current + [x for x in new if x not in current]
 
 
+def add_messages_capped(current: list, new: list) -> list:
+    """Append messages but keep only the last N to prevent unbounded growth."""
+    merged = add_messages(current, new)
+    max_messages = settings.STATE_MAX_MESSAGES
+    if max_messages > 0 and len(merged) > max_messages:
+        trimmed_count = len(merged) - max_messages
+        try:
+            from src.services.observability import track_metric
+
+            track_metric("state_messages_trimmed", trimmed_count)
+        except Exception:
+            pass
+        logger.info(
+            "[STATE] Trimmed messages: trimmed=%d kept=%d",
+            trimmed_count,
+            max_messages,
+        )
+        return merged[-max_messages:]
+    return merged
+
+
 # =============================================================================
 # CONVERSATION STATE
 # =============================================================================
@@ -54,13 +80,40 @@ class ConversationState(TypedDict, total=False):
 
     Every field has a proper reducer for LangGraph's state management.
     """
+
     # Core conversation data
-    messages: Annotated[list[dict[str, Any]], add_messages]
+    messages: Annotated[list[dict[str, Any]], add_messages_capped]
     current_state: str  # FSM state (STATE_0_INIT, etc.)
     metadata: Annotated[dict[str, Any], merge_dict]
 
+    # ==========================================================================
+    # DIALOG PHASE (Turn-Based State Machine)
+    # ==========================================================================
+    # This is the KEY field for turn-based conversation!
+    # Master router checks this to know where to continue the dialog.
+    #
+    # ПОВНИЙ СПИСОК ФАЗ (відповідає n8n state machine):
+    #
+    #   INIT                      - STATE_0: Новий діалог, потрібен intent detection
+    #   DISCOVERY                 - STATE_1: Збір контексту (зріст, тип речі, подія)
+    #   VISION_DONE               - STATE_2: Vision впізнав товар, чекаємо уточнення
+    #   WAITING_FOR_SIZE          - STATE_3: Потрібен розмір (зріст дитини)
+    #   WAITING_FOR_COLOR         - STATE_3: Потрібен вибір кольору
+    #   SIZE_COLOR_DONE           - STATE_3→4: Є розмір і колір, готові до offer
+    #   OFFER_MADE                - STATE_4: Пропозиція зроблена, чекаємо "Беру"
+    #   WAITING_FOR_DELIVERY_DATA - STATE_5: Чекаємо ПІБ, телефон, НП
+    #   WAITING_FOR_PAYMENT_METHOD- STATE_5: Чекаємо вибір способу оплати
+    #   WAITING_FOR_PAYMENT_PROOF - STATE_5: Чекаємо скрін оплати
+    #   UPSELL_OFFERED            - STATE_6: Запропонували допродаж
+    #   COMPLETED                 - STATE_7: Діалог завершено
+    #   COMPLAINT                 - STATE_8: Скарга, ескалація
+    #   OUT_OF_DOMAIN             - STATE_9: Поза доменом
+    # ==========================================================================
+    dialog_phase: str
+
     # Session identification
     session_id: str
+    trace_id: str  # UUID for the current interaction chain
     thread_id: str  # LangGraph thread for persistence
 
     # Intent & routing
@@ -76,6 +129,7 @@ class ConversationState(TypedDict, total=False):
     moderation_result: dict[str, Any] | None
     should_escalate: bool
     escalation_reason: str | None
+    escalation_level: str | None  # SOFT, HARD, or None
 
     # Tool execution
     tool_plan_result: dict[str, Any] | None
@@ -99,7 +153,15 @@ class ConversationState(TypedDict, total=False):
     # Time travel support (prefixed to avoid LangGraph reserved names)
     saved_checkpoint_id: str | None
     saved_parent_checkpoint_id: str | None
-    step_number: int
+    step_number: Annotated[int, replace_value]
+
+    # ==========================================================================
+    # MEMORY SYSTEM (Titans-like)
+    # ==========================================================================
+    # Populated by memory_context_node, consumed by AgentDeps
+    memory_profile: Any  # UserProfile from memory_models
+    memory_facts: list[Any]  # list[Fact] from memory_models
+    memory_context_prompt: str | None  # Pre-formatted prompt block
 
 
 # =============================================================================
@@ -135,45 +197,44 @@ def create_initial_state(
             "language": "uk",
             **(metadata or {}),
         },
-
+        # Dialog Phase (Turn-Based State Machine)
+        "dialog_phase": "INIT",
         # Session
         "session_id": session_id,
+        "trace_id": kwargs.get("trace_id"),  # Should be generated at entry point
         "thread_id": session_id,  # Use same ID for LangGraph threading
-
         # Intent
         "detected_intent": None,
         "has_image": False,
         "image_url": None,
-
         # Products
         "selected_products": [],
         "offered_products": [],
-
         # Moderation
         "moderation_result": None,
         "should_escalate": False,
         "escalation_reason": None,
-
         # Tools
         "tool_plan_result": None,
         "tool_errors": [],
-
         # Validation (self-correction)
         "validation_errors": [],
         "retry_count": 0,
         "max_retries": 3,
         "last_error": None,
-
         # Payment (human-in-the-loop)
         "awaiting_human_approval": False,
         "approval_type": None,
         "approval_data": None,
         "human_approved": None,
-
         # Time travel
         "checkpoint_id": None,
         "parent_checkpoint_id": None,
         "step_number": 0,
+        # Memory System (Titans-like)
+        "memory_profile": None,
+        "memory_facts": [],
+        "memory_context_prompt": None,
     }
 
     # Apply overrides
@@ -192,6 +253,7 @@ def get_state_snapshot(state: ConversationState) -> dict[str, Any]:
     return {
         "session_id": state.get("session_id"),
         "current_state": state.get("current_state"),
+        "dialog_phase": state.get("dialog_phase"),  # Turn-Based State Machine
         "detected_intent": state.get("detected_intent"),
         "has_image": state.get("has_image"),
         "products_count": len(state.get("selected_products", [])),
@@ -216,6 +278,10 @@ def validate_state(state: ConversationState) -> list[str]:
 
     if not state.get("session_id"):
         errors.append("Missing session_id")
+
+    if not state.get("trace_id"):
+        # Not a blocking error yet, but worth noting
+        pass
 
     if not state.get("current_state"):
         errors.append("Missing current_state")

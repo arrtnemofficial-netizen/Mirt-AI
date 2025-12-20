@@ -1,16 +1,13 @@
 """
 LangGraph Production Architecture.
 ===================================
-Proper separation of concerns:
+Core modules:
 - state.py: State definitions
-- checkpointer.py: PostgreSQL/Redis persistence
+- checkpointer.py: PostgreSQL persistence
 - nodes/: Individual node modules
 - edges.py: Routing logic
 - graph.py: Graph assembly
-- streaming.py: Real-time streaming
-- time_travel.py: State rollback/fork
-
-This is NOT a toy. This is production-ready.
+- streaming.py: Real-time token streaming (UX)
 """
 
 from .checkpointer import (
@@ -21,7 +18,6 @@ from .checkpointer import (
 from .edges import (
     route_after_intent,
     route_after_validation,
-    should_retry,
 )
 from .graph import (
     build_production_graph,
@@ -38,11 +34,6 @@ from .streaming import (
     StreamEventType,
     stream_events,
     stream_tokens,
-)
-from .time_travel import (
-    fork_from_state,
-    get_state_history,
-    rollback_to_step,
 )
 
 
@@ -63,13 +54,8 @@ __all__ = [
     # Edges
     "route_after_intent",
     "route_after_validation",
-    "should_retry",
-    # Streaming
+    # Streaming (UX)
     "stream_events",
     "stream_tokens",
     "StreamEventType",
-    # Time Travel
-    "get_state_history",
-    "rollback_to_step",
-    "fork_from_state",
 ]

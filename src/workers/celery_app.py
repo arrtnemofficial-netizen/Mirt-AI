@@ -81,6 +81,7 @@ celery_app = Celery(
         "src.workers.tasks.followups",
         "src.workers.tasks.crm",
         "src.workers.tasks.health",
+        "src.workers.tasks.manychat",
         "src.workers.tasks.messages",  # THE MAIN TASK!
         "src.workers.tasks.llm_usage",  # Token usage tracking
     ],
@@ -151,6 +152,24 @@ celery_app.conf.update(
 )
 
 # =============================================================================
+# SIGNALS - Lifecycle hooks
+# =============================================================================
+
+
+@signals.setup_logging.connect
+def setup_celery_logging(**kwargs):
+    from src.core.logging import setup_logging
+
+    is_production = os.getenv("PUBLIC_BASE_URL", "").strip() != "http://localhost:8000"
+    is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"))
+    setup_logging(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        json_format=bool(is_production or is_railway),
+        service_name="mirt-ai-worker",
+    )
+
+
+# =============================================================================
 # TASK ROUTING
 # =============================================================================
 
@@ -158,6 +177,7 @@ celery_app.conf.task_routes = {
     "src.workers.tasks.summarization.*": {"queue": "summarization"},
     "src.workers.tasks.followups.*": {"queue": "followups"},
     "src.workers.tasks.crm.*": {"queue": "crm"},
+    "src.workers.tasks.manychat.*": {"queue": "llm"},
     "src.workers.tasks.messages.process_message": {"queue": "llm"},
     "src.workers.tasks.messages.process_and_respond": {"queue": "llm"},
     "src.workers.tasks.messages.send_response": {"queue": "webhooks"},
@@ -211,6 +231,17 @@ celery_app.conf.beat_schedule = {
 def worker_init_handler(sender=None, **kwargs):
     """Called when worker process starts."""
     logger.info("[CELERY] Worker initialized: %s", sender)
+
+
+@signals.worker_process_init.connect
+def worker_process_init_handler(sender=None, **kwargs):
+    try:
+        from src.agents.langgraph.checkpointer import warmup_checkpointer_pool
+        from src.workers.sync_utils import run_sync
+
+        run_sync(warmup_checkpointer_pool())
+    except Exception as e:
+        logger.warning("[CELERY] Checkpointer warmup skipped/failed: %s", e)
 
 
 @signals.worker_shutdown.connect

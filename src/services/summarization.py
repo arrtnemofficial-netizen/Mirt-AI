@@ -2,8 +2,8 @@
 
 Handles:
 - Summarizing old conversations after SUMMARY_RETENTION_DAYS
-- Saving summaries to mirt_users table
-- Pruning old messages from mirt_messages
+- Saving summaries to users table
+- Pruning old messages from messages table
 - Integration with Supabase function summarize_inactive_users
 """
 
@@ -51,7 +51,7 @@ def summarise_messages(messages: list[StoredMessage]) -> str:
 
 
 def update_user_summary(user_id: int, summary: str) -> None:
-    """Update summary field in mirt_users table."""
+    """Update summary field in users table."""
     client = get_supabase_client()
     if not client:
         return
@@ -187,10 +187,10 @@ def run_retention(
     cleaned_messages = _drop_human_tag(messages)
     summary_text = summarise_messages(cleaned_messages)
 
-    # Save summary to mirt_users if we have user_id
+    # Save summary to users table if we have user_id
     if user_id:
         update_user_summary(user_id, summary_text)
 
-    # Delete old messages from mirt_messages
+    # Delete old messages from messages table
     message_store.delete(session_id)
     return summary_text

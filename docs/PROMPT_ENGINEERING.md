@@ -1,58 +1,87 @@
-# Prompt Engineering Guide
+﻿# 🧠 Prompt Engineering Guide
 
-## Overview
-
-MIRT AI uses a **single source of truth** for system prompts, defined in YAML and loaded dynamically. This ensures consistency between the codebase and the LLM's behavior.
-
----
-
-## 📄 Prompt Structure
-
-### 1. Master Prompt (`data/system_prompt_full.yaml`)
-This is the definitive prompt file. It contains:
-- **Identity**: Persona (Kind, professional stylist).
-- **Tools**: Definitions of available tools (Catalog, CRM).
-- **Output Contract**: Strict JSON schema for responses.
-- **Catalog**: Embedded product list (top bestsellers).
-- **Domain Knowledge**: Sizing charts, return policies, delivery info.
-
-### 2. Prompt Loader (`src/core/prompt_loader.py`)
-Responsible for loading and formatting the prompt.
-- Reads `system_prompt_full.yaml`.
-- Converts YAML sections into a unified Markdown string.
-- Injects dynamic context (if any).
+> **Версія:** 5.0  
+> **Status:** ✅ Active
 
 ---
 
-## 🛠️ Editing Prompts
+## 🎨 Philosophy
 
-**DO NOT hardcode prompts in Python files.**
+1. **Role-Based:** Кожен агент має чітку роль (Stylist, Cashier, Support).
+2. **Context-Aware:** В промпт динамічно підставляється історія, профіль клієнта та стан діалогу.
+3. **Structured Output:** Відповіді валідуються через Pydantic models.
 
-To change the bot's behavior:
-1. Open `data/system_prompt_full.yaml`.
-2. Edit the relevant section (e.g., `IDENTITY` or `POLICIES`).
-3. Restart the server (prompt is loaded on agent initialization).
+---
 
-### Example: Changing Tone
-```yaml
-IDENTITY: |
-  You are Mirt, a helpful and stylish assistant.
-  Tone: Warm, encouraging, using emojis (🤍, ✨).
-  Language: Ukrainian (always).
+## 🏗️ Prompt Structure
+
+```markdown
+# Role
+Ти - Олена, професійний стиліст дитячого одягу бренду MIRT.
+
+# Personality
+- Тон: Дружній, теплий, експертний, український.
+- Табу: Не використовувати російсизми, складні терміни.
+- Emoji: Використовувати помірно (1-2 на повідомлення).
+
+# Context
+User: {{user_name}}
+Child: {{child_info}}
+Detected Intent: {{intent}}
+
+# Rules
+1. Якщо клієнт питає ціну — перевір наявність.
+2. Якщо клієнт сумнівається — запропонуй допомогу з розміром.
+3. Завжди пропонуй супутні товари (Upsell) після підтвердження.
+
+# Tools
+Ти маєш доступ до:
+- `search_catalog(query)`
+- `check_stock(sku)`
 ```
 
 ---
 
-## 📦 Embedded Catalog
+## 🔧 Dynamic Injection Variables
 
-For speed and reliability, we embed the core product catalog directly into the system prompt.
-This avoids RAG latency and database dependencies for common queries.
-
-**Location**: `data/catalog.json` (source) -> `system_prompt_full.yaml` (runtime)
+| Variable | Description | Source |
+|:---------|:------------|:-------|
+| `{{dialog_phase}}` | Current flow step (e.g., WAITING_FOR_SIZE) | FSM |
+| `{{memory_context}}` | Relevant past facts (Titans Memory) | Vector DB |
+| `{{cart_content}}` | Potential order items | State |
+| `{{validation_error}}` | Previous tool error (for self-correction) | Runtime |
 
 ---
 
-## 🧪 Testing Prompts
+## 🛠️ Best Practices
 
-Use the `scripts/test_real_llm.py` (legacy) or manual testing via Telegram to verify prompt changes.
-Always check that the LLM adheres to the `OUTPUT_CONTRACT` defined in the Pydantic models.
+### 1. XML Tagging for Parsing
+Використовуйте теги для внутрішнього мислення (Chain of Thought):
+
+```xml
+<thinking>
+Клієнт запитав про сукню.
+У мене немає розміру 116.
+Я маю запропонувати 122 на виріст.
+</thinking>
+На жаль, 116 закінчився, але 122 чудово підійде з запасом!
+```
+
+### 2. Guardrails
+- **Safety:** Не відповідати на провокаційні питання.
+- **Brand Safe:** Не рекомендувати конкурентів.
+- **OOD (Out of Domain):** "Я можу допомогти тільки з одягом MIRT".
+
+---
+
+## 📂 Prompt Registry (`data/prompts/`)
+
+| File | Purpose |
+|:-----|:--------|
+| `system/main.md` | Master prompt for Router/Agent |
+| `vision/vision_main.md` | Image analysis guidelines |
+| `states/STATE_*.md` | State-specific instructions |
+
+---
+
+> **Оновлено:** 20 грудня 2025, 13:52 UTC+2

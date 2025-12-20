@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from src.core.input_validator import validate_input_metadata
+from src.core.state_machine import State
 
 
 logger = logging.getLogger(__name__)
@@ -19,31 +20,201 @@ logger = logging.getLogger(__name__)
 # Intent keywords for quick detection
 INTENT_PATTERNS = {
     "PAYMENT_DELIVERY": [
-        "купую", "беру", "оплата", "реквізит", "замовл", "оформ",
-        "карта", "переказ", "оплачу", "доставк", "нова пошта",
+        "купую",
+        "беру",
+        "оплата",
+        "реквізит",
+        "замовл",
+        "оформ",
+        "карта",
+        "переказ",
+        "оплачу",
+        "доставк",
+        "нова пошта",
+        "хочу куп",  # explicit purchase intent
+    ],
+    # Confirmation words that mean "yes" in OFFER state
+    "CONFIRMATION": [
+        "так",
+        "да",
+        "yes",
+        "ок",
+        "ok",
+        "добре",
+        "згодна",
+        "згоден",
+        "підходить",
+        "давай",
+        "давайте",
+        "можна",
+        "хочу",
+        "буду",
+        "годі",
+        "файно",
+        "супер",
+    ],
+    # Product names for selection in OFFER state
+    "PRODUCT_NAMES": [
+        "лагуна",
+        "мрія",
+        "ритм",
+        "каприз",
+        "валері",
+        "мерея",
+        "анна",
+        "тренч",
+        "еліт",
+        "зірка",
+        "софія",
+        "вікторія",
+        "мілана",
+        "діана",
+        "перший",
+        "другий",
+        "третій",
+        "1",
+        "2",
+        "3",  # selection by number
+    ],
+    # Product category browsing - general type requests
+    "PRODUCT_CATEGORY": [
+        # Костюми
+        "костюм",
+        "костюмчик",
+        "комплект",
+        # Сукні
+        "сукн",  # сукня, сукню, сукні
+        "плаття",
+        "платтячко",
+        # Верхній одяг
+        "тренч",
+        "куртка",
+        "курточка",
+        "плащ",
+        # Штани
+        "штани",
+        "штанці",
+        "брюки",
+        "джогери",
+        # Верх
+        "блуз",  # блуза, блузка, блузу
+        "кофт",  # кофта, кофту
+        "світшот",
+        "худі",
+        # General
+        "одяг",
+        "річ",
+        "щось на",  # "щось на свято"
     ],
     "SIZE_HELP": [
-        "зріст", "розмір", "вік", "см", "років", "рік", "міс",
-        "скільки", "який розмір", "підбери", "підійде",
+        "зріст",
+        "розмір",
+        "вік",
+        "см",
+        "років",
+        "рік",
+        "міс",
+        "скільки",
+        "який розмір",
+        "підбери",
+        "підійде",
     ],
     "COLOR_HELP": [
-        "колір", "кольор", "інший", "чорн", "біл", "рожев",
-        "синій", "червон", "зелен",
+        # Generic color questions (specific patterns to avoid false positives)
+        "який колір",
+        "які кольори",
+        "інший колір",  # More specific than just "інший"
+        "є в кольорі",  # More specific than "є в "
+        "колір є",
+        # Specific colors (longer stems to avoid false positives)
+        "чорний",
+        "чорного",
+        "чорному",
+        "чорним",
+        "білий",
+        "білого",
+        "білому",
+        "білим",
+        "рожев",  # рожевий, рожевого - safe, no FP
+        "синій",
+        "синього",
+        "синьому",  # NOT "син" - FP with "син" (son)!
+        "червон",  # червоний - safe
+        "зелен",  # зелений - safe
+        "жовт",  # жовтий - safe
+        "помаранч",  # помаранчевий - safe
+        "сірий",
+        "сірого",
+        "сірому",  # NOT "сір" - FP with "сір" (cheese)!
+        "молоч",  # молочний - safe
+        "бордо",  # бордо - safe
+        "шоколад",  # шоколадний - safe
+        "бежев",  # бежевий - safe
+        "малинов",  # малиновий - safe
     ],
     "COMPLAINT": [
-        "скарга", "проблем", "повернен", "брак", "жалоба", "обман",
-        "не працює", "зламан", "погано", "відмов",
+        "скарга",
+        "проблем",
+        "повернен",
+        "брак",
+        "жалоба",
+        "обман",
+        "не працює",
+        "зламан",
+        "погано",
+        "відмов",
     ],
+    # PHOTO_IDENT - used when has_image=True (user sent photo)
+    # Note: This is not matched via keywords, only via has_image flag
     "PHOTO_IDENT": [
-        "фото", "фотографія", "зображення", "покажи фото", "можна фото",
-        "дивись фото", "картинка", "знімок", "фотк",
+        # These are kept for reference but detection is via has_image flag
+    ],
+    # REQUEST_PHOTO - user asks to see a product photo (no image attached)
+    "REQUEST_PHOTO": [
+        "покажи фото",
+        "можна фото",
+        "є фото",
+        "скинь фото",
+        "фотку",
+        "як виглядає",
+        "покажіть",
+        "хочу побачити",
+        "можна подивитись",
     ],
     "DISCOVERY_OR_QUESTION": [
-        "сукн", "костюм", "тренч", "плаття", "покаж", "є", "хочу",
-        "підбери", "порадь", "шукаю", "ціна", "скільки кошт",
+        # NOTE: Clothing types (костюм, сукня, тренч) are now in PRODUCT_CATEGORY
+        # which has higher priority. Keep only general discovery keywords here.
+        "покаж",
+        "є",  # "чи є?"
+        "хочу",  # "хочу щось"
+        "підбери",
+        "порадь",
+        "шукаю",
+        "ціна",
+        "скільки кошт",
     ],
     "GREETING_ONLY": [
-        "привіт", "вітаю", "добр", "hello", "hi", "хай",
+        "привіт",
+        "вітаю",
+        "добр",
+        "hello",
+        "hi",
+        "хай",
+    ],
+    # Thank you / small talk - end of conversation
+    "THANKYOU_SMALLTALK": [
+        "дякую",
+        "дякуємо",
+        "спасибі",
+        "дуже вдячна",
+        "вдячна",
+        "ок",
+        "окей",
+        "добре",
+        "зрозуміло",
+        "гарного дня",
+        "до побачення",
+        "бувайте",
     ],
 }
 
@@ -75,20 +246,54 @@ def detect_intent_from_text(
 
 def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -> str | None:
     """Check special cases before keyword matching."""
-    # Empty text with image
+    # Empty text with image = definitely photo identification
     if not text_lower and has_image:
         return "PHOTO_IDENT"
 
-    # Payment context takes priority in payment state
-    if current_state == "STATE_5_PAYMENT_DELIVERY":
-        if has_image:
-            return "PAYMENT_DELIVERY"
+    # In OFFER state: payment keywords, confirmations, or product names = PAYMENT
+    if current_state == "STATE_4_OFFER":
+        # Payment keywords
         for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
             if keyword in text_lower:
+                logger.info(
+                    "Intent override: PAYMENT_DELIVERY in OFFER state (payment keyword: %s)",
+                    keyword,
+                )
+                return "PAYMENT_DELIVERY"
+        # Confirmation words (так, да, ок, etc.)
+        for keyword in INTENT_PATTERNS["CONFIRMATION"]:
+            if keyword in text_lower:
+                logger.info(
+                    "Intent override: PAYMENT_DELIVERY in OFFER state (confirmation: %s)", keyword
+                )
+                return "PAYMENT_DELIVERY"
+        # Product name selection (лагуна, мрія, etc.)
+        for keyword in INTENT_PATTERNS["PRODUCT_NAMES"]:
+            if keyword in text_lower:
+                logger.info(
+                    "Intent override: PAYMENT_DELIVERY in OFFER state (product selection: %s)",
+                    keyword,
+                )
                 return "PAYMENT_DELIVERY"
 
-    # Photo identification (not in payment context)
+    # Payment context takes priority in payment state - ANY input continues payment flow
+    if current_state == "STATE_5_PAYMENT_DELIVERY":
+        # In payment state, most inputs are payment-related (size, address, phone, etc.)
+        # Only explicit questions or complaints should break out
+        for keyword in INTENT_PATTERNS["COMPLAINT"]:
+            if keyword in text_lower:
+                return None  # Let keyword matching handle complaints
+        # Everything else in payment state stays in payment
+        logger.info("Intent: PAYMENT_DELIVERY (in payment state, continuing flow)")
+        return "PAYMENT_DELIVERY"
+
+    # Photo identification ONLY if user sent text that looks like photo query
+    # OR if there's no meaningful text (just "ціна" etc with image)
     if has_image:
+        # Check if text is a payment/action keyword - don't override to PHOTO_IDENT
+        for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
+            if keyword in text_lower:
+                return None  # Let keyword matching handle it
         return "PHOTO_IDENT"
 
     return None
@@ -102,6 +307,8 @@ def _match_keywords(text_lower: str, text_len: int) -> str:
         "COMPLAINT",
         "SIZE_HELP",
         "COLOR_HELP",
+        "REQUEST_PHOTO",  # User asking for product photos
+        "PRODUCT_CATEGORY",  # User looking for clothing type
     ]
 
     for intent in priority_intents:
@@ -130,7 +337,42 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     This runs BEFORE LLM to enable conditional edges.
     Fast and lightweight - no API calls.
     """
-    # Skip if already escalating
+    dialog_phase = state.get("dialog_phase", "")
+    reset_for_new = dialog_phase == "COMPLETED"
+
+    # Check for image FIRST - photo identification has highest priority
+    metadata = state.get("metadata", {})
+    has_image_early = state.get("has_image", False) or metadata.get("has_image", False)
+
+    if has_image_early:
+        # Photo always goes to vision, ignore old escalation flags
+        logger.info("Intent: PHOTO_IDENT (has_image=True, overrides escalation)")
+        update = {
+            "detected_intent": "PHOTO_IDENT",
+            "has_image": True,
+            "image_url": metadata.get("image_url"),
+            "metadata": {**metadata, "has_image": True},
+            "step_number": state.get("step_number", 0) + 1,
+        }
+        if reset_for_new:
+            update.update(
+                {
+                    "current_state": State.STATE_0_INIT.value,
+                    "dialog_phase": "INIT",
+                    "selected_products": [],
+                    "offered_products": [],
+                    "metadata": {
+                        **metadata,
+                        "has_image": True,
+                        "current_state": State.STATE_0_INIT.value,
+                        "upsell_flow_active": False,
+                        "upsell_base_products": [],
+                    },
+                }
+            )
+        return update
+
+    # Skip if already escalating (only for non-photo messages)
     if state.get("should_escalate"):
         return {
             "detected_intent": "ESCALATION",
@@ -142,6 +384,7 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Get latest user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
+
     user_content = extract_user_message(state.get("messages", []))
 
     # Check for image
@@ -163,7 +406,8 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         metadata.current_state.value,
     )
 
-    return {
+    reset_now = reset_for_new and detected_intent != "THANKYOU_SMALLTALK"
+    update = {
         "detected_intent": detected_intent,
         "has_image": has_image,
         "image_url": image_url,
@@ -174,3 +418,22 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         },
         "step_number": state.get("step_number", 0) + 1,
     }
+    if reset_now:
+        update.update(
+            {
+                "current_state": State.STATE_0_INIT.value,
+                "dialog_phase": "INIT",
+                "selected_products": [],
+                "offered_products": [],
+                "metadata": {
+                    **state.get("metadata", {}),
+                    "has_image": has_image,
+                    "image_url": image_url,
+                    "current_state": State.STATE_0_INIT.value,
+                    "intent": detected_intent,
+                    "upsell_flow_active": False,
+                    "upsell_base_products": [],
+                },
+            }
+        )
+    return update

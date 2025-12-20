@@ -1,0 +1,60 @@
+# GOLDEN DATASET v1.0
+# "Source of Truth" for AI Testing
+# Contains Hand-Crafted Scenarios based on MIRT_FULL_RULES.yaml
+
+suites:
+  - name: "Strict Size Boundaries"
+    description: "Verifies that the bot correctly up-sizes on the 119/131/143 boundaries."
+    cases:
+      - id: "SIZE_119_BOUNDARY"
+        input: "Зріст 119 см"
+        expected_state: "STATE_3_SIZE_COLOR"
+        must_contain: 
+          - "122"
+          - "122-128"
+        must_not_contain:
+          - "116"
+          - "110-116"
+      
+      - id: "SIZE_131_BOUNDARY"
+        input: "131 см"
+        expected_state: "STATE_3_SIZE_COLOR"
+        must_contain: "134"
+        must_not_contain: "128"
+
+  - name: "Color Equivalence"
+    description: "Verifies White=Milk rule."
+    cases:
+      - id: "COLOR_WHITE_REQ"
+        input: "Хочу білий колір"
+        expected_state: "STATE_3_SIZE_COLOR"
+        must_contain: 
+          - "молочний"
+        must_not_contain:
+          - "білого немає"
+          - "немає білого"
+
+  - name: "Video Priority"
+    description: "Verifies that video is sent immediately in Discovery."
+    cases:
+      - id: "DISCOVERY_VIDEO"
+        input: "Покажіть костюми"
+        expected_state: "STATE_1_DISCOVERY"
+        must_contain:
+          - "https://"
+        must_not_contain:
+          - "фото чи відео?"
+          - "надіслати вам?"
+
+  - name: "Payment Scripts"
+    description: "Verifies exact legal wording for payment."
+    cases:
+      - id: "PAYMENT_TEMPLATE_STRICT"
+        input: "Обираю накладений"
+        context_state: "STATE_5_PAYMENT_DELIVERY"
+        must_contain:
+          - "200 грн"
+          - "+ 2% + 20 грн комісія"
+        must_not_contain:
+          - "передплата 100"
+          - "комісія пошти" # vague phrasing

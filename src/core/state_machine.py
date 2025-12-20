@@ -301,6 +301,74 @@ TRANSITIONS: list[Transition] = [
 ]
 
 
+# =============================================================================
+# DIALOG PHASE -> STATE MAPPING (Turn-Based FSM)
+# =============================================================================
+
+
+DIALOG_PHASE_TO_STATE: dict[str, State] = {
+    "INIT": State.STATE_0_INIT,
+    "DISCOVERY": State.STATE_1_DISCOVERY,
+    "VISION_DONE": State.STATE_2_VISION,
+    "WAITING_FOR_SIZE": State.STATE_3_SIZE_COLOR,
+    "WAITING_FOR_COLOR": State.STATE_3_SIZE_COLOR,
+    "SIZE_COLOR_DONE": State.STATE_4_OFFER,
+    "OFFER_MADE": State.STATE_4_OFFER,
+    "WAITING_FOR_DELIVERY_DATA": State.STATE_5_PAYMENT_DELIVERY,
+    "WAITING_FOR_PAYMENT_METHOD": State.STATE_5_PAYMENT_DELIVERY,
+    "WAITING_FOR_PAYMENT_PROOF": State.STATE_5_PAYMENT_DELIVERY,
+    "CRM_ERROR_HANDLING": State.STATE_5_PAYMENT_DELIVERY,
+    "UPSELL_OFFERED": State.STATE_6_UPSELL,
+    "COMPLETED": State.STATE_7_END,
+    "ESCALATED": State.STATE_7_END,
+    "COMPLAINT": State.STATE_8_COMPLAINT,
+    "OUT_OF_DOMAIN": State.STATE_9_OOD,
+}
+
+
+def expected_state_for_phase(phase: str | None) -> State | None:
+    if not phase:
+        return None
+    return DIALOG_PHASE_TO_STATE.get(str(phase).upper())
+
+
+def allowed_next_states(
+    from_state: State,
+    *,
+    intent: Intent | None = None,
+    dialog_phase: str | None = None,
+) -> set[State]:
+    """Return allowed next states given current state, intent, and dialog_phase."""
+    allowed: set[State] = {from_state}
+
+    if intent is None or intent == Intent.UNKNOWN_OR_EMPTY:
+        allowed.update({t.to_state for t in TRANSITIONS if t.from_state == from_state})
+    else:
+        allowed.update(
+            {
+                t.to_state
+                for t in TRANSITIONS
+                if t.from_state == from_state and intent in t.when_intents
+            }
+        )
+
+    phase_state = expected_state_for_phase(dialog_phase)
+    if phase_state is not None:
+        allowed.add(phase_state)
+
+    return allowed
+
+
+def is_transition_allowed(
+    *,
+    from_state: State,
+    to_state: State,
+    intent: Intent | None = None,
+    dialog_phase: str | None = None,
+) -> bool:
+    return to_state in allowed_next_states(from_state, intent=intent, dialog_phase=dialog_phase)
+
+
 def get_possible_transitions(from_state: State) -> list[Transition]:
     """Get all possible transitions from a given state."""
     return [t for t in TRANSITIONS if t.from_state == from_state]
@@ -389,23 +457,6 @@ def get_keyboard_for_state(
     if escalation_level != EscalationLevel.NONE:
         return ESCALATION_KEYBOARD
     return STATE_KEYBOARDS.get(state)
-
-
-# =============================================================================
-# TOOL NAMES (DEPRECATED - Embedded Catalog Mode)
-# =============================================================================
-
-
-class ToolName(str, Enum):
-    """
-    Tool identifiers - DEPRECATED.
-    RAG tools disabled, using Embedded Catalog in prompt.
-    Kept for backward compatibility only.
-    """
-
-    SEARCH_BY_QUERY = "T_CATALOG_SEARCH"  # renamed, no longer calls Supabase
-    GET_BY_ID = "T_CATALOG_GET_BY_ID"
-    GET_BY_PHOTO_URL = "T_CATALOG_GET_BY_PHOTO_URL"
 
 
 # =============================================================================

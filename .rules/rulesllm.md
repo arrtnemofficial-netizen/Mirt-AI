@@ -1,29 +1,32 @@
-# 🔥 ЗАЛІЗОБЕТОННИЙ КОДЕКС РОЗРОБКИ v3.0
+# 🔥 ЗАЛІЗОБЕТОННИЙ КОДЕКС РОЗРОБКИ v4.0
 
 > **⚠️ КРИТИЧНА ІНСТРУКЦІЯ ДЛЯ AI AGENTS ТА РОЗРОБНИКІВ:**
 > Цей документ визначає **НЕПОРУШНІ ЗАКОНИ** архітектури проекту MIRT AI.
-> **PydanticAI + LangGraph = Production-Grade Agentic System**
+> **PydanticAI + LangGraph + CRM Integration = Production-Grade Agentic System**
 > Будь-яке відхилення від цих правил вважається **КРИТИЧНОЮ ПОМИЛКОЮ**.
+>
+> 📚 **Центральний індекс документації:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
 
 ---
 
 ## 0. Про проект (Контекст для AI)
 
 **MIRT AI** — це AI-консультант для магазину дитячого одягу MIRT.
-- **Архітектура:** PydanticAI (мозок) + LangGraph (оркестратор) + PostgreSQL Checkpointer
+- **Архітектура:** PydanticAI (мозок) + LangGraph (оркестратор) + PostgreSQL Checkpointer + Snitkix CRM
 - **Мова спілкування:** Українська
 - **Платформи:** Instagram (ManyChat), Telegram
 - **LLM:** Grok/GPT/Gemini через OpenRouter
 - **База даних:** Supabase (PostgreSQL) + LangGraph Persistence
+- **CRM:** Snitkix (async API + webhooks + Celery tasks)
 - **Каталог:** ~100 товарів (Embedded Catalog в system_prompt)
 
-**Ключова ціль:** Допомогти клієнту обрати товар → уточнити розмір/колір → довести до покупки.
+**Ключова ціль:** Допомогти клієнту обрати товар → уточнити розмір/колір → довести до покупки → створити замовлення в CRM з повним контролем статусів.
 
 ---
 
-## 🏗️ 1. АРХІТЕКТУРА: PydanticAI + LangGraph
+## 🏗️ 1. АРХІТЕКТУРА: PydanticAI + LangGraph + CRM Integration
 
-### 1.1. Двошарова архітектура
+### 1.1. Тришарова архітектура
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -37,14 +40,15 @@
 │  │  ├── checkpointer.py  # PostgreSQL/Redis Persistence              │  │
 │  │  ├── streaming.py     # Real-time Token Streaming                 │  │
 │  │  ├── time_travel.py   # State Rollback/Fork                       │  │
-│  │  └── nodes/           # 10 Production Nodes                       │  │
+│  │  └── nodes/           # 11 Production Nodes                       │  │
 │  │      ├── moderation.py   # Content Filter (Gate)                  │  │
 │  │      ├── intent.py       # Intent Detection                       │  │
 │  │      ├── agent.py        # Main LLM Processing                    │  │
 │  │      ├── vision.py       # Photo Recognition                      │  │
 │  │      ├── offer.py        # Product Offers                         │  │
-│  │      ├── payment.py      # Payment Flow (HITL)                    │  │
-│  │      ├── upsell.py       # Cross-sell                             │  │
+│  │      ├── payment.py      # Payment Flow (HITL) + CRM Integration   │  │
+│  │      ├── upsell.py       # Cross-sell + CRM Status Display        │  │
+│  │      ├── crm_error.py    # CRM Error Recovery (NEW)               │  │
 │  │      ├── validation.py   # Self-Correction Loop                   │  │
 │  │      └── escalation.py   # Human Handoff                          │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
@@ -58,10 +62,24 @@
 │  │  src/agents/pydantic/                                             │  │
 │  │  ├── deps.py           # AgentDeps (Dependency Injection)         │  │
 │  │  ├── models.py         # OUTPUT_CONTRACT Models (Typed!)          │  │
-│  │  ├── support_agent.py  # Main Sales Agent "Ольга"                 │  │
+│  │  ├── support_agent.py  # Main Sales Agent "Софія"                 │  │
 │  │  ├── vision_agent.py   # Photo Recognition Specialist             │  │
 │  │  ├── payment_agent.py  # Payment Flow Specialist                  │  │
 │  │  └── observability.py  # Logfire Integration                      │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         🔄 CRM INTEGRATION LAYER                        │
+│                    (External Systems / Зовнішні системи)                │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  src/integrations/crm/                                            │  │
+│  │  ├── crmservice.py      # High-level CRM Service (NEW)           │  │
+│  │  ├── error_handler.py   # CRM Error Recovery (NEW)               │  │
+│  │  ├── webhooks.py        # Snitkix Webhook Handlers (NEW)         │  │
+│  │  ├── snitkix.py         # Snitkix Async API Client                │  │
+│  │  └── database_schema.sql# Supabase CRM Orders Table (NEW)         │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -75,7 +93,12 @@ START → moderation → intent ──┬──→ vision ───┬──→ 
                               │              │                          │
                               ├──→ offer ────┘                          │
                               │                                         │
-                              ├──→ payment (HITL) → upsell ─────────────┤
+                              ├──→ payment (HITL) ──┬──→ upsell ────────┤
+                              │                    │                   │
+                              │                    ├──→ crm_error ──────┤
+                              │                    │   ↓               │
+                              │                    │ retry/escalate    │
+                              │                    └──→ upsell ────────┤
                               │                                         │
                               └──→ escalation ──────────────────────────┘
                                                          ▲
@@ -85,9 +108,86 @@ START → moderation → intent ──┬──→ vision ───┬──→ 
 
 ---
 
-## 🚨 2. КРИТИЧНО: ПРАВИЛА ІМПОРТІВ
+## � 2. CRM INTEGRATION: Snitkix
 
-### 2.1. Правильні імпорти
+### 2.1. Архітектура CRM інтеграції
+
+**Компоненти:**
+- `crmservice.py` - High-level service з persistence та idempotency
+- `error_handler.py` - Error recovery з retry UI та operator escalation  
+- `webhooks.py` - FastAPI endpoints для bidirectional sync
+- `snitkix.py` - Async HTTP client для Snitkix API
+- `database_schema.sql` - Supabase таблиця `crm_orders`
+
+**Flow:** Payment approval → CRM creation (async Celery) → Status webhook → User notification
+
+### 2.2. Критичні налаштування перед продакшеном
+
+```bash
+# 1. Environment Variables (REQUIRED)
+SNITKIX_ENABLED=true
+SNITKIX_API_URL=https://your-snitkix-instance.com/api
+SNITKIX_API_KEY=your-api-key-here
+
+# 2. Database Migration (REQUIRED)
+# Execute src/integrations/crm/database_schema.sql in Supabase
+CREATE TABLE crm_orders (
+    id SERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    external_id TEXT UNIQUE NOT NULL,
+    crm_order_id TEXT,
+    status TEXT DEFAULT 'pending',
+    order_data JSONB,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+# 3. Celery Worker (REQUIRED)
+celery -A src.workers.celery_app worker --loglevel=info
+
+# 4. Webhook Registration (REQUIRED)
+# Register with Snitkix:
+POST /webhooks/snitkix/order-status
+POST /webhooks/snitkix/payment  
+POST /webhooks/snitkix/inventory
+```
+
+### 2.3. Error Handling Strategy
+
+| Error Type | Recovery Action | User Message |
+|------------|-----------------|--------------|
+| `network_error` | Auto-retry (max 3) | "Проблеми з зв'язком, спробувати ще раз?" |
+| `crm_rejected` | User action required | "Перевірте дані замовлення та повторіть" |
+| `timeout` | Retry or escalate | "CRM не відповідає, передати оператору?" |
+| `rate_limit` | Auto-retry with delay | "Забагато запитів, спробуйте через хвилину" |
+| `unknown` | User choice (retry/escalate) | "Помилка CRM, що робити?" |
+
+### 2.4. CRM Status Flow
+
+```python
+# Статуси замовлення в CRM:
+"pending" → "queued" (Celery task) → "created" (Snitkix) → "confirmed" (webhook)
+      ↓
+   "failed" → crm_error_node → retry/escalate → "created" або "escalated"
+```
+
+### 2.5. CRM Troubleshooting
+
+| Проблема | Симптоми | Рішення |
+|----------|----------|---------|
+| `SNITKIX_ENABLED=false` | CRM creation skipped, no errors | Set `SNITKIX_ENABLED=true` in env vars |
+| Celery worker not running | Tasks stuck in "queued" status | Start: `celery -A src.workers.celery_app worker --loglevel=info` |
+| Missing DB table | Database errors on order creation | Run `src/integrations/crm/database_schema.sql` migration |
+| Webhook auth failure | 401 errors from Snitkix | Verify `SNITKIX_API_KEY` matches webhook registration |
+| Duplicate orders | Same order created multiple times | Check `external_id` generation and idempotency logic |
+| CRM API timeout | "timeout" errors in crm_error_node | Increase timeout settings or check network connectivity |
+
+---
+
+## � 3. КРИТИЧНО: ПРАВИЛА ІМПОРТІВ
+
+### 3.1. Правильні імпорти
 
 ```python
 # ═══════════════════════════════════════════════════════════════════
@@ -164,7 +264,7 @@ from src.agents.langgraph.nodes import agent_node, vision_node
 from src.agents.langgraph.edges import route_after_intent
 ```
 
-### 2.2. Заборонені імпорти
+### 3.2. Заборонені імпорти
 
 ```python
 # ❌ ЗАБОРОНЕНО - ЦІ ФАЙЛИ НЕ ІСНУЮТЬ:
@@ -174,7 +274,7 @@ from src.agents.graph_v2 import ...        # ЗАСТАРІЛО!
 from src.agents.pydantic_agent import ...  # ЗАСТАРІЛО!
 ```
 
-### 2.3. Структура модуля src/agents/
+### 3.3. Структура модуля src/agents/
 
 ```
 src/agents/
@@ -184,7 +284,7 @@ src/agents/
 │   ├── __init__.py              # Експорт PydanticAI API
 │   ├── deps.py                  # AgentDeps (DI Container)
 │   ├── models.py                # OUTPUT_CONTRACT Models
-│   ├── support_agent.py         # Agent "Ольга" (main)
+│   ├── support_agent.py         # Agent "Софія" (main)
 │   ├── vision_agent.py          # Vision specialist
 │   ├── payment_agent.py         # Payment specialist
 │   └── observability.py         # Logfire integration
@@ -206,6 +306,7 @@ src/agents/
         ├── offer.py             # Product offers
         ├── payment.py           # Payment (HITL)
         ├── upsell.py            # Cross-sell
+        ├── crm_error.py         # CRM Error Recovery (NEW)
         ├── validation.py        # Self-correction
         ├── escalation.py        # Human handoff
         └── utils.py             # Shared utilities
@@ -213,9 +314,9 @@ src/agents/
 
 ---
 
-## 🎯 3. PydanticAI ПРАВИЛА
+## 🎯 4. PydanticAI ПРАВИЛА
 
-### 3.1. AgentDeps (Dependency Injection)
+### 4.1. AgentDeps (Dependency Injection)
 
 ```python
 # ✅ ПРАВИЛЬНО: Використовуй AgentDeps для всіх залежностей
@@ -239,7 +340,7 @@ deps = AgentDeps(
 response = await run_support("Привіт!", deps)
 ```
 
-### 3.2. Structured Output (OUTPUT_CONTRACT)
+### 4.2. Structured Output (OUTPUT_CONTRACT)
 
 ```python
 # PydanticAI ЗАВЖДИ повертає типізовану відповідь!
@@ -256,31 +357,70 @@ print(response.metadata.intent)          # "SIZE_HELP"
 print(response.escalation)               # EscalationInfo | None
 ```
 
-### 3.3. OUTPUT_CONTRACT Models
+### 4.3. OUTPUT_CONTRACT Models (актуальна схема)
 
 ```python
 class SupportResponse(BaseModel):
-    """Головна модель відповіді агента."""
+    """Головна модель відповіді агента (OUTPUT_CONTRACT)."""
     
-    event: EventType                 # simple_answer/clarifying_question/multi_option/escalation/end_smalltalk
-    messages: list[MessageItem]      # [{type: "text", content: "..."}]
-    products: list[ProductMatch]     # [{id, name, price, size, color, photo_url}]
+    # REQUIRED
+    event: EventType                 # "simple_answer" | "clarifying_question" | ...
+    messages: list[MessageItem]      # [{type: "text", content: "..."}], min_length=1
     metadata: ResponseMetadata       # {session_id, current_state, intent, escalation_level}
-    escalation: EscalationInfo | None
-    customer_data: CustomerDataExtracted | None
-    reasoning: str | None            # Chain-of-thought (debug)
+
+    # OPTIONAL (можуть бути порожні)
+    products: list[ProductMatch] = Field(
+        default_factory=list,
+        description="Товари ТІЛЬКИ з CATALOG (id, name, price, size, color, photo_url)",
+    )
+    reasoning: str | None = Field(
+        default=None,
+        description="Internal debug log (Input -> Intent -> Catalog -> State -> Output)",
+    )
+    escalation: EscalationInfo | None = Field(
+        default=None,
+        description="Required if event='escalation'",
+    )
+    customer_data: CustomerDataExtracted | None = Field(
+        default=None,
+        description="Дані клієнта з повідомлення (для STATE_5)",
+    )
+    deliberation: OfferDeliberation | None = Field(
+        default=None,
+        description="Multi-role analysis: customer/business/quality views (для STATE_4_OFFER)",
+    )
+
 
 class ProductMatch(BaseModel):
-    """Товар з CATALOG - валідація вбудована!"""
-    id: int                          # Product ID (MUST exist in CATALOG)
-    name: str                        # Назва з каталогу
-    price: float = Field(gt=0)       # Ціна > 0
-    size: str                        # Розмір з CATALOG.sizes
-    color: str                       # Колір з CATALOG.colors
-    photo_url: str                   # https://cdn.sitniks.com/...
+    """Товар з CATALOG - relaxed валідація (Vision-friendly)."""
+
+    # name обовʼязковий, інші поля можуть бути заповнені пізніше з БД
+    id: int = Field(
+        default=0,
+        description="Product ID (0 якщо невідомий, шукаємо по name в CATALOG)",
+    )
+    name: str = Field(description="Назва товару точно як в CATALOG")
+    price: float = Field(
+        default=0.0,
+        ge=0,
+        description="Ціна в грн (0 = варіативна, дізнатись з DB)",
+    )
+    size: str | None = Field(default=None, description="Розмір (якщо клієнт вказав)")
+    color: str = Field(default="", description="Колір (може бути порожнім)")
+    photo_url: str = Field(
+        default="",
+        description="URL фото з CATALOG (може бути порожнім)",
+    )
+
+    @field_validator("photo_url")
+    @classmethod
+    def validate_photo_url(cls, v: str) -> str:
+        if v and not v.startswith("https://"):
+            raise ValueError("photo_url MUST start with 'https://'")
+        return v
 ```
 
-### 3.4. Dynamic System Prompts
+### 4.4. Dynamic System Prompts
 
 ```python
 # PydanticAI підтримує динамічні промпти через функції
@@ -302,7 +442,7 @@ async def get_size_recommendation(ctx: RunContext[AgentDeps], height_cm: int) ->
     ...
 ```
 
-### 3.5. Agent Creation (PydanticAI 1.23+)
+### 4.5. Agent Creation (PydanticAI 1.23+)
 
 ```python
 # ⚠️ ВАЖЛИВО: PydanticAI 1.23+ API Changes
@@ -328,11 +468,25 @@ response = result.output  # НЕ result.response (це ModelResponse)!
 # result_type=SupportResponse  # Помилка: Unknown keyword arguments
 ```
 
+### 4.6. Memory-Aware AgentDeps (Titans-like памʼять)
+
+```python
+from src.agents.pydantic.deps import create_deps_with_memory
+
+# LangGraph state → AgentDeps + memory context
+deps = await create_deps_with_memory(state)
+
+# Усередині:
+# - Завантажуються профіль (Persistent Memory)
+# - Останні факти (Fluid Memory)
+# - Формується memory_context_prompt для system prompt
+```
+
 ---
 
-## 🌊 4. LangGraph ПРАВИЛА
+## 🌊 5. LangGraph ПРАВИЛА
 
-### 4.1. ConversationState (TypedDict + Reducers)
+### 5.1. ConversationState (TypedDict + Reducers)
 
 ```python
 from src.agents import ConversationState, create_initial_state
@@ -385,7 +539,7 @@ class ConversationState(TypedDict, total=False):
     step_number: int
 ```
 
-### 4.2. Graph Invocation
+### 5.2. Graph Invocation
 
 ```python
 from src.agents import get_active_graph, invoke_graph, invoke_with_retry
@@ -412,7 +566,7 @@ result = await invoke_with_retry(
 )
 ```
 
-### 4.3. Human-in-the-Loop (HITL)
+### 5.3. Human-in-the-Loop (HITL)
 
 ```python
 from src.agents.langgraph.graph import resume_after_interrupt
@@ -427,7 +581,7 @@ result = await resume_after_interrupt(
 )
 ```
 
-### 4.4. Time Travel
+### 5.4. Time Travel
 
 ```python
 from src.agents import get_state_history, rollback_to_step, fork_from_state
@@ -444,7 +598,7 @@ result = await rollback_to_step(graph, session_id, step_number=5)
 new_session_id = await fork_from_state(graph, session_id, step_number=3)
 ```
 
-### 4.5. Streaming
+### 5.5. Streaming
 
 ```python
 from src.agents import stream_events, stream_tokens, StreamEventType
@@ -463,9 +617,9 @@ async for token in stream_tokens(graph, state, session_id):
 
 ---
 
-## 🔀 5. ROUTING LOGIC
+## 🔀 6. ROUTING LOGIC
 
-### 5.1. Intent-Based Routing
+### 6.1. Intent-Based Routing
 
 ```python
 # src/agents/langgraph/edges.py
@@ -491,7 +645,7 @@ def route_after_intent(state: dict) -> IntentRoute:
     return "agent"  # Default
 ```
 
-### 5.2. Self-Correction Loop
+### 6.2. Self-Correction Loop
 
 ```python
 def route_after_validation(state: dict) -> ValidationRoute:
@@ -511,9 +665,9 @@ def route_after_validation(state: dict) -> ValidationRoute:
 
 ---
 
-## 📦 6. OUTPUT_CONTRACT (Pydantic Models)
+## 📦 7. OUTPUT_CONTRACT (Pydantic Models)
 
-### 6.1. Event Types (5)
+### 7.1. Event Types (5)
 
 | Event | Опис | Коли використовувати |
 |-------|------|---------------------|
@@ -523,7 +677,7 @@ def route_after_validation(state: dict) -> ValidationRoute:
 | `escalation` | Передача менеджеру | Скарга, складне питання |
 | `end_smalltalk` | Завершення | Прощання, подяка |
 
-### 6.2. Intent Types (10)
+### 7.2. Intent Types (10)
 
 | Intent | Опис | → Node |
 |--------|------|--------|
@@ -538,7 +692,7 @@ def route_after_validation(state: dict) -> ValidationRoute:
 | `OUT_OF_DOMAIN` | Не по темі | agent |
 | `UNKNOWN_OR_EMPTY` | Незрозуміло | agent |
 
-### 6.3. State Types (10)
+### 7.3. State Types (11)
 
 | State | Опис | Transitions |
 |-------|------|-------------|
@@ -552,10 +706,11 @@ def route_after_validation(state: dict) -> ValidationRoute:
 | `STATE_7_END` | Завершення | Terminal |
 | `STATE_8_COMPLAINT` | Скарга | → ESCALATION |
 | `STATE_9_OOD` | Out of domain | → DISCOVERY |
+| `CRM_ERROR_HANDLING` | CRM помилка | → CRM_ERROR/RETRY/ESCALATE |
 
 ---
 
-## 🏛️ 7. SSOT (Single Source of Truth)
+## 🏛️ 8. SSOT (Single Source of Truth)
 
 | Що | Де визначено | ЗАБОРОНЕНО |
 |----|--------------|------------|
@@ -568,12 +723,13 @@ def route_after_validation(state: dict) -> ValidationRoute:
 | **Routing** | `src/agents/langgraph/edges.py` | Хардкодити маршрути |
 | **Каталог** | `data/system_prompt_full.yaml` | Зберігати в коді |
 | **Конфігурація** | `src/conf/config.py` | Хардкодити API ключі |
+| **CRM Integration** | `src/integrations/crm/` | Ігнорувати ідемпотентність |
 
 ---
 
-## 🔧 8. NODES (10 Production Nodes)
+## 🔧 9. NODES (11 Production Nodes)
 
-### 8.1. Node Contract
+### 9.1. Node Contract
 
 ```python
 async def node_name(state: dict[str, Any]) -> dict[str, Any]:
@@ -598,7 +754,7 @@ async def node_name(state: dict[str, Any]) -> dict[str, Any]:
         }
 ```
 
-### 8.2. Node → PydanticAI Integration
+### 9.2. Node → PydanticAI Integration
 
 ```python
 # src/agents/langgraph/nodes/agent.py
@@ -631,9 +787,9 @@ async def agent_node(state: dict, runner=None) -> dict:
 
 ---
 
-## 🗄️ 9. PERSISTENCE & CHECKPOINTING
+## 🗄️ 10. PERSISTENCE & CHECKPOINTING
 
-### 9.1. PostgreSQL Checkpointer
+### 10.1. PostgreSQL Checkpointer
 
 ```python
 from src.agents import get_checkpointer, get_postgres_checkpointer
@@ -653,7 +809,7 @@ graph = build_production_graph(
 )
 ```
 
-### 9.2. What's Persisted?
+### 10.2. What's Persisted?
 
 | Що | Де | Навіщо |
 |----|-----|--------|
@@ -664,7 +820,7 @@ graph = build_production_graph(
 
 ---
 
-## 📊 10. OBSERVABILITY (Logfire)
+## 📊 11. OBSERVABILITY (Logfire)
 
 ```python
 from src.agents import setup_observability
@@ -689,7 +845,7 @@ setup_observability(
 
 ---
 
-## ✅ 11. ЧЕКЛІСТ ПЕРЕД КОМІТОМ
+## ✅ 12. ЧЕКЛІСТ ПЕРЕД КОМІТОМ
 
 | # | Перевірка | Що робити |
 |---|-----------|-----------|
@@ -703,7 +859,7 @@ setup_observability(
 
 ---
 
-## 🚫 12. ЗАБОРОНЕНІ ДІЇ
+## 🚫 13. ЗАБОРОНЕНІ ДІЇ
 
 | # | ЗАБОРОНЕНО | Чому |
 |---|------------|------|
@@ -717,12 +873,14 @@ setup_observability(
 | 8 | `except: pass` | Ховає помилки |
 | 9 | Змінювати OUTPUT_CONTRACT | Зламає парсинг |
 | 10 | Видаляти тести | Маскує баги |
+| 11 | Блокувати payment на CRM | CRM - async, не блокуй потік |
+| 12 | Ігнорувати ідемпотентність | Дублікати в CRM |
 
 ---
 
-## 🔄 13. ТИПОВІ PATTERNS
+## 🔄 14. ТИПОВІ PATTERNS
 
-### 13.1. Webhook Handler
+### 14.1. Webhook Handler
 
 ```python
 @router.post("/webhooks/manychat")
@@ -747,7 +905,7 @@ async def manychat_webhook(request: ManyChatRequest):
     return {"reply": reply_text}
 ```
 
-### 13.2. Testing Pattern
+### 14.2. Testing Pattern
 
 ```python
 @pytest.fixture
@@ -766,7 +924,7 @@ async def test_support_agent(mock_deps, mock_llm):
 
 ---
 
-## 🎯 14. QUICK REFERENCE
+## 🎯 15. QUICK REFERENCE
 
 ```python
 # === ENTRY POINTS ===

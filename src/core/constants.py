@@ -65,10 +65,20 @@ class ModerationFlag(str, Enum):
 class DBTable:
     """Database table names constants."""
 
-    USERS = "mirt_users"
-    MESSAGES = "mirt_messages"
+    # Core tables (unified naming)
+    USERS = "users"  # Was: mirt_users (dropped, use 'users')
+    MESSAGES = "messages"  # Was: mirt_messages (dropped, use 'messages')
     SESSIONS = "agent_sessions"
     LLM_USAGE = "llm_usage"
+
+    # Memory System (Titans-like)
+    PROFILES = "mirt_profiles"
+    MEMORIES = "mirt_memories"
+    MEMORY_SUMMARIES = "mirt_memory_summaries"
+
+    # CRM Integration
+    CRM_ORDERS = "crm_orders"
+    SITNIKS_MAPPINGS = "sitniks_chat_mappings"
 
 
 # =============================================================================

@@ -36,6 +36,9 @@ class SessionStore(Protocol):
     def save(self, session_id: str, state: ConversationState) -> None:
         """Persist the current state for the session."""
 
+    def delete(self, session_id: str) -> bool:
+        """Delete session state. Returns True if session existed."""
+
 
 class InMemorySessionStore:
     """Lightweight, process-local session storage.
@@ -60,6 +63,13 @@ class InMemorySessionStore:
         # Serialize state to handle LangChain Message objects
         serialized_state = _serialize_for_json(dict(state))
         self._store[session_id] = deepcopy(serialized_state)
+
+    def delete(self, session_id: str) -> bool:
+        """Delete session state. Returns True if session existed."""
+        if session_id in self._store:
+            del self._store[session_id]
+            return True
+        return False
 
 
 def state_from_text(text: str, session_id: str) -> ConversationState:

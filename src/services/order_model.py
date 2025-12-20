@@ -7,7 +7,7 @@ or other order management systems.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
@@ -121,7 +121,7 @@ class Order(BaseModel):
     status: OrderStatus = OrderStatus.NEW
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
 
     # Source tracking

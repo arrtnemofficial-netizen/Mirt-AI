@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+
+from src.conf.config import settings
 
 
 logger = logging.getLogger("mirt.observability")
@@ -62,7 +65,7 @@ class MetricsCollector:
         point = MetricPoint(
             name=name,
             value=value,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             tags=tags or {},
         )
         self.points.append(point)
@@ -266,29 +269,108 @@ def log_validation_result(
 # =============================================================================
 
 
-@dataclass
-class AgentMetrics:
-    """Summary of agent performance metrics."""
+# =============================================================================
+# ASYNC TRACING SERVICE (Supabase)
+# =============================================================================
 
-    total_requests: int = 0
-    successful_responses: int = 0
-    moderation_blocks: int = 0
-    validation_failures: int = 0
-    tool_calls: int = 0
-    avg_latency_ms: float = 0
-    escalations: int = 0
 
-    @classmethod
-    def from_collector(cls) -> AgentMetrics:
-        """Build metrics from collector."""
-        summary = get_metrics_summary()
+class AsyncTracingService:
+    """
+    Background service for logging LLM traces to Supabase.
 
-        latency_data = summary.get("agent_step_latency_ms", {})
+    Designed to be fire-and-forget so it doesn't block the bot.
+    """
 
-        return cls(
-            total_requests=latency_data.get("count", 0),
-            avg_latency_ms=latency_data.get("avg", 0),
-            moderation_blocks=int(summary.get("moderation_blocks", {}).get("sum", 0)),
-            validation_failures=int(summary.get("validation_failures", {}).get("sum", 0)),
-            tool_calls=int(summary.get("tool_latency_ms", {}).get("count", 0)),
-        )
+    def __init__(self):
+        self._enabled = bool(getattr(settings, "ENABLE_OBSERVABILITY", True))
+
+    @staticmethod
+    def _normalize_trace_id(value: str) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            return str(uuid.uuid4())
+        try:
+            return str(uuid.UUID(raw))
+        except Exception:
+            return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
+
+    async def log_trace(
+        self,
+        session_id: str,
+        trace_id: str,
+        node_name: str,
+        status: str,  # SUCCESS, ERROR, BLOCKED, ESCALATED
+        state_name: str | None = None,
+        prompt_key: str | None = None,
+        prompt_version: str | None = None,
+        prompt_label: str | None = None,
+        input_snapshot: dict[str, Any] | None = None,
+        output_snapshot: dict[str, Any] | None = None,
+        error_category: str | None = None,  # SCHEMA, BUSINESS, SAFETY, SYSTEM
+        error_message: str | None = None,
+        latency_ms: float = 0,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        cost: float | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        """Log a trace record to Supabase."""
+        if not self._enabled:
+            return
+
+        try:
+            from src.services.supabase_client import get_supabase_client
+
+            client = get_supabase_client()
+            if not client:
+                return
+
+            payload = {
+                "session_id": session_id,
+                "trace_id": self._normalize_trace_id(trace_id),
+                "node_name": node_name,
+                "status": status,
+                "state_name": state_name,
+                "prompt_key": prompt_key,
+                "prompt_version": prompt_version,
+                "prompt_label": prompt_label,
+                "input_snapshot": input_snapshot,
+                "output_snapshot": output_snapshot,
+                "error_category": error_category,
+                "error_message": error_message,
+                "latency_ms": latency_ms,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost": cost,
+                "model_name": model_name,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+
+            # Remove None values to let DB defaults work or avoid null issues
+            payload = {k: v for k, v in payload.items() if v is not None}
+
+            try:
+                await client.table("llm_traces").insert(payload).execute()
+            except Exception:
+                await client.table("llm_usage").insert(payload).execute()
+
+        except Exception as e:
+            # Observability shouldn't crash the app - use debug level to avoid spam
+            logger.debug(f"Failed to log trace: {e}")
+
+
+# Global singleton
+_tracer = AsyncTracingService()
+
+
+async def log_trace(
+    session_id: str,
+    trace_id: str,
+    node_name: str,
+    status: str = "SUCCESS",
+    **kwargs: Any,
+) -> None:
+    """Public API for logging traces."""
+    await _tracer.log_trace(
+        session_id=session_id, trace_id=trace_id, node_name=node_name, status=status, **kwargs
+    )

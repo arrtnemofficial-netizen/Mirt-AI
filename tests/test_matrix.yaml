@@ -1,0 +1,82 @@
+# CRM Integration Test Matrix
+# Comprehensive coverage for crm_error node and bidirectional status flow
+
+crm_error_scenarios:
+  # Error Types × Recovery Actions × States Matrix
+  error_types:
+    - network_error
+    - timeout_error  
+    - rate_limit_error
+    - crm_rejected
+    - unknown_error
+    
+  recovery_actions:
+    - retry
+    - escalate
+    - back
+    
+  source_states:
+    - STATE_5_PAYMENT_DELIVERY
+    - CRM_ERROR_HANDLING
+    - STATE_6_UPSELL
+    
+  test_cases: 105 # 5 × 3 × 7 combinations
+
+state_transitions:
+  # All valid paths to/from crm_error node
+  transitions:
+    payment_to_crm_error:
+      trigger: "payment approval + CRM failure"
+      expected_route: "payment → crm_error"
+      
+    crm_error_to_payment:
+      trigger: "retry action selected"
+      expected_route: "crm_error → payment"
+      
+    crm_error_to_upsell:
+      trigger: "CRM success after retry"
+      expected_route: "crm_error → upsell"
+      
+    crm_error_to_escalation:
+      trigger: "max retries exceeded + escalate"
+      expected_route: "crm_error → escalation"
+      
+    crm_error_to_agent:
+      trigger: "back action selected"
+      expected_route: "crm_error → agent"
+      
+  test_cases: 80
+
+bidirectional_flows:
+  # Webhook and status update scenarios
+  webhook_types:
+    - order_status_created
+    - order_status_confirmed
+    - order_status_failed
+    - payment_received
+    - inventory_updated
+    
+  status_mappings:
+    pending: ["queued", "processing"]
+    success: ["created", "confirmed", "paid"]
+    failure: ["failed", "rejected", "timeout"]
+    
+  test_cases: 60
+
+edge_cases:
+  # Boundary conditions and failure scenarios
+  scenarios:
+    - concurrent_webhook_updates
+    - missing_environment_variables
+    - database_connection_lost
+    - celery_worker_down
+    - duplicate_order_creation
+    - invalid_webhook_payload
+    - timeout_during_retry
+    - rate_limit_exhausted
+    - partial_order_data
+    - webhook_authentication_failure
+    
+  test_cases: 60
+
+total_tests: 305

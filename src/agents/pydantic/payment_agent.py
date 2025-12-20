@@ -11,10 +11,13 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from src.agents.langgraph.state_prompts import get_state_prompt
 from src.conf.config import settings
+from src.conf.payment_config import format_requisites_multiline
+from src.core.human_responses import get_human_response
 
 from .deps import AgentDeps
 from .models import PaymentResponse
@@ -28,12 +31,29 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-def _build_model() -> OpenAIModel:
+def _build_model() -> OpenAIChatModel:
     """Build OpenAI model."""
-    api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-    client = AsyncOpenAI(base_url=settings.OPENROUTER_BASE_URL, api_key=api_key)
+    if settings.LLM_PROVIDER == "openai":
+        api_key = settings.OPENAI_API_KEY.get_secret_value()
+        base_url = "https://api.openai.com/v1"
+        model_name = settings.LLM_MODEL_GPT
+    else:
+        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+        base_url = settings.OPENROUTER_BASE_URL
+        model_name = (
+            settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
+        )
+
+    if not api_key:
+        logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
+        if settings.LLM_PROVIDER == "openai":
+            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+            base_url = settings.OPENROUTER_BASE_URL
+            model_name = settings.AI_MODEL
+
+    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)
-    return OpenAIModel(settings.AI_MODEL, provider=provider)
+    return OpenAIChatModel(model_name, provider=provider)
 
 
 # =============================================================================
@@ -41,33 +61,26 @@ def _build_model() -> OpenAIModel:
 # =============================================================================
 
 
-_payment_prompt = """
+_PAYMENT_PROMPT_FALLBACK = """
 Ти спеціаліст з оформлення замовлень MIRT_UA.
-
-ТВОЯ ЗАДАЧА:
-1. Зібрати дані для доставки
-2. Підтвердити замовлення
-3. Надати реквізити для оплати
-
-ДАНІ ДЛЯ ЗБОРУ:
-- ПІБ отримувача
-- Номер телефону
-- Місто доставки
-- Номер відділення Нової Пошти
-
-РЕКВІЗИТИ ДЛЯ ОПЛАТИ:
-ФОП Крупка Ганна Михайлівна
-ПриватБанк: 5168 7520 0123 4567
-Призначення: "За дитячий одяг"
-
-ВАЖЛИВО:
-- Витягуй дані з повідомлень автоматично
-- Якщо даних не вистачає - питай ТІЛЬКИ про відсутні
-- Не питай повторно те що вже сказали
-- Коли всі дані зібрані - підтверди і надай реквізити
-
-Відповідай УКРАЇНСЬКОЮ, тепло і підтримуюче 🤍
+Збери дані для доставки: ПІБ, телефон, місто, відділення НП.
+Використовуй реквізити з SSOT-блоку.
+Відповідай УКРАЇНСЬКОЮ 🤍
 """
+
+
+def _get_payment_prompt() -> str:
+    """Get payment prompt from .md file with fallback."""
+    try:
+        from src.core.prompt_registry import registry
+
+        return registry.get("system.payment").content
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("Failed to load payment.md, using fallback: %s", e)
+        return _PAYMENT_PROMPT_FALLBACK
+
 
 _payment_agent: Agent[AgentDeps, PaymentResponse] | None = None
 
@@ -116,6 +129,21 @@ async def _add_order_context(ctx: RunContext[AgentDeps]) -> str:
         lines.append("\n✅ ВСІ ДАНІ ЗІБРАНІ - можна надавати реквізити!")
 
     return "\n".join(lines)
+
+
+async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
+    """Inject canonical payment requisites to avoid hallucinations."""
+    return "\n--- РЕКВІЗИТИ ДЛЯ ОПЛАТИ (SSOT) ---\n" + format_requisites_multiline()
+
+
+async def _add_payment_subphase_prompt(ctx: RunContext[AgentDeps]) -> str:
+    """Inject payment sub-phase instructions from markdown prompts (SSOT)."""
+    sub_phase = getattr(ctx.deps, "payment_sub_phase", None) or "REQUEST_DATA"
+    try:
+        prompt = get_state_prompt("STATE_5_PAYMENT_DELIVERY", sub_phase=sub_phase)
+        return "\n--- PAYMENT SUB-PHASE PROMPT (SSOT) ---\n" + prompt
+    except Exception:
+        return ""
 
 
 async def _extract_customer_data(
@@ -171,10 +199,12 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
             _build_model(),
             deps_type=AgentDeps,
             output_type=PaymentResponse,  # Changed from result_type (PydanticAI 1.23+)
-            system_prompt=_payment_prompt,
+            system_prompt=_get_payment_prompt(),
             retries=2,
         )
         _payment_agent.system_prompt(_add_order_context)
+        _payment_agent.system_prompt(_add_payment_requisites)
+        _payment_agent.system_prompt(_add_payment_subphase_prompt)
         # Register tools - use decorator syntax
         _payment_agent.tool(name="extract_customer_data")(_extract_customer_data)
         _payment_agent.tool(name="check_order_ready")(_check_order_ready)
@@ -219,7 +249,7 @@ async def run_payment(
     except Exception as e:
         logger.exception("Payment agent error: %s", e)
         return PaymentResponse(
-            reply_to_user="Вибачте, сталася помилка. Менеджер зв'яжеться з вами для оформлення 🤍",
+            reply_to_user=get_human_response("payment_error"),
             missing_fields=["name", "phone", "city", "nova_poshta"],
             order_ready=False,
         )

@@ -7,15 +7,22 @@ instead of global singletons.
 from __future__ import annotations
 
 import logging
+import os
+import re
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from aiogram.types import Update
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from starlette.responses import StreamingResponse
 
 from src.conf.config import settings
-from src.core.logging import setup_logging
+from src.core.logging import log_event, safe_preview, setup_logging
 from src.integrations.manychat.webhook import ManychatPayloadError
 from src.server.dependencies import (
     MessageStoreDep,
@@ -24,9 +31,50 @@ from src.server.dependencies import (
     get_cached_manychat_handler,
 )
 from src.server.middleware import setup_middleware
+from src.services.webhook_dedupe import WebhookDedupeStore
 
 
 logger = logging.getLogger(__name__)
+
+
+# Will be initialized in webhook handler
+
+
+def _get_build_info() -> dict[str, str]:
+    sha = (
+        os.environ.get("GIT_SHA")
+        or os.environ.get("COMMIT_SHA")
+        or os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("RENDER_GIT_COMMIT")
+        or os.environ.get("SOURCE_VERSION")
+        or os.environ.get("GITHUB_SHA")
+        or "unknown"
+    )
+    build_id = (
+        os.environ.get("BUILD_ID")
+        or os.environ.get("RAILWAY_DEPLOYMENT_ID")
+        or os.environ.get("RENDER_INSTANCE_ID")
+        or os.environ.get("DYNO")
+        or os.environ.get("HOSTNAME")
+        or "unknown"
+    )
+    return {"git_sha": sha, "build_id": build_id}
+
+
+def _extract_manychat_message_id(payload: dict[str, Any], message: dict[str, Any]) -> str | None:
+    # Prefer explicit message ids if present. If absent, we do NOT dedupe
+    # to avoid false positives on repeated user texts.
+    for key in ("id", "message_id", "messageId"):
+        value = message.get(key)
+        if value:
+            return str(value)
+
+    for key in ("message_id", "messageId", "event_id", "eventId", "update_id", "updateId"):
+        value = payload.get(key)
+        if value:
+            return str(value)
+
+    return None
 
 
 def _init_sentry():
@@ -72,12 +120,41 @@ async def lifespan(app: FastAPI):
 
     # Startup
     logger.info("Starting MIRT AI Webhooks server")
+    build_info = _get_build_info()
+    logger.info(
+        "Build info: git_sha=%s build_id=%s",
+        build_info.get("git_sha"),
+        build_info.get("build_id"),
+    )
 
-    # Register Telegram webhook if configured
+    # ==========================================================================
+    # WARMUP: Pre-initialize the graph to avoid 20+ second delay on first request
+    # This is CRITICAL for ManyChat timeout compliance
+    # ==========================================================================
+    try:
+        from src.agents.langgraph import get_production_graph
+        from src.agents.langgraph.checkpointer import warmup_checkpointer_pool
+
+        logger.info("Warming up LangGraph (this may take 10-20 seconds on first deploy)...")
+        _graph = get_production_graph()
+        warmup_ok = await warmup_checkpointer_pool()
+        if not warmup_ok:
+            required = (
+                (os.getenv("CHECKPOINTER_WARMUP_REQUIRED", "false") or "false").strip().lower()
+            )
+            if required in {"1", "true", "yes"}:
+                raise RuntimeError("Checkpointer warmup required but failed")
+            logger.warning("LangGraph warmup incomplete; continuing without warm pool")
+        else:
+            logger.info("LangGraph warmed up successfully!")
+    except Exception as e:
+        logger.warning("Failed to warm up LangGraph: %s (will initialize on first request)", e)
+
+    # Telegram webhook: реєструємо, якщо є token і публічна адреса
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
 
-    if base_url and token and base_url != "http://localhost:8000":
+    if base_url and token:
         try:
             bot = get_bot()
             full_url = f"{base_url}{settings.TELEGRAM_WEBHOOK_PATH}"
@@ -99,8 +176,137 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.get("/media/proxy")
+async def media_proxy(url: str, token: str | None = None) -> StreamingResponse:
+    if not bool(getattr(settings, "MEDIA_PROXY_ENABLED", False)):
+        raise HTTPException(status_code=404, detail="disabled")
+
+    required_token = str(getattr(settings, "MEDIA_PROXY_TOKEN", "") or "").strip()
+    if required_token and (token or "") != required_token:
+        raise HTTPException(status_code=401, detail="invalid token")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="invalid url")
+
+    host = (parsed.hostname or "").lower()
+    allowed_hosts_raw = str(getattr(settings, "MEDIA_PROXY_ALLOWED_HOSTS", "") or "")
+    allowed_hosts = {h.strip().lower() for h in allowed_hosts_raw.split(",") if h and h.strip()}
+    if allowed_hosts and host not in allowed_hosts:
+        raise HTTPException(status_code=403, detail="host not allowed")
+
+    timeout = httpx.Timeout(10.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        upstream = await client.get(url)
+
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"upstream {upstream.status_code}")
+
+    content_type = upstream.headers.get("content-type") or "application/octet-stream"
+    if not content_type.lower().startswith("image/"):
+        raise HTTPException(status_code=415, detail="not an image")
+
+    data = upstream.content
+    if len(data) > 8_000_000:
+        raise HTTPException(status_code=413, detail="too large")
+
+    headers = {
+        "Cache-Control": "public, max-age=3600",
+    }
+    return StreamingResponse(iter([data]), media_type=content_type, headers=headers)
+
+
 # Setup middleware (rate limiting, request logging)
 setup_middleware(app, enable_rate_limit=True, enable_logging=True)
+
+
+# Regex to detect image URLs in message text
+# Supports:
+# - Direct image URLs (.jpg, .png, etc.)
+# - Instagram CDN: cdn.instagram.com, fbcdn, scontent
+# - Instagram DM images: lookaside.fbsbx.com/ig_messaging_cdn
+_IMAGE_URL_PATTERN = re.compile(
+    r"(https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp|svg)|"
+    r"https?://(?:cdn\.)?(?:instagram|fbcdn|scontent|lookaside\.fbsbx)[^\s]+)",
+    re.IGNORECASE,
+)
+
+
+class ApiV1MessageRequest(BaseModel):
+    """Request model for /api/v1/messages endpoint.
+
+    Supports multiple formats:
+    - ManyChat External Request: {type, clientId, message, image_url}
+    - n8n format: {sessionId, name, message} where message may contain image URL
+    """
+
+    type: str = Field(default="instagram")
+    message: str = Field(default="", validation_alias=AliasChoices("message", "messages"))
+    client_id: str = Field(
+        validation_alias=AliasChoices("clientId", "client_id", "sessionId", "session_id"),
+        serialization_alias="clientId",
+    )
+    client_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("clientName", "client_name", "name"),
+        serialization_alias="clientName",
+    )
+    username: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("username", "userName", "user_name"),
+        serialization_alias="username",
+    )
+    image_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "image_url",
+            "imageUrl",
+            "photo_url",
+            "photoUrl",
+            "image",
+            "photo",
+        ),
+        serialization_alias="image_url",
+    )
+
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="ignore")
+
+    @model_validator(mode="after")
+    def extract_image_from_message(self) -> ApiV1MessageRequest:
+        """Extract image URL from message text if not provided separately.
+
+        This handles the n8n format where message field contains the image URL.
+        Also strips ManyChat/n8n prefix '.;' from messages.
+        """
+        msg = (self.message or "").strip()
+        img_url = self.image_url
+
+        # Strip ManyChat/n8n prefix '.;' (can appear multiple times)
+        while msg.startswith(".;"):
+            msg = msg[2:].lstrip()
+
+        # Extract image URL from message text if not provided separately
+        if not img_url and msg:
+            match = _IMAGE_URL_PATTERN.search(msg)
+            if match:
+                img_url = match.group(0)
+                logger.info("[API_V1] 📷 Extracted image URL from message: %s", img_url[:60])
+
+        # Remove embedded image URL from message text
+        if img_url and msg:
+            msg = msg.replace(img_url, "").strip()
+            # Strip prefix again in case it was before the URL
+            while msg.startswith(".;"):
+                msg = msg[2:].lstrip()
+
+        if not msg and not img_url:
+            raise ValueError("Either message or image_url is required")
+
+        # Use object.__setattr__ for Pydantic v2 compatibility
+        object.__setattr__(self, "message", msg)
+        object.__setattr__(self, "image_url", img_url)
+        return self
 
 
 @app.get("/health")
@@ -154,17 +360,39 @@ async def health() -> dict[str, Any]:
     else:
         checks["celery"] = "disabled"
 
+    # LLM Provider health (circuit breaker status)
+    try:
+        from src.services.llm_fallback import get_llm_service
+
+        llm_service = get_llm_service()
+        llm_health = llm_service.get_health_status()
+        checks["llm"] = {
+            "any_available": llm_health["any_available"],
+            "providers": [
+                {"name": p["name"], "status": p["circuit_state"], "available": p["available"]}
+                for p in llm_health["providers"]
+            ],
+        }
+        if not llm_health["any_available"]:
+            status = "degraded"
+    except Exception as e:
+        checks["llm"] = f"error: {type(e).__name__}"
+        status = "degraded"
+
     return {
         "status": status,
         "checks": checks,
+        **_get_build_info(),
         "version": "1.0.0",
         "celery_enabled": settings.CELERY_ENABLED,
+        "llm_provider": settings.LLM_PROVIDER,
+        "active_model": settings.active_llm_model,
     }
 
 
 @app.post(settings.TELEGRAM_WEBHOOK_PATH)
 async def telegram_webhook(request: Request) -> JSONResponse:
-    """Handle incoming Telegram webhook updates."""
+    """Handle incoming Telegram webhook updates (AI-only відповіді)."""
     bot = get_bot()
     dp = get_cached_dispatcher()
 
@@ -174,21 +402,454 @@ async def telegram_webhook(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/v1/messages", status_code=202)
+async def api_v1_messages(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    """Handle messages from ManyChat External Request.
+
+    Supports formats:
+    - {type, clientId, message, image_url}
+    - {sessionId, name, message} (n8n format)
+    """
+    raw_body = await request.body()
+    log_event(
+        logger,
+        event="api_v1_payload_received",
+        text_len=len(raw_body or b""),
+        text_preview=safe_preview(raw_body.decode("utf-8", errors="replace"), 200),
+    )
+
+    import json
+
+    try:
+        raw_json = json.loads(raw_body)
+        logger.debug("[API_V1] RAW keys=%s", list(raw_json.keys()))
+    except json.JSONDecodeError as e:
+        log_event(
+            logger,
+            event="api_v1_payload_parsed",
+            level="warning",
+            root_cause="INVALID_JSON",
+            error=safe_preview(e, 200),
+        )
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    try:
+        payload = ApiV1MessageRequest.model_validate(raw_json)
+        log_event(
+            logger,
+            event="api_v1_payload_parsed",
+            user_id=str(payload.client_id),
+            channel=payload.type or "instagram",
+            text_len=len(payload.message or ""),
+            text_preview=safe_preview(payload.message, 160),
+            has_image=bool(payload.image_url),
+            image_url_preview=safe_preview(payload.image_url, 100),
+        )
+    except Exception as e:
+        logger.error("[API_V1] ❌ Pydantic validation error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # === STEP 3: Auth check ===
+    verify_token = settings.MANYCHAT_VERIFY_TOKEN
+    inbound_token = x_api_key
+    if not inbound_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            inbound_token = auth_value[7:].strip()
+        else:
+            inbound_token = auth_value
+
+    if verify_token and verify_token != inbound_token:
+        logger.warning(
+            "[API_V1] ⛔ Auth failed: expected=%s, got=%s",
+            verify_token[:10] if verify_token else None,
+            inbound_token[:10] if inbound_token else None,
+        )
+        raise HTTPException(status_code=401, detail="Invalid API token")
+
+    # === STEP 4: Schedule background processing ===
+    from src.integrations.manychat.async_service import get_manychat_async_service
+    from src.server.dependencies import get_session_store
+
+    store = get_session_store()
+    service = get_manychat_async_service(store)
+
+    user_id = str(payload.client_id)
+    channel = payload.type or "instagram"
+
+    trace_id = str(uuid.uuid4())
+
+    log_event(
+        logger,
+        event="api_v1_task_scheduled",
+        trace_id=trace_id,
+        user_id=user_id,
+        channel=channel,
+        text_len=len(payload.message or ""),
+        text_preview=safe_preview(payload.message, 160),
+        has_image=bool(payload.image_url),
+        image_url_preview=safe_preview(payload.image_url, 100),
+    )
+
+    background_tasks.add_task(
+        service.process_message_async,
+        user_id=user_id,
+        text=payload.message or "",
+        image_url=payload.image_url,
+        channel=channel,
+        trace_id=trace_id,
+    )
+
+    logger.debug("[API_V1] returning 202")
+    return {"status": "accepted"}
+
+
 @app.post("/webhooks/manychat")
 async def manychat_webhook(
     payload: dict[str, Any],
+    background_tasks: BackgroundTasks,
     x_manychat_token: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Handle incoming ManyChat webhook payloads."""
+    """Handle incoming ManyChat webhook payloads.
+
+    Supports two modes:
+    - Push mode (MANYCHAT_PUSH_MODE=true): Returns 202 immediately, processes async
+    - Response mode (MANYCHAT_PUSH_MODE=false): Waits for AI, returns response
+    """
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
-    if verify_token and verify_token != x_manychat_token:
+    inbound_token = x_manychat_token
+    if not inbound_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            inbound_token = auth_value[7:].strip()
+        else:
+            inbound_token = auth_value
+
+    if verify_token and verify_token != inbound_token:
         raise HTTPException(status_code=401, detail="Invalid ManyChat token")
 
+    # Push mode: return immediately, process in background
+    if settings.MANYCHAT_PUSH_MODE:
+        from src.integrations.manychat.async_service import get_manychat_async_service
+        from src.server.dependencies import get_session_store
+
+        try:
+            trace_id = str(uuid.uuid4())
+
+            # Extract user info from payload
+            subscriber = payload.get("subscriber") or payload.get("user") or {}
+            message = payload.get("message") or payload.get("data", {}).get("message") or {}
+
+            user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+            text = ""
+            image_url = None
+
+            if isinstance(message, dict):
+                text = message.get("text") or message.get("content") or ""
+                # Extract image from attachments
+                for attachment in message.get("attachments", []):
+                    if attachment.get("type") == "image":
+                        image_url = attachment.get("payload", {}).get("url")
+                        break
+                if not image_url:
+                    image_url = message.get("image") or message.get("image_url")
+
+            # Also check data.image_url
+            if not image_url:
+                data = payload.get("data", {})
+                image_url = data.get("image_url") or data.get("photo_url")
+
+            channel = payload.get("type") or "instagram"
+
+            if not text and not image_url:
+                raise HTTPException(status_code=400, detail="Missing message text or image")
+
+            # -----------------------------------------------------------------
+            # IDEMPOTENCY (DB-backed, 24h TTL)
+            # -----------------------------------------------------------------
+            message_id = None
+            if isinstance(message, dict):
+                message_id = _extract_manychat_message_id(payload, message)
+
+            if message_id:
+                from src.services.supabase_client import get_supabase_client
+
+                db = get_supabase_client()
+                if db:
+                    dedupe_store = WebhookDedupeStore(db, ttl_hours=24)
+
+                    # Check for duplicates using DB store
+                    is_duplicate = dedupe_store.check_and_mark(
+                        user_id=user_id,
+                        message_id=message_id,
+                        text=text,
+                        image_url=image_url,
+                    )
+
+                    if is_duplicate:
+                        logger.info(
+                            "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
+                            user_id,
+                            message_id,
+                        )
+                        return {"status": "accepted"}
+                else:
+                    logger.warning(
+                        "[MANYCHAT] Supabase disabled, skipping dedupe (push mode) user=%s message_id=%s",
+                        user_id,
+                        message_id,
+                    )
+
+            # -----------------------------------------------------------------
+            # DURABLE PROCESSING (Celery or BackgroundTasks fallback)
+            # -----------------------------------------------------------------
+            if settings.CELERY_ENABLED and getattr(settings, "MANYCHAT_USE_CELERY", False):
+                # Use durable Celery task
+                from src.workers.tasks.manychat import process_manychat_message
+
+                task = process_manychat_message.delay(
+                    user_id=user_id,
+                    text=text or "",
+                    image_url=image_url,
+                    channel=channel,
+                    subscriber_data=subscriber,
+                    trace_id=trace_id,
+                )
+
+                log_event(
+                    logger,
+                    event="manychat_task_scheduled",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    task_id=task.id,
+                )
+
+                return {"status": "accepted"}
+            else:
+                # Fallback to BackgroundTasks (not durable)
+                store = get_session_store()
+                service = get_manychat_async_service(store)
+
+                background_tasks.add_task(
+                    service.process_message_async,
+                    user_id=user_id,
+                    text=text or "",
+                    image_url=image_url,
+                    channel=channel,
+                    subscriber_data=subscriber,  # Pass subscriber data for username
+                    trace_id=trace_id,
+                )
+
+                log_event(
+                    logger,
+                    event="manychat_task_scheduled",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    status="background_tasks",
+                )
+
+            log_event(
+                logger,
+                event="manychat_message_accepted",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+            )
+            return {"status": "accepted"}
+
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("[MANYCHAT] Error in push mode: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Response mode: wait for AI and return response
     handler = get_cached_manychat_handler()
     try:
         return await handler.handle(payload)
     except ManychatPayloadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# =============================================================================
+# SNITKIX CRM WEBHOOK ENDPOINTS
+# =============================================================================
+
+
+@app.post("/webhooks/snitkix/order-status")
+async def snitkix_order_status_webhook(request: Request) -> JSONResponse:
+    """Handle order status updates from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_order_status_webhook as webhook_handler
+
+    return await webhook_handler(request)
+
+
+@app.post("/webhooks/snitkix/payment")
+async def snitkix_payment_webhook(request: Request) -> JSONResponse:
+    """Handle payment confirmation from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_payment_webhook as webhook_handler
+
+    return await webhook_handler(request)
+
+
+@app.post("/webhooks/snitkix/inventory")
+async def snitkix_inventory_webhook(request: Request) -> JSONResponse:
+    """Handle inventory updates from Snitkix CRM."""
+    from src.integrations.crm.webhooks import snitkix_inventory_webhook as webhook_handler
+
+    return await webhook_handler(request)
+
+
+# =============================================================================
+# SITNIKS STATUS UPDATE ENDPOINT (for external JS node / n8n / ManyChat)
+# =============================================================================
+
+
+class SitniksUpdateRequest(BaseModel):
+    """Request for updating Sitniks chat status from external systems."""
+
+    stage: str = Field(description="Stage: first_touch, give_requisites, escalation")
+    user_id: str = Field(
+        description="MIRT user/session ID",
+        validation_alias=AliasChoices(
+            "user_id", "userId", "session_id", "sessionId", "client_id", "clientId"
+        ),
+    )
+    instagram_username: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("instagram_username", "instagramUsername", "ig_username"),
+    )
+    telegram_username: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("telegram_username", "telegramUsername", "tg_username"),
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+@app.post("/api/v1/sitniks/update-status")
+async def sitniks_update_status(
+    payload: SitniksUpdateRequest,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Update Sitniks CRM chat status from external JS node.
+
+    This endpoint allows ManyChat/n8n JS nodes to trigger status updates
+    after the agent response is generated.
+
+    Stages:
+    - first_touch: Set "Взято в роботу" + assign AI Manager
+    - give_requisites: Set "Виставлено рахунок"
+    - escalation: Set "AI Увага" + assign human manager
+
+    Auth: X-API-Key header or Authorization: Bearer token
+    (uses MANYCHAT_VERIFY_TOKEN)
+
+    Example JS (n8n):
+    ```javascript
+    const response = await fetch('https://your-server/api/v1/sitniks/update-status', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': 'your-token'
+        },
+        body: JSON.stringify({
+            stage: 'first_touch',
+            user_id: '12345',
+            instagram_username: 'user123'
+        })
+    });
+    ```
+    """
+    from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+
+    # Auth check (same as /api/v1/messages)
+    verify_token = settings.MANYCHAT_VERIFY_TOKEN
+    inbound_token = x_api_key
+    if not inbound_token and authorization:
+        auth_value = authorization.strip()
+        if auth_value.lower().startswith("bearer "):
+            inbound_token = auth_value[7:].strip()
+        else:
+            inbound_token = auth_value
+
+    if verify_token and verify_token != inbound_token:
+        raise HTTPException(status_code=401, detail="Invalid API token")
+
+    service = get_sitniks_chat_service()
+
+    if not service.enabled:
+        return {
+            "success": False,
+            "error": "Sitniks integration not configured",
+            "stage": payload.stage,
+        }
+
+    stage = payload.stage.lower().replace("-", "_").replace(" ", "_")
+    user_id = payload.user_id
+
+    logger.info(
+        "[SITNIKS_API] Update status: stage=%s, user_id=%s, ig=%s",
+        stage,
+        user_id,
+        payload.instagram_username,
+    )
+
+    try:
+        if stage == "first_touch":
+            result = await service.handle_first_touch(
+                user_id=user_id,
+                instagram_username=payload.instagram_username,
+                telegram_username=payload.telegram_username,
+            )
+            return {
+                "success": result.get("success", False),
+                "stage": stage,
+                "chat_id": result.get("chat_id"),
+                "status_set": result.get("status_set", False),
+                "manager_assigned": result.get("manager_assigned", False),
+                "error": result.get("error"),
+            }
+
+        elif stage in ("give_requisites", "invoice", "invoice_sent"):
+            success = await service.handle_invoice_sent(user_id)
+            return {
+                "success": success,
+                "stage": "give_requisites",
+            }
+
+        elif stage == "escalation":
+            result = await service.handle_escalation(user_id)
+            return {
+                "success": result.get("success", False),
+                "stage": stage,
+                "chat_id": result.get("chat_id"),
+                "status_set": result.get("status_set", False),
+                "manager_assigned": result.get("manager_assigned", False),
+            }
+
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown stage: {stage}. Valid: first_touch, give_requisites, escalation",
+            }
+
+    except Exception as e:
+        logger.exception("[SITNIKS_API] Error: %s", e)
+        return {
+            "success": False,
+            "error": str(e),
+            "stage": stage,
+        }
 
 
 @app.post("/automation/mirt-summarize-prod-v1")
@@ -199,7 +860,7 @@ async def run_summarization(
     """Summarize and prune old messages for a session.
 
     Called by ManyChat after 3 days of inactivity.
-    Saves summary to mirt_users.summary and deletes messages from mirt_messages.
+    Saves summary to users.summary and deletes messages from messages table.
 
     Uses Celery if CELERY_ENABLED=true, otherwise runs synchronously.
 
@@ -349,8 +1010,9 @@ async def manychat_create_order(
 ) -> dict[str, Any]:
     """Create order in CRM from ManyChat data.
 
-    This endpoint is called when all customer data is collected
-    and order should be created in Snitkix CRM.
+    IDEMPOTENT: Uses deterministic external_id based on user + product + price.
+    Duplicate requests return existing order instead of creating new one.
+    Uses CRMService and crm_orders table for proper persistence.
 
     Payload expected:
     {
@@ -365,14 +1027,14 @@ async def manychat_create_order(
         }
     }
     """
-    from src.integrations.crm.snitkix import get_snitkix_client
+    import hashlib
+
+    from src.integrations.crm.crmservice import CRMService
     from src.services.order_model import (
-        CustomerInfo,
-        Order,
-        OrderItem,
         build_missing_data_prompt,
         validate_order_data,
     )
+    from src.services.supabase_client import get_supabase_client
 
     # Verify token
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
@@ -414,60 +1076,140 @@ async def manychat_create_order(
             ],
         }
 
-    # Create order
+    # === IDEMPOTENCY: Create deterministic external_id ===
+    # Hash: user_id + product_name + price (normalized)
+    idempotency_data = f"{user_id}|{product_name.lower().strip()}|{int(price * 100)}"
+    idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
+    external_id = f"mc_{user_id}_{idempotency_hash}"
+
+    logger.info(
+        "[CREATE_ORDER] Idempotency key: %s (user=%s, product=%s, price=%s)",
+        external_id,
+        user_id,
+        product_name[:20],
+        price,
+    )
+
+    # === CHECK FOR EXISTING ORDER IN crm_orders ===
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            existing = (
+                supabase.table("crm_orders")
+                .select("id, crm_order_id, status, task_id")
+                .eq("external_id", external_id)
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                order_data = existing.data[0]
+                logger.info(
+                    "[CREATE_ORDER] Duplicate detected, returning existing order: %s",
+                    order_data.get("crm_order_id"),
+                )
+                return {
+                    "success": True,
+                    "order_id": order_data.get("crm_order_id"),
+                    "status": order_data.get("status"),
+                    "task_id": order_data.get("task_id"),
+                    "message": "Замовлення вже створено! 🎉",
+                    "duplicate": True,
+                    "set_field_values": [
+                        {
+                            "field_name": "order_status",
+                            "field_value": order_data.get("status", "created"),
+                        },
+                        {"field_name": "crm_external_id", "field_value": external_id},
+                        {
+                            "field_name": "crm_order_id",
+                            "field_value": order_data.get("crm_order_id") or "",
+                        },
+                    ],
+                    "add_tag": ["order_created"]
+                    if order_data.get("status") == "created"
+                    else ["order_queued"],
+                }
+        except Exception as e:
+            logger.warning("[CREATE_ORDER] Failed to check for duplicate: %s", e)
+
+    # Create order using CRMService
     try:
-        order = Order(
-            external_id=f"mc_{user_id}",
-            customer=CustomerInfo(
-                full_name=full_name,
-                phone=phone,
-                city=city,
-                nova_poshta_branch=nova_poshta,
-                manychat_id=user_id,
-            ),
-            items=[
-                OrderItem(
-                    product_id=1,
-                    product_name=product_name,
-                    size="",
-                    color="",
-                    price=price,
-                ),
+        # Initialize CRMService
+        crm_service = CRMService()
+
+        # Prepare order data
+        order_data = {
+            "customer": {
+                "full_name": full_name,
+                "phone": phone,
+                "city": city,
+                "nova_poshta_branch": nova_poshta,
+                "manychat_id": user_id,
+            },
+            "items": [
+                {
+                    "product_id": 1,
+                    "product_name": product_name,
+                    "size": "",
+                    "color": "",
+                    "price": price,
+                }
             ],
-            source="manychat",
-            source_id=user_id,
+            "source": "manychat",
+            "source_id": user_id,
+        }
+
+        # Create order with persistence
+        result = await crm_service.create_order_with_persistence(
+            session_id=user_id, external_id=external_id, order_data=order_data
         )
 
-        # Send to CRM
-        crm = get_snitkix_client()
-        response = await crm.create_order(order)
+        if result.get("status") in ["queued", "created"]:
+            logger.info(
+                "[CREATE_ORDER] Order created successfully: %s",
+                result.get("crm_order_id"),
+            )
 
-        if response.success:
             return {
                 "success": True,
-                "order_id": response.order_id,
-                "message": "Замовлення створено! 🎉",
+                "order_id": result.get("crm_order_id"),
+                "status": result.get("status"),
+                "task_id": result.get("task_id"),
+                "external_id": external_id,
+                "message": "Замовлення успішно створено! 🎉",
                 "set_field_values": [
-                    {"field_name": "order_status", "field_value": "created"},
-                    {"field_name": "crm_order_id", "field_value": response.order_id or ""},
+                    {"field_name": "order_status", "field_value": result.get("status")},
+                    {"field_name": "crm_external_id", "field_value": external_id},
+                    {"field_name": "crm_order_id", "field_value": result.get("crm_order_id") or ""},
+                    {"field_name": "crm_task_id", "field_value": result.get("task_id") or ""},
                 ],
-                "add_tag": ["order_created"],
+                "add_tag": ["order_created"]
+                if result.get("status") == "created"
+                else ["order_queued"],
             }
         else:
-            logger.error("CRM order creation failed: %s", response.error)
+            logger.error(
+                "[CREATE_ORDER] Order creation failed: %s",
+                result.get("error"),
+            )
             return {
                 "success": False,
-                "error": response.error,
+                "error": result.get("error", "Unknown error"),
+                "message": "Не вдалося створити замовлення. Спробуйте ще раз.",
                 "set_field_values": [
-                    {"field_name": "order_status", "field_value": "crm_error"},
+                    {"field_name": "order_status", "field_value": "failed"},
                 ],
             }
 
     except Exception as e:
-        logger.exception("Order creation error: %s", e)
+        logger.exception("[CREATE_ORDER] Failed to create order: %s", e)
         return {
             "success": False,
             "error": str(e),
+            "message": "Сталася помилка при створенні замовлення",
+            "set_field_values": [
+                {"field_name": "order_status", "field_value": "error"},
+            ],
         }
 
 

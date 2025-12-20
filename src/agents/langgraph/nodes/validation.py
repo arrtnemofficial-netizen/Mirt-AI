@@ -23,7 +23,7 @@ import logging
 from typing import Any
 
 from src.core.product_adapter import ProductAdapter
-from src.services.observability import log_validation_result, track_metric
+from src.services.observability import log_trace, log_validation_result, track_metric
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         If errors found, retry_count is incremented
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    trace_id = state.get("trace_id", "")
     errors: list[str] = []
 
     # Get latest assistant response
@@ -94,8 +95,28 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Update retry count if validation failed
     retry_count = state.get("retry_count", 0)
+
+    # Trace Logging
     if not passed:
         retry_count += 1
+
+        # Categorize error
+        error_category = "BUSINESS"
+        if any("structure" in e or "Missing" in e for e in errors):
+            error_category = "SCHEMA"
+        elif any("hallucination" in e for e in errors):
+            error_category = "SAFETY"
+
+        await log_trace(
+            session_id=session_id,
+            trace_id=trace_id,
+            node_name="validation_node",
+            status="ERROR",
+            error_category=error_category,
+            error_message="; ".join(errors),
+            output_snapshot={"errors": errors},
+        )
+
         logger.warning(
             "Validation failed for session %s (attempt %d): %s",
             session_id,
@@ -104,6 +125,12 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         )
         track_metric("validation_failed", 1, {"session_id": session_id})
     else:
+        await log_trace(
+            session_id=session_id,
+            trace_id=trace_id,
+            node_name="validation_node",
+            status="SUCCESS",
+        )
         track_metric("validation_passed", 1, {"session_id": session_id})
 
     return {
@@ -146,7 +173,9 @@ def _validate_products(products: list[dict[str, Any]]) -> list[str]:
     for i, p in enumerate(products):
         price = p.get("price", 0)
         if price and (price < MIN_PRICE or price > MAX_PRICE):
-            errors.append(f"Product {i}: price {price} outside valid range ({MIN_PRICE}-{MAX_PRICE})")
+            errors.append(
+                f"Product {i}: price {price} outside valid range ({MIN_PRICE}-{MAX_PRICE})"
+            )
 
         # Check photo URL
         photo_url = p.get("photo_url") or p.get("image_url")
@@ -184,6 +213,57 @@ def _check_for_hallucination(
     return errors
 
 
+# Russian-specific characters (not shared with Ukrainian)
+# ы, э, ъ are ONLY in Russian, not Ukrainian
+RUSSIAN_ONLY_CHARS = set("ыэъЫЭЪёЁ")
+
+# Russian words that should NEVER appear in Ukrainian response
+RUSSIAN_MARKERS = [
+    r"\bщас\b",  # сейчас (рос) vs зараз (укр)
+    r"\bсейчас\b",  # сейчас (рос)
+    r"\bтолько\b",  # только (рос) vs тільки (укр)
+    r"\bхорошо\b",  # хорошо (рос) vs добре (укр)
+    r"\bконечно\b",  # конечно (рос) vs звичайно (укр)
+    r"\bпожалуйста\b",  # пожалуйста (рос) vs будь ласка (укр)
+    r"\bспасибо\b",  # спасибо (рос) vs дякую (укр)
+    r"\bждите\b",  # ждите (рос) vs чекайте (укр)
+    r"\bподождите\b",  # подождите (рос) vs зачекайте (укр)
+    r"\bздравствуйте\b",  # здравствуйте (рос) vs вітаю (укр)
+    r"\bпривет\b",  # привет (рос) vs привіт (укр)
+]
+
+
+def _validate_language_ukrainian(response: dict[str, Any]) -> list[str]:
+    """Validate that response is in Ukrainian, not Russian.
+
+    This is CRITICAL for brand consistency and legal compliance.
+    """
+    import re
+
+    errors = []
+    messages = response.get("messages", [])
+
+    for i, msg in enumerate(messages):
+        text = msg.get("text", "") if isinstance(msg, dict) else str(msg)
+
+        # Check for Russian-only characters
+        russian_chars_found = [c for c in text if c in RUSSIAN_ONLY_CHARS]
+        if russian_chars_found:
+            errors.append(
+                f"Message {i}: contains Russian characters {set(russian_chars_found)} - must be Ukrainian only"
+            )
+
+        # Check for Russian marker words
+        text_lower = text.lower()
+        for pattern in RUSSIAN_MARKERS:
+            if re.search(pattern, text_lower):
+                errors.append(
+                    f"Message {i}: contains Russian word '{pattern.strip(chr(92) + 'b')}' - use Ukrainian equivalent"
+                )
+
+    return errors
+
+
 def _validate_response_structure(response: dict[str, Any]) -> list[str]:
     """Validate response has required structure."""
     errors = []
@@ -199,6 +279,10 @@ def _validate_response_structure(response: dict[str, Any]) -> list[str]:
         errors.append("'messages' must be an array")
     elif len(response["messages"]) == 0:
         errors.append("'messages' array is empty")
+    else:
+        # VALIDATE LANGUAGE - must be Ukrainian!
+        lang_errors = _validate_language_ukrainian(response)
+        errors.extend(lang_errors)
 
     # Must have metadata
     if "metadata" not in response:
