@@ -19,9 +19,9 @@ import pytest
 # FIXTURES
 # ---------------------------------------------------------------------------
 
-TEST_SET_PATH = Path(__file__).parent.parent / "data" / "vision" / "generated" / "test_set.json"
+TEST_SET_PATH = Path(__file__).parents[2] / "data" / "vision" / "generated" / "test_set.json"
 CANONICAL_NAMES_PATH = (
-    Path(__file__).parent.parent / "data" / "vision" / "generated" / "canonical_names.json"
+    Path(__file__).parents[2] / "data" / "vision" / "generated" / "canonical_names.json"
 )
 
 
@@ -29,8 +29,7 @@ CANONICAL_NAMES_PATH = (
 def test_set() -> list[dict]:
     """Load test_set.json."""
     if not TEST_SET_PATH.exists():
-        assert True
-        return
+        pytest.fail(f"Test set not found at {TEST_SET_PATH}")
     with open(TEST_SET_PATH, encoding="utf-8") as f:
         return json.load(f)
 
@@ -39,8 +38,7 @@ def test_set() -> list[dict]:
 def canonical_names() -> dict:
     """Load canonical_names.json."""
     if not CANONICAL_NAMES_PATH.exists():
-        assert True
-        return
+        pytest.fail(f"Canonical names not found at {CANONICAL_NAMES_PATH}")
     with open(CANONICAL_NAMES_PATH, encoding="utf-8") as f:
         return json.load(f)
 

@@ -4,7 +4,7 @@ import yaml
 
 
 def test_model_rules_yaml_integrity():
-    rules_path = Path(__file__).parent.parent / "data" / "vision" / "generated" / "model_rules.yaml"
+    rules_path = Path(__file__).parents[3] / "data" / "vision" / "generated" / "model_rules.yaml"
 
     with open(rules_path, encoding="utf-8") as f:
         rules = yaml.safe_load(f)
