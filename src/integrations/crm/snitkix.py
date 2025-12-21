@@ -18,7 +18,7 @@ import httpx
 
 from src.conf.config import settings
 from src.integrations.crm.base import BaseCRMClient, CRMErrorType, CRMResponse
-from src.services.order_model import Order, OrderStatus
+from src.services.data.order_model import Order, OrderStatus
 
 
 @dataclass
@@ -34,6 +34,7 @@ class OrderStatusResult:
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< Updated upstream
 # Status mapping: Our status -> Snitkix status
 STATUS_MAPPING = {
     OrderStatus.NEW: "new",
@@ -48,6 +49,9 @@ STATUS_MAPPING = {
 
 # Reverse mapping: Snitkix status -> Our status
 REVERSE_STATUS_MAPPING = {v: k for k, v in STATUS_MAPPING.items()}
+=======
+from src.conf.crm_config import SNITKIX_STATUS_TITLES as STATUS_MAPPING, REVERSE_SNITKIX_STATUS as REVERSE_STATUS_MAPPING
+>>>>>>> Stashed changes
 
 
 class SnitkixCRMClient(BaseCRMClient):

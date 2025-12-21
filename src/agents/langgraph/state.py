@@ -43,6 +43,30 @@ def append_list(current: list, new: list) -> list:
     return current + [x for x in new if x not in current]
 
 
+<<<<<<< Updated upstream
+=======
+def add_messages_capped(current: list, new: list) -> list:
+    """Append messages but keep only the last N to prevent unbounded growth."""
+    merged = add_messages(current, new)
+    max_messages = settings.STATE_MAX_MESSAGES
+    if max_messages > 0 and len(merged) > max_messages:
+        trimmed_count = len(merged) - max_messages
+        try:
+            from src.services.core.observability import track_metric
+
+            track_metric("state_messages_trimmed", trimmed_count)
+        except Exception:
+            pass
+        logger.info(
+            "[STATE] Trimmed messages: trimmed=%d kept=%d",
+            trimmed_count,
+            max_messages,
+        )
+        return merged[-max_messages:]
+    return merged
+
+
+>>>>>>> Stashed changes
 # =============================================================================
 # CONVERSATION STATE
 # =============================================================================

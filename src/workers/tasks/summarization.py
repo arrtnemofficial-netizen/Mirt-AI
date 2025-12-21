@@ -14,14 +14,14 @@ from datetime import UTC, datetime
 from celery import shared_task
 
 from src.conf.config import settings
-from src.services.message_store import create_message_store
-from src.services.summarization import (
+from src.services.infra.message_store import create_message_store
+from src.services.domain.memory.summarization import (
     call_summarize_inactive_users,
     get_users_needing_summary,
     mark_user_summarized,
     run_retention,
 )
-from src.services.supabase_client import get_supabase_client
+from src.services.infra.supabase_client import get_supabase_client
 from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
 from src.workers.sync_utils import run_sync
 

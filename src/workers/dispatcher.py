@@ -45,8 +45,8 @@ def dispatch_summarization(session_id: str, user_id: int | None = None) -> dict:
         return {"queued": True, "task_id": task.id}
     else:
         # Sync execution
-        from src.services.message_store import create_message_store
-        from src.services.summarization import run_retention
+        from src.services.infra.message_store import create_message_store
+        from src.services.domain.memory.summarization import run_retention
 
         message_store = create_message_store()
         summary = run_retention(session_id, message_store, user_id=user_id)
@@ -76,8 +76,8 @@ def dispatch_followup(
         return {"queued": True, "task_id": task.id}
     else:
         # Sync execution
-        from src.services.followups import run_followups
-        from src.services.message_store import create_message_store
+        from src.services.domain.engagement.followups import run_followups
+        from src.services.infra.message_store import create_message_store
 
         message_store = create_message_store()
         followup = run_followups(session_id, message_store)
@@ -145,7 +145,7 @@ def dispatch_crm_order(order_data: dict[str, Any]) -> dict:
     else:
         # Sync execution - use run_sync instead of asyncio.run
         from src.integrations.crm.snitkix import get_snitkix_client
-        from src.services.order_model import CustomerInfo, Order, OrderItem
+        from src.services.data.order_model import CustomerInfo, Order, OrderItem
         from src.workers.sync_utils import run_sync
 
         if not settings.snitkix_enabled:
@@ -286,7 +286,7 @@ def dispatch_message(
             from src.agents import (
                 get_active_graph as create_agent_graph,  # Fixed typo: was src.agent
             )
-            from src.services.message_store import create_message_store
+            from src.services.infra.message_store import create_message_store
 
             message_store = create_message_store()
             history = message_store.list(session_id, limit=20)

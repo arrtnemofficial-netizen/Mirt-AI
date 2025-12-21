@@ -1,12 +1,17 @@
 """ASGI app exposing Telegram and ManyChat webhooks.
 
-This module uses proper FastAPI dependency injection and lifespan management
-instead of global singletons.
+This module is now a thin orchestrator that:
+1. Manages FastAPI app lifecycle
+2. Includes routers for all endpoints
+3. Sets up middleware
+
+All endpoint logic has been extracted to src/server/routers/ for maintainability.
 """
 
 from __future__ import annotations
 
 import logging
+<<<<<<< Updated upstream
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -24,6 +29,26 @@ from src.server.dependencies import (
     get_cached_manychat_handler,
 )
 from src.server.middleware import setup_middleware
+=======
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from src.conf.config import settings
+from src.core.logging import setup_logging
+from src.server.dependencies import get_bot
+from src.server.middleware import setup_middleware
+from src.server.routers import (
+    automation_router,
+    health_router,
+    manychat_router,
+    media_router,
+    sitniks_router,
+    snitkix_router,
+    telegram_router,
+)
+>>>>>>> Stashed changes
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +98,33 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting MIRT AI Webhooks server")
 
+<<<<<<< Updated upstream
     # Register Telegram webhook if configured
+=======
+    # ==========================================================================
+    # WARMUP: Pre-initialize the graph to avoid 20+ second delay on first request
+    # ==========================================================================
+    try:
+        from src.agents.langgraph import get_production_graph
+        from src.agents.langgraph.checkpointer import warmup_checkpointer_pool
+
+        logger.info("Warming up LangGraph (this may take 10-20 seconds on first deploy)...")
+        _graph = get_production_graph()
+        warmup_ok = await warmup_checkpointer_pool()
+        if not warmup_ok:
+            required = (
+                (os.getenv("CHECKPOINTER_WARMUP_REQUIRED", "false") or "false").strip().lower()
+            )
+            if required in {"1", "true", "yes"}:
+                raise RuntimeError("Checkpointer warmup required but failed")
+            logger.warning("LangGraph warmup incomplete; continuing without warm pool")
+        else:
+            logger.info("LangGraph warmed up successfully!")
+    except Exception as e:
+        logger.warning("Failed to warm up LangGraph: %s (will initialize on first request)", e)
+
+    # Telegram webhook: реєструємо, якщо є token і публічна адреса
+>>>>>>> Stashed changes
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
 
@@ -92,6 +143,10 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down MIRT AI Webhooks server")
 
 
+# =============================================================================
+# FastAPI App
+# =============================================================================
+
 app = FastAPI(
     title="MIRT AI Webhooks",
     description="AI-powered shopping assistant webhooks for Telegram and ManyChat",
@@ -102,6 +157,7 @@ app = FastAPI(
 # Setup middleware (rate limiting, request logging)
 setup_middleware(app, enable_rate_limit=True, enable_logging=True)
 
+<<<<<<< Updated upstream
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
@@ -516,3 +572,16 @@ def _generate_followup_text(current_state: str, last_product: str = "") -> str |
         return None
 
     return followup_templates.get(current_state, "Чим можу допомогти? 🤍")
+=======
+# =============================================================================
+# Include Routers
+# =============================================================================
+
+app.include_router(health_router)
+app.include_router(telegram_router)
+app.include_router(media_router)
+app.include_router(manychat_router)
+app.include_router(snitkix_router)
+app.include_router(sitniks_router)
+app.include_router(automation_router)
+>>>>>>> Stashed changes

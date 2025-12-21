@@ -10,8 +10,8 @@ import logging
 import time
 from typing import Any
 
-from src.services.moderation import moderate_user_message
-from src.services.observability import log_moderation_result, track_metric
+from src.services.core.moderation import moderate_user_message
+from src.services.core.observability import log_moderation_result, track_metric
 
 
 logger = logging.getLogger(__name__)

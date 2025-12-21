@@ -240,14 +240,18 @@ def get_production_graph(
     """
     global _production_graph
 
+<<<<<<< Updated upstream
     if _production_graph is None:
         from src.agents.pydantic.support_agent import run_support
+=======
+        from src.agents.pydantic.main_agent import run_main
+>>>>>>> Stashed changes
 
         # Create a wrapper that matches the runner signature
         async def _default_runner(msg: str, metadata: dict[str, Any]) -> dict[str, Any]:
             from src.agents.pydantic.deps import create_deps_from_state
             deps = create_deps_from_state(metadata)
-            result = await run_support(msg, deps)
+            result = await run_main(msg, deps)
             return result.model_dump()
 
         _production_graph = build_production_graph(

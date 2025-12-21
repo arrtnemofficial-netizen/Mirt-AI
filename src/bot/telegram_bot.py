@@ -27,9 +27,16 @@ from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
 from src.core.state_machine import EscalationLevel, State, get_keyboard_for_state, normalize_state
 from src.services.conversation import ConversationHandler, create_conversation_handler
+<<<<<<< Updated upstream
 from src.services.message_store import MessageStore, create_message_store
 from src.services.renderer import render_agent_response_text
 from src.services.session_store import InMemorySessionStore, SessionStore
+=======
+from src.services.infra.debouncer import BufferedMessage, MessageDebouncer
+from src.services.infra.message_store import MessageStore, create_message_store
+from src.services.infra.renderer import render_agent_response_text
+from src.services.infra.session_store import InMemorySessionStore, SessionStore
+>>>>>>> Stashed changes
 
 
 if TYPE_CHECKING:
@@ -94,6 +101,7 @@ def build_dispatcher(
 
     @dp.message(CommandStart())
     async def handle_start(message: Message) -> None:
+<<<<<<< Updated upstream
         # Reset session state on /start
         session_id = str(message.chat.id)
         store.save(session_id, {
@@ -103,6 +111,93 @@ def build_dispatcher(
         })
         await message.answer("Можемо почати спілкування!")
 
+=======
+        """Старт діалогу: м'який ресет стану.
+
+        Використовується при першому запуску або коли користувач сам натиснув /start.
+        """
+        from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+
+        def _get_reply(header: str, default: str) -> str:
+            s = get_snippet_by_header(header)
+            return "".join(s) if s else default
+
+        session_id = str(message.chat.id)
+        thread_id = f"{session_id}:{uuid.uuid4()}"
+        store.save(
+            session_id,
+            {
+                "messages": [],
+                "metadata": {
+                    "session_id": session_id,
+                    "thread_id": thread_id,
+                    "vision_greeted": False,
+                    "has_image": False,
+                },
+                "current_state": "STATE_0_INIT",
+                "dialog_phase": "INIT",
+                "should_escalate": False,
+                "has_image": False,
+                "detected_intent": None,
+                "selected_products": [],
+                "offered_products": [],
+                "step_number": 0,
+            },
+        )
+        await message.answer(_get_reply("BOT_START_REPLY", "Можемо почати спілкування!"))
+
+    @dp.message(Command("restart"))
+    async def handle_restart(message: Message) -> None:
+        """Жорсткий ресет: повністю очистити сесію.
+
+        - Перезаписує state в SessionStore (Supabase / in-memory)
+        - Видаляє історію повідомлень з MessageStore
+        """
+
+        import uuid
+        from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+
+        def _get_reply(header: str, default: str) -> str:
+            s = get_snippet_by_header(header)
+            return "".join(s) if s else default
+
+        session_id = str(message.chat.id)
+        thread_id = f"{session_id}:{uuid.uuid4()}"
+
+        store.save(
+            session_id,
+            {
+                "messages": [],
+                "metadata": {
+                    "session_id": session_id,
+                    "thread_id": thread_id,
+                    "vision_greeted": False,
+                    "has_image": False,
+                },
+                "current_state": "STATE_0_INIT",
+                "dialog_phase": "INIT",
+                "should_escalate": False,
+                "has_image": False,
+                "detected_intent": None,
+                "selected_products": [],
+                "offered_products": [],
+                "step_number": 0,
+            },
+        )
+
+        # 2) Видаляємо історію повідомлень, якщо сховище це підтримує
+        try:
+            delete_fn = getattr(msg_store, "delete", None)
+            if callable(delete_fn):
+                delete_fn(session_id)
+        except Exception as e:
+            logger.warning("Failed to delete message history for session %s: %s", session_id, e)
+
+        await message.answer(
+            _get_reply("BOT_RESTART_REPLY", "Сесію перезапустила. Надішліть фото або запитання.")
+        )
+
+>>>>>>> Stashed changes
     @dp.message(F.text)
     async def handle_text(message: Message) -> None:
         await _process_incoming(message, conversation_handler)
@@ -181,10 +276,48 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
         if not chunk or not chunk.strip():
             continue
 
+<<<<<<< Updated upstream
         is_last_text = (i == len(text_chunks) - 1) and not agent_response.products
         await message.answer(
             chunk,
             reply_markup=keyboard if is_last_text else None,
+=======
+    # Send product photos only for vision/photo-ident responses to avoid повторних фото
+    if agent_response.metadata.intent == "PHOTO_IDENT":
+        for _i, product in enumerate(agent_response.products):
+            if product.photo_url:
+                await message.answer_photo(
+                    photo=product.photo_url,
+                    caption="",  # без дублювання тексту/ціни
+                )
+
+
+async def run_polling(store: SessionStore | None = None) -> None:
+    """Convenience entry point for local polling runs."""
+    # Configure logging to show INFO level for our modules
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    # Reduce noise from external libs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("aiogram").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    print("🚀 Starting Telegram bot with INFO logging enabled...")
+
+    from src.services.infra.supabase_store import create_supabase_store
+
+    # Try to use Supabase store if not provided
+    if store is None:
+        store = create_supabase_store()
+
+    if store is None:
+        print(
+            "⚠️ Using InMemorySessionStore - session state will be lost on restart!\n"
+            "   Set SUPABASE_URL and SUPABASE_API_KEY for persistent session storage."
+>>>>>>> Stashed changes
         )
 
     # Send product photos (last one with keyboard)

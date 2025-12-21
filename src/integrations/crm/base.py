@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from src.services.order_model import Order, OrderStatus
+    from src.services.data.order_model import Order, OrderStatus
 
 
 class CRMErrorType(str, Enum):

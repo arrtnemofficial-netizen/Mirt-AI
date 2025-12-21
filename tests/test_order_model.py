@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.services.order_model import (
+from src.services.data.order_model import (
     CustomerInfo,
     Order,
     OrderItem,

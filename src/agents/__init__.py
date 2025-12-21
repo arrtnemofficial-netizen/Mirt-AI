@@ -8,11 +8,11 @@ Structure:
 - langgraph/   <- Orchestration (THE CONDUCTOR)
 
 Quick Start:
-    from src.agents import run_support, AgentDeps, get_active_graph
+    from src.agents import run_main, AgentDeps, get_active_graph
 
     # 1. Run agent directly
     deps = AgentDeps(session_id="123", current_state="STATE_0_INIT")
-    response = await run_support("Привіт!", deps)
+    response = await run_main("Привіт!", deps)
 
     # 2. Run via LangGraph
     graph = get_active_graph()
@@ -78,11 +78,11 @@ from .pydantic import (
     create_deps_from_state,
     get_payment_agent,
     # Agent factories (for advanced use)
-    get_support_agent,
+    get_main_agent,
     get_vision_agent,
     run_payment,
     # Agent runners (what you call)
-    run_support,
+    run_main,
     run_vision,
 )
 
@@ -132,10 +132,10 @@ __all__ = [
     "IntentType",
     "StateType",
     "EventType",
-    "run_support",
+    "run_main",
     "run_vision",
     "run_payment",
-    "get_support_agent",
+    "get_main_agent",
     "get_vision_agent",
     "get_payment_agent",
     # LangGraph

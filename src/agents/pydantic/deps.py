@@ -23,8 +23,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< Updated upstream
 from src.services.catalog_service import CatalogService
 from src.services.order_service import OrderService
+=======
+from src.services.data.catalog_service import CatalogService
+from src.services.domain.memory.memory_service import MemoryService
+from src.services.data.order_service import OrderService
+from src.services.domain.vision.vision_context import VisionContextService
+>>>>>>> Stashed changes
 
 # =============================================================================
 # DATABASE SERVICE (Real Supabase Implementation)
@@ -37,7 +44,7 @@ Database = OrderService
 # CATALOG SERVICE (Real Supabase Implementation)
 # =============================================================================
 
-# CatalogService is now imported directly from src.services.catalog_service
+# CatalogService is now imported directly from src.services.data.catalog_service
 
 
 # =============================================================================
@@ -86,6 +93,15 @@ class AgentDeps:
     # Services (injected)
     db: OrderService = field(default_factory=OrderService)
     catalog: CatalogService = field(default_factory=CatalogService)
+<<<<<<< Updated upstream
+=======
+    memory: MemoryService | None = None  # Lazy init to avoid circular import
+    vision: VisionContextService | None = None # Auto-initialized in post_init
+
+    def __post_init__(self):
+        if self.vision is None:
+            self.vision = VisionContextService(self.catalog)
+>>>>>>> Stashed changes
 
     # Environment
     env: str = "production"

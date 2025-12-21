@@ -25,10 +25,17 @@ from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
 from src.conf.config import settings
+<<<<<<< Updated upstream:scripts/test_workers_real.py
 from src.services.followups import build_followup_message, next_followup_due_at, run_followups
 from src.services.message_store import MessageStore, StoredMessage, create_message_store
 from src.services.summarization import run_retention, summarise_messages
 from src.services.supabase_client import get_supabase_client
+=======
+from src.services.domain.engagement.followups import build_followup_message, next_followup_due_at, run_followups
+from src.services.infra.message_store import StoredMessage, create_message_store
+from src.services.domain.memory.summarization import summarise_messages
+from src.services.infra.supabase_client import get_supabase_client
+>>>>>>> Stashed changes:tests/manual/test_workers_real.py
 
 
 def print_header(title: str):

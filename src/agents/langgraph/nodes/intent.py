@@ -11,11 +11,17 @@ import logging
 from typing import Any
 
 from src.core.input_validator import validate_input_metadata
+<<<<<<< Updated upstream
+=======
+from src.core.state_machine import State
+from src.core.prompt_registry import get_snippet_by_header
+>>>>>>> Stashed changes
 
 
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< Updated upstream
 # Intent keywords for quick detection
 INTENT_PATTERNS = {
     "PAYMENT_DELIVERY": [
@@ -46,6 +52,35 @@ INTENT_PATTERNS = {
         "привіт", "вітаю", "добр", "hello", "hi", "хай",
     ],
 }
+=======
+def _get_patterns(header: str) -> list[str]:
+    """Get patterns from registry."""
+    bubbles = get_snippet_by_header(header)
+    if not bubbles:
+        return []
+    # Support both multi-bubble messages and multi-line keyword lists
+    patterns = []
+    for b in bubbles:
+        patterns.extend([line.strip() for line in b.split("\n") if line.strip()])
+    return patterns
+
+
+def get_intent_patterns() -> dict[str, list[str]]:
+    """Get all intent patterns from registry."""
+    return {
+        "PAYMENT_DELIVERY": _get_patterns("INTENT_PATTERN_PAYMENT_DELIVERY"),
+        "CONFIRMATION": _get_patterns("INTENT_PATTERN_CONFIRMATION"),
+        "PRODUCT_NAMES": _get_patterns("INTENT_PATTERN_PRODUCT_NAMES"),
+        "PRODUCT_CATEGORY": _get_patterns("INTENT_PATTERN_PRODUCT_CATEGORY"),
+        "SIZE_HELP": _get_patterns("INTENT_PATTERN_SIZE_HELP"),
+        "COLOR_HELP": _get_patterns("INTENT_PATTERN_COLOR_HELP"),
+        "COMPLAINT": _get_patterns("INTENT_PATTERN_COMPLAINT"),
+        "REQUEST_PHOTO": _get_patterns("INTENT_PATTERN_REQUEST_PHOTO"),
+        "DISCOVERY_OR_QUESTION": _get_patterns("INTENT_PATTERN_DISCOVERY"),
+        "GREETING_ONLY": _get_patterns("INTENT_PATTERN_GREETING"),
+        "THANKYOU_SMALLTALK": _get_patterns("INTENT_PATTERN_THANKYOU"),
+    }
+>>>>>>> Stashed changes
 
 
 def detect_intent_from_text(
@@ -53,28 +88,22 @@ def detect_intent_from_text(
     has_image: bool,
     current_state: str,
 ) -> str:
-    """
-    Quick intent detection based on keywords and context.
-
-    Priority:
-    1. Payment context in payment state (no matter what)
-    2. Photo present -> PHOTO_IDENT
-    3. Keyword matching
-    4. Default to DISCOVERY_OR_QUESTION
-    """
+    """Quick intent detection based on keywords and context."""
     text_lower = text.lower().strip()
+    patterns = get_intent_patterns()
 
     # Special cases first
-    special = _check_special_cases(text_lower, has_image, current_state)
+    special = _check_special_cases(text_lower, has_image, current_state, patterns)
     if special:
         return special
 
     # Keyword matching in priority order
-    return _match_keywords(text_lower, len(text))
+    return _match_keywords(text_lower, len(text), patterns)
 
 
-def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -> str | None:
+def _check_special_cases(text_lower: str, has_image: bool, current_state: str, patterns: dict) -> str | None:
     """Check special cases before keyword matching."""
+<<<<<<< Updated upstream
     # Empty text with image
     if not text_lower and has_image:
         return "PHOTO_IDENT"
@@ -89,34 +118,62 @@ def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -
 
     # Photo identification (not in payment context)
     if has_image:
+=======
+    if not text_lower and has_image:
+        return "PHOTO_IDENT"
+
+    if current_state == "STATE_4_OFFER":
+        for keyword in patterns["PAYMENT_DELIVERY"]:
+            if keyword in text_lower:
+                return "PAYMENT_DELIVERY"
+        for keyword in patterns["CONFIRMATION"]:
+            if keyword in text_lower:
+                return "PAYMENT_DELIVERY"
+        for keyword in patterns["PRODUCT_NAMES"]:
+            if keyword in text_lower:
+                return "PAYMENT_DELIVERY"
+
+    if current_state == "STATE_5_PAYMENT_DELIVERY":
+        for keyword in patterns["COMPLAINT"]:
+            if keyword in text_lower:
+                return None
+        return "PAYMENT_DELIVERY"
+
+    if has_image:
+        for keyword in patterns["PAYMENT_DELIVERY"]:
+            if keyword in text_lower:
+                return None
+>>>>>>> Stashed changes
         return "PHOTO_IDENT"
 
     return None
 
 
-def _match_keywords(text_lower: str, text_len: int) -> str:
+def _match_keywords(text_lower: str, text_len: int, patterns: dict) -> str:
     """Match keywords in priority order."""
-    # Priority order for keyword matching
     priority_intents = [
         "PAYMENT_DELIVERY",
         "COMPLAINT",
         "SIZE_HELP",
         "COLOR_HELP",
+<<<<<<< Updated upstream
+=======
+        "REQUEST_PHOTO",
+        "PRODUCT_CATEGORY",
+>>>>>>> Stashed changes
     ]
 
     for intent in priority_intents:
-        for keyword in INTENT_PATTERNS[intent]:
+        for keyword in patterns.get(intent, []):
             if keyword in text_lower:
                 return intent
 
-    # Greeting (only if short message)
     if text_len < 30:
-        for keyword in INTENT_PATTERNS["GREETING_ONLY"]:
+        for keyword in patterns["GREETING_ONLY"]:
             if keyword in text_lower:
                 return "GREETING_ONLY"
 
-    # Discovery/questions
-    for keyword in INTENT_PATTERNS["DISCOVERY_OR_QUESTION"]:
+    for keyword in patterns["DISCOVERY_OR_QUESTION"]:
         if keyword in text_lower:
             return "DISCOVERY_OR_QUESTION"
 
@@ -124,6 +181,7 @@ def _match_keywords(text_lower: str, text_len: int) -> str:
 
 
 async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
+<<<<<<< Updated upstream
     """
     Detect intent from user input for smart routing.
 
@@ -131,30 +189,44 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     Fast and lightweight - no API calls.
     """
     # Skip if already escalating
+=======
+    """Detect intent from user input for smart routing."""
+    dialog_phase = state.get("dialog_phase", "")
+    reset_for_new = dialog_phase == "COMPLETED"
+
+    metadata = state.get("metadata", {})
+    has_image_early = state.get("has_image", False) or metadata.get("has_image", False)
+
+    if has_image_early:
+        return {
+            "detected_intent": "PHOTO_IDENT",
+            "has_image": True,
+            "image_url": metadata.get("image_url"),
+            "metadata": {**metadata, "has_image": True},
+            "step_number": state.get("step_number", 0) + 1,
+        }
+
+>>>>>>> Stashed changes
     if state.get("should_escalate"):
         return {
             "detected_intent": "ESCALATION",
             "step_number": state.get("step_number", 0) + 1,
         }
 
-    # Validate metadata
     metadata = validate_input_metadata(state.get("metadata", {}))
-
-    # Get latest user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
     user_content = extract_user_message(state.get("messages", []))
 
-    # Check for image
     has_image = metadata.has_image or bool(metadata.image_url)
     image_url = metadata.image_url
 
-    # Detect intent
     detected_intent = detect_intent_from_text(
         text=user_content,
         has_image=has_image,
         current_state=metadata.current_state.value,
     )
 
+<<<<<<< Updated upstream
     logger.debug(
         "Intent detected: %s (text=%s, has_image=%s, state=%s)",
         detected_intent,
@@ -164,6 +236,10 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     )
 
     return {
+=======
+    reset_now = reset_for_new and detected_intent != "THANKYOU_SMALLTALK"
+    update = {
+>>>>>>> Stashed changes
         "detected_intent": detected_intent,
         "has_image": has_image,
         "image_url": image_url,
@@ -174,3 +250,23 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         },
         "step_number": state.get("step_number", 0) + 1,
     }
+<<<<<<< Updated upstream
+=======
+    if reset_now:
+        update.update({
+            "current_state": State.STATE_0_INIT.value,
+            "dialog_phase": "INIT",
+            "selected_products": [],
+            "offered_products": [],
+            "metadata": {
+                **state.get("metadata", {}),
+                "has_image": has_image,
+                "image_url": image_url,
+                "current_state": State.STATE_0_INIT.value,
+                "intent": detected_intent,
+                "upsell_flow_active": False,
+                "upsell_base_products": [],
+            },
+        })
+    return update
+>>>>>>> Stashed changes

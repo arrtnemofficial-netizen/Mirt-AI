@@ -25,7 +25,7 @@ from typing import Any
 from celery import shared_task
 
 from src.core.constants import DBTable
-from src.services.supabase_client import get_supabase_client
+from src.services.infra.supabase_client import get_supabase_client
 from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
 
 

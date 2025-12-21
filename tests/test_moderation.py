@@ -1,4 +1,4 @@
-from src.services.moderation import moderate_user_message
+from src.services.core.moderation import moderate_user_message
 
 
 def test_detects_and_redacts_pii():

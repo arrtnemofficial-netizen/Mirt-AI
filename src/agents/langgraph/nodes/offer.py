@@ -3,7 +3,18 @@ Offer Node - Product presentation.
 ==================================
 Presents product offer with price and details.
 This is where we close the sale.
+<<<<<<< Updated upstream
 Uses run_support directly with offer context.
+=======
+
+DELIBERATION FLOW:
+1. Pre-validation: Check prices against DB before LLM call
+2. LLM generates offer with deliberation (Customer/Business/Quality views)
+3. Post-validation: If low confidence or price_mismatch → fallback
+4. Return offer to customer
+
+Uses run_main directly with offer context.
+>>>>>>> Stashed changes
 """
 
 from __future__ import annotations
@@ -13,18 +24,83 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from src.agents.pydantic.deps import create_deps_from_state
+<<<<<<< Updated upstream
 from src.agents.pydantic.support_agent import run_support
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
+=======
+from src.agents.pydantic.main_agent import run_offer
+from src.conf.config import settings
+from src.core.debug_logger import debug_log
+from src.core.state_machine import State
+from src.services.data.catalog_service import CatalogService
+from src.services.core.observability import log_agent_step, track_metric
+
+
+from src.conf.config import settings
+from src.core.debug_logger import debug_log
+from src.core.state_machine import State
+from src.services.data.catalog_service import CatalogService
+from src.services.core.observability import log_agent_step, track_metric
+>>>>>>> Stashed changes
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+<<<<<<< Updated upstream
     from src.agents.pydantic.models import SupportResponse
 
 
 logger = logging.getLogger(__name__)
+=======
+    from src.agents.pydantic.models import OfferResponse
+def _merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """Merge fields from incoming product into existing product, preserving truth."""
+    merged = dict(existing)
+    for key, new_value in incoming.items():
+        if key == "price":
+            if (isinstance(new_value, (int, float)) and new_value > 0) or key not in merged:
+                merged[key] = new_value
+            continue
+        if key in {"size", "color", "photo_url", "description"}:
+            if (isinstance(new_value, str) and new_value.strip()) or key not in merged:
+                merged[key] = new_value
+            continue
+        merged[key] = new_value
+    return merged
+
+
+def _merge_products(
+    existing: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge product lists, preserving details like size/color/price."""
+    by_id: dict[int, dict[str, Any]] = {}
+    by_name: dict[str, dict[str, Any]] = {}
+    for item in existing:
+        pid = item.get("id")
+        name = str(item.get("name") or "").strip().lower()
+        if isinstance(pid, int) and pid > 0:
+            by_id[pid] = item
+        if name:
+            by_name[name] = item
+
+    merged_incoming: list[dict[str, Any]] = []
+    for item in incoming:
+        pid = item.get("id")
+        name = str(item.get("name") or "").strip().lower()
+        existing_item = None
+        if isinstance(pid, int) and pid > 0:
+            existing_item = by_id.get(pid)
+        if existing_item is None and name:
+            existing_item = by_name.get(name)
+        merged_incoming.append(
+            _merge_product_fields(existing_item or {}, item) if existing_item else item
+        )
+
+    return merged_incoming
+>>>>>>> Stashed changes
 
 
 async def offer_node(
@@ -41,7 +117,7 @@ async def offer_node(
 
     Args:
         state: Current conversation state
-        runner: IGNORED - uses run_support directly
+        runner: IGNORED - uses run_main directly
 
     Returns:
         State update with offer response
@@ -71,8 +147,15 @@ async def offer_node(
     )
 
     try:
+<<<<<<< Updated upstream
         # Call support agent with offer context
         response: SupportResponse = await run_support(
+=======
+        # =========================================================================
+        # STEP 2: LLM CALL with deliberation
+        # =========================================================================
+        response: OfferResponse = await run_offer(
+>>>>>>> Stashed changes
             message=user_message,
             deps=deps,
             message_history=None,
@@ -96,6 +179,99 @@ async def offer_node(
         # Build assistant message from response
         assistant_content = "\n".join(m.content for m in response.messages)
 
+<<<<<<< Updated upstream
+=======
+        if settings.USE_OFFER_DELIBERATION and response.deliberation:
+            delib = response.deliberation
+
+            # Log deliberation
+            logger.info(
+                "🎯 [SESSION %s] Deliberation: confidence=%.2f, flags=%s",
+                session_id,
+                delib.confidence,
+                delib.flags or "none",
+            )
+            logger.debug(
+                "📊 Views: customer='%s...', business='%s...', quality='%s...'",
+                (delib.customer_view or "-")[:40],
+                (delib.business_view or "-")[:40],
+                (delib.quality_view or "-")[:40],
+            )
+
+            # CHECK: Price mismatch → CRITICAL, use fallback
+            if "price_mismatch" in delib.flags:
+                use_fallback = True
+                fallback_reason = "price_mismatch"
+                logger.error(
+                    "🚨 [SESSION %s] PRICE MISMATCH → fallback activated!",
+                    session_id,
+                )
+                track_metric("deliberation_price_mismatch", 1)
+
+            # CHECK: Low confidence → use fallback
+            elif delib.confidence < settings.DELIBERATION_MIN_CONFIDENCE:
+                use_fallback = True
+                fallback_reason = f"low_confidence_{delib.confidence:.2f}"
+                logger.warning(
+                    "⚠️ [SESSION %s] LOW CONFIDENCE %.2f < %.2f → fallback",
+                    session_id,
+                    delib.confidence,
+                    settings.DELIBERATION_MIN_CONFIDENCE,
+                )
+                track_metric("deliberation_low_confidence", 1)
+
+            # CHECK: Size unavailable (warning only, no fallback)
+            if "size_unavailable" in delib.flags:
+                logger.warning(
+                    "⚠️ [SESSION %s] SIZE UNAVAILABLE flag (no fallback)",
+                    session_id,
+                )
+
+        # =========================================================================
+        # STEP 4: BUILD RESPONSE (normal or fallback)
+        # =========================================================================
+        if use_fallback:
+            # Use safe fallback message instead of LLM response
+            fallback_text = _get_fallback_text(fallback_reason)
+
+            assistant_messages = [{"role": "assistant", "content": fallback_text}]
+
+            # Stay in SIZE_COLOR to re-try with correct data
+            return {
+                "current_state": State.STATE_3_SIZE_COLOR.value,  # Go back!
+                "messages": assistant_messages,
+                "selected_products": validated_products,  # Keep validated
+                "dialog_phase": "WAITING_FOR_SIZE",  # Re-ask
+                "metadata": {"fallback_reason": fallback_reason},
+                "step_number": state.get("step_number", 0) + 1,
+                "last_error": None,
+            }
+
+        # Normal flow: use LLM response
+        assistant_messages = [
+            {"role": "assistant", "content": m.content} for m in response.messages
+        ]
+        if not assistant_messages:
+            assistant_messages = [{"role": "assistant", "content": ""}]
+
+        # Update selected_products if agent returned new products (preserve size/color/price).
+        if response.products:
+            incoming_products = [p.model_dump() for p in response.products]
+            validated_products = _merge_products(validated_products, incoming_products)
+
+        # =====================================================
+        # DIALOG PHASE (Turn-Based State Machine)
+        # =====================================================
+        if settings.DEBUG_TRACE_LOGS:
+            preview_text = assistant_messages[0].get("content", "") if assistant_messages else ""
+            debug_log.node_exit(
+                session_id=session_id,
+                node_name="offer",
+                goto="memory_update",
+                new_phase="OFFER_MADE",
+                response_preview=preview_text,
+            )
+>>>>>>> Stashed changes
         return {
             "current_state": State.STATE_4_OFFER.value,
             "messages": [{"role": "assistant", "content": assistant_content}],

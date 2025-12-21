@@ -23,7 +23,11 @@ import logging
 from typing import Any
 
 from src.core.product_adapter import ProductAdapter
+<<<<<<< Updated upstream
 from src.services.observability import log_validation_result, track_metric
+=======
+from src.services.core.observability import log_trace, log_validation_result, track_metric
+>>>>>>> Stashed changes
 
 
 logger = logging.getLogger(__name__)
@@ -223,12 +227,22 @@ def should_retry(state: dict[str, Any]) -> bool:
 
 def get_retry_feedback(state: dict[str, Any]) -> str:
     """Build feedback message for retry attempt."""
+    from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+    
     errors = state.get("validation_errors", [])
     retry_count = state.get("retry_count", 0)
 
-    feedback = f"Попередня відповідь мала помилки (спроба {retry_count}):\n"
+    snippets = get_snippet_by_header("VALIDATION_RETRY_FEEDBACK")
+    if snippets and len(snippets) >= 2:
+        prefix = snippets[0].format(retry_count=retry_count)
+        suffix = snippets[1]
+    else:
+        prefix = f"Previous response had errors (attempt {retry_count}):"
+        suffix = "Please fix these and try again."
+
+    feedback = f"{prefix}\n"
     for err in errors[:3]:  # First 3 errors
         feedback += f"- {err}\n"
-    feedback += "\nВиправ ці помилки та спробуй ще раз."
+    feedback += f"\n{suffix}"
 
     return feedback

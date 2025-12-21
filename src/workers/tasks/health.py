@@ -31,7 +31,7 @@ def worker_health_check(self) -> dict:
     Returns:
         dict with health status
     """
-    from src.services.supabase_client import get_supabase_client
+    from src.services.infra.supabase_client import get_supabase_client
 
     health = {
         "status": "healthy",

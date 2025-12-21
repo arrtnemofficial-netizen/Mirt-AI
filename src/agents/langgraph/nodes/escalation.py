@@ -11,7 +11,12 @@ from typing import Any
 
 from src.core.models import AgentResponse, DebugInfo, Escalation, Message, Metadata
 from src.core.state_machine import State
+<<<<<<< Updated upstream
 from src.services.observability import log_agent_step, track_metric
+=======
+from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+from src.services.core.observability import log_agent_step, track_metric
+>>>>>>> Stashed changes
 
 
 logger = logging.getLogger(__name__)
@@ -31,14 +36,20 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     current_state = state.get("current_state", State.STATE_0_INIT.value)
 
     # Determine escalation reason
+    from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+
+    def _get_reason(snippet_name: str, default: str) -> str:
+        s = get_snippet_by_header(snippet_name)
+        return s[0] if s else default
+
     reason = state.get("escalation_reason")
     if not reason:
         if state.get("retry_count", 0) >= state.get("max_retries", 3):
-            reason = "Перевищено кількість спроб"
+            reason = _get_reason("ESCALATION_REASON_RETRIES", "Maximum attempts exceeded")
         elif state.get("moderation_result", {}).get("allowed") is False:
-            reason = state.get("moderation_result", {}).get("reason", "Модерація")
+            reason = state.get("moderation_result", {}).get("reason") or _get_reason("ESCALATION_REASON_MODERATION", "Moderation")
         else:
-            reason = "Потрібна допомога оператора"
+            reason = _get_reason("ESCALATION_REASON_OPERATOR", "Operator assistance required")
 
     # Build escalation response
     response = AgentResponse(
@@ -82,7 +93,12 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     # NOTIFY MANAGER
     # =========================================================================
     try:
+<<<<<<< Updated upstream
         from src.services.notification_service import NotificationService
+=======
+        from src.services.infra.notification_service import NotificationService
+
+>>>>>>> Stashed changes
         notifier = NotificationService()
         
         # Get last user message for context

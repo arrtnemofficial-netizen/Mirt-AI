@@ -155,7 +155,183 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=5)
         checkpointer = PostgresSaver(pool)
 
+<<<<<<< Updated upstream
         logger.info("PostgreSQL checkpointer initialized successfully")
+=======
+        async def check_connection(conn):
+            """Check if connection is still alive before returning from pool."""
+            try:
+                await conn.execute("SELECT 1")
+            except Exception:
+                raise  # Connection is dead, pool will discard it
+
+        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 1)
+        pool_max_size = _setting_int(settings, "CHECKPOINTER_POOL_MAX_SIZE", 5)
+        pool_timeout_s = _setting_float(settings, "CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
+        pool_max_idle_s = _setting_float(settings, "CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
+        connect_timeout_s = _setting_float(settings, "CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 10.0)
+
+        statement_timeout_ms = _setting_int(settings, "CHECKPOINTER_STATEMENT_TIMEOUT_MS", 8000)
+        lock_timeout_ms = _setting_int(settings, "CHECKPOINTER_LOCK_TIMEOUT_MS", 2000)
+
+        pool_min_size = max(pool_min_size, 0)
+        pool_max_size = max(pool_max_size, 1)
+        pool_min_size = min(pool_min_size, pool_max_size)
+
+        options = None
+        if statement_timeout_ms > 0 or lock_timeout_ms > 0:
+            parts: list[str] = []
+            if statement_timeout_ms > 0:
+                parts.append(f"-c statement_timeout={statement_timeout_ms}")
+            if lock_timeout_ms > 0:
+                parts.append(f"-c lock_timeout={lock_timeout_ms}")
+            options = " ".join(parts) if parts else None
+
+        pool_kwargs: dict[str, Any] = {
+            "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
+            "connect_timeout": connect_timeout_s,
+        }
+        if options:
+            pool_kwargs["options"] = options
+
+        try:
+            pool = AsyncConnectionPool(
+                conninfo=database_url,
+                min_size=pool_min_size,
+                max_size=pool_max_size,
+                max_idle=pool_max_idle_s,
+                check=check_connection,  # Verify connection health before use
+                timeout=pool_timeout_s,
+                open=False,
+                kwargs=pool_kwargs,
+            )
+        except TypeError:
+            pool = AsyncConnectionPool(
+                conninfo=database_url,
+                min_size=pool_min_size,
+                max_size=pool_max_size,
+                max_idle=pool_max_idle_s,
+                check=check_connection,  # Verify connection health before use
+                timeout=pool_timeout_s,
+                kwargs=pool_kwargs,
+            )
+
+        slow_threshold_s = _setting_float(settings, "CHECKPOINTER_SLOW_LOG_SECONDS", 1.0)
+
+        from src.services.core.trim_policy import get_checkpoint_compaction
+
+        max_messages, max_chars, drop_base64 = get_checkpoint_compaction(settings)
+
+        class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
+            async def _ensure_pool_open(self) -> None:
+                pool = getattr(self, "pool", None) or getattr(self, "conn", None)
+                await _open_pool_on_demand(pool)
+
+            async def aget_tuple(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    await self._ensure_pool_open()
+                    result = await super().aget_tuple(*args, **kwargs)
+                    return result
+                finally:
+                    config = args[0] if args else None
+                    payload = None
+                    try:
+                        if (
+                            isinstance(locals().get("result"), tuple)
+                            and len(locals()["result"]) > 0
+                        ):
+                            payload = locals()["result"][0]
+                        else:
+                            payload = locals().get("result")
+                    except Exception:
+                        payload = None
+                    _log_if_slow(
+                        "aget_tuple",
+                        _t0,
+                        config,
+                        payload=payload,
+                        slow_threshold_s=slow_threshold_s,
+                    )
+
+            async def aput(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    await self._ensure_pool_open()
+                    if len(args) > 1:
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
+                        args = (args[0], payload, *args[2:])
+                    return await super().aput(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    payload = args[1] if len(args) > 1 else None
+                    _log_if_slow(
+                        "aput", _t0, config, payload=payload, slow_threshold_s=slow_threshold_s
+                    )
+
+            async def aput_writes(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    await self._ensure_pool_open()
+                    if len(args) > 1:
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
+                        args = (args[0], payload, *args[2:])
+                    return await super().aput_writes(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    payload = args[1] if len(args) > 1 else None
+                    _log_if_slow(
+                        "aput_writes",
+                        _t0,
+                        config,
+                        payload=payload,
+                        slow_threshold_s=slow_threshold_s,
+                    )
+
+            def get_tuple(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return super().get_tuple(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow(
+                        "get_tuple", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                    )
+
+            def put(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return super().put(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow(
+                        "put", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                    )
+
+            def put_writes(self, *args: Any, **kwargs: Any):
+                _t0 = time.perf_counter()
+                try:
+                    return super().put_writes(*args, **kwargs)
+                finally:
+                    config = args[0] if args else None
+                    _log_if_slow(
+                        "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                    )
+
+        checkpointer = InstrumentedAsyncPostgresSaver(pool)
+
+        logger.info("AsyncPostgresSaver checkpointer initialized successfully")
+>>>>>>> Stashed changes
         return checkpointer
 
     except ImportError:

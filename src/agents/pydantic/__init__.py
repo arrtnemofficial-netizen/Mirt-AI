@@ -6,7 +6,7 @@ This is the "sniper rifle" inside your LangGraph orchestra.
 Structure:
 - deps.py: Dependency Injection (DB, user context, etc.)
 - models.py: Structured output models (type-safe responses)
-- support_agent.py: Main sales/support agent
+- main_agent.py: Main sales/support agent
 - vision_agent.py: Photo recognition specialist
 - payment_agent.py: Payment flow specialist
 
@@ -25,6 +25,7 @@ from .models import (
     # Types (from OUTPUT_CONTRACT)
     IntentType,
     MessageItem,
+    OfferResponse,
     PaymentResponse,
     # Models
     ProductMatch,
@@ -35,7 +36,7 @@ from .models import (
 )
 from .observability import configure_logfire, setup_observability
 from .payment_agent import get_payment_agent, run_payment
-from .support_agent import get_support_agent, run_support
+from .main_agent import get_main_agent, run_main, run_offer
 from .vision_agent import get_vision_agent, run_vision
 
 
@@ -57,14 +58,16 @@ __all__ = [
     "EscalationInfo",
     "CustomerDataExtracted",
     "SupportResponse",
+    "OfferResponse",
     "VisionResponse",
     "PaymentResponse",
     # Agent factories (lazy initialization)
-    "get_support_agent",
+    "get_main_agent",
     "get_vision_agent",
     "get_payment_agent",
     # Runners (what LangGraph nodes call)
-    "run_support",
+    "run_main",
+    "run_offer",
     "run_vision",
     "run_payment",
     # Observability

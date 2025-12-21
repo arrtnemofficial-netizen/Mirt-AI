@@ -208,6 +208,22 @@ class SupportResponse(BaseModel):
 
 
 # =============================================================================
+# OFFER RESPONSE (adds deliberation for STATE_4_OFFER)
+# =============================================================================
+
+
+class OfferResponse(SupportResponse):
+    """
+    Output contract for offer generation with deliberation.
+    """
+
+    deliberation: OfferDeliberation | None = Field(
+        default=None,
+        description="Multi-role analysis: customer/business/quality views (for STATE_4_OFFER)",
+    )
+
+
+# =============================================================================
 # VISION AGENT RESPONSE
 # =============================================================================
 
@@ -294,6 +310,11 @@ class PaymentResponse(BaseModel):
     awaiting_payment_confirmation: bool = Field(
         default=False,
         description="Чи чекаємо підтвердження оплати",
+    )
+
+    payment_proof_detected: bool = Field(
+        default=False,
+        description="Чи є підтвердження оплати в поточному повідомленні",
     )
 
 

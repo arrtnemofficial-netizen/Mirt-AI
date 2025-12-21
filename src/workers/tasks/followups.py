@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 from celery import shared_task
 
 from src.conf.config import settings
-from src.services.followups import next_followup_due_at, run_followups
-from src.services.message_store import create_message_store
-from src.services.supabase_client import get_supabase_client
+from src.services.domain.engagement.followups import next_followup_due_at, run_followups
+from src.services.infra.message_store import create_message_store
+from src.services.infra.supabase_client import get_supabase_client
 
 
 logger = logging.getLogger(__name__)
