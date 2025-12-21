@@ -71,10 +71,10 @@ class TestCriticalImports:
 
     def test_pydantic_agents_importable(self):
         """PydanticAI agents must import."""
-        from src.agents.pydantic.main_agent import get_main_agent
+        from src.agents.pydantic.support_agent import get_support_agent
 
-        assert get_main_agent is not None
-        assert callable(get_main_agent)
+        assert get_support_agent is not None
+        assert callable(get_support_agent)
 
     def test_pydantic_models_importable(self):
         """PydanticAI response models must import."""
@@ -84,10 +84,10 @@ class TestCriticalImports:
 
     def test_services_importable(self):
         """Core services must import."""
-        from src.services.data.catalog_service import CatalogService
+        from src.services.catalog_service import CatalogService
         from src.services.conversation import ConversationHandler
-        from src.services.domain.memory.memory_service import MemoryService
-        from src.services.data.order_service import OrderService
+        from src.services.memory_service import MemoryService
+        from src.services.order_service import OrderService
 
         assert CatalogService is not None
         assert OrderService is not None

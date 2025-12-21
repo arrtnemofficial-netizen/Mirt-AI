@@ -13,6 +13,7 @@ from typing import Any
 from celery import shared_task
 
 from src.conf.config import settings
+from src.core.human_responses import get_human_response
 from src.workers.exceptions import (
     ExternalServiceError,
     PermanentError,
@@ -125,7 +126,7 @@ def process_message(
                 response_text = last_msg.get("content", "")
 
         if not response_text:
-            response_text = "Вибачте, сталася помилка. Спробуйте ще раз."
+            response_text = get_human_response("error")
 
         # Store assistant response
         assistant_msg = StoredMessage(

@@ -1,14 +1,6 @@
 """
 Observability - Logfire Integration for PydanticAI.
-====================================================
-"Сліпий снайпер не стріляє."
-
-Logfire дає тобі:
-- Трейси: Graph Node -> Agent Run -> Tool Call -> DB Query
-- Метрики: latency, token count, cost
-- Алерти: якщо агент тупить
-
-Вмикай у main.py ПЕРШИМ РЯДКОМ!
+===================================================
 """
 
 from __future__ import annotations

@@ -1,14 +1,7 @@
 """
 Human-like Response Generator.
 ==============================
-Makes AI responses indistinguishable from real human (Софія).
-
-Key principles:
-1. VARIABILITY - never same phrase twice
-2. CASUAL SPEECH - like real Instagram DM
-3. TYPOS occasionally - humans make mistakes
-4. EMOJI usage like real person
-5. Short messages - not walls of text
+Makes AI responses feel like a real human.
 """
 
 from __future__ import annotations
@@ -59,7 +52,7 @@ def get_human_response(response_type: ResponseType) -> str:
         # Extreme fallback if registry fails
         labels_json = get_snippet_by_header("VISION_LABELS")
         labels = json.loads(labels_json[0]) if labels_json else {}
-        return labels.get("fallback_typing", "Секундочку, зараз перевірю.")
+        return labels.get("fallback_typing", "One moment, checking.")
         
     return random.choice(variants)
 

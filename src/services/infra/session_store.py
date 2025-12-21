@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from langchain_core.messages import BaseMessage
 
-from src.agents import ConversationState
+from src.core.conversation_state import ConversationState
 from src.core.constants import AgentState as StateEnum
 
 
@@ -70,3 +70,4 @@ def state_from_text(text: str, session_id: str) -> ConversationState:
         metadata={"session_id": session_id},
         current_state=StateEnum.default(),
     )
+

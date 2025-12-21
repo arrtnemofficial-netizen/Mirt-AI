@@ -1,16 +1,7 @@
 """
-Prompt Loader - завантаження LLM-специфічних промптів.
-======================================================
-Завантажує base.yaml + LLM-specific overlay (grok.yaml, gpt.yaml, gemini.yaml).
-
-Використання:
-    from src.core.prompt_loader import load_prompt, get_system_prompt_text
-
-    # Завантажити конфіг для моделі
-    config = load_prompt("grok")
-
-    # Отримати готовий system prompt text
-    text = get_system_prompt_text("grok")
+Prompt Loader - load LLM-specific prompts.
+==========================================
+Loads base.yaml plus a model-specific overlay (grok.yaml, gpt.yaml, gemini.yaml).
 """
 
 from __future__ import annotations

@@ -15,10 +15,12 @@ Changes to prompts should:
 
 import logging
 import re
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel
+import yaml
 
 
 logger = logging.getLogger(__name__)
@@ -59,14 +61,17 @@ class PromptRegistry:
         self._cache: dict[str, PromptConfig] = {}
         self._initialized = True
 
-    def get(self, key: str) -> PromptConfig:
+    def get(self, key: Union[str, RegistryKey], default: Optional[str] = None) -> PromptConfig:
         """
-        Get a prompt by key (e.g., 'main.main', 'state.STATE_0_INIT').
+        Get a prompt by key (e.g., 'system.base_identity' or RegistryKey.SYS_BASE_IDENTITY).
         """
-        if key in self._cache:
-            return self._cache[key]
+        key_str = str(key.value) if isinstance(key, RegistryKey) else str(key)
 
-        parts = key.split(".")
+        if key_str in self._cache:
+            return self._cache[key_str]
+
+        parts = key_str.split(".")
+
         if len(parts) < 2:
             raise ValueError(f"Invalid prompt key format: {key}. Expected 'category.name'")
 
@@ -97,6 +102,17 @@ class PromptRegistry:
             path_yaml = path.with_suffix(".yaml")
             if path_yaml.exists():
                 path = path_yaml
+            elif default is not None:
+                config = PromptConfig(
+                    key=key,
+                    content=default,
+                    path=Path("<default>"),
+                    version="default",
+                    metadata={"version": "default", "file": "<default>", "default": True},
+                )
+                self._cache[key] = config
+                logger.debug("Using default prompt for key %s", key)
+                return config
             else:
                 raise FileNotFoundError(f"Prompt file not found for key: {key} at {path}")
 
@@ -153,6 +169,24 @@ class PromptRegistry:
 
 # Global Registry Instance
 registry = PromptRegistry()
+
+
+@lru_cache(maxsize=64)
+def load_yaml_from_registry(key: str) -> dict[str, Any]:
+    """Load YAML content from a registry key."""
+    try:
+        content = registry.get(key).content
+    except Exception as exc:
+        logger.warning("Registry YAML not found for key %s: %s", key, exc)
+        return {}
+
+    try:
+        data = yaml.safe_load(content) or {}
+    except Exception as exc:
+        logger.warning("Failed to parse registry YAML for key %s: %s", key, exc)
+        return {}
+
+    return data if isinstance(data, dict) else {}
 
 
 def validate_all_states_have_prompts() -> list[str]:
@@ -220,11 +254,11 @@ def get_snippet_by_header(header_name: str) -> list[str] | None:
                     body_lines.append(lines[i])
                     i += 1
 
-                # Parse body: skip КОЛИ/НЕ КОЛИ lines, split by ---
+                # Parse body: skip metadata lines, split by ---
                 text_lines = []
                 for bl in body_lines:
                     bl_stripped = bl.strip()
-                    if bl_stripped.startswith("КОЛИ:") or bl_stripped.startswith("НЕ КОЛИ:"):
+                    if bl_stripped.startswith("WHEN:") or bl_stripped.startswith("NEVER:"):
                         continue
                     text_lines.append(bl_stripped)
 
@@ -235,7 +269,7 @@ def get_snippet_by_header(header_name: str) -> list[str] | None:
 
                 bubbles = [b.strip() for b in full_text.split("---") if b.strip()]
                 if bubbles:
-                    logger.debug("📋 Found snippet '%s' in %s", header_name, source_key)
+                    logger.debug("Found snippet '%s' in %s", header_name, source_key)
                     return bubbles
                 return None
             i += 1
@@ -262,7 +296,7 @@ def get_product_snippet(product_name: str) -> list[str] | None:
     if not pn_lower:
         return None
 
-    # Extract key words (e.g., "сукня анна" -> ["сукня", "анна"])
+    # Extract keywords (e.g., "suknia anna" -> ["suknia", "anna"])
     keywords = [w for w in pn_lower.split() if len(w) > 2]
     if not keywords:
         return None
@@ -279,8 +313,8 @@ def get_product_snippet(product_name: str) -> list[str] | None:
 
             # Check if this header matches our product (all keywords present)
             if all(kw in header_lower for kw in keywords):
-                # Found a match! Look for "презентація" or first snippet for this product
-                if "презентація" in header_lower or "відповідь" in header_lower:
+                # Found a match! Look for "presentation" or "reply" headers
+                if "presentation" in header_lower or "reply" in header_lower:
                     # Extract the snippet body (until next ### or EOF)
                     body_lines = []
                     i += 1
@@ -288,14 +322,14 @@ def get_product_snippet(product_name: str) -> list[str] | None:
                         body_lines.append(lines[i])
                         i += 1
 
-                    # Parse body: skip КОЛИ/НЕ КОЛИ lines, split by ---
+                    # Parse body: skip metadata lines, split by ---
                     text_lines = []
                     for bl in body_lines:
                         bl_stripped = bl.strip()
                         if (
-                            bl_stripped.startswith("КОЛИ:")
-                            or bl_stripped.startswith("НЕ КОЛИ:")
-                            or bl_stripped.startswith("ПРІОРИТЕТ:")
+                            bl_stripped.startswith("WHEN:")
+                            or bl_stripped.startswith("NEVER:")
+                            or bl_stripped.startswith("PRIORITY:")
                         ):
                             continue
                         text_lines.append(bl_stripped)
@@ -307,9 +341,7 @@ def get_product_snippet(product_name: str) -> list[str] | None:
 
                     bubbles = [b.strip() for b in full_text.split("---") if b.strip()]
                     if bubbles:
-                        logger.info(
-                            "📋 Found snippet for '%s': %d bubbles", product_name, len(bubbles)
-                        )
+                        logger.info("Found snippet for '%s': %d bubbles", product_name, len(bubbles))
                         return bubbles
                     return None
         i += 1

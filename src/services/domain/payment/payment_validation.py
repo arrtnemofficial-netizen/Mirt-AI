@@ -10,9 +10,11 @@ Single Source of Truth (SSOT) for:
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 from typing import Any
+
+from src.services.domain.payment.payment_config import get_payment_list, get_payment_section
 
 logger = logging.getLogger(__name__)
 
@@ -47,17 +49,11 @@ def detect_payment_proof(text: str, has_image: bool = False) -> bool:
     """
     if has_image:
         return True
-        
-    from src.core.prompt_registry import get_snippet_by_header
-    import json
-    labels_json = get_snippet_by_header("VISION_LABELS")
-    labels = json.loads(labels_json[0]) if labels_json else {}
-    
-    proof_keywords = labels.get("payment_proof_keywords", [
-        "оплатив", "оплатила", "скинув", "скинула", "чек", 
-        "оплачено", "переказав", "переказала", "готов", "сплатив"
-    ])
-    
+
+    proof_keywords = get_payment_list("validation", "payment_proof_keywords")
+    if not proof_keywords:
+        proof_keywords = ["paid", "payment", "transfer", "receipt"]
+
     text_lower = (text or "").lower()
     return any(kw in text_lower for kw in proof_keywords)
 
@@ -67,11 +63,12 @@ def is_order_ready(metadata: dict[str, Any]) -> tuple[bool, list[str]]:
     Check if order has all required delivery fields.
     Returns (is_ready, missing_fields_list).
     """
+    labels = get_payment_section("validation").get("required_fields", {})
     required = {
-        "customer_name": "ПІБ",
-        "customer_phone": "Телефон",
-        "customer_city": "Місто",
-        "customer_nova_poshta": "Відділення НП"
+        "customer_name": labels.get("customer_name", "Full name"),
+        "customer_phone": labels.get("customer_phone", "Phone"),
+        "customer_city": labels.get("customer_city", "City"),
+        "customer_nova_poshta": labels.get("customer_nova_poshta", "Branch"),
     }
     
     missing = []

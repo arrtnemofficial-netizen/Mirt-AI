@@ -79,7 +79,7 @@ def _run_summarization():
     print_header("SUMMARIZATION")
 
     try:
-        from src.services.domain.memory.summarization import (
+        from src.services.summarization import (
             call_summarize_inactive_users,
             get_users_needing_summary,
         )
@@ -124,8 +124,8 @@ def _run_followups():
         from datetime import timedelta
 
         from src.conf.config import settings
-        from src.services.domain.engagement.followups import next_followup_due_at, run_followups
-        from src.services.infra.message_store import InMemoryMessageStore, StoredMessage
+        from src.services.followups import next_followup_due_at, run_followups
+        from src.services.message_store import InMemoryMessageStore, StoredMessage
 
         print(f"   FOLLOWUP_DELAYS_HOURS: {settings.FOLLOWUP_DELAYS_HOURS}")
         print(f"   Parsed schedule: {settings.followup_schedule_hours}")
@@ -217,7 +217,7 @@ def _run_llm_usage():
     print_header("LLM USAGE TRACKING")
 
     try:
-        from src.services.core.observability import get_metrics_summary, track_metric
+        from src.services.observability import get_metrics_summary, track_metric
 
         # Track a test metric
         track_metric("test_worker_run", 1)
@@ -244,7 +244,7 @@ def _run_message_store():
     print_header("MESSAGE STORE")
 
     try:
-        from src.services.infra.message_store import create_message_store
+        from src.services.message_store import create_message_store
 
         store = create_message_store()
         print_result("create_message_store", True, f"Type: {type(store).__name__}")

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage
 
-from src.agents import ConversationState
+from src.core.conversation_state import ConversationState
 from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
 from src.services.infra.session_store import InMemorySessionStore, SessionStore, _serialize_for_json
@@ -77,3 +77,4 @@ def create_supabase_store() -> SupabaseSessionStore | None:
     if not client:
         return None
     return SupabaseSessionStore(client, table=settings.SUPABASE_TABLE)
+

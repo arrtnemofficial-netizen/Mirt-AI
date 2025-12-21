@@ -1,14 +1,5 @@
 """
-Input Validator - валідація вхідних metadata.
-=============================================
-Pydantic схеми для валідації metadata у вебхуках
-перед викликом агента.
-
-Використання:
-    from src.core.input_validator import validate_input_metadata, InputMetadata
-
-    # В webhook handler
-    validated = validate_input_metadata(raw_metadata)
+Input Validator - validation for incoming metadata.
 """
 
 from __future__ import annotations

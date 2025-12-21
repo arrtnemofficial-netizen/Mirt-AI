@@ -8,8 +8,8 @@ import sys
 # Add project root to path
 sys.path.append(".")
 
-from src.services.infra.supabase_client import get_supabase_client
-from src.services.infra.webhook_dedupe import WebhookDedupeStore
+from src.services.supabase_client import get_supabase_client
+from src.services.webhook_dedupe import WebhookDedupeStore
 
 
 async def test_dedupe():

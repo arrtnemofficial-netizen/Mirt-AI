@@ -177,40 +177,37 @@ def _get_instructions_for_intent(intent: str, state: dict[str, Any]) -> str:
 
     instructions = {
         "GREETING_ONLY": (
-            "Привітай клієнта тепло, як MIRT_UA менеджер Ольга. "
-            "Запитай чим можеш допомогти. "
-            "Не перевантажуй інформацією - будь лаконічною."
+            "Greet the customer warmly as the MIRT_UA manager. "
+            "Ask how you can help. Keep it short."
         ),
         "DISCOVERY_OR_QUESTION": (
-            "Клієнт шукає товар або має питання. "
-            "Знайди відповідні товари в EMBEDDED CATALOG. "
-            "Покажи варіанти з цінами та характеристиками. "
-            "Якщо потрібно - запитай уточнення (зріст, вік, колір)."
+            "Customer is looking for a product or has a question. "
+            "Find relevant items in the embedded catalog. "
+            "Show options with prices and key attributes. "
+            "Ask clarifying questions if needed (height, age, color)."
         ),
         "SIZE_HELP": (
-            "Клієнт питає про розмір. "
-            "Дай КОНКРЕТНУ відповідь з розмірної сітки. "
-            "Якщо знаєш зріст - підбери розмір. "
-            "Якщо є вибраний товар - переходь до пропозиції!"
+            "Customer asks about size. "
+            "Give a concrete answer from the size guide. "
+            "If height is known, pick a size. "
+            "If a product is selected, move to offer."
         ),
         "COLOR_HELP": (
-            "Клієнт питає про колір. "
-            "Покажи доступні кольори для товару. "
-            "Якщо товар є в потрібному кольорі - підтверди. "
-            "Якщо немає - запропонуй альтернативи."
+            "Customer asks about color. "
+            "Show available colors for the product. "
+            "Confirm availability or suggest alternatives."
         ),
         "THANKYOU_SMALLTALK": (
-            "Клієнт подякував або веде світську бесіду. "
-            "Відповідай тепло, але коротко. "
-            "Запропонуй допомогу, якщо потрібно."
+            "Customer is in small talk or thanking. "
+            "Reply warmly but briefly. Offer help if needed."
         ),
     }
 
     # Add product context if available
     products = state.get("selected_products", [])
     if products:
-        product_names = ", ".join(p.get("name", "товар") for p in products[:3])
+        product_names = ", ".join(p.get("name", "product") for p in products[:3])
         base = instructions.get(intent, instructions["DISCOVERY_OR_QUESTION"])
-        return f"{base}\n\nУ діалозі вже є товари: {product_names}."
+        return f"{base}\n\nProducts already in the dialog: {product_names}."
 
     return instructions.get(intent, instructions["DISCOVERY_OR_QUESTION"])

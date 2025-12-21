@@ -1,58 +1,34 @@
 """
-Dependencies - Dependency Injection для агентів.
-================================================
-ПРАВИЛО №1: Ніколи не хардкодь ключі API, з'єднання з БД чи ID юзера!
-
-Все передається через ctx.deps:
-- Тестування: підсунь мок-об'єкт замість реальної БД
-- Безпека: ніяких глобальних змінних
-- Чистота: кожен виклик ізольований
+Dependencies - Dependency Injection for agents.
+==============================================
+Central context container passed to agent.run(...) as ctx.deps.
 """
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from src.services.data.catalog_service import CatalogService
+    from src.services.data.order_service import OrderService
+    from src.services.domain.memory.memory_service import MemoryService
+    from src.services.domain.vision.vision_context import VisionContextService
+
     from .models import StateType
 
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    Database = OrderService
+else:
+    Database = Any
 
 
-from src.services.data.catalog_service import CatalogService
-from src.services.domain.memory.memory_service import MemoryService
-from src.services.data.order_service import OrderService
-from src.services.domain.vision.vision_context import VisionContextService
-
-# =============================================================================
-# DATABASE SERVICE (Real Supabase Implementation)
-# =============================================================================
-
-# We use OrderService as the main database interface for agents
-Database = OrderService
-
-# =============================================================================
-# CATALOG SERVICE (Real Supabase Implementation)
-# =============================================================================
-
-# CatalogService is now imported directly from src.services.data.catalog_service
-
-
-# =============================================================================
-# MAIN DEPENDENCIES CONTAINER
-# =============================================================================
-
-
-@dataclass
+@dataclass(init=False)
 class AgentDeps:
     """
     Main dependencies container for PydanticAI agents.
-
-    This is what gets passed to ctx.deps in every tool and instruction.
 
     Usage:
         deps = AgentDeps(
@@ -63,95 +39,158 @@ class AgentDeps:
         )
         result = await agent.run(message, deps=deps)
     """
-    # Session identification
+
     session_id: str
     user_id: str = ""
 
-    # Current conversation state (Literal type from models)
     current_state: StateType = "STATE_0_INIT"
-    channel: str = "instagram"  # instagram, telegram, web
+    channel: str = "instagram"
     language: str = "uk"
 
     # Image context
     has_image: bool = False
     image_url: str | None = None
 
-    # Product context (from previous steps)
+    # Product context
     selected_products: list[dict[str, Any]] = field(default_factory=list)
 
-    # Customer data (collected during conversation)
+    # Customer data
     customer_name: str | None = None
     customer_phone: str | None = None
     customer_city: str | None = None
     customer_nova_poshta: str | None = None
 
-    # Services (injected)
-    db: OrderService = field(default_factory=OrderService)
-    catalog: CatalogService = field(default_factory=CatalogService)
-    memory: MemoryService | None = None  # Lazy init to avoid circular import
-    vision: VisionContextService | None = None # Auto-initialized in post_init
+    # Memory context (optional, provided by LangGraph)
+    memory_context_prompt: str | None = None
+    memory_profile: Any = None
+    memory_facts: list[Any] = field(default_factory=list)
 
-    def __post_init__(self):
-        if self.vision is None:
-            self.vision = VisionContextService(self.catalog)
-
-    # Environment
     env: str = "production"
+
+    _db: Any = field(default=None, repr=False)
+    _catalog: Any = field(default=None, repr=False)
+    _memory: Any = field(default=None, repr=False)
+    _vision: Any = field(default=None, repr=False)
+
+    def __init__(
+        self,
+        session_id: str,
+        user_id: str = "",
+        current_state: StateType = "STATE_0_INIT",
+        channel: str = "instagram",
+        language: str = "uk",
+        has_image: bool = False,
+        image_url: str | None = None,
+        selected_products: list[dict[str, Any]] | None = None,
+        customer_name: str | None = None,
+        customer_phone: str | None = None,
+        customer_city: str | None = None,
+        customer_nova_poshta: str | None = None,
+        memory_context_prompt: str | None = None,
+        memory_profile: Any = None,
+        memory_facts: list[Any] | None = None,
+        db: Any = None,
+        catalog: Any = None,
+        memory: Any = None,
+        vision: Any = None,
+        env: str = "production",
+    ) -> None:
+        self.session_id = session_id
+        self.user_id = user_id
+        self.current_state = current_state
+        self.channel = channel
+        self.language = language
+        self.has_image = has_image
+        self.image_url = image_url
+        self.selected_products = selected_products or []
+        self.customer_name = customer_name
+        self.customer_phone = customer_phone
+        self.customer_city = customer_city
+        self.customer_nova_poshta = customer_nova_poshta
+        self.memory_context_prompt = memory_context_prompt
+        self.memory_profile = memory_profile
+        self.memory_facts = memory_facts or []
+        self._db = db
+        self._catalog = catalog
+        self._memory = memory
+        self._vision = vision
+        self.env = env
+
+    @property
+    def db(self) -> "OrderService":
+        if self._db is None:
+            from src.services.data.order_service import OrderService
+
+            self._db = OrderService()
+        return self._db
+
+    @property
+    def catalog(self) -> "CatalogService":
+        if self._catalog is None:
+            from src.services.data.catalog_service import CatalogService
+
+            self._catalog = CatalogService()
+        return self._catalog
+
+    @property
+    def memory(self) -> "MemoryService":
+        if self._memory is None:
+            from src.services.domain.memory.memory_service import MemoryService
+
+            self._memory = MemoryService()
+        return self._memory
+
+    @property
+    def vision(self) -> "VisionContextService":
+        if self._vision is None:
+            from src.services.domain.vision.vision_context import VisionContextService
+
+            self._vision = VisionContextService(self.catalog)
+        return self._vision
 
     def get_customer_data_summary(self) -> str:
         """Get summary of collected customer data for prompts."""
+        from src.services.domain.payment.payment_config import get_payment_section
+
+        labels = get_payment_section("order_context")
+        label_name = labels.get("label_name", "Full name")
+        label_phone = labels.get("label_phone", "Phone")
+        label_city = labels.get("label_city", "City")
+        label_branch = labels.get("label_branch", "Branch")
+        empty_text = labels.get("no_data", "No customer data collected.")
+
         data = []
         if self.customer_name:
-            data.append(f"Ім'я: {self.customer_name}")
+            data.append(f"{label_name}: {self.customer_name}")
         if self.customer_phone:
-            data.append(f"Телефон: {self.customer_phone}")
+            data.append(f"{label_phone}: {self.customer_phone}")
         if self.customer_city:
-            data.append(f"Місто: {self.customer_city}")
+            data.append(f"{label_city}: {self.customer_city}")
         if self.customer_nova_poshta:
-            data.append(f"Відділення НП: {self.customer_nova_poshta}")
+            data.append(f"{label_branch}: {self.customer_nova_poshta}")
 
         if not data:
-            return "Дані клієнта ще не зібрані."
+            return empty_text
         return "\n".join(data)
 
     def is_ready_for_order(self) -> bool:
         """Check if all required data is collected for order."""
-        return all([
-            self.customer_name,
-            self.customer_phone,
-            self.customer_city,
-            self.customer_nova_poshta,
-            self.selected_products,
-        ])
-
-
-# =============================================================================
-# FACTORY FUNCTIONS
-# =============================================================================
+        return all(
+            [
+                self.customer_name,
+                self.customer_phone,
+                self.customer_city,
+                self.customer_nova_poshta,
+                self.selected_products,
+            ]
+        )
 
 
 def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
-    """
-    Create AgentDeps from LangGraph state.
+    """Create AgentDeps from LangGraph state."""
+    from src.app.bootstrap import build_agent_deps
 
-    This is the bridge between LangGraph and PydanticAI.
-    """
-    metadata = state.get("metadata", {})
-
-    return AgentDeps(
-        session_id=state.get("session_id", metadata.get("session_id", "")),
-        user_id=metadata.get("user_id", ""),
-        current_state=state.get("current_state", "STATE_0_INIT"),
-        channel=metadata.get("channel", "instagram"),
-        language=metadata.get("language", "uk"),
-        has_image=state.get("has_image", False),
-        image_url=state.get("image_url"),
-        selected_products=state.get("selected_products", []),
-        customer_name=metadata.get("customer_name"),
-        customer_phone=metadata.get("customer_phone"),
-        customer_city=metadata.get("customer_city"),
-        customer_nova_poshta=metadata.get("customer_nova_poshta"),
-    )
+    return build_agent_deps(state)
 
 
 def create_mock_deps(session_id: str = "test_session") -> AgentDeps:

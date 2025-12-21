@@ -1,0 +1,59 @@
+# version: 1.0
+order_context:
+  order_header: "ЗАМОВЛЕННЯ"
+  default_product: "Товар"
+  currency: "грн"
+  total_label: "Разом"
+  collected_header: "ЗІБРАНІ ДАНІ"
+  label_name: "ПІБ"
+  label_phone: "Телефон"
+  label_city: "Місто"
+  label_branch: "Відділення НП"
+  ok_mark: "✓"
+  missing_prefix: "Потрібно зібрати"
+  ready_note: "✅ ВСІ ДАНІ ЗІБРАНІ - можна надавати реквізити!"
+  saved_prefix: "Збережено"
+  no_new_data: "Нові дані не надано"
+  invalid_phone_note: "перевірте формат"
+  no_data: "Дані клієнта ще не зібрані."
+  order_not_ready_products: "❌ Товари не вибрані"
+  order_not_ready_missing: "❌ Потрібно ще"
+  order_ready: "✅ Замовлення готове! Можна надавати реквізити для оплати."
+  image_context_header: "IMAGE CONTEXT"
+  image_has_image_label: "has_image"
+  image_url_label: "image_url"
+payment_requisites:
+  header: "РЕКВІЗИТИ ДЛЯ ОПЛАТИ"
+  body: |
+    ФОП Крупка Ганна Михайлівна
+    ПриватБанк: 5168 7520 0123 4567
+    Призначення: "За дитячий одяг"
+payment_subphase:
+  header: "PAYMENT SUBPHASE"
+validation:
+  required_fields:
+    customer_name: "ПІБ"
+    customer_phone: "Телефон"
+    customer_city: "Місто"
+    customer_nova_poshta: "Відділення НП"
+  payment_proof_keywords:
+    - "оплатив"
+    - "оплатила"
+    - "скинув"
+    - "скинула"
+    - "чек"
+    - "оплачено"
+    - "переказав"
+    - "переказала"
+    - "готов"
+    - "сплатив"
+notifications:
+  order_success: |
+    ✅ **НОВЕ ЗАМОВЛЕННЯ**
+    Сесія: `{session_id}`
+    Сума: {total} {currency}
+    Товари: {products}
+  critical_error: |
+    🚨 **КРИТИЧНА ПОМИЛКА**
+    Сесія: `{session_id}`
+    Помилка оплати: {error}

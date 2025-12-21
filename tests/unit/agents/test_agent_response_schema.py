@@ -116,12 +116,12 @@ class TestSupportResponseContract:
         assert len(response.messages) > 0
         assert isinstance(response.messages[0], MessageItem)
 
-    def test_offer_response_has_deliberation(self):
-        """OfferResponse should have optional deliberation field."""
-        from src.agents.pydantic.models import OfferResponse
+    def test_support_response_has_deliberation(self):
+        """SupportResponse should have optional deliberation field."""
+        from src.agents.pydantic.models import SupportResponse
 
-        assert "deliberation" in OfferResponse.model_fields, (
-            "CONTRACT: OfferResponse should have 'deliberation' field for multi-role pattern"
+        assert "deliberation" in SupportResponse.model_fields, (
+            "CONTRACT: SupportResponse should have 'deliberation' field for multi-role pattern"
         )
 
 

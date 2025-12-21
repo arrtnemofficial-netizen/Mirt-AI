@@ -1,24 +1,5 @@
 """
-Support/Sales Agent - Based on system_prompt_full.yaml
-=======================================================
-MIRT AI AGENT v7.0 - "Ольга"
-
-IDENTITY (BLOCK 2):
-- role: "AI-консультант магазину дитячого одягу MIRT"
-- agent_name: "Ольга"
-- personality: "Жива людина: можу перепитати, можу чесно сказати, якщо не впевнена."
-
-IMMUTABLE_RULES:
-- [P0] Мова відповіді ТІЛЬКИ українська
-- [P0] ЗАБОРОНЕНО вигадувати товари, кольори, розміри, ціни - ТІЛЬКИ з CATALOG
-- [P0] Максимум 900 символів у відповіді
-- [P0] На межі розміру (120, 131, 143 см) = БІЛЬШИЙ розмір для запасу!
-
-OUTPUT_CONTRACT:
-- event: simple_answer/clarifying_question/multi_option/escalation/end_smalltalk
-- messages: [{type: "text", content: "..."}]
-- products: [{id, name, price, size, color, photo_url}] - ТІЛЬКИ з CATALOG!
-- metadata: {session_id, current_state, intent, escalation_level}
+Support/Sales Agent - PydanticAI main agent.
 """
 
 from __future__ import annotations
@@ -34,7 +15,12 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
-from src.core.prompt_loader import get_system_prompt_text
+from src.core.prompt_registry import registry
+from src.agents.pydantic.main_agent_config import (
+    get_main_agent_section,
+    get_main_agent_value,
+)
+from src.services.domain.payment.payment_config import get_payment_section
 
 from .deps import AgentDeps
 from .models import (
@@ -47,6 +33,36 @@ from .models import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_main_section(name: str) -> dict[str, object]:
+    data = get_main_agent_section(name)
+    return data if isinstance(data, dict) else {}
+
+
+def _get_main_value(section: str, key: str, default: str) -> str:
+    return get_main_agent_value(section, key, default)
+
+
+def _format_payment_requisites() -> str:
+    requisites = get_payment_section("payment_requisites")
+    if not requisites:
+        return ""
+    header = str(requisites.get("header") or "PAYMENT REQUISITES")
+    body = str(requisites.get("body") or "").strip()
+    if not body:
+        return ""
+    return f"\n--- {header} ---\n{body}"
+
+
+def _get_error_text(key: str, default: str) -> str:
+    errors = _get_main_section("errors")
+    value = errors.get(key) if isinstance(errors, dict) else None
+    return str(value) if isinstance(value, str) and value else default
+
+
+def _get_error_response() -> str:
+    return _get_error_text("generic", "An error occurred.")
 
 
 # =============================================================================
@@ -101,11 +117,12 @@ async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:
     try:
         content = registry.get("system.snippets").content
         logger.info(
-            "📋 Manager snippets injected (%d chars, version=%s)",
+            "Manager snippets injected (%d chars, version=%s)",
             len(content),
             registry.get("system.snippets").metadata.get("version", "unknown"),
         )
-        return "\n--- ШАБЛОНИ МЕНЕДЖЕРА ---\n" + content
+        header = _get_main_value("headers", "manager_snippets", "MANAGER SNIPPETS")
+        return f"\n--- {header} ---\n{content}"
     except (FileNotFoundError, ValueError) as e:
         logger.warning("Manager snippets not found: %s", e)
         return ""
@@ -113,7 +130,7 @@ async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:
 
 async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
     """Inject canonical payment requisites to avoid LLM hallucinations."""
-    return "\n--- РЕКВІЗИТИ ДЛЯ ОПЛАТИ (SSOT) ---\n" + format_requisites_multiline()
+    return _format_payment_requisites()
 
 
 # =============================================================================
@@ -125,59 +142,57 @@ async def _add_state_context(ctx: RunContext[AgentDeps]) -> str:
     """Add current state and customer context to prompt."""
     deps = ctx.deps
 
+    headers = _get_main_section("headers")
+    labels = _get_main_section("labels")
+
     lines = [
-        "\n--- КОНТЕКСТ СЕСІЇ ---",
+        f"\n--- {headers.get('session_context', 'SESSION CONTEXT')} ---",
         f"Session ID: {deps.session_id}",
-        f"Поточний стан: {deps.current_state}",
-        f"Канал: {deps.channel}",
+        f"{labels.get('current_state', 'Current state')}: {deps.current_state}",
+        f"{labels.get('channel', 'Channel')}: {deps.channel}",
     ]
 
     if any([deps.customer_name, deps.customer_phone, deps.customer_city]):
-        lines.append("\n--- ДАНІ КЛІЄНТА ---")
+        lines.append(f"\n--- {headers.get('customer_data', 'CUSTOMER DATA')} ---")
         lines.append(deps.get_customer_data_summary())
 
     if deps.selected_products:
-        lines.append("\n--- ВИБРАНІ ТОВАРИ ---")
+        lines.append(f"\n--- {headers.get('selected_products', 'SELECTED PRODUCTS')} ---")
         for p in deps.selected_products[:3]:
-            lines.append(f"- {p.get('name', 'Товар')}: {p.get('price', 0)} грн")
+            lines.append(
+                f"- {p.get('name', labels.get('default_product', 'Product'))}: "
+                f"{p.get('price', 0)} {labels.get('currency', 'UAH')}"
+            )
 
     return "\n".join(lines)
+
+
+async def _add_memory_context(ctx: RunContext[AgentDeps]) -> str:
+    """Add memory context when available."""
+    prompt = getattr(ctx.deps, "memory_context_prompt", None)
+    if not prompt:
+        return ""
+    header = _get_main_value("headers", "memory_context", "MEMORY CONTEXT")
+    return f"\n--- {header} ---\n{prompt}"
 
 
 async def _add_image_context(ctx: RunContext[AgentDeps]) -> str:
     """Add image analysis instructions if image present."""
     if not ctx.deps.has_image:
         return ""
-
-    return """
---- ФОТО ВІД КЛІЄНТА ---
-ВАЖЛИВО: Користувач надіслав ФОТО!
-1. Проаналізуй фото та визнач товар з EMBEDDED CATALOG
-2. Якщо знайшов товар - ОДРАЗУ дай ціну та запропонуй розмір
-3. Intent має бути PHOTO_IDENT
-4. Не питай 'що вас цікавить' - відповідай конкретно!
-"""
+    photo_context = _get_main_section("photo_context")
+    block = photo_context.get("block", "")
+    return str(block).strip()
 
 
 async def _add_state_instructions(ctx: RunContext[AgentDeps]) -> str:
     """Add state-specific behavioral instructions."""
     state = ctx.deps.current_state
-
-    instructions = {
-        "STATE_0_INIT": "Привітай клієнта тепло. Запитай чим можеш допомогти.",
-        "STATE_1_DISCOVERY": "Допоможи знайти потрібний товар. Запитай про зріст/вік дитини.",
-        "STATE_2_VISION": "Аналізуй фото і пропонуй товар з каталогу.",
-        "STATE_3_SIZE_COLOR": "Допоможи з розміром. Використай розмірну сітку.",
-        "STATE_4_OFFER": "Зроби конкретну пропозицію з ціною. Запитай чи оформлюємо.",
-        "STATE_5_PAYMENT_DELIVERY": "Збирай дані для доставки: ПІБ, телефон, місто, НП.",
-        "STATE_6_UPSELL": "Запропонуй аксесуар. Не наполягай якщо відмовляються.",
-        "STATE_7_END": "Подякуй за замовлення. Нагадай про термін доставки.",
-        "STATE_8_COMPLAINT": "Вислухай скаргу. Передай менеджеру якщо потрібно.",
-    }
-
-    instruction = instructions.get(state, "")
+    instructions = _get_main_section("state_instructions")
+    instruction = instructions.get(state, "") if isinstance(instructions, dict) else ""
     if instruction:
-        return f"\n--- ІНСТРУКЦІЯ ДЛЯ СТАНУ ---\n{instruction}"
+        header = _get_main_value("headers", "state_instruction", "STATE INSTRUCTION")
+        return f"\n--- {header} ---\n{instruction}"
     return ""
 
 
@@ -235,16 +250,23 @@ async def _get_size_recommendation(
     Provide size recommendation based on height.
     """
     size_mapping, border_sizes = _load_size_mapping()
+    size_templates = _get_main_section("size_recommendation")
+
+    below_min = str(size_templates.get("below_min") or "Height below minimum.")
+    above_max = str(size_templates.get("above_max") or "Height above maximum.")
+    exact_tmpl = str(size_templates.get("exact") or "Height {height_cm} fits size {preferred}.")
+    borderline_tmpl = str(
+        size_templates.get("borderline") or "Height {height_cm} is borderline, choose {size}."
+    )
+    needs_detail_tmpl = str(
+        size_templates.get("needs_detail") or "Height {height_cm} needs clarification."
+    )
 
     if height_cm < 80:
-        return (
-            "Для зросту нижче 80 см порадьте найменший доступний розмір і уточніть точний зріст."
-        )
+        return below_min
 
     if height_cm > 168:
-        return (
-            "Для зросту вище 168 см порадьте найбільший доступний розмір і уточніть деталі."
-        )
+        return above_max
 
     for item in size_mapping:
         min_h = int(item.get("min", 0))
@@ -252,74 +274,87 @@ async def _get_size_recommendation(
         sizes = item.get("sizes", [])
         if min_h <= height_cm <= max_h and isinstance(sizes, list) and sizes:
             preferred = sizes[0]
-            return f"Для зросту {height_cm} см рекомендую розмір {preferred}."
+            return exact_tmpl.format(height_cm=height_cm, preferred=preferred)
 
     if height_cm in border_sizes:
-        return (
-            f"Для зросту {height_cm} см на межі, краще взяти більший розмір {border_sizes[height_cm]}."
-        )
+        return borderline_tmpl.format(height_cm=height_cm, size=border_sizes[height_cm])
 
-    return f"Для зросту {height_cm} см потрібне додаткове уточнення."
+    return needs_detail_tmpl.format(height_cm=height_cm)
 
 
 async def _check_customer_data(ctx: RunContext[AgentDeps]) -> str:
-    """Перевірити які дані клієнта вже зібрані."""
+    """Check which customer fields are already collected."""
     deps = ctx.deps
     collected, missing = [], []
+    order_context = get_payment_section("order_context")
+    label_name = str(order_context.get("label_name") or "Name")
+    label_phone = str(order_context.get("label_phone") or "Phone")
+    label_city = str(order_context.get("label_city") or "City")
+    label_branch = str(order_context.get("label_branch") or "Branch")
+    collected_header = str(order_context.get("collected_header") or "Collected")
+    missing_prefix = str(order_context.get("missing_prefix") or "Missing")
+    no_data = str(order_context.get("no_data") or "No data collected")
 
     if deps.customer_name:
-        collected.append(f"ПІБ: {deps.customer_name}")
+        collected.append(f"{label_name}: {deps.customer_name}")
     else:
-        missing.append("ПІБ")
+        missing.append(label_name)
 
     if deps.customer_phone:
-        collected.append(f"Телефон: {deps.customer_phone}")
+        collected.append(f"{label_phone}: {deps.customer_phone}")
     else:
-        missing.append("Телефон")
+        missing.append(label_phone)
 
     if deps.customer_city:
-        collected.append(f"Місто: {deps.customer_city}")
+        collected.append(f"{label_city}: {deps.customer_city}")
     else:
-        missing.append("Місто")
+        missing.append(label_city)
 
     if deps.customer_nova_poshta:
-        collected.append(f"Відділення НП: {deps.customer_nova_poshta}")
+        collected.append(f"{label_branch}: {deps.customer_nova_poshta}")
     else:
-        missing.append("Відділення НП")
+        missing.append(label_branch)
 
     result = []
     if collected:
-        result.append(f"Зібрано: {', '.join(collected)}")
+        result.append(f"{collected_header}: {', '.join(collected)}")
     if missing:
-        result.append(f"Потрібно ще: {', '.join(missing)}")
+        result.append(f"{missing_prefix}: {', '.join(missing)}")
 
-    return "\n".join(result) if result else "Дані не зібрані"
+    return "\n".join(result) if result else no_data
 
 
 async def _get_order_summary(ctx: RunContext[AgentDeps]) -> str:
-    """Отримати підсумок замовлення."""
+    """Get order summary."""
     products = ctx.deps.selected_products
+    summary = _get_main_section("order_summary")
+    labels = _get_main_section("labels")
+    none_selected = str(summary.get("none_selected") or "No products selected")
+    header = str(summary.get("header") or "Order")
+    size_label = str(summary.get("size_label") or "size")
+    total_label = str(summary.get("total_label") or "Total")
+    currency = str(labels.get("currency") or "UAH")
 
     if not products:
-        return "Товари ще не вибрані"
+        return none_selected
 
-    lines = ["Замовлення:"]
+    lines = [f"{header}:"]
     total = 0.0
 
     for p in products:
-        name = p.get("name", "Товар")
+        name = p.get("name", labels.get("default_product", "Product"))
         price = p.get("price", 0)
         size = p.get("size", "")
 
         line = f"- {name}"
         if size:
-            line += f" (розмір {size})"
-        line += f": {price} грн"
+            line += f" ({size_label} {size})"
+        line += f": {price} {currency}"
 
         lines.append(line)
         total += price
 
-    lines.append(f"\nРазом: {total} грн")
+    lines.append(f"\n{total_label}: {total} {currency}")
     return "\n".join(lines)
 
 
@@ -329,23 +364,36 @@ async def _search_products(
     category: str | None = None,
 ) -> str:
     """
-    Знайти товари в каталозі.
-    
-    Використовуй це коли клієнт питає про наявність або просить показати товари.
+    Search products in the catalog.
     """
     products = await ctx.deps.catalog.search_products(query, category)
-    
+
+    search_cfg = _get_main_section("search")
+    header = str(search_cfg.get("header") or "Found products")
+    none_found = str(search_cfg.get("none_found") or "No products found.")
+    line_template = str(
+        search_cfg.get("line_template")
+        or "- {name} ({price} UAH). Sizes: {sizes}. Colors: {colors}"
+    )
+
     if not products:
-        return "На жаль, за вашим запитом нічого не знайдено."
-        
-    lines = ["Знайдені товари:"]
+        return none_found
+
+    lines = [f"{header}:"]
     for p in products:
         name = p.get("name")
         price = p.get("price")
         sizes = ", ".join(p.get("sizes", []))
         colors = ", ".join(p.get("colors", []))
-        lines.append(f"- {name} ({price} грн). Розміри: {sizes}. Кольори: {colors}")
-        
+        lines.append(
+            line_template.format(
+                name=name,
+                price=price,
+                sizes=sizes,
+                colors=colors,
+            )
+        )
+
     return "\n".join(lines)
 
 
@@ -357,6 +405,7 @@ async def _search_products(
 def _register_dynamic_prompts(agent: Agent[AgentDeps, Any]) -> None:
     """Register dynamic system prompts with the agent."""
     agent.system_prompt(_add_state_context)
+    agent.system_prompt(_add_memory_context)
     agent.system_prompt(_add_image_context)
     agent.system_prompt(_add_state_instructions)
 
@@ -453,7 +502,14 @@ async def run_main(
         logger.error("Support agent timeout for session %s", deps.session_id)
         return SupportResponse(
             event="escalation",
-            messages=[MessageItem(content="Вибачте, система перевантажена. Спробуйте ще раз 🤍")],
+            messages=[
+                MessageItem(
+                    content=_get_error_text(
+                        "overload",
+                        "System overloaded. Please try again.",
+                    )
+                )
+            ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
                 current_state=deps.current_state or "STATE_0_INIT",
@@ -467,7 +523,14 @@ async def run_main(
         logger.exception("Support agent error: %s", e)
         return SupportResponse(
             event="escalation",
-            messages=[MessageItem(content="Вибачте, сталася помилка. Менеджер зв'яжеться з вами 🤍")],
+            messages=[
+                MessageItem(
+                    content=_get_error_text(
+                        "generic",
+                        "An error occurred. A manager will follow up.",
+                    )
+                )
+            ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
                 current_state=deps.current_state or "STATE_0_INIT",

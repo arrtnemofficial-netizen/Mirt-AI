@@ -11,6 +11,7 @@ Coordinates the vision pipeline:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -39,6 +40,30 @@ logger = logging.getLogger(__name__)
 _BG_TASKS: set[asyncio.Task] = set()
 
 
+def _get_vision_labels() -> dict[str, Any]:
+    """Load vision labels from registry."""
+    labels_json = get_snippet_by_header("VISION_LABELS")
+    if not labels_json:
+        return {}
+    try:
+        data = json.loads(labels_json[0])
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _get_vision_node_templates() -> dict[str, Any]:
+    """Load vision node templates from registry."""
+    bubbles = get_snippet_by_header("VISION_NODE_TEMPLATES")
+    if not bubbles:
+        return {}
+    try:
+        data = json.loads(bubbles[0])
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 async def vision_node(
     state: dict[str, Any],
     runner: Callable[..., Any] | None = None,  # Kept for signature compatibility
@@ -63,9 +88,14 @@ async def vision_node(
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
     trace_id = state.get("trace_id", "")
     messages = state.get("messages", [])
+    labels = _get_vision_labels()
+    templates = _get_vision_node_templates()
 
     # Extract user message
-    user_message = extract_user_message(messages) or "Аналіз фото"
+    user_message = extract_user_message(messages) or labels.get(
+        "vision_default_analysis_prompt",
+        "Photo analysis",
+    )
 
     # Build deps with image context
     deps = create_deps_from_state(state)
@@ -89,10 +119,10 @@ async def vision_node(
         text = ' '.join(text.split())
         return text[:1].upper() + text[1:]
     def _get_greeting_bubble() -> str:
-        snippet = get_snippet_by_header("Привітання")
+        snippet = get_snippet_by_header("VISION_GREETING")
         if snippet:
             return snippet[0]
-        return "Вітаю 🎀 З вами MIRT_UA, менеджер Софія)!"
+        return templates.get("escalation_greeting", "Hello")
 
 
     # Helper for error escalation (notifications)
@@ -134,11 +164,11 @@ async def vision_node(
                 from src.services.infra.notification_service import NotificationService
 
                 notification = NotificationService()
-                reason = (
-                    "Відсутні артефакти Vision: "
-                    + ", ".join(missing)
-                    + ". Потрібно згенерувати data/vision/generate.py"
+                reason_template = templates.get(
+                    "artifacts_missing_reason",
+                    "Vision artifacts missing: {missing}. Run data/vision/generate.py",
                 )
+                reason = reason_template.format(missing=", ".join(missing))
                 await notification.send_escalation_alert(
                     session_id=session_id or "unknown",
                     reason=reason,
@@ -160,11 +190,13 @@ async def vision_node(
         _BG_TASKS.add(task)
         task.add_done_callback(_BG_TASKS.discard)
 
+        user_message_text = templates.get(
+            "artifacts_missing_user",
+            "This product is currently unavailable. We can suggest alternatives.",
+        )
         escalation_messages = [
             text_msg(_get_greeting_bubble()),
-            text_msg(
-                "Зараз цього товару немає в наявності — партія закінчилась. Можу перевірити, що найближче по стилю/кольору/розміру."
-            ),
+            text_msg(user_message_text),
         ]
 
         return {
@@ -198,7 +230,7 @@ async def vision_node(
         }
 
     logger.info(
-        "🖼️ [SESSION %s] Vision node started: image=%s",
+        "[SESSION %s] Vision node started: image=%s",
         session_id,
         deps.image_url[:60] if deps.image_url else "None",
     )
@@ -273,11 +305,13 @@ async def vision_node(
         )
 
         if no_product_identified and low_confidence and not metadata.get("vision_quality_retry"):
+            retry_text = templates.get(
+                "retry_low_quality",
+                "Please send a clearer photo so we can match the model.",
+            )
             retry_messages = [
                 text_msg(_get_greeting_bubble()),
-                text_msg(
-                    "Щоб точно підібрати модель, скиньте, будь ласка, фото трохи ближче або світліше 🙏"
-                ),
+                text_msg(retry_text),
             ]
             return {
                 "current_state": State.STATE_2_VISION.value,
@@ -313,7 +347,7 @@ async def vision_node(
 
         if should_escalate:
             logger.warning(
-                "🚨 [SESSION %s] ESCALATION: Product not in catalog or low confidence! "
+                "[SESSION %s] ESCALATION: Product not in catalog or low confidence. "
                 "claimed='%s' confidence=%.0f%% catalog_found=%s",
                 session_id,
                 response.identified_product.name if response.identified_product else "<none>",
@@ -325,8 +359,8 @@ async def vision_node(
             response.needs_clarification = False  # Don't ask clarification, escalate!
             # Force escalation message - HUMAN STYLE (no AI mentions!)
             escalation_messages = [
-                text_msg("Вітаю 🎀"),
-                text_msg("Секундочку, уточню інформацію по цьому товару 🙌🏻"),
+                text_msg(templates.get("escalation_greeting", "Hello")),
+                text_msg(templates.get("escalation_body", "Checking availability for this item.")),
             ]
 
             # Send Telegram notification to manager in background (fire-and-forget)
@@ -336,9 +370,13 @@ async def vision_node(
                     from src.services.infra.notification_service import NotificationService
 
                     notification = NotificationService()
+                    reason = templates.get(
+                        "escalation_reason_not_in_catalog",
+                        "Product not found in catalog.",
+                    )
                     await notification.send_escalation_alert(
                         session_id=session_id or "unknown",
-                        reason="Товар не знайдено в каталозі (можливо з іншого магазину)",
+                        reason=reason,
                         user_context=_normalize_text(user_message),
                         details={
                             "trace_id": trace_id,

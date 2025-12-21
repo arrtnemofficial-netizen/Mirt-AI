@@ -28,17 +28,12 @@ from src.services.data.catalog_service import CatalogService
 from src.services.core.observability import log_agent_step, track_metric
 
 
-from src.conf.config import settings
-from src.core.debug_logger import debug_log
-from src.core.state_machine import State
-from src.services.data.catalog_service import CatalogService
-from src.services.core.observability import log_agent_step, track_metric
-
-
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from src.agents.pydantic.models import OfferResponse
+
+
 def _merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     """Merge fields from incoming product into existing product, preserving truth."""
     merged = dict(existing)
@@ -113,7 +108,7 @@ async def offer_node(
     user_message = extract_user_message(state.get("messages", []))
 
     if not user_message:
-        user_message = "Покажи товар"
+        user_message = "Show product"
 
     # Get products to offer
     selected_products = state.get("selected_products", [])
@@ -162,13 +157,13 @@ async def offer_node(
 
             # Log deliberation
             logger.info(
-                "🎯 [SESSION %s] Deliberation: confidence=%.2f, flags=%s",
+                "[SESSION %s] Deliberation: confidence=%.2f, flags=%s",
                 session_id,
                 delib.confidence,
                 delib.flags or "none",
             )
             logger.debug(
-                "📊 Views: customer='%s...', business='%s...', quality='%s...'",
+                "Views: customer='%s...', business='%s...', quality='%s...'",
                 (delib.customer_view or "-")[:40],
                 (delib.business_view or "-")[:40],
                 (delib.quality_view or "-")[:40],
@@ -179,7 +174,7 @@ async def offer_node(
                 use_fallback = True
                 fallback_reason = "price_mismatch"
                 logger.error(
-                    "🚨 [SESSION %s] PRICE MISMATCH → fallback activated!",
+                    "[SESSION %s] PRICE MISMATCH fallback activated.",
                     session_id,
                 )
                 track_metric("deliberation_price_mismatch", 1)
@@ -189,7 +184,7 @@ async def offer_node(
                 use_fallback = True
                 fallback_reason = f"low_confidence_{delib.confidence:.2f}"
                 logger.warning(
-                    "⚠️ [SESSION %s] LOW CONFIDENCE %.2f < %.2f → fallback",
+                    "[SESSION %s] LOW CONFIDENCE %.2f < %.2f fallback",
                     session_id,
                     delib.confidence,
                     settings.DELIBERATION_MIN_CONFIDENCE,
@@ -199,7 +194,7 @@ async def offer_node(
             # CHECK: Size unavailable (warning only, no fallback)
             if "size_unavailable" in delib.flags:
                 logger.warning(
-                    "⚠️ [SESSION %s] SIZE UNAVAILABLE flag (no fallback)",
+                    "[SESSION %s] SIZE UNAVAILABLE flag (no fallback)",
                     session_id,
                 )
 
@@ -272,16 +267,16 @@ def _format_products_for_offer(products: list[dict[str, Any]]) -> str:
     """Format products list for LLM context."""
     lines = []
     for i, p in enumerate(products[:5], 1):  # Limit to 5 products
-        name = p.get("name", "Товар")
+        name = p.get("name", "Product")
         price = p.get("price", 0)
         sizes = p.get("sizes", [])
         colors = p.get("colors", [])
 
-        line = f"{i}. {name} - {price} грн"
+        line = f"{i}. {name} - {price} UAH"
         if sizes:
-            line += f" (розміри: {', '.join(str(s) for s in sizes[:5])})"
+            line += f" (sizes: {', '.join(str(s) for s in sizes[:5])})"
         if colors:
-            line += f" (кольори: {', '.join(colors[:3])})"
+            line += f" (colors: {', '.join(colors[:3])})"
         lines.append(line)
 
-    return "\n".join(lines) if lines else "Товари не вибрано"
+    return "\n".join(lines) if lines else "No products selected"

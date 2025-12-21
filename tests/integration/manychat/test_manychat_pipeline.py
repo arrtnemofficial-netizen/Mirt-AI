@@ -5,7 +5,7 @@ import pytest
 from src.core.models import AgentResponse, Message, Metadata
 from src.integrations.manychat.pipeline import process_manychat_pipeline
 from src.services.conversation import ConversationResult
-from src.services.infra.debouncer import BufferedMessage
+from src.services.debouncer import BufferedMessage
 
 
 class FakeDebouncer:

@@ -12,6 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from src.agents.langgraph.nodes.intent import get_intent_patterns
+from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
 from src.agents.langgraph.state_prompts import detect_simple_intent
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.main_agent import run_main
@@ -29,16 +30,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_UPSELL_DECLINE = (
-    "нет",
-    "ні",
-    "не потрібно",
-    "не треба",
-    "не хочу",
-    "не цікаво",
-    "не интересует",
-    "не интересна",
-)
+def _get_decline_patterns() -> list[str]:
+    bubbles = get_snippet_by_header("UPSELL_DECLINE_PATTERNS")
+    if not bubbles:
+        return []
+    patterns: list[str] = []
+    for bubble in bubbles:
+        patterns.extend([line.strip() for line in bubble.splitlines() if line.strip()])
+    return patterns
 
 
 def _contains_any(text: str, keywords: tuple[str, ...] | list[str]) -> bool:
@@ -49,7 +48,7 @@ def _should_restart_flow(user_message: str) -> bool:
     text = (user_message or "").strip().lower()
     if not text:
         return False
-    if _contains_any(text, _UPSELL_DECLINE):
+    if _contains_any(text, _get_decline_patterns()):
         return False
         
     # Lazy load patterns
@@ -66,9 +65,6 @@ def _should_restart_flow(user_message: str) -> bool:
         "SIZE_HELP",
         "COLOR_HELP",
     }
-
-
-from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
 
 
 def _get_snippet_text(header: str, default: str) -> str:
@@ -89,22 +85,34 @@ def _build_crm_status_message(state: dict[str, Any]) -> str:
     task_id = crm_order_result.get("task_id")
 
     if status == "queued":
-        message = _get_snippet_text("UPSELL_CRM_QUEUED", "🔄 Замовлення відправлено до CRM системи")
+        message = _get_snippet_text(
+            "UPSELL_CRM_QUEUED",
+            "Order queued in CRM.",
+        )
         if task_id:
-            message = message.replace("CRM системи", f"CRM системи (завдання #{task_id[:8]}...)")
+            message = f"{message} (task {task_id[:8]}...)"
     elif status == "created":
-        message = _get_snippet_text("UPSELL_CRM_CREATED", "✅ Замовлення успішно створено в CRM")
+        message = _get_snippet_text(
+            "UPSELL_CRM_CREATED",
+            "Order created in CRM.",
+        )
         if crm_order_id:
-            message += f" (№{crm_order_id})"
+            message += f" (id {crm_order_id})"
     elif status == "exists":
-        message = _get_snippet_text("UPSELL_CRM_EXISTS", "ℹ️ Замовлення вже існує в CRM")
+        message = _get_snippet_text(
+            "UPSELL_CRM_EXISTS",
+            "Order already exists in CRM.",
+        )
         if crm_order_id:
-            message += f" (№{crm_order_id})"
+            message += f" (id {crm_order_id})"
     elif status == "failed":
-        error = crm_order_result.get("error", "Невідома помилка")
-        message = _get_snippet_text("UPSELL_CRM_FAILED", "⚠️ Проблема з створенням замовлення в CRM: {error}").format(error=error)
+        error = crm_order_result.get("error", "Unknown error")
+        message = _get_snippet_text(
+            "UPSELL_CRM_FAILED",
+            "CRM order creation failed: {error}",
+        ).format(error=error)
     else:
-        message = f"📋 Статус замовлення в CRM: {status}"
+        message = f"CRM order status: {status}"
 
     return message
 
@@ -141,7 +149,10 @@ async def upsell_node(
     crm_status_message = _build_crm_status_message(state)
 
     if _should_restart_flow(user_message):
-        restart_text = _get_snippet_text("UPSELL_RESTART", "Супер! Давайте підберемо ще одну модель 🌸")
+        restart_text = _get_snippet_text(
+            "UPSELL_RESTART",
+            "Great. Let's pick another model.",
+        )
         metadata_update = state.get("metadata", {}).copy()
         metadata_update.update(
             {

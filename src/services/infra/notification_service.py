@@ -10,7 +10,7 @@ import logging
 import aiohttp
 
 from src.conf.config import settings
-from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+from src.core.prompt_registry import get_snippet_by_header
 
 logger = logging.getLogger(__name__)
 
@@ -187,3 +187,4 @@ class NotificationService:
         except Exception as e:
             logger.error("Notification error: %s", e)
             return False
+

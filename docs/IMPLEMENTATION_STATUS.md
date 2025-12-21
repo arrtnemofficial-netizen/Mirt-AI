@@ -1,61 +1,30 @@
-# Implementation Status
+﻿# ✅ Implementation Status
 
-**Current Status: 🟢 STABLE / PRODUCTION READY**
-**Last Updated:** 2025-11-30
-
----
-
-## ✅ Completed Migration (PydanticAI + LangGraph v2)
-
-We have successfully migrated the legacy architecture to a modern, type-safe stack.
-
-### 🧠 AI Core
-- [x] **Support Agent**: Fully migrated to PydanticAI (`src/agents/pydantic/support_agent.py`).
-- [x] **Vision Agent**: Fully migrated to PydanticAI (`src/agents/pydantic/vision_agent.py`).
-- [x] **Payment Agent**: Fully migrated to PydanticAI (`src/agents/pydantic/payment_agent.py`).
-- [x] **Output Structured**: All agents return strictly typed Pydantic models (`SupportResponse`, `VisionResponse`).
-- [x] **Dependencies**: `AgentDeps` handles catalog and DB injection type-safely.
-
-### ⚙️ Orchestration (LangGraph)
-- [x] **Graph Structure**: Linear pipeline with branches (Moderation -> Intent -> Routing -> Agent).
-- [x] **State Management**: `ConversationState` using `TypedDict` for explicit schema.
-- [x] **Persistence**: PostgreSQL checkpointer via Supabase (`src/agents/langgraph/checkpointer.py`).
-- [x] **HITL**: Human-in-the-loop implemented for Payment confirmation (`interrupt_before`).
-
-### 🧹 Cleanup & Refactoring
-- [x] **Dead Code**: Removed ~15 legacy files (`graph_v2`, `pydantic_agent_old`, `ab_testing`, `tool_planner`).
-- [x] **Imports**: Fixed all circular imports and broken references.
-- [x] **Linting**: `ruff` and `mypy` passing with strict rules.
-- [x] **Config**: Cleaned up `src/conf/config.py`, removed unused feature flags.
+> **Версія:** 5.0  
+> **Дата:** 20 грудня 2025
 
 ---
 
-## 🏗️ Infrastructure
+## 🧩 Feature Matrix
 
-### Server (`src/server/`)
-- [x] **FastAPI**: Serving Webhooks and Automation endpoints.
-- [x] **Telegram**: `aiogram` bot integrated with LangGraph.
-- [x] **ManyChat**: Webhook handler with JSON response rendering.
-- [x] **Health Checks**: `/health` endpoint monitors Supabase and Redis.
-
-### Workers (`src/workers/`)
-- [x] **Celery**: Background task processing.
-- [x] **Dispatcher**: Smart routing (Sync vs Async based on config).
-- [x] **Tasks**: CRM sync, Message logging, Summarization.
-
----
-
-## 📉 Known Issues / Tech Debt
-
-| Severity | Issue | Plan |
-|----------|-------|------|
-| 🟡 Low | **Legacy Stubs** in `conversation.py` | `parse_llm_output` and `validate_state_transition` are kept as stubs for compatibility. Can be removed in v2. |
-| 🟡 Low | **Model Duplication** | `core/models.py` (Legacy) and `pydantic/models.py` (New) coexist. Merging scheduled for Q1 2026. |
+| Feature | Status | Notes |
+|:--------|:-------|:------|
+| **Core Architecture** | 🟢 Done | LangGraph v2, 12 nodes, Checkpointer |
+| **Integrations** | 🟢 Done | Telegram, ManyChat, CRM |
+| **Vision** | 🟢 Done | GPT-4o Vision, Media Proxy |
+| **Memory** | 🟢 Done | Titans-like 3-layer system |
+| **Deployment** | 🟢 Done | Railway, Docker Compose |
+| **Observability** | 🟡 Partial | Struct logs done, Dashboards pending |
+| **Testing** | 🟡 Partial | Unit tests active, E2E pending |
 
 ---
 
-## 🎯 Next Steps
+## 🚧 Known Isues
 
-1. **Production Monitoring**: Watch Sentry and Logfire for runtime anomalies.
-2. **Catalog Update**: Automate `catalog.json` generation from CRM.
-3. **User Testing**: Verify HITL flow in real scenarios.
+1. **ManyChat Timeout:** Occasional 504 on synchronous responses (fixed by Push Mode).
+2. **Vision Latency:** Cold start for GPT-4o Vision can take 5-8s.
+3. **CRM Sync:** Rare idempotency conflicts on rapid updates (handled by retry).
+
+---
+
+> **Оновлено:** 20 грудня 2025, 13:58 UTC+2

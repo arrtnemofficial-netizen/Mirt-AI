@@ -14,6 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
+import yaml
+
+from src.core.prompt_registry import registry
 
 
 # =============================================================================
@@ -77,19 +82,49 @@ class State(str, Enum):
         return self in (State.STATE_8_COMPLAINT, State.STATE_9_OOD)
 
 
+def _load_state_machine_config() -> dict[str, Any]:
+    try:
+        content = registry.get("system.state_machine").content
+    except Exception:
+        return {}
+    try:
+        data = yaml.safe_load(content) or {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 # Display names for UI/logs
-STATE_DISPLAY_NAMES: dict[State, str] = {
-    State.STATE_0_INIT: "Початок",
-    State.STATE_1_DISCOVERY: "Пошук",
-    State.STATE_2_VISION: "Фото",
-    State.STATE_3_SIZE_COLOR: "Розмір/Колір",
-    State.STATE_4_OFFER: "Пропозиція",
-    State.STATE_5_PAYMENT_DELIVERY: "Оплата/Доставка",
-    State.STATE_6_UPSELL: "Допродаж",
-    State.STATE_7_END: "Завершення",
-    State.STATE_8_COMPLAINT: "Скарга",
-    State.STATE_9_OOD: "Поза доменом",
+_DEFAULT_STATE_DISPLAY_NAMES: dict[State, str] = {
+    State.STATE_0_INIT: "Init",
+    State.STATE_1_DISCOVERY: "Discovery",
+    State.STATE_2_VISION: "Vision",
+    State.STATE_3_SIZE_COLOR: "Size/Color",
+    State.STATE_4_OFFER: "Offer",
+    State.STATE_5_PAYMENT_DELIVERY: "Payment/Delivery",
+    State.STATE_6_UPSELL: "Upsell",
+    State.STATE_7_END: "End",
+    State.STATE_8_COMPLAINT: "Complaint",
+    State.STATE_9_OOD: "Out of domain",
 }
+
+
+def _load_state_display_names() -> dict[State, str]:
+    data = _load_state_machine_config()
+    labels = data.get("state_labels", {})
+    if not isinstance(labels, dict):
+        return _DEFAULT_STATE_DISPLAY_NAMES
+
+    result: dict[State, str] = {}
+    for state in State:
+        value = labels.get(state.value)
+        if isinstance(value, str) and value:
+            result[state] = value
+
+    return result or _DEFAULT_STATE_DISPLAY_NAMES
+
+
+STATE_DISPLAY_NAMES = _load_state_display_names()
 
 
 # =============================================================================
@@ -199,7 +234,6 @@ TRANSITIONS: list[Transition] = [
         State.STATE_1_DISCOVERY,
         State.STATE_3_SIZE_COLOR,
         frozenset({Intent.SIZE_HELP, Intent.COLOR_HELP, Intent.DISCOVERY_OR_QUESTION}),
-        "зріст/вік відомі і тип речі зрозумілий",
     ),
     Transition(State.STATE_1_DISCOVERY, State.STATE_2_VISION, frozenset({Intent.PHOTO_IDENT})),
     Transition(State.STATE_1_DISCOVERY, State.STATE_9_OOD, frozenset({Intent.OUT_OF_DOMAIN})),
@@ -208,52 +242,36 @@ TRANSITIONS: list[Transition] = [
         State.STATE_2_VISION,
         State.STATE_3_SIZE_COLOR,
         frozenset({Intent.SIZE_HELP, Intent.COLOR_HELP, Intent.DISCOVERY_OR_QUESTION}),
-        "модель знайдена",
     ),
-    Transition(
-        State.STATE_2_VISION,
-        State.STATE_9_OOD,
-        frozenset({Intent.OUT_OF_DOMAIN}),
-        "на фото явно не одяг",
-    ),
+    Transition(State.STATE_2_VISION, State.STATE_9_OOD, frozenset({Intent.OUT_OF_DOMAIN})),
     # From STATE_3_SIZE_COLOR
     Transition(
         State.STATE_3_SIZE_COLOR,
         State.STATE_4_OFFER,
         frozenset({Intent.DISCOVERY_OR_QUESTION, Intent.SIZE_HELP, Intent.COLOR_HELP}),
-        "є продукт, розмір та колір",
     ),
-    Transition(
-        State.STATE_3_SIZE_COLOR,
-        State.STATE_9_OOD,
-        frozenset({Intent.OUT_OF_DOMAIN}),
-        "розмір поза межами доступних",
-    ),
+    Transition(State.STATE_3_SIZE_COLOR, State.STATE_9_OOD, frozenset({Intent.OUT_OF_DOMAIN})),
     # From STATE_4_OFFER
     Transition(
         State.STATE_4_OFFER,
         State.STATE_5_PAYMENT_DELIVERY,
         frozenset({Intent.PAYMENT_DELIVERY}),
-        "клієнт готовий оформлювати",
     ),
     Transition(
         State.STATE_4_OFFER,
         State.STATE_7_END,
         frozenset({Intent.THANKYOU_SMALLTALK}),
-        "клієнт відмовився",
     ),
     # From STATE_5_PAYMENT_DELIVERY
     Transition(
         State.STATE_5_PAYMENT_DELIVERY,
         State.STATE_6_UPSELL,
         frozenset({Intent.PAYMENT_DELIVERY}),
-        "оплата підтверджена, upsell доречний",
     ),
     Transition(
         State.STATE_5_PAYMENT_DELIVERY,
         State.STATE_7_END,
         frozenset({Intent.PAYMENT_DELIVERY, Intent.THANKYOU_SMALLTALK}),
-        "оплата підтверджена, upsell недоречний",
     ),
     Transition(
         State.STATE_5_PAYMENT_DELIVERY, State.STATE_9_OOD, frozenset({Intent.OUT_OF_DOMAIN})
@@ -263,40 +281,34 @@ TRANSITIONS: list[Transition] = [
         State.STATE_6_UPSELL,
         State.STATE_7_END,
         frozenset({Intent.THANKYOU_SMALLTALK, Intent.PAYMENT_DELIVERY}),
-        "клієнт підтвердив або відмовився",
     ),
     # From STATE_8_COMPLAINT
     Transition(
         State.STATE_8_COMPLAINT,
         State.STATE_7_END,
         frozenset({Intent.THANKYOU_SMALLTALK}),
-        "ескалація зафіксована",
     ),
     # From STATE_9_OOD (Out of Domain) - recovery transitions
     Transition(
         State.STATE_9_OOD,
         State.STATE_0_INIT,
         frozenset({Intent.GREETING_ONLY}),
-        "відновлення після out-of-domain",
     ),
     Transition(
         State.STATE_9_OOD,
         State.STATE_1_DISCOVERY,
         frozenset({Intent.DISCOVERY_OR_QUESTION}),
-        "повернення до пошуку",
     ),
     # From STATE_7_END (End state) - restart transitions
     Transition(
         State.STATE_7_END,
         State.STATE_0_INIT,
         frozenset({Intent.GREETING_ONLY}),
-        "перезапуск розмови",
     ),
     Transition(
         State.STATE_7_END,
         State.STATE_1_DISCOVERY,
         frozenset({Intent.DISCOVERY_OR_QUESTION}),
-        "почати новий пошук",
     ),
 ]
 
@@ -331,55 +343,40 @@ class PlatformKeyboard:
 
 
 # Unified keyboard mapping for all platforms
-STATE_KEYBOARDS: dict[State, PlatformKeyboard] = {
-    State.STATE_0_INIT: PlatformKeyboard(
-        [
-            ["👗 Сукні", "👔 Костюми"],
-            ["🧥 Тренчі", "📏 Розмірна сітка"],
-        ]
-    ),
-    State.STATE_1_DISCOVERY: PlatformKeyboard(
-        [
-            ["👗 Сукні", "👔 Костюми"],
-            ["🧥 Тренчі", "📏 Розмірна сітка"],
-        ]
-    ),
-    State.STATE_2_VISION: PlatformKeyboard(
-        [
-            ["🎨 Інші кольори", "📏 Який розмір?"],
-        ]
-    ),
-    State.STATE_3_SIZE_COLOR: PlatformKeyboard(
-        [
-            ["📏 Розмірна сітка", "🎨 Інші кольори"],
-            ["✅ Підходить!"],
-        ]
-    ),
-    State.STATE_4_OFFER: PlatformKeyboard(
-        [
-            ["✅ Беру!", "🎨 Інший колір"],
-            ["📏 Інший розмір", "❓ Ще питання"],
-        ]
-    ),
-    State.STATE_5_PAYMENT_DELIVERY: PlatformKeyboard(
-        [
-            ["💳 Повна оплата", "💵 Передплата 200 грн"],
-        ]
-    ),
-    State.STATE_6_UPSELL: PlatformKeyboard(
-        [
-            ["✅ Так, додати", "❌ Ні, дякую"],
-        ]
-    ),
-    # STATE_7_END, STATE_8_COMPLAINT, STATE_9_OOD - no keyboards (or escalation)
-}
+def _coerce_keyboard_rows(value: Any) -> list[list[str]] | None:
+    if not isinstance(value, list):
+        return None
+    rows: list[list[str]] = []
+    for row in value:
+        if isinstance(row, list) and all(isinstance(item, str) for item in row):
+            rows.append(row)
+    return rows if rows else None
 
-ESCALATION_KEYBOARD = PlatformKeyboard(
-    [
-        ["👩 Зв'язок з менеджером"],
-    ],
-    one_time=True,
-)
+
+def _load_state_keyboards() -> dict[State, PlatformKeyboard]:
+    data = _load_state_machine_config()
+    keyboards = data.get("keyboards", {})
+    if not isinstance(keyboards, dict):
+        return {}
+
+    result: dict[State, PlatformKeyboard] = {}
+    for state in State:
+        rows = _coerce_keyboard_rows(keyboards.get(state.value))
+        if rows:
+            result[state] = PlatformKeyboard(buttons=rows)
+    return result
+
+
+def _load_escalation_keyboard() -> PlatformKeyboard:
+    data = _load_state_machine_config()
+    rows = _coerce_keyboard_rows(data.get("escalation_keyboard"))
+    if rows:
+        return PlatformKeyboard(buttons=rows, one_time=True)
+    return PlatformKeyboard(buttons=[["Contact manager"]], one_time=True)
+
+
+STATE_KEYBOARDS = _load_state_keyboards()
+ESCALATION_KEYBOARD = _load_escalation_keyboard()
 
 
 def get_keyboard_for_state(

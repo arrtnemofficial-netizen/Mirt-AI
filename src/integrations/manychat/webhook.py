@@ -11,6 +11,7 @@ in ManyChat v2 format with support for:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +21,7 @@ from src.services.conversation import create_conversation_handler
 from src.services.infra.debouncer import MessageDebouncer
 from src.services.infra.media_utils import normalize_image_url
 from src.services.infra.message_store import MessageStore, create_message_store
+from src.core.prompt_registry import get_snippet_by_header
 
 from .constants import (  # noqa: F401
     FIELD_AI_INTENT,
@@ -44,24 +46,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# ManyChat Custom Field Names (повинні співпадати з твоїм ManyChat)
+# ManyChat Custom Field Names (must match your ManyChat config)
 # ---------------------------------------------------------------------------
-FIELD_AI_STATE = "ai_state"  # Поточний стан AI (STATE_1_DISCOVERY, etc.)
-FIELD_AI_INTENT = "ai_intent"  # Intent останнього повідомлення
-FIELD_LAST_PRODUCT = "last_product"  # Назва останнього товару
-FIELD_ORDER_SUM = "order_sum"  # Сума замовлення
-FIELD_CLIENT_NAME = "client_name"  # ПІБ клієнта
-FIELD_CLIENT_PHONE = "client_phone"  # Телефон клієнта
-FIELD_CLIENT_CITY = "client_city"  # Місто клієнта
-FIELD_CLIENT_NP = "client_nova_poshta"  # Відділення НП
+FIELD_AI_STATE = "ai_state"  # Current AI state (STATE_1_DISCOVERY, etc.)
+FIELD_AI_INTENT = "ai_intent"  # Intent of the last message
+FIELD_LAST_PRODUCT = "last_product"  # Last product name
+FIELD_ORDER_SUM = "order_sum"  # Order total
+FIELD_CLIENT_NAME = "client_name"  # Customer full name
+FIELD_CLIENT_PHONE = "client_phone"  # Customer phone
+FIELD_CLIENT_CITY = "client_city"  # Customer city
+FIELD_CLIENT_NP = "client_nova_poshta"  # Nova Poshta branch
 
 # ---------------------------------------------------------------------------
 # ManyChat Tags
 # ---------------------------------------------------------------------------
-TAG_AI_RESPONDED = "ai_responded"  # AI відповів
-TAG_NEEDS_HUMAN = "needs_human"  # Потрібен живий менеджер
-TAG_ORDER_STARTED = "order_started"  # Почав оформлення
-TAG_ORDER_PAID = "order_paid"  # Оплатив
+TAG_AI_RESPONDED = "ai_responded"  # AI responded
+TAG_NEEDS_HUMAN = "needs_human"  # Human manager needed
+TAG_ORDER_STARTED = "order_started"  # Order started
+TAG_ORDER_PAID = "order_paid"  # Paid
 
 
 class ManychatPayloadError(Exception):

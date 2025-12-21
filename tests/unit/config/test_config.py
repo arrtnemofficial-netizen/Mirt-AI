@@ -85,7 +85,7 @@ class TestPromptFilesExist:
         """Main system prompt file exists."""
         from pathlib import Path
 
-        prompt_path = Path("data/prompts/main/main.md")
+        prompt_path = Path("data/prompts/system/main.md")
         assert prompt_path.exists(), "Main system prompt missing"
 
     def test_state_prompts_exist(self):

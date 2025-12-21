@@ -38,6 +38,6 @@ def render_agent_response_text(response: AgentResponse) -> list[str]:
 
     chunks = render_messages_text(response.messages)
     if response.products:
-        product_lines = ["Пропозиції:"] + [f"• {format_product(p)}" for p in response.products]
+        product_lines = ["Suggestions:"] + [f"- {format_product(p)}" for p in response.products]
         chunks.append("\n".join(product_lines))
     return chunks

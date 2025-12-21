@@ -1,13 +1,13 @@
 """
 State-Specific Prompts for Turn-Based State Machine.
 =====================================================
-Кожен стейт має свій промпт з:
-- Чіткими інструкціями що робити
-- Форматом відповіді (OUTPUT)
-- Умовами переходу (transitions)
-- Заборонами (bans)
+Each state has its own prompt with:
+- Clear instructions
+- Output format (OUTPUT)
+- Transition conditions
+- Bans
 
-Відповідає n8n state machine 1:1.
+Matches the n8n state machine 1:1.
 """
 
 from __future__ import annotations
@@ -226,9 +226,9 @@ def detect_simple_intent(message: str) -> str | None:
         "COMPLAINT",
         "SIZE_HELP",
         "COLOR_HELP",
-        "REQUEST_PHOTO",  # Before THANKYOU to catch "покажи фото"
+        "REQUEST_PHOTO",  # Before THANKYOU to catch "request photo"
         "PRODUCT_CATEGORY",
-        "THANKYOU_SMALLTALK",  # Last - catch "дякую", "ок" at end
+        "THANKYOU_SMALLTALK",  # Last - catch "thanks", "ok" at end
     ]
 
     for intent in priority_intents:

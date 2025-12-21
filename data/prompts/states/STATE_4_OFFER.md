@@ -70,12 +70,8 @@
 - Не пропускай deliberation!
 
 ## TRANSITIONS
-- Якщо клієнт погодився оформлювати, встанови:
-  - metadata.intent = PAYMENT_DELIVERY
-  - metadata.current_state = STATE_5_PAYMENT_DELIVERY
-- Якщо клієнт просить додати ще товар/комплект:
-  - metadata.current_state = STATE_6_UPSELL
-- Якщо клієнт хоче подумати -> STATE_7_END
+- Клієнт погодився -> STATE_5_PAYMENT_DELIVERY
+- Клієнт хоче подумати -> STATE_7_END
 
 ## EXAMPLES (короткі бабли!)
 

@@ -1,15 +1,7 @@
 """
-Memory Service - AGI-Style Memory Layer (Titans-like).
-========================================================
-CRUD operations для 3-рівневої архітектури памʼяті:
-  1. Profiles (Persistent Memory)
-  2. Memories/Facts (Fluid Memory)
-  3. Summaries (Compressed Memory)
-
-Ключова логіка:
-- Gating: importance >= 0.6 AND surprise >= 0.4 для запису
-- Semantic search через pgvector
-- Profile merge для JSONB полів
+Memory Service - AGI-style memory layer (Titans-like).
+CRUD for profiles, facts, and summaries.
+Key logic: gating, semantic search, JSONB merges.
 """
 
 from __future__ import annotations
@@ -26,7 +18,7 @@ if TYPE_CHECKING:
 
     from supabase import Client
 
-    from src.agents.pydantic.memory_models import (
+    from src.services.domain.memory.memory_models import (
         Fact,
         MemoryContext,
         MemoryDecision,
@@ -65,7 +57,7 @@ TABLE_SUMMARIES = "mirt_memory_summaries"
 
 def _get_memory_models():
     """Lazy import memory models to avoid circular import."""
-    from src.agents.pydantic.memory_models import (
+    from src.services.domain.memory.memory_models import (
         ChildProfile,
         CommerceInfo,
         Fact,
@@ -95,16 +87,7 @@ def _get_memory_models():
 
 
 class MemoryService:
-    """
-    Service для роботи з Titans-like памʼяттю.
-
-    Provides:
-    - Profile CRUD (Persistent Memory)
-    - Facts CRUD with gating (Fluid Memory)
-    - Summaries CRUD (Compressed Memory)
-    - Semantic search
-    - Memory context loading
-    """
+    """Memory service for profiles, facts, summaries, and search."""
 
     def __init__(self, client: Client | None = None) -> None:
         self.client = client or get_supabase_client()
@@ -131,13 +114,13 @@ class MemoryService:
 
     async def get_profile(self, user_id: str) -> UserProfile | None:
         """
-        Завантажити профіль користувача.
+          .
 
         Args:
             user_id: External ID (Telegram/ManyChat/Instagram)
 
         Returns:
-            UserProfile або None якщо не знайдено
+            UserProfile  None   
         """
         if not self._enabled:
             return None
@@ -165,7 +148,7 @@ class MemoryService:
 
     async def get_or_create_profile(self, user_id: str) -> UserProfile:
         """
-        Отримати профіль або створити новий.
+            .
 
         Args:
             user_id: External ID
@@ -182,7 +165,7 @@ class MemoryService:
 
     async def create_profile(self, user_id: str) -> UserProfile:
         """
-        Створити новий профіль.
+          .
 
         Args:
             user_id: External ID
@@ -227,7 +210,7 @@ class MemoryService:
         commerce: dict | None = None,
     ) -> UserProfile | None:
         """
-        Оновити профіль (merge з існуючими даними).
+          (merge   ).
 
         Args:
             user_id: External ID
@@ -237,7 +220,7 @@ class MemoryService:
             commerce: Partial update for commerce
 
         Returns:
-            Updated UserProfile або None при помилці
+            Updated UserProfile  None  
         """
         if not self._enabled:
             return None
@@ -298,7 +281,7 @@ class MemoryService:
             return None
 
     async def touch_profile(self, user_id: str) -> None:
-        """Оновити last_seen_at для профілю."""
+        """ last_seen_at  ."""
         if not self._enabled:
             return
 
@@ -341,7 +324,7 @@ class MemoryService:
         bypass_gating: bool = False,
     ) -> Fact | None:
         """
-        Зберегти новий факт (з gating перевіркою).
+           ( gating ).
 
         Gating rule: importance >= 0.6 AND surprise >= 0.4
 
@@ -353,7 +336,7 @@ class MemoryService:
             bypass_gating: Bypass importance/surprise check
 
         Returns:
-            Stored Fact або None якщо відхилено gating
+            Stored Fact  None   gating
         """
         # GATING CHECK (Titans-like)
         if not bypass_gating:
@@ -424,14 +407,14 @@ class MemoryService:
         embedding: list[float] | None = None,
     ) -> Fact | None:
         """
-        Оновити існуючий факт.
+          .
 
         Args:
             update: UpdateFact with new content
             embedding: Optional new embedding
 
         Returns:
-            Updated Fact або None при помилці
+            Updated Fact  None  
         """
         if not self._enabled:
             return None
@@ -486,7 +469,7 @@ class MemoryService:
         min_importance: float = 0.3,
     ) -> list[Fact]:
         """
-        Отримати факти для користувача.
+           .
 
         Args:
             user_id: External ID
@@ -538,7 +521,7 @@ class MemoryService:
         categories: list[str] | None = None,
     ) -> list[tuple[Fact, float]]:
         """
-        Semantic search через pgvector.
+        Semantic search  pgvector.
 
         Args:
             user_id: External ID
@@ -588,7 +571,7 @@ class MemoryService:
             return []
 
     async def deactivate_fact(self, fact_id: UUID, reason: str | None = None) -> bool:
-        """Деактивувати факт (soft delete)."""
+        """  (soft delete)."""
         if not self._enabled:
             return False
 
@@ -644,7 +627,7 @@ class MemoryService:
     # =========================================================================
 
     async def get_user_summary(self, user_id: str) -> MemorySummary | None:
-        """Отримати актуальний summary для користувача."""
+        """  summary  ."""
         if not self._enabled:
             return None
 
@@ -677,7 +660,7 @@ class MemoryService:
         facts_count: int = 0,
     ) -> MemorySummary | None:
         """
-        Зберегти summary (замінює попередній).
+         summary ( ).
 
         Args:
             user_id: External ID
@@ -744,22 +727,15 @@ class MemoryService:
         user_id: str,
         query_embedding: list[float] | None = None,
         facts_limit: int = DEFAULT_FACTS_LIMIT,
+        ensure_profile: bool = True,
     ) -> MemoryContext:
         """
-        Завантажити повний контекст памʼяті для агента.
-
-        Це головний метод для використання в memory_context_node.
-
-        Args:
-            user_id: External ID
-            query_embedding: Optional query for semantic search
-            facts_limit: Max facts to load
-
-        Returns:
-            MemoryContext з profile, facts, summary
+        Load full memory context for an agent.
         """
         # Load profile
-        profile = await self.get_or_create_profile(user_id)
+        profile = await self.get_profile(user_id)
+        if profile is None and ensure_profile:
+            profile = await self.create_profile(user_id)
 
         # Load facts (semantic search if embedding provided)
         facts: list[Fact] = []
@@ -773,7 +749,8 @@ class MemoryService:
         summary = await self.get_user_summary(user_id)
 
         # Touch profile (update last_seen_at)
-        await self.touch_profile(user_id)
+        if profile:
+            await self.touch_profile(user_id)
 
         return self.models["MemoryContext"](
             profile=profile,
@@ -792,7 +769,7 @@ class MemoryService:
         session_id: str | None = None,
     ) -> dict[str, int]:
         """
-        Застосувати рішення MemoryAgent.
+          MemoryAgent.
 
         Args:
             user_id: External ID
@@ -855,7 +832,7 @@ class MemoryService:
 
     async def apply_time_decay(self) -> int:
         """
-        Застосувати time decay до старих фактів.
+         time decay   .
 
         Returns:
             Number of affected rows
@@ -874,7 +851,7 @@ class MemoryService:
 
     async def cleanup_expired(self) -> int:
         """
-        Видалити expired факти.
+         expired .
 
         Returns:
             Number of deleted rows

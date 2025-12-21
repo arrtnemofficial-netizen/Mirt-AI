@@ -1,19 +1,5 @@
 """
-Memory Background Tasks - Time Decay & Hygiene.
-================================================
-Фонові задачі для підтримки здорової памʼяті:
-
-1. apply_time_decay - зменшує importance старих фактів
-2. cleanup_expired - видаляє expired факти
-3. generate_summaries - генерує summary для активних юзерів
-4. memory_maintenance - повний цикл обслуговування
-
-Ці задачі мають запускатися через cron або Celery beat.
-
-Рекомендований розклад:
-- apply_time_decay: щодня о 3:00
-- cleanup_expired: щодня о 4:00
-- generate_summaries: щотижня (неділя о 5:00)
+Memory background tasks for decay, cleanup, and summaries.
 """
 
 from __future__ import annotations
@@ -21,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from src.services.domain.memory.memory_service import MemoryService
 from src.services.infra.supabase_client import get_supabase_client
@@ -36,15 +23,15 @@ logger = logging.getLogger(__name__)
 
 async def apply_time_decay() -> dict[str, int]:
     """
-    Застосувати time decay до старих фактів.
+     time decay   .
 
-    Зменшує importance для фактів, які давно не використовувались.
-    Це робить памʼять "живою" — застаріле поступово забувається.
+     importance  ,    .
+       ""    .
 
     Returns:
         Stats dict with affected counts
     """
-    logger.info("🕐 Starting memory time decay...")
+    logger.info("Starting memory time decay...")
     start = datetime.now(UTC)
 
     memory_service = MemoryService()
@@ -57,7 +44,7 @@ async def apply_time_decay() -> dict[str, int]:
         affected = await memory_service.apply_time_decay()
 
         elapsed = (datetime.now(UTC) - start).total_seconds()
-        logger.info("✅ Time decay complete: %d facts affected in %.2fs", affected, elapsed)
+        logger.info("Time decay complete: %d facts affected in %.2fs", affected, elapsed)
 
         return {
             "affected": affected,
@@ -66,20 +53,20 @@ async def apply_time_decay() -> dict[str, int]:
         }
 
     except Exception as e:
-        logger.error("❌ Time decay failed: %s", e)
+        logger.error("Time decay failed: %s", e)
         return {"affected": 0, "error": str(e)}
 
 
 async def cleanup_expired() -> dict[str, int]:
     """
-    Видалити (деактивувати) expired факти.
+     () expired .
 
-    Факти з expires_at < now() будуть помічені як is_active=False.
+      expires_at < now()    is_active=False.
 
     Returns:
         Stats dict with cleaned counts
     """
-    logger.info("🧹 Starting expired memories cleanup...")
+    logger.info("Starting expired memories cleanup...")
     start = datetime.now(UTC)
 
     memory_service = MemoryService()
@@ -92,7 +79,7 @@ async def cleanup_expired() -> dict[str, int]:
         cleaned = await memory_service.cleanup_expired()
 
         elapsed = (datetime.now(UTC) - start).total_seconds()
-        logger.info("✅ Cleanup complete: %d expired facts deactivated in %.2fs", cleaned, elapsed)
+        logger.info("Cleanup complete: %d expired facts deactivated in %.2fs", cleaned, elapsed)
 
         return {
             "cleaned": cleaned,
@@ -101,15 +88,15 @@ async def cleanup_expired() -> dict[str, int]:
         }
 
     except Exception as e:
-        logger.error("❌ Cleanup failed: %s", e)
+        logger.error("Cleanup failed: %s", e)
         return {"cleaned": 0, "error": str(e)}
 
 
-async def generate_user_summary(user_id: str) -> dict[str, any]:
+async def generate_user_summary(user_id: str) -> dict[str, Any]:
     """
-    Згенерувати summary для конкретного користувача.
+     summary   .
 
-    Збирає всі активні факти і створює стислий summary.
+           summary.
 
     Args:
         user_id: User to generate summary for
@@ -166,9 +153,9 @@ async def generate_user_summary(user_id: str) -> dict[str, any]:
         return {"user_id": user_id, "error": str(e)}
 
 
-async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
+async def generate_summaries_for_active_users(days: int = 7) -> dict[str, Any]:
     """
-    Згенерувати summaries для активних юзерів.
+     summaries   .
 
     Args:
         days: Consider users active if seen in last N days
@@ -176,7 +163,7 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
     Returns:
         Stats dict
     """
-    logger.info("📝 Starting summary generation for active users (last %d days)...", days)
+    logger.info("Starting summary generation for active users (last %d days)...", days)
     start = datetime.now(UTC)
 
     client = get_supabase_client()
@@ -209,7 +196,7 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
         elapsed = (datetime.now(UTC) - start).total_seconds()
 
         logger.info(
-            "✅ Summary generation complete: %d/%d users in %.2fs",
+            "Summary generation complete: %d/%d users in %.2fs",
             successful,
             len(user_ids),
             elapsed,
@@ -223,15 +210,15 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
         }
 
     except Exception as e:
-        logger.error("❌ Summary generation failed: %s", e)
+        logger.error("Summary generation failed: %s", e)
         return {"processed": 0, "error": str(e)}
 
 
-async def memory_maintenance() -> dict[str, any]:
+async def memory_maintenance() -> dict[str, Any]:
     """
-    Повний цикл обслуговування памʼяті.
+       .
 
-    Запускає:
+    :
     1. Time decay
     2. Cleanup expired
     3. Generate summaries
@@ -239,7 +226,7 @@ async def memory_maintenance() -> dict[str, any]:
     Returns:
         Combined stats from all tasks
     """
-    logger.info("🔧 Starting full memory maintenance cycle...")
+    logger.info("Starting full memory maintenance cycle...")
     start = datetime.now(UTC)
 
     results = {}
@@ -257,7 +244,7 @@ async def memory_maintenance() -> dict[str, any]:
     results["total_elapsed_seconds"] = elapsed
     results["timestamp"] = start.isoformat()
 
-    logger.info("✅ Full maintenance complete in %.2fs", elapsed)
+    logger.info("Full maintenance complete in %.2fs", elapsed)
 
     return results
 

@@ -19,8 +19,8 @@ async def enrich_product_from_db(
 ) -> dict[str, Any] | None:
     """Lookup product in DB by name (and color if provided) and return enriched data.
 
-    Використовується, коли Vision повернув назву без ціни/фото.
-    ВАЖЛИВО: Якщо є колір - шукає з кольором для точного match!
+    Used when Vision returns a name without price/photo.
+    If color is provided, prefer color-specific matching.
     """
     try:
         catalog = CatalogService()
@@ -34,14 +34,14 @@ async def enrich_product_from_db(
                 return s.split("(")[0].strip()
             return s
 
-        # Якщо колір вже в назві (наприклад "Костюм Ритм (рожевий)") - не дублюємо
+        # Avoid duplicating color if already in the name.
         search_query = product_name
         if (
             color
             and f"({color})" not in product_name.lower()
             and color.lower() not in product_name.lower()
         ):
-            # Спробуємо знайти точний match з кольором
+            # Try exact match with color.
             search_query = f"{product_name} ({color})"
 
         results = await catalog.search_products(query=search_query, limit=5)
@@ -72,13 +72,13 @@ async def enrich_product_from_db(
             scored.sort(key=lambda x: x[0], reverse=True)
             results = [row for _score, row in scored[:5]]
 
-        # Якщо не знайшли з повною назвою - спробуємо базову назву без кольору
+        # If no full-name match, try base name without color.
         if not results and "(" in product_name:
             base_name = product_name.split("(")[0].strip()
             logger.debug("Retry search with base name: '%s'", base_name)
             results = await catalog.search_products(query=base_name, limit=5)
 
-        # Якщо є колір - шукаємо товар з цим кольором
+        # If color is provided, search products with that color.
         product = None
         if color and results:
             for p in results:
@@ -105,7 +105,7 @@ async def enrich_product_from_db(
                         seen.add(lc)
                         color_options.append(c)
 
-        # Якщо не знайшли з кольором - беремо перший
+        # If no color-specific match, pick the first.
         if not product and results:
             product = results[0]
 

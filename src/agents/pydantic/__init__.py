@@ -16,7 +16,10 @@ Integration with LangGraph:
 - Nodes update graph state based on agent output
 """
 
-from .deps import AgentDeps, CatalogService, Database, create_deps_from_state
+from src.services.data.catalog_service import CatalogService
+from src.services.data.order_service import OrderService as Database
+
+from .deps import AgentDeps, create_deps_from_state
 from .models import (
     CustomerDataExtracted,
     EscalationInfo,

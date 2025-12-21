@@ -13,57 +13,11 @@ import unicodedata
 from dataclasses import dataclass
 
 from src.core.constants import ModerationFlag
+from src.services.core.moderation_config import get_forbidden_terms, get_substitution_map
 
 
-# Base forbidden terms
-FORBIDDEN_TERMS: set[str] = {
-    "бомба",
-    "терорист",
-    "суїцид",
-    "пістолет",
-    "вибух",
-    "вбити",
-    "смерть",
-    "зброя",
-    "наркотик",
-    "героїн",
-}
-
-# Leetspeak and Cyrillic substitution map for normalization
-SUBSTITUTION_MAP = {
-    # Cyrillic look-alikes
-    "а": "a",
-    "е": "e",
-    "і": "i",
-    "о": "o",
-    "р": "p",
-    "с": "c",
-    "у": "y",
-    "х": "x",
-    "А": "a",
-    "В": "b",
-    "Е": "e",
-    "К": "k",
-    "М": "m",
-    "Н": "h",
-    "О": "o",
-    "Р": "p",
-    "С": "c",
-    "Т": "t",
-    "У": "y",
-    "Х": "x",
-    # Common leetspeak
-    "0": "o",
-    "1": "i",
-    "3": "e",
-    "4": "a",
-    "5": "s",
-    "7": "t",
-    "8": "b",
-    "@": "a",
-    "$": "s",
-    "!": "i",
-}
+FORBIDDEN_TERMS: set[str] = get_forbidden_terms()
+SUBSTITUTION_MAP = get_substitution_map()
 
 # Regex patterns
 EMAIL_REGEX = re.compile(
@@ -79,7 +33,7 @@ CARD_REGEX = re.compile(
 )
 # Ukrainian passport series
 PASSPORT_REGEX = re.compile(
-    r"\b[А-ЯІЇЄҐ]{2}\s?\d{6}\b",
+    r"\b[\u0410-\u042F\u0406\u0407\u0404\u0490]{2}\s?\d{6}\b",
     re.IGNORECASE,
 )
 
@@ -191,7 +145,7 @@ def moderate_user_message(text: str) -> ModerationResult:
     flags: list[str] = []
 
     # Check for prompt injection FIRST
-    from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+    from src.core.prompt_registry import get_snippet_by_header
     
     def _get_snippet_text(header: str, default: str) -> str:
         s = get_snippet_by_header(header)
@@ -229,3 +183,4 @@ def moderate_user_message(text: str) -> ModerationResult:
         flags=flags,
         reason=None,
     )
+

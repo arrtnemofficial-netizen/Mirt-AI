@@ -138,7 +138,7 @@ def test_snippets_cases(title: str, body: str, rule_id: str) -> None:
 
 @pytest.mark.anyio
 async def test_support_agent_injects_snippets() -> None:
-    from src.agents.pydantic.main_agent import _add_manager_snippets
+    from src.agents.pydantic.support_agent import _add_manager_snippets
 
     injected = await _add_manager_snippets(None)  # type: ignore[arg-type]
     assert "ШАБЛОНИ МЕНЕДЖЕРА" in injected

@@ -16,7 +16,7 @@ from src.core.debug_logger import debug_log
 from src.services.core.observability import track_metric
 
 if TYPE_CHECKING:
-    from src.agents import ConversationState
+    from src.core.conversation_state import ConversationState
 
 logger = logging.getLogger(__name__)
 
@@ -353,3 +353,4 @@ def apply_transition_guardrails(
 
 # Backward compatibility alias
 _apply_transition_guardrails = apply_transition_guardrails
+

@@ -1,46 +1,60 @@
-"""Tests for prompt validation and structure."""
+"""Tests for system prompt validation and structure (Markdown-based).
+
+These tests verify:
+1. System prompt file exists
+2. Required sections exist (Identity, Rules)
+3. Content quality (Ukrainian, No placeholders)
+"""
 
 import pytest
 
 from src.core.prompt_registry import PromptRegistry
 
 
+# Load Registry
 registry = PromptRegistry()
 
 
 class TestSystemPromptBasics:
-    """Test base identity and main prompt content."""
+    """Test system/main.md content."""
 
     @pytest.fixture
-    def base_identity_content(self) -> str:
-        """Get base identity prompt content from registry."""
-        return registry.get("system.base_identity").content
+    def prompt_content(self) -> str:
+        """Get system prompt content from registry."""
+        return registry.get("system.main").content
 
-    @pytest.fixture
-    def main_prompt_content(self) -> str:
-        """Get main domain prompt content from registry."""
-        return registry.get("main.main").content
+    def test_has_identity_section(self, prompt_content):
+        """Prompt should define AI identity."""
+        assert "# Роль" in prompt_content or "IDENTITY" in prompt_content
+        assert "Софія" in prompt_content
+        assert "MIRT" in prompt_content
 
-    def test_base_identity_has_identity_section(self, base_identity_content):
-        """Base identity prompt should define identity."""
-        assert "IDENTITY" in base_identity_content
-        assert "MIRT" in base_identity_content
+    def test_has_do_and_do_not(self, prompt_content):
+        """Prompt should have DO and DO NOT sections."""
+        assert "## DO" in prompt_content
+        assert "## DO NOT" in prompt_content
 
-    def test_base_identity_has_format_rules(self, base_identity_content):
-        """Base identity prompt should define format rules."""
-        assert "FORMAT RULES" in base_identity_content
-        assert "messages" in base_identity_content
+    def test_has_escalation_rules(self, prompt_content):
+        """Prompt should mention escalation or safety."""
+        # Use lower case check or partial match for Ukrainian header
+        assert "escalation" in prompt_content.lower() or "безпека" in prompt_content.lower()
+        assert "EXIT" in prompt_content
 
-    def test_main_has_do_and_do_not(self, main_prompt_content):
-        """Main prompt should have DO and DO NOT sections."""
-        assert "## DO" in main_prompt_content
-        assert "## DO NOT" in main_prompt_content
-
-    def test_no_placeholder_text(self, base_identity_content):
-        """Base identity prompt should not have placeholder text."""
+    def test_no_placeholder_text(self, prompt_content):
+        """Prompt should not have placeholder text."""
         placeholders = ["TODO", "FIXME", "XXX", "PLACEHOLDER", "YOUR_NAME"]
         for ph in placeholders:
-            assert ph not in base_identity_content, f"Found placeholder: {ph}"
+            assert ph not in prompt_content, f"Found placeholder: {ph}"
+
+    def test_has_ukrainian_content(self, prompt_content):
+        """Prompt should have Ukrainian language content."""
+        ukrainian_words = ["привіт", "дякую", "будь ласка", "замовлення", "вітаю"]
+        found = any(word in prompt_content.lower() for word in ukrainian_words)
+        assert found, "Prompt should contain Ukrainian content"
+
+    def test_formatting_markdown(self, prompt_content):
+        """Prompt should use markdown headers."""
+        assert "# " in prompt_content
 
 
 class TestStatePromptsBasics:

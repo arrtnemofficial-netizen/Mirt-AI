@@ -1,12 +1,12 @@
 """
 Structured Output Models - Based on OUTPUT_CONTRACT from system_prompt_full.yaml
-================================================================================
-БЛОК 10: OUTPUT CONTRACT (Final JSON Schema)
+===============================================================================
+BLOCK 10: OUTPUT CONTRACT (Final JSON Schema)
 
-Ці моделі відповідають точній схемі з промпта:
-- event: enum з 5 значень
-- messages: array з type/content
-- products: array з id/name/price/size/color/photo_url
+These models match the exact prompt schema:
+- event: enum with 5 values
+- messages: array with type/content
+- products: array with id/name/price/size/color/photo_url
 - metadata: session_id/current_state/intent/escalation_level
 """
 
@@ -55,12 +55,12 @@ class ProductMatch(BaseModel):
     - products[i].size MUST be in CATALOG.sizes
     """
 
-    id: int = Field(description="Product ID з CATALOG (обов'язково існує в каталозі)")
-    name: str = Field(description="Назва товару точно як в CATALOG")
-    price: float = Field(gt=0, description="Ціна в грн (ТІЛЬКИ з CATALOG!)")
-    size: str = Field(description="Розмір з CATALOG.sizes")
-    color: str = Field(description="Колір з CATALOG.colors")
-    photo_url: str = Field(description="URL фото з CATALOG (https://cdn.sitniks.com/...)")
+    id: int = Field(description="Product ID from catalog (must exist).")
+    name: str = Field(description="Product name exactly as in catalog.")
+    price: float = Field(gt=0, description="Price in UAH (must come from catalog).")
+    size: str = Field(description="Size from catalog sizes.")
+    color: str = Field(description="Color from catalog colors.")
+    photo_url: str = Field(description="Photo URL from catalog.")
 
     @field_validator("photo_url")
     @classmethod
@@ -116,7 +116,7 @@ class ResponseMetadata(BaseModel):
 
 class EscalationInfo(BaseModel):
     """Escalation details when event='escalation'."""
-    reason: str = Field(description="Причина ескалації")
+    reason: str = Field(description="Escalation reason")
     target: str = Field(default="human_operator")
 
 
@@ -130,13 +130,13 @@ class CustomerDataExtracted(BaseModel):
     Customer data for order.
 
     STATE_5_PAYMENT_DELIVERY goals:
-    - Зібрати ПІБ, телефон, місто та відділення/адресу
-    - Зафіксувати спосіб оплати
+    - Collect full name, phone, city, and branch/address
+    - Capture payment method
     """
-    name: str | None = Field(default=None, description="ПІБ отримувача")
-    phone: str | None = Field(default=None, description="Номер телефону")
-    city: str | None = Field(default=None, description="Місто доставки")
-    nova_poshta: str | None = Field(default=None, description="Відділення Нової пошти")
+    name: str | None = Field(default=None, description="Recipient full name")
+    phone: str | None = Field(default=None, description="Phone number")
+    city: str | None = Field(default=None, description="Delivery city")
+    nova_poshta: str | None = Field(default=None, description="Nova Poshta branch")
 
 
 # =============================================================================
@@ -151,12 +151,12 @@ class SupportResponse(BaseModel):
     BLOCK 10 mandatory_fields: ["event", "messages", "metadata"]
 
     PRE_OUTPUT_CHECKLIST:
-    1. Чи всі products[].id є в CATALOG?
-    2. Чи всі products[].price > 0 і взяті з CATALOG?
-    3. Чи metadata.session_id скопійовано з input?
-    4. Чи messages[] має >= 1 елемент?
-    5. Якщо event='escalation' -> чи заповнено escalation.reason?
-    6. Чи всі products[].photo_url починаються з 'https://'?
+    1. Are all products[].id present in catalog?
+    2. Are all products[].price > 0 and from catalog?
+    3. Is metadata.session_id copied from input?
+    4. Does messages[] have at least 1 element?
+    5. If event='escalation' -> is escalation.reason filled?
+    6. Do all products[].photo_url start with 'https://'? 
     """
 
     # REQUIRED: event type
@@ -167,7 +167,7 @@ class SupportResponse(BaseModel):
     # REQUIRED: messages (min 1)
     messages: list[MessageItem] = Field(
         min_length=1,
-        description="Повідомлення для клієнта (plain text, NO markdown, max 900 chars)",
+        description="Customer-facing message (plain text, no markdown, max 900 chars)",
     )
 
     # REQUIRED: metadata
@@ -178,7 +178,7 @@ class SupportResponse(BaseModel):
     # OPTIONAL: products (only if found in CATALOG)
     products: list[ProductMatch] = Field(
         default_factory=list,
-        description="Товари ТІЛЬКИ з CATALOG (id, name, price, size, color, photo_url)",
+        description="Products must be from catalog (id, name, price, size, color, photo_url)",
     )
 
     # OPTIONAL: reasoning for debug
@@ -196,14 +196,14 @@ class SupportResponse(BaseModel):
     # Additional: customer data extracted
     customer_data: CustomerDataExtracted | None = Field(
         default=None,
-        description="Дані клієнта з повідомлення (для STATE_5)",
+        description="Customer data extracted from message (for STATE_5)",
     )
 
     @field_validator("messages")
     @classmethod
     def validate_messages_not_empty(cls, v: list[MessageItem]) -> list[MessageItem]:
         if not v:
-            raise ValueError("messages[] НЕ МОЖЕ бути порожнім. Завжди >= 1 message.")
+            raise ValueError("messages[] must not be empty. Always >= 1 message.")
         return v
 
 
@@ -230,38 +230,38 @@ class OfferResponse(SupportResponse):
 
 class VisionResponse(BaseModel):
     """
-    Відповідь Vision агента (аналіз фото).
+    Vision agent response (photo analysis).
     """
 
     reply_to_user: str = Field(
-        description="Відповідь клієнту про товар на фото",
+        description="Customer-facing response about the product in the photo",
     )
 
     identified_product: ProductMatch | None = Field(
         default=None,
-        description="Товар визначений на фото",
+        description="Identified product in the photo",
     )
 
     alternative_products: list[ProductMatch] = Field(
         default_factory=list,
-        description="Альтернативні товари якщо точний не знайдено",
+        description="Alternative products if exact match not found",
     )
 
     confidence: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Впевненість у визначенні",
+        description="Confidence score",
     )
 
     needs_clarification: bool = Field(
         default=False,
-        description="Чи потрібно уточнення від клієнта",
+        description="Whether clarification is needed from the customer",
     )
 
     clarification_question: str | None = Field(
         default=None,
-        description="Питання для уточнення",
+        description="Clarification question",
     )
 
 
@@ -272,49 +272,49 @@ class VisionResponse(BaseModel):
 
 class PaymentResponse(BaseModel):
     """
-    Відповідь Payment агента (оформлення замовлення).
+    Payment agent response (order processing).
     """
 
     reply_to_user: str = Field(
-        description="Відповідь клієнту про оплату/доставку",
+        description="Customer-facing response about payment/delivery",
     )
 
     # Data collection status
     customer_data: CustomerDataExtracted | None = Field(
         default=None,
-        description="Зібрані дані клієнта",
+        description="Collected customer data",
     )
 
     missing_fields: list[str] = Field(
         default_factory=list,
-        description="Які дані ще потрібні: name, phone, city, nova_poshta",
+        description="Missing fields: name, phone, city, nova_poshta",
     )
 
     # Order status
     order_ready: bool = Field(
         default=False,
-        description="Чи готове замовлення до створення в CRM",
+        description="Whether order is ready for CRM creation",
     )
 
     order_total: float = Field(
         default=0.0,
-        description="Сума замовлення",
+        description="Order total",
     )
 
     # Payment
     payment_details_sent: bool = Field(
         default=False,
-        description="Чи надіслано реквізити для оплати",
+        description="Whether payment requisites were sent",
     )
 
     awaiting_payment_confirmation: bool = Field(
         default=False,
-        description="Чи чекаємо підтвердження оплати",
+        description="Whether payment confirmation is pending",
     )
 
     payment_proof_detected: bool = Field(
         default=False,
-        description="Чи є підтвердження оплати в поточному повідомленні",
+        description="Whether payment proof is present in current message",
     )
 
 
@@ -336,23 +336,23 @@ class AgentOutput(BaseModel):
         "escalation",
         "upsell",
         "end",
-    ] = Field(description="Тип події")
+    ] = Field(description="Event type")
 
     messages: list[dict[str, str]] = Field(
-        description="Повідомлення для клієнта",
+        description="Customer-facing messages",
     )
 
     products: list[ProductMatch] = Field(
         default_factory=list,
-        description="Товари для показу",
+        description="Products to display",
     )
 
     metadata: dict = Field(
         default_factory=dict,
-        description="Метадані (state, intent, etc.)",
+        description="Metadata (state, intent, etc.)",
     )
 
     escalation: dict | None = Field(
         default=None,
-        description="Дані ескалації якщо потрібно",
+        description="Escalation data if needed",
     )

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from src.agents import ConversationState
+    from src.core.conversation_state import ConversationState
     from src.core.models import AgentResponse
 
 
@@ -42,3 +42,4 @@ class ConversationResult:
     state: "ConversationState"
     error: str | None = None
     is_fallback: bool = False
+

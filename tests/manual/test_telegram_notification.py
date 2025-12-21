@@ -20,7 +20,7 @@ async def main():
     print("=" * 60)
 
     from src.conf.config import settings
-    from src.services.infra.notification_service import NotificationService
+    from src.services.notification_service import NotificationService
 
     # Check config
     bot_token = settings.MANAGER_BOT_TOKEN.get_secret_value()

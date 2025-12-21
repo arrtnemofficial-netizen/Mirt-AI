@@ -1,16 +1,14 @@
-"""Parser for extracting client data from message text.
-
-Extracts:
-- Full name (ПІБ)
-- Phone number (Ukrainian format)
-- City
-- Nova Poshta branch number
-"""
+"""Parser for extracting client data from message text."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from src.services.core.client_parser_config import (
+    get_client_parser_list,
+    get_client_parser_value,
+)
 
 
 @dataclass
@@ -36,134 +34,36 @@ class ClientData:
         }
 
 
-# ---------------------------------------------------------------------------
-# Phone number patterns (Ukrainian)
-# ---------------------------------------------------------------------------
-PHONE_PATTERNS = [
-    # +380XXXXXXXXX
+PHONE_PATTERNS = get_client_parser_list("phone_patterns") or [
     r"\+?380\s*\d{2}\s*\d{3}\s*\d{2}\s*\d{2}",
-    # 0XXXXXXXXX
     r"0\d{2}\s*\d{3}\s*\d{2}\s*\d{2}",
-    # 0XX XXX XX XX
     r"0\d{2}\s+\d{3}\s+\d{2}\s+\d{2}",
-    # 0XX-XXX-XX-XX
     r"0\d{2}[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2}",
 ]
 
-# ---------------------------------------------------------------------------
-# Nova Poshta patterns
-# ---------------------------------------------------------------------------
-NP_PATTERNS = [
-    # Відділення №123, відділення 123
-    r"(?:відділення|віділення|отделение|№)\s*[№#]?\s*(\d{1,4})",
-    # НП 123, нп №123
-    r"(?:нп|np)\s*[№#]?\s*(\d{1,4})",
-    # Поштомат 123
-    r"(?:поштомат|почтомат)\s*[№#]?\s*(\d{1,4})",
-    # Just number after city context
-    r"(?:нова\s*пошта|новая\s*почта)\s*[№#]?\s*(\d{1,4})",
-]
+NP_PATTERNS = get_client_parser_list("np_patterns")
+NP_KEYWORDS = get_client_parser_list("np_keywords")
+UKRAINIAN_CITIES = get_client_parser_list("cities")
+CITY_PATTERNS = get_client_parser_list("city_patterns")
 
-# ---------------------------------------------------------------------------
-# Ukrainian cities (top 50 + common variations)
-# ---------------------------------------------------------------------------
-UKRAINIAN_CITIES = [
-    # Major cities
-    "київ",
-    "kyiv",
-    "kiev",
-    "харків",
-    "kharkiv",
-    "харьков",
-    "одеса",
-    "odesa",
-    "одесса",
-    "дніпро",
-    "dnipro",
-    "днепр",
-    "львів",
-    "lviv",
-    "львов",
-    "запоріжжя",
-    "zaporizhzhia",
-    "запорожье",
-    "кривий ріг",
-    "kryvyi rih",
-    "кривой рог",
-    "миколаїв",
-    "mykolaiv",
-    "николаев",
-    "маріуполь",
-    "mariupol",
-    "мариуполь",
-    "вінниця",
-    "vinnytsia",
-    "винница",
-    "херсон",
-    "kherson",
-    "полтава",
-    "poltava",
-    "чернігів",
-    "chernihiv",
-    "чернигов",
-    "черкаси",
-    "cherkasy",
-    "черкассы",
-    "житомир",
-    "zhytomyr",
-    "суми",
-    "sumy",
-    "рівне",
-    "rivne",
-    "ровно",
-    "івано-франківськ",
-    "ivano-frankivsk",
-    "тернопіль",
-    "ternopil",
-    "луцьк",
-    "lutsk",
-    "кропивницький",
-    "kropyvnytskyi",
-    "ужгород",
-    "uzhhorod",
-    "чернівці",
-    "chernivtsi",
-    "черновцы",
-    "хмельницький",
-    "khmelnytskyi",
-    # Common smaller cities
-    "біла церква",
-    "бровари",
-    "бориспіль",
-    "ірпінь",
-    "буча",
-    "вишгород",
-    "обухів",
-    "фастів",
-    "васильків",
-    "кам'янське",
-    "павлоград",
-    "нікополь",
-    "мелітополь",
-    "бердянськ",
-    "енергодар",
-]
+NAME_PATTERN = get_client_parser_value(
+    "name_pattern",
+    r"([\u0410-\u042F\u0406\u0407\u0404\u0490][\u0430-\u044F\u0456\u0457\u0454\u0491']+(?:\s+[\u0410-\u042F\u0406\u0407\u0404\u0490][\u0430-\u044F\u0456\u0457\u0454\u0491']+){1,2})",
+)
 
 
 def normalize_phone(phone: str) -> str:
     """Normalize phone number to +380XXXXXXXXX format."""
-    # Remove all non-digits
     digits = re.sub(r"\D", "", phone)
 
-    # Handle different formats
     if digits.startswith("380") and len(digits) == 12:
         return f"+{digits}"
-    elif digits.startswith("0") and len(digits) == 10:
+    if digits.startswith("0") and len(digits) == 10:
         return f"+38{digits}"
-    elif len(digits) == 9:
+    if len(digits) == 9:
         return f"+380{digits}"
 
-    return phone  # Return as-is if can't normalize
+    return phone
 
 
 def extract_phone(text: str) -> str | None:
@@ -187,11 +87,10 @@ def extract_nova_poshta(text: str) -> str | None:
         if match:
             return match.group(1)
 
-    # Fallback: look for standalone numbers after NP-related words
-    if any(word in text_lower for word in ["нп", "пошт", "відділ", "отдел"]):
+    if any(word in text_lower for word in NP_KEYWORDS):
         numbers = re.findall(r"\b(\d{1,4})\b", text)
         for num in numbers:
-            if 1 <= int(num) <= 9999:  # Valid NP range
+            if 1 <= int(num) <= 9999:
                 return num
 
     return None
@@ -201,18 +100,11 @@ def extract_city(text: str) -> str | None:
     """Extract city name from text."""
     text_lower = text.lower()
 
-    # Check for known cities
     for city in UKRAINIAN_CITIES:
         if city in text_lower:
-            # Return capitalized version
             return city.title()
 
-    # Pattern: "м. Cityname" or "місто Cityname"
-    city_patterns = [
-        r"(?:м\.|місто|город|city)\s*([А-ЯІЇЄҐа-яіїєґA-Za-z\-\']+)",
-    ]
-
-    for pattern in city_patterns:
+    for pattern in CITY_PATTERNS:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return match.group(1).strip().title()
@@ -221,21 +113,15 @@ def extract_city(text: str) -> str | None:
 
 
 def extract_full_name(text: str) -> str | None:
-    """Extract full name (ПІБ) from text."""
-    # Remove phone numbers and known patterns first
+    """Extract full name from text."""
     clean_text = text
     for pattern in PHONE_PATTERNS:
         clean_text = re.sub(pattern, "", clean_text, flags=re.IGNORECASE)
 
-    # Pattern: 2-3 capitalized words (Ukrainian names)
-    # Прізвище Ім'я По-батькові
-    name_pattern = r"([А-ЯІЇЄҐ][а-яіїєґ\']+(?:\s+[А-ЯІЇЄҐ][а-яіїєґ\']+){1,2})"
-
-    matches = re.findall(name_pattern, clean_text)
+    matches = re.findall(NAME_PATTERN, clean_text)
 
     for match in matches:
         words = match.split()
-        # Filter out cities and common words
         if len(words) >= 2:
             is_city = any(word.lower() in " ".join(UKRAINIAN_CITIES) for word in words)
             if not is_city:
@@ -245,27 +131,10 @@ def extract_full_name(text: str) -> str | None:
 
 
 def parse_client_data(text: str) -> ClientData:
-    """Parse all client data from a message text.
-
-    Args:
-        text: Message text from client (e.g. "Іванов Іван, 0501234567, Київ, НП 25")
-
-    Returns:
-        ClientData with extracted fields
-    """
+    """Parse all client data from a message text."""
     return ClientData(
         full_name=extract_full_name(text),
         phone=extract_phone(text),
         city=extract_city(text),
         nova_poshta=extract_nova_poshta(text),
-    )
-
-
-def merge_client_data(existing: ClientData, new: ClientData) -> ClientData:
-    """Merge new data into existing, keeping non-empty values."""
-    return ClientData(
-        full_name=new.full_name or existing.full_name,
-        phone=new.phone or existing.phone,
-        city=new.city or existing.city,
-        nova_poshta=new.nova_poshta or existing.nova_poshta,
     )

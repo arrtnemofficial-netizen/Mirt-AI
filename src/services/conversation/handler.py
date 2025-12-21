@@ -13,7 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from src.agents import ConversationState
+from src.core.conversation_state import ConversationState
 from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
@@ -545,3 +545,4 @@ def create_conversation_handler(
         kwargs["fallback_message"] = fallback_message
 
     return ConversationHandler(**kwargs)
+

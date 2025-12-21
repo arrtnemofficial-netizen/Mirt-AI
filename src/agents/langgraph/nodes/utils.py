@@ -74,29 +74,29 @@ def extract_assistant_message(messages: list[Any]) -> str:
 
 def extract_height_from_text(text: str) -> int | None:
     """
-    Витягує зріст з тексту повідомлення.
+    Extract height from a user message.
 
-    Приклади:
-    - "какая цена на рост 147" -> 147
-    - "зріст 120" -> 120
-    - "на 128 см" -> 128
-    - "ціна" -> None
+    Examples:
+    - "price for height 147" -> 147
+    - "height 120" -> 120
+    - "at 128 cm" -> 128
+    - "price" -> None
     """
     import re
 
-    # Шукаємо числа 80-180 (реальний діапазон зросту дітей)
+    # Match 80-180 range (typical child height range).
     patterns = [
-        r"\bрост\s*(\d{2,3})\b",  # рост 147
-        r"\bзріст\s*(\d{2,3})\b",  # зріст 120
-        r"\bна\s*(\d{2,3})\s*(см)?\b",  # на 128, на 128 см
-        r"\b(\d{2,3})\s*см\b",  # 120 см
-        r"\b(\d{3})\b",  # просто 147 (тризначне)
+        r"\b\u0440\u043e\u0441\u0442\s*(\d{2,3})\b",  # "height 147"
+        r"\b\u0437\u0440\u0456\u0441\u0442\s*(\d{2,3})\b",  # "height 120"
+        r"\b\u043d\u0430\s*(\d{2,3})\s*(\u0441\u043c)?\b",  # "at 128 cm"
+        r"\b(\d{2,3})\s*\u0441\u043c\b",  # "120 cm"
+        r"\b(\d{3})\b",  # "147"
     ]
     for pattern in patterns:
         match = re.search(pattern, text.lower())
         if match:
             height = int(match.group(1))
-            if 80 <= height <= 180:  # Реальний діапазон
+            if 80 <= height <= 180:
                 return height
     return None
 
@@ -127,8 +127,8 @@ def get_size_and_price_for_height(
     height: int, prices_by_size: dict | None = None
 ) -> tuple[str, int]:
     """
-    Визначає розмір і ціну за зростом.
-    
+    Determine size and price by height.
+
     Priority:
     1. Injected prices (from CatalogService check)
     2. Registry fallback (FALLBACK_PRICES_JSON)
@@ -138,7 +138,7 @@ def get_size_and_price_for_height(
     prices = prices_by_size or _get_fallback_prices_from_registry()
     default_price = prices.get("80-92", DEFAULT_SUIT_PRICE)
 
-    # Визначаємо розмір за зростом
+    # Determine size by height.
     if height <= 92:
         size = "80-92"
     elif height <= 104:

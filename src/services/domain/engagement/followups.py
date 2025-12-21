@@ -63,7 +63,7 @@ def next_followup_due_at(
 def build_followup_message(
     session_id: str, index: int, now: datetime | None = None
 ) -> StoredMessage:
-    from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+    from src.core.prompt_registry import get_snippet_by_header
 
     created_at = now or datetime.now(UTC)
     
@@ -102,3 +102,4 @@ def run_followups(
     followup = build_followup_message(session_id, index=sent + 1, now=current_time)
     message_store.append(followup)
     return followup
+

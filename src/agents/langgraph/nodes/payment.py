@@ -7,6 +7,7 @@ Logic moved to src.services.payment_*
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -15,6 +16,7 @@ from langgraph.types import Command, interrupt
 
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
+from src.conf.config import settings
 from src.core.state_machine import State
 from src.services.core.observability import track_metric
 from src.core.prompt_registry import get_snippet_by_header
@@ -41,7 +43,10 @@ def _get_snippet_text(header: str, default: str) -> str:
 
 
 PAYMENT_TEMPLATES = {
-    "THANK_YOU": _get_snippet_text("Дякуємо за замовлення", "Дякуємо за замовлення🥰\n\nГарного вам дня та мирного неба 🕊"),
+    "THANK_YOU": _get_snippet_text(
+        "PAYMENT_THANK_YOU",
+        "Thank you for your order.\n\nHave a great day.",
+    ),
 }
 
 
@@ -56,6 +61,7 @@ async def payment_node(
     The graph STOPS here and waits for explicit approval.
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    dialog_phase = state.get("dialog_phase", "")
 
     # Check if we're resuming from interrupt
     if state.get("awaiting_human_approval"):
@@ -83,11 +89,14 @@ async def _prepare_payment_and_interrupt(
     products = state.get("selected_products", []) or state.get("offered_products", [])
     products = await hydrate_prices(products, session_id=session_id)
     total_price = sum(p.get("price", 0) for p in products)
-    product_names = [p.get("name", labels.get("default_product", "Товар")) for p in products]
+    product_names = [p.get("name", labels.get("default_product", "Product")) for p in products]
 
     # Get user message
     from .utils import extract_user_message
-    user_message = extract_user_message(state.get("messages", [])) or labels.get("default_action", "Оформлення")
+    user_message = extract_user_message(state.get("messages", [])) or labels.get(
+        "default_action",
+        "Checkout",
+    )
 
     # Create deps with payment context
     deps = create_deps_from_state(state)
@@ -106,12 +115,20 @@ async def _prepare_payment_and_interrupt(
         response_text = response.reply_to_user
     except Exception as e:
         logger.error("Payment LLM call failed: %s", e)
-        response_text = _get_snippet_text("Очікуємо на дані (доставка)", "Вкажіть дані для доставки")
+        response_text = _get_snippet_text(
+            "PAYMENT_WAITING_DELIVERY",
+            "Please provide delivery details.",
+        )
         price_tmpl = get_snippet_by_header("PAYMENT_TOTAL_PRICE_TEMPLATE")
         if price_tmpl:
-             response_text += "\n\n" + price_tmpl[0].format(total=total_price, currency=labels.get("currency_uah", "грн"))
+            response_text += "\n\n" + price_tmpl[0].format(
+                total=total_price,
+                currency=labels.get("currency_uah", "UAH"),
+            )
         else:
-             response_text += f"\n\nСума до сплати: {total_price} {labels.get('currency_uah', 'грн')}"
+            response_text += (
+                f"\n\nTotal to pay: {total_price} {labels.get('currency_uah', 'UAH')}"
+            )
 
     latency_ms = (time.perf_counter() - start_time) * 1000
     track_metric("payment_prepare_latency_ms", latency_ms)
@@ -189,7 +206,11 @@ async def _handle_delivery_data(
                 fallback = get_snippet_by_header("PAYMENT_INVALID_PHONE_FALLBACK")
                 labels_json = get_snippet_by_header("VISION_LABELS")
                 labels = json.loads(labels_json[0]) if labels_json else {}
-                response.reply_to_user = (fallback[0] if fallback else labels.get("invalid_phone", "Невалідний номер")) + "\n\n" + response.reply_to_user
+                response.reply_to_user = (
+                    (fallback[0] if fallback else labels.get("invalid_phone", "Invalid phone number"))
+                    + "\n\n"
+                    + response.reply_to_user
+                )
 
         # Sync metadata
         for field in ["customer_name", "customer_city", "customer_nova_poshta"]:

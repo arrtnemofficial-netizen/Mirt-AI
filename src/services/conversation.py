@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
-from src.agents import ConversationState
+from src.core.conversation_state import ConversationState
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
@@ -478,3 +478,4 @@ def create_conversation_handler(
         kwargs["fallback_message"] = fallback_message
 
     return ConversationHandler(**kwargs)
+

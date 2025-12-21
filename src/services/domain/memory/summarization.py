@@ -45,7 +45,7 @@ def _drop_human_tag(messages: list[StoredMessage]) -> list[StoredMessage]:
 def summarise_messages(messages: list[StoredMessage]) -> str:
     parts = []
     for msg in messages:
-        prefix = "Користувач" if msg.role == "user" else "Асистент"
+        prefix = "User" if msg.role == "user" else "Assistant"
         parts.append(f"{prefix}: {msg.content}")
     return " \n".join(parts)
 
@@ -186,6 +186,10 @@ def run_retention(
 
     cleaned_messages = _drop_human_tag(messages)
     summary_text = summarise_messages(cleaned_messages)
+
+    if not user_id:
+        logger.warning("Retention skipped: user_id missing for session %s", session_id)
+        return None
 
     # Save summary to mirt_users if we have user_id
     if user_id:

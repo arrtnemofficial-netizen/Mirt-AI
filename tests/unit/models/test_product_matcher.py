@@ -8,7 +8,7 @@ Product Matcher Tests
 
 import pytest
 
-from src.services.domain.catalog.product_matcher import (
+from src.services.product_matcher import (
     extract_color_from_name,
     is_valid_product_name,
     normalize_product_name,

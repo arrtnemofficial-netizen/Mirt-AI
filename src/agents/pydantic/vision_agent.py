@@ -6,18 +6,20 @@ Handles photo identification and product matching.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from openai import AsyncOpenAI
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, ImageUrl, RunContext
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
-from src.core.human_responses import get_human_response
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry, get_snippet_by_header
 
@@ -29,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 # Vision guide path
 VISION_GUIDE_PATH = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
+
+# Private CDN hosts that require image download to bypass access restrictions.
+_PRIVATE_CDN_HOSTS: tuple[str, ...] = ("scontent", "fbcdn", "cdninstagram")
 
 
 # Reference logic moved to VisionContextService
@@ -43,7 +48,7 @@ def _build_reference_parts(
 
     labels_json = get_snippet_by_header("VISION_LABELS")
     labels = json.loads(labels_json[0]) if labels_json else {}
-    ref_prefix = labels.get("reference_image_prefix", "REFERENCE IMAGE — ")
+    ref_prefix = labels.get("reference_image_prefix", "REFERENCE IMAGE: ")
 
     for name in product_names:
         urls = ref_map.get(name) or []
@@ -169,10 +174,8 @@ async def _search_products(
     category: str | None = None,
 ) -> str:
     """
-    Знайти товари в каталозі.
-    
-    Використовуй це щоб знайти товар який ти бачиш на фото.
-    Наприклад: search_products("рожева сукня") або search_products("костюм з лампасами")
+    Search products in the catalog by query.
+    Example: search_products("pink dress") or search_products("striped suit").
     """
     products = await ctx.deps.catalog.search_products(query, category)
     
@@ -192,7 +195,7 @@ async def _search_products(
     return "\n".join(lines)
 
 
-def _get_base_vision_prompt() -> str:
+def _get_vision_prompt() -> str:
     parts = []
 
     base_identity = registry.get("system.base_identity").content
@@ -342,7 +345,8 @@ async def run_vision(
     labels = json.loads(labels_json[0]) if labels_json else {}
     
     user_input: list[str | ImageUrl] = [
-        message or labels.get("vision_default_analysis_prompt", "Аналізуй це фото та знайди товар MIRT."),
+        message
+        or labels.get("vision_default_analysis_prompt", "Analyze the photo and find the matching product."),
         ImageUrl(url=final_image_url),
     ]
 
@@ -389,8 +393,10 @@ async def run_vision(
         logger.exception("👁️ Vision agent error: %s", e)
         clarif = get_snippet_by_header("VISION_ASK_PHOTO")
         return VisionResponse(
-            reply_to_user="Вибачте, не вдалося проаналізувати фото. Спробуйте надіслати ще раз 🤍",
+            reply_to_user=get_human_response("photo_analysis_error"),
             confidence=0.0,
             needs_clarification=True,
-            clarification_question=clarif[0] if clarif else "Чи можете надіслати фото ще раз або описати товар?",
+            clarification_question=clarif[0]
+            if clarif
+            else "Could you send another photo or describe the item?",
         )

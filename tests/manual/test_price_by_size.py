@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-from src.services.data.catalog_service import CatalogService
+from src.services.catalog_service import CatalogService
 
 
 load_dotenv(Path(__file__).parent.parent / ".env")

@@ -185,7 +185,12 @@ class VisionContextService:
                 prices = list(price_by_size.values())
                 if prices:
                     min_p, max_p = min(prices), max(prices)
-                    size_prices = ", ".join([f"{sz}: {int(pr)} {labels.get('currency_uah', 'грн')}" for sz, pr in price_by_size.items()])
+                    size_prices = ", ".join(
+                        [
+                            f"{sz}: {int(pr)} {labels.get('currency_uah', 'UAH')}"
+                            for sz, pr in price_by_size.items()
+                        ]
+                    )
                     
                     price_tmpl = self._get_snippet("VISION_PRICE_TEMPLATE")
                     if price_tmpl:
@@ -243,7 +248,7 @@ class VisionContextService:
         """Build global detection rules from product set."""
         by_fabric: dict[str, list[str]] = {}
         by_closure: dict[str, list[str]] = {}
-        by_hood: dict[str, list[str]] = {"з капюшоном": [], "без капюшона": []}
+        by_hood: dict[str, list[str]] = {"with_hood": [], "without_hood": []}
 
         for p in products:
             name = p.get("name", "Unknown")
@@ -258,9 +263,9 @@ class VisionContextService:
                 by_closure.setdefault(closure, []).append(base_name)
 
             if p.get("has_hood"):
-                by_hood["з капюшоном"].append(base_name)
+                by_hood["with_hood"].append(base_name)
             elif p.get("has_hood") is False:
-                by_hood["без капюшона"].append(base_name)
+                by_hood["without_hood"].append(base_name)
 
         lines = ["\n" + self._get_snippet("VISION_DETECTION_RULES_HEADER")[0]]
 
@@ -279,13 +284,13 @@ class VisionContextService:
                 unique = list(set(names))[:5]
                 lines.append(f"- {closure}: {', '.join(unique)}")
 
-        if by_hood["з капюшоном"] or by_hood["без капюшона"]:
+        if by_hood["with_hood"] or by_hood["without_hood"]:
             lines.append(f"## {labels.get('det_hood', 'By Hood')}:")
-            if by_hood["з капюшоном"]:
-                unique = list(set(by_hood["з капюшоном"]))[:5]
+            if by_hood["with_hood"]:
+                unique = list(set(by_hood["with_hood"]))[:5]
                 lines.append(f"- {labels.get('hood_yes', 'With Hood')}: {', '.join(unique)}")
-            if by_hood["без капюшона"]:
-                unique = list(set(by_hood["без капюшона"]))[:5]
+            if by_hood["without_hood"]:
+                unique = list(set(by_hood["without_hood"]))[:5]
                 lines.append(f"- {labels.get('hood_no', 'No Hood')}: {', '.join(unique)}")
 
         return "\n".join(lines)
@@ -444,35 +449,51 @@ class VisionContextService:
              
              lines = []
              lines.append(self._get_snippet("VISION_MODEL_DB_HEADER")[0])
+             labels_json = self._get_snippet("VISION_LABELS")
+             labels = json.loads(labels_json[0]) if labels_json else {}
 
              model_rules = rules.get("MODEL_RULES", {})
              for name, data in model_rules.items():
                  lines.append(f"## {name}")
-                 lines.append(f"- **{labels.get('category_label', 'Категорія')}**: {data.get('category', '?')}")
-                 lines.append(f"- **{labels.get('fabric', 'Тканина')}**: {data.get('fabric_type', '?')}")
-                 lines.append(f"- **{labels.get('price', 'Ціна')}**: {data.get('price', '?')} {labels.get('currency_uah', 'грн')}")
+                 lines.append(
+                     f"- **{labels.get('category_label', 'Category')}**: {data.get('category', '?')}"
+                 )
+                 lines.append(
+                     f"- **{labels.get('fabric', 'Fabric')}**: {data.get('fabric_type', '?')}"
+                 )
+                 lines.append(
+                     f"- **{labels.get('price', 'Price')}**: {data.get('price', '?')} {labels.get('currency_uah', 'UAH')}"
+                 )
 
                  markers = data.get("visual_markers", [])
                  if markers:
-                     lines.append(f"- **{labels.get('det_markers', 'Візуальні ознаки')}**:")
+                     lines.append(f"- **{labels.get('det_markers', 'Visual markers')}**:")
                      for m in markers:
                          lines.append(f"  - {m}")
 
                  identify = data.get("identify_by")
                  if identify:
-                     lines.append(f"- **ГОЛОВНА ОЗНАКА**: {identify}")
+                     lines.append(
+                         f"- **{labels.get('det_main_marker', 'MAIN MARKER')}**: {identify}"
+                     )
 
                  confused = data.get("confused_with", [])
                  if confused:
-                     lines.append(f"- **{labels.get('not_confuse_with', 'Не плутай з')}**: {', '.join(confused)}")
+                     lines.append(
+                         f"- **{labels.get('not_confuse_with', 'Do not confuse with')}**: {', '.join(confused)}"
+                     )
                      if data.get("how_to_distinguish"):
-                         lines.append(f"- **{labels.get('how_distinguish', 'Як відрізнити')}**: {data['how_to_distinguish'].strip()}")
+                         lines.append(
+                             f"- **{labels.get('how_distinguish', 'How to distinguish')}**: {data['how_to_distinguish'].strip()}"
+                         )
                      if data.get("critical_check"):
-                         lines.append(f"- **⚠️ {labels.get('critical_check_upper', 'КРИТИЧНА ПЕРЕВІРКА')}**: {data['critical_check'].strip()}")
+                         lines.append(
+                             f"- **⚠️ {labels.get('critical_check_upper', 'CRITICAL CHECK')}**: {data['critical_check'].strip()}"
+                         )
 
                  colors = data.get("colors", [])
                  if colors:
-                     lines.append(f"- **Кольори**: {', '.join(colors)}")
+                     lines.append(f"- **{labels.get('colors', 'Colors')}**: {', '.join(colors)}")
 
                  lines.append("")
                  
@@ -490,5 +511,6 @@ class VisionContextService:
             return ""
 
     def _get_snippet(self, header: str) -> list[str]:
-        from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
+        from src.core.prompt_registry import get_snippet_by_header
         return get_snippet_by_header(header)
+

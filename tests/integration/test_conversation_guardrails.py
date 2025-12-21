@@ -1,8 +1,8 @@
 import pytest
 
 from src.services.conversation import ConversationHandler
-from src.services.infra.message_store import InMemoryMessageStore
-from src.services.infra.session_store import InMemorySessionStore
+from src.services.message_store import InMemoryMessageStore
+from src.services.session_store import InMemorySessionStore
 
 
 class PassthroughRunner:

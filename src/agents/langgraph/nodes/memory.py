@@ -1,20 +1,5 @@
 """
-Memory Nodes - AGI-Style Memory Layer (Titans-like).
-=====================================================
-Два nodes для інтеграції памʼяті в LangGraph:
-
-1. memory_context_node - завантажує profile + facts ПЕРЕД агентами
-   - Не блокує UX (швидкий read з Supabase)
-   - Додає контекст в state для AgentDeps
-
-2. memory_update_node - тихо оновлює памʼять ПІСЛЯ ключових стейтів
-   - Запускає MemoryAgent для класифікації фактів
-   - Застосовує gating (importance >= 0.6, surprise >= 0.4)
-   - Не впливає на відповідь користувачу
-
-Де в графі живе памʼять:
-- memory_context_node → ДО agent/vision/offer (пре-контекст)
-- memory_update_node → ПІСЛЯ offer/payment/complaint (пост-контекст)
+Memory Nodes - pre/post agent memory integration.
 """
 
 from __future__ import annotations
@@ -24,7 +9,7 @@ import time
 from typing import Any
 
 from src.agents.pydantic.memory_agent import analyze_for_memory, extract_quick_facts
-from src.agents.pydantic.memory_models import NewFact
+from src.services.domain.memory.memory_models import NewFact
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.domain.memory.memory_service import MemoryService
 from src.services.core.observability import log_agent_step, track_metric
@@ -40,19 +25,13 @@ logger = logging.getLogger(__name__)
 
 async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Завантажити контекст памʼяті перед агентами.
-
-    Цей node:
-    1. Завантажує UserProfile (Persistent Memory)
-    2. Завантажує top-K Facts (Fluid Memory)
-    3. Генерує форматований контекст для промпта
-    4. Зберігає все в state для AgentDeps
+    Load memory context before agents.
 
     Args:
-        state: Current LangGraph state
+        state: Current LangGraph state.
 
     Returns:
-        State update with memory context
+        State update with memory context.
     """
     start_time = time.perf_counter()
     session_id = state.get("session_id", "")
@@ -81,7 +60,7 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
             return {"step_number": state.get("step_number", 0) + 1}
 
         # Load memory context
-        context = await memory_service.load_memory_context(user_id)
+        context = await memory_service.load_memory_context(user_id, ensure_profile=False)
 
         # Generate prompt block
         memory_prompt = context.to_prompt_block() if not context.is_empty() else None
@@ -89,7 +68,7 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
         elapsed = (time.perf_counter() - start_time) * 1000
 
         logger.info(
-            "📚 [SESSION %s] Memory context loaded: profile=%s, facts=%d, %.1fms",
+            "[SESSION %s] Memory context loaded: profile=%s, facts=%d, %.1fms",
             session_id,
             "yes" if context.profile else "no",
             len(context.facts),
@@ -164,17 +143,17 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
 # Phases that trigger memory update
 # IMPORTANT: Trigger on EVERY phase to capture facts early!
 MEMORY_TRIGGER_PHASES = {
-    "INIT",  # STATE_0: Новий діалог
-    "DISCOVERY",  # STATE_1: Збір контексту
-    "VISION_DONE",  # STATE_2: Vision впізнав товар
-    "WAITING_FOR_SIZE",  # STATE_3: Потрібен розмір
-    "WAITING_FOR_COLOR",  # STATE_3: Потрібен колір
-    "SIZE_COLOR_DONE",  # STATE_3→4: Готові до offer
-    "OFFER_MADE",  # STATE_4: Пропозиція зроблена
-    "WAITING_FOR_DELIVERY_DATA",  # STATE_5: Чекаємо дані доставки
-    "WAITING_FOR_PAYMENT_PROOF",  # STATE_5: Payment flow
-    "COMPLETED",  # STATE_7: Діалог завершено
-    "COMPLAINT",  # STATE_8: Скарга
+    "INIT",
+    "DISCOVERY",
+    "VISION_DONE",
+    "WAITING_FOR_SIZE",
+    "WAITING_FOR_COLOR",
+    "SIZE_COLOR_DONE",
+    "OFFER_MADE",
+    "WAITING_FOR_DELIVERY_DATA",
+    "WAITING_FOR_PAYMENT_PROOF",
+    "COMPLETED",
+    "COMPLAINT",
 }
 
 # States that trigger memory update
@@ -192,22 +171,13 @@ MEMORY_TRIGGER_STATES = {
 
 async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Тихе оновлення памʼяті після ключових стейтів.
-
-    Цей node:
-    1. Перевіряє чи потрібне оновлення (trigger phases)
-    2. Запускає MemoryAgent для класифікації фактів
-    3. Застосовує gating (importance >= 0.6, surprise >= 0.4)
-    4. Зберігає нові факти / оновлює існуючі
-
-    ВАЖЛИВО: Не впливає на відповідь користувачу!
-    Latency цього node не блокує UX.
+    Silent memory update after key dialog phases.
 
     Args:
-        state: Current LangGraph state
+        state: Current LangGraph state.
 
     Returns:
-        State update (minimal, just step_number)
+        State update (minimal, just step_number).
     """
     start_time = time.perf_counter()
     session_id = state.get("session_id", "")
@@ -271,7 +241,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
         # =====================================================================
         # OPTION 1: Quick facts extraction (no LLM, fast)
         # =====================================================================
-        # Для швидкого витягу очевидних фактів (зріст, вік, місто)
+        # Quick extraction for obvious facts.
         user_messages = [m for m in message_dicts if m.get("role") == "user"]
         quick_facts = []
         for msg in user_messages[-3:]:  # Last 3 user messages
@@ -307,7 +277,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
         # =====================================================================
         # OPTION 2: Full LLM analysis (for complex facts)
         # =====================================================================
-        # Тільки якщо є достатньо повідомлень і це важливий стейт
+        # Only run LLM analysis if there are enough messages and a trigger state.
         llm_analysis_threshold = 5  # Min messages for LLM analysis
 
         if len(message_dicts) >= llm_analysis_threshold and current_state in MEMORY_TRIGGER_STATES:
@@ -330,7 +300,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
             elapsed = (time.perf_counter() - start_time) * 1000
 
             logger.info(
-                "🧠 [SESSION %s] Memory update: quick=%d, stored=%d, updated=%d, rejected=%d, %.1fms",
+                "[SESSION %s] Memory update: quick=%d, stored=%d, updated=%d, rejected=%d, %.1fms",
                 session_id,
                 quick_stored,
                 stats.get("stored", 0),
@@ -345,7 +315,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
         else:
             elapsed = (time.perf_counter() - start_time) * 1000
             logger.info(
-                "🧠 [SESSION %s] Quick memory update: stored=%d, %.1fms",
+                "[SESSION %s] Quick memory update: stored=%d, %.1fms",
                 session_id,
                 quick_stored,
                 elapsed,
@@ -376,12 +346,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
 
 def should_load_memory(state: dict[str, Any]) -> bool:
     """
-    Визначити чи потрібно завантажувати памʼять.
-
-    Returns True якщо:
-    - Є user_id
-    - Це не перше повідомлення (є хоч якась історія)
-    - Не в escalation
+    Determine whether to load memory context.
     """
     user_id = state.get("metadata", {}).get("user_id", "")
     if not user_id:
@@ -393,11 +358,7 @@ def should_load_memory(state: dict[str, Any]) -> bool:
 
 def should_update_memory(state: dict[str, Any]) -> bool:
     """
-    Визначити чи потрібно оновлювати памʼять.
-
-    Returns True якщо:
-    - Є user_id
-    - Знаходимось в trigger phase/state
+    Determine whether to update memory.
     """
     user_id = state.get("metadata", {}).get("user_id", "")
     if not user_id:

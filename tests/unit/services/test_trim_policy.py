@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.services.core.trim_policy import (
+from src.services.trim_policy import (
     get_checkpoint_compaction,
     get_llm_history_limit,
     get_state_message_limit,
