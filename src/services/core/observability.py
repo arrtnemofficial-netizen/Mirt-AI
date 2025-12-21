@@ -28,8 +28,13 @@ import logging
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+import uuid
 from typing import Any
+
+from src.conf.config import settings
+
+UTC = timezone.utc
 
 
 logger = logging.getLogger("mirt.observability")
@@ -282,8 +287,20 @@ class AgentMetrics:
     def from_collector(cls) -> AgentMetrics:
         """Build metrics from collector."""
         summary = get_metrics_summary()
-
         latency_data = summary.get("agent_step_latency_ms", {})
+        
+        return cls(
+            total_requests=summary.get("agent_step_latency_ms", {}).get("count", 0),
+            successful_responses=summary.get("agent_step_latency_ms", {}).get("count", 0),
+            moderation_blocks=summary.get("moderation_blocks", {}).get("count", 0),
+            validation_failures=summary.get("validation_failures", {}).get("count", 0),
+            tool_calls=summary.get("tool_results", {}).get("count", 0),
+            avg_latency_ms=latency_data.get("avg", 0),
+        )
+
+
+class AsyncTracingService:
+    """Service for logging asynchronous traces to external storage (Supabase)."""
 
     def __init__(self):
         self._enabled = bool(getattr(settings, "ENABLE_OBSERVABILITY", True))
