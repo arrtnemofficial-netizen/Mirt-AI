@@ -21,7 +21,7 @@ router = APIRouter(tags=["telegram"])
 
 @router.post(settings.TELEGRAM_WEBHOOK_PATH)
 async def telegram_webhook(request: Request) -> JSONResponse:
-    """Handle incoming Telegram webhook updates (AI-only відповіді)."""
+    """Handle incoming Telegram webhook updates (AI-only \u0432\u0456\u0434\u043f\u043e\u0432\u0456\u0434\u0456)."""
     bot = get_bot()
     dp = get_cached_dispatcher()
 

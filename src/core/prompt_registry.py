@@ -22,6 +22,8 @@ from typing import Any, Optional
 from pydantic import BaseModel
 import yaml
 
+from src.core.registry_keys import SystemKeys
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +63,11 @@ class PromptRegistry:
         self._cache: dict[str, PromptConfig] = {}
         self._initialized = True
 
-    def get(self, key: Union[str, RegistryKey], default: Optional[str] = None) -> PromptConfig:
+    def get(self, key: Any, default: Optional[str] = None) -> PromptConfig:
         """
-        Get a prompt by key (e.g., 'system.base_identity' or RegistryKey.SYS_BASE_IDENTITY).
+        Get a prompt by key (e.g., 'system.base_identity' or SystemKeys.BASE_IDENTITY).
         """
-        key_str = str(key.value) if isinstance(key, RegistryKey) else str(key)
+        key_str = str(getattr(key, "value", key))
 
         if key_str in self._cache:
             return self._cache[key_str]
@@ -73,7 +75,7 @@ class PromptRegistry:
         parts = key_str.split(".")
 
         if len(parts) < 2:
-            raise ValueError(f"Invalid prompt key format: {key}. Expected 'category.name'")
+            raise ValueError(f"Invalid prompt key format: {key_str}. Expected 'category.name'")
 
         category, name = parts[0], parts[1]
 
@@ -222,12 +224,12 @@ def get_snippet_by_header(header_name: str) -> list[str] | None:
     """
     # Registry keys to search in order
     sources = [
-        "system.snippets",
-        "system.fallbacks",
-        "system.intents",
-        "system.system_messages",
-        "system.vision",
-        "system.automation",
+        SystemKeys.SNIPPETS.value,
+        SystemKeys.FALLBACKS.value,
+        SystemKeys.INTENTS.value,
+        SystemKeys.SYSTEM_MESSAGES.value,
+        SystemKeys.VISION.value,
+        SystemKeys.AUTOMATION.value,
     ]
 
     for source_key in sources:

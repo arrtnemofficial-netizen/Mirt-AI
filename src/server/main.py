@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to warm up LangGraph: %s (will initialize on first request)", e)
 
-    # Telegram webhook: реєструємо, якщо є token і публічна адреса
+    # Telegram webhook: \u0440\u0435\u0454\u0441\u0442\u0440\u0443\u0454\u043c\u043e, \u044f\u043a\u0449\u043e \u0454 token \u0456 \u043f\u0443\u0431\u043b\u0456\u0447\u043d\u0430 \u0430\u0434\u0440\u0435\u0441\u0430
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
 

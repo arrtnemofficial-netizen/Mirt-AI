@@ -1,12 +1,12 @@
 """
-Observability - метрики та структуроване логування.
-===================================================
-Мінімальний модуль для:
-- Метрики вузлів (moderation hit, tool latency, validation fails)
-- Структуровані логи з тегами (state/intent/tool_result_size)
+Observability - metrics and structured logging.
+================================================
+Minimal module for:
+- Node metrics (moderation hit, tool latency, validation fails)
+- Structured logs with tags (state/intent/tool_result_size)
 - Plan branch tracking
 
-Використання:
+Usage:
     from src.services.core.observability import log_agent_step, track_metric, AgentMetrics
 
     # Log agent step

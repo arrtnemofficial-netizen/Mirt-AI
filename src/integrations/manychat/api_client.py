@@ -47,22 +47,22 @@ class ManyChatClient:
         client = ManyChatClient()
         
         # Send text message
-        await client.send_message(subscriber_id, "Привіт!")
+        await client.send_message(subscriber_id, "\u041f\u0440\u0438\u0432\u0456\u0442!")
         
         # Send with buttons
         await client.send_message_with_buttons(
             subscriber_id,
-            "Оберіть розмір:",
+            "\u041e\u0431\u0435\u0440\u0456\u0442\u044c \u0440\u043e\u0437\u043c\u0456\u0440:",
             [{"title": "S", "payload": "size_s"}, {"title": "M", "payload": "size_m"}]
         )
         
         # Send product card
         await client.send_card(
             subscriber_id,
-            title="Сукня Анна",
+            title="\u0421\u0443\u043a\u043d\u044f \u0410\u043d\u043d\u0430",
             image_url="https://...",
-            subtitle="1200 грн",
-            buttons=[{"title": "Замовити", "payload": "order"}]
+            subtitle="1200 \u0433\u0440\u043d",
+            buttons=[{"title": "\u0417\u0430\u043c\u043e\u0432\u0438\u0442\u0438", "payload": "order"}]
         )
     """
 
@@ -694,10 +694,10 @@ async def send_ai_response(
     if products:
         gallery_items = [
             {
-                "title": p.get("name", "Товар"),
+                "title": p.get("name", "\u0422\u043e\u0432\u0430\u0440"),
                 "image_url": p.get("photo_url"),
-                "subtitle": f"{p.get('price', 0)} грн",
-                "buttons": [{"title": "Детальніше", "payload": f"product_{p.get('id', '')}"}],
+                "subtitle": f"{p.get('price', 0)} \u0433\u0440\u043d",
+                "buttons": [{"title": "\u0414\u0435\u0442\u0430\u043b\u044c\u043d\u0456\u0448\u0435", "payload": f"product_{p.get('id', '')}"}],
             }
             for p in products[:10]
         ]

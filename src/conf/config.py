@@ -186,6 +186,10 @@ class Settings(BaseSettings):
         default=True,
         description="Enable detailed logging with tags (state/intent/tool)",
     )
+    ENABLE_LEGACY_STATE_ALIASES: bool = Field(
+        default=True,
+        description="Allow legacy state aliases in normalize_state (temporary).",
+    )
     # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
     # - LangGraph v2 is now the only architecture
     # - PydanticAI handles tool planning automatically

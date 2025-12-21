@@ -10,6 +10,8 @@ import logging
 from typing import Any
 
 from src.core.models import AgentResponse, DebugInfo, Escalation, Message, Metadata
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
 from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.core.observability import log_agent_step, track_metric
@@ -48,12 +50,16 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
             reason = _get_reason("ESCALATION_REASON_OPERATOR", "Operator assistance required")
 
     # Build escalation response
+    texts = load_yaml_from_registry(SystemKeys.TEXTS.value)
+    esc_text = ""
+    if isinstance(texts, dict):
+        esc_text = texts.get("escalation", {}).get("message", "")
+    if not esc_text:
+        esc_text = "Your request was handed off to a manager."
+
     response = AgentResponse(
         event="escalation",
-        messages=[Message(content=(
-            "Вибачте, я передаю ваш запит колезі для перевірки. "
-            "Менеджер зв'яжеться з вами найближчим часом 🤍"
-        ))],
+        messages=[Message(content=esc_text)],
         products=[],
         metadata=Metadata(
             session_id=session_id,

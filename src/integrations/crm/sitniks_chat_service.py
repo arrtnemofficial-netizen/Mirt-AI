@@ -2,11 +2,6 @@
 
 Handles chat status updates and manager assignments.
 Requires paid Sitniks plan for API access.
-
-Statuses flow:
-- "Взято в роботу" → first touch, AI starts handling
-- "Виставлено рахунок" → payment requisites sent
-- "AI Увага" → escalation, needs human manager
 """
 
 from __future__ import annotations
@@ -18,20 +13,33 @@ from typing import Any
 import httpx
 
 from src.conf.config import settings
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
 from src.services.infra.supabase_client import get_supabase_client
 
 
 logger = logging.getLogger(__name__)
 
 
+def _load_sitniks_titles() -> dict[str, str]:
+    data = load_yaml_from_registry(SystemKeys.CRM_CONFIG.value)
+    titles = data.get("sitniks_status_titles", {})
+    if isinstance(titles, dict):
+        return {str(k): str(v) for k, v in titles.items()}
+    return {}
+
+
+_SITNIKS_TITLES = _load_sitniks_titles()
+
+
 # Sitniks status names (from user's CRM)
 class SitniksStatus:
-    FIRST_TOUCH = "Взято в роботу"
-    INVOICE_SENT = "Виставлено рахунок"
-    AI_ATTENTION = "AI Увага"
-    NEW = "Нові заявки"
-    PAID = "ОПЛАЧЕНО"
-    ORDER_FORMED = "Оформлено замовлення"
+    FIRST_TOUCH = _SITNIKS_TITLES.get("first_touch", "first_touch")
+    INVOICE_SENT = _SITNIKS_TITLES.get("invoice_sent", "invoice_sent")
+    AI_ATTENTION = _SITNIKS_TITLES.get("ai_attention", "ai_attention")
+    NEW = _SITNIKS_TITLES.get("new", "new")
+    PAID = _SITNIKS_TITLES.get("paid", "paid")
+    ORDER_FORMED = _SITNIKS_TITLES.get("order_formed", "order_formed")
 
 
 # Manager configuration loaded from settings
@@ -156,7 +164,7 @@ class SitniksChatService:
 
         Args:
             chat_id: Sitniks chat ID
-            status: New status name (e.g. "Взято в роботу")
+            status: New status name (e.g. "\u0412\u0437\u044f\u0442\u043e \u0432 \u0440\u043e\u0431\u043e\u0442\u0443")
 
         Returns:
             True if successful, False otherwise
@@ -335,7 +343,7 @@ class SitniksChatService:
             telegram_username=telegram_username,
         )
 
-        # 3. Set status to "Взято в роботу"
+        # 3. Set status to "\u0412\u0437\u044f\u0442\u043e \u0432 \u0440\u043e\u0431\u043e\u0442\u0443"
         status_ok = await self.update_chat_status(
             chat_id=chat_id,
             status=SitniksStatus.FIRST_TOUCH,
@@ -358,7 +366,7 @@ class SitniksChatService:
         return result
 
     async def handle_invoice_sent(self, user_id: str) -> bool:
-        """Set status to "Виставлено рахунок" when requisites are sent."""
+        """Set status to "\u0412\u0438\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u043e \u0440\u0430\u0445\u0443\u043d\u043e\u043a" when requisites are sent."""
         chat_id = await self._get_chat_id_for_user(user_id)
         if not chat_id:
             logger.warning("[SITNIKS] No chat_id found for user %s", user_id)
@@ -386,7 +394,7 @@ class SitniksChatService:
 
         result["chat_id"] = chat_id
 
-        # 1. Set status to "AI Увага"
+        # 1. Set status to "AI \u0423\u0432\u0430\u0433\u0430"
         status_ok = await self.update_chat_status(chat_id, SitniksStatus.AI_ATTENTION)
         result["status_set"] = status_ok
 

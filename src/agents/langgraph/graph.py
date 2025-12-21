@@ -240,17 +240,22 @@ def get_production_graph(
     """
     global _production_graph
 
-        from src.agents.pydantic.main_agent import run_main
+    if _production_graph is None:
+        if runner is None:
+            from src.agents.pydantic.main_agent import run_main
 
-        # Create a wrapper that matches the runner signature
-        async def _default_runner(msg: str, metadata: dict[str, Any]) -> dict[str, Any]:
-            from src.agents.pydantic.deps import create_deps_from_state
-            deps = create_deps_from_state(metadata)
-            result = await run_main(msg, deps)
-            return result.model_dump()
+            # Create a wrapper that matches the runner signature
+            async def _default_runner(msg: str, metadata: dict[str, Any]) -> dict[str, Any]:
+                from src.agents.pydantic.deps import create_deps_from_state
+
+                deps = create_deps_from_state(metadata)
+                result = await run_main(msg, deps)
+                return result.model_dump()
+
+            runner = _default_runner
 
         _production_graph = build_production_graph(
-            runner or _default_runner,
+            runner,
             checkpointer,
         )
 

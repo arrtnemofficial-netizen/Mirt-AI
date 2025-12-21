@@ -10,25 +10,20 @@ from __future__ import annotations
 
 import re
 import logging
+from functools import lru_cache
 from typing import Any
 
 from src.agents.langgraph.nodes.utils import get_size_and_price_for_height
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
 
 logger = logging.getLogger(__name__)
 
-# Common Ukrainian size patterns
-SIZE_PATTERNS = [
-    r"rozmir\s*(\d{2,3}[-–]\d{2,3})",  # "розмір 146-152"
-    r"radzhu\s*(\d{2,3}[-–]\d{2,3})",  # "раджу 146-152"
-    r"pidide\s*(\d{2,3}[-–]\d{2,3})",  # "підійде 122-128"
-    r"(\d{2,3}[-–]\d{2,3})\s*sm",  # "146-152 см"
-    r"rozmir\s*(\d{2,3})",  # "розмір 140"
-    # Cyrillic versions
-    r"розмір\s*(\d{2,3}[-–]\d{2,3})",
-    r"раджу\s*(\d{2,3}[-–]\d{2,3})",
-    r"підійде\s*(\d{2,3}[-–]\d{2,3})",
-    r"(\d{2,3}[-–]\d{2,3})\s*см",
-]
+@lru_cache(maxsize=1)
+def _get_size_patterns() -> list[str]:
+    data = load_yaml_from_registry(SystemKeys.TEXTS.value)
+    patterns = data.get("size_patterns", []) if isinstance(data, dict) else []
+    return [str(p) for p in patterns if p]
 
 
 def merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
@@ -142,12 +137,13 @@ def extract_size_from_response(messages: list) -> str | None:
     Extract size from LLM response messages.
 
     Fallback when LLM forgets to include size in products[].
-    Looks for patterns like "раджу 146-152" or "розмір 122-128".
+    Looks for size patterns from registry.
     """
+    patterns = _get_size_patterns()
     for msg in messages:
         content = msg.content if hasattr(msg, "content") else str(msg)
 
-        for pattern in SIZE_PATTERNS:
+        for pattern in patterns:
             # Use re.IGNORECASE for proper Unicode handling
             match = re.search(pattern, content, re.IGNORECASE)
             if match:

@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph
 from src.conf.config import settings
+from src.core.registry_keys import SystemKeys
+from src.core.prompt_registry import load_yaml_from_registry
 from src.core.fallbacks import FallbackType, get_fallback_response
 from src.core.logging import classify_root_cause, log_event, safe_preview
 from src.core.rate_limiter import check_rate_limit
@@ -43,6 +45,11 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_manychat_config() -> dict[str, Any]:
+    data = load_yaml_from_registry(SystemKeys.MANYCHAT.value)
+    return data if isinstance(data, dict) else {}
 
 
 class ManyChatAsyncService:
@@ -266,14 +273,12 @@ class ManyChatAsyncService:
 
         # If we reached here, main processing likely still running.
         # Keep it short: 1 bubble, no images.
-        interim_text = str(
-            getattr(
-                settings,
-                "MANYCHAT_INTERIM_TEXT_WITH_IMAGE" if has_image else "MANYCHAT_INTERIM_TEXT",
-                "Секунду, уточняю по наявності та деталях.",
-            )
-            or ""
-        ).strip()
+                config = _get_manychat_config()
+        interim_cfg = config.get("interim_messages", {}) if isinstance(config, dict) else {}
+        if has_image:
+            interim_text = str(interim_cfg.get("text_with_image", "Working on it...")).strip()
+        else:
+            interim_text = str(interim_cfg.get("text", "Working on it...")).strip()
 
         if not interim_text:
             return
@@ -300,7 +305,7 @@ class ManyChatAsyncService:
         It handles debouncing, AI processing, and push delivery.
 
         Commands:
-            /restart - Clear session and respond "Сесія очищена!"
+            /restart - Clear session and respond "\u0421\u0435\u0441\u0456\u044f \u043e\u0447\u0438\u0449\u0435\u043d\u0430!"
 
         Args:
             user_id: ManyChat subscriber ID
@@ -319,7 +324,7 @@ class ManyChatAsyncService:
             image_url=image_url,
         )
 
-        # RATE LIMITING: Захист від спаму/abuse
+        # RATE LIMITING: \u0417\u0430\u0445\u0438\u0441\u0442 \u0432\u0456\u0434 \u0441\u043f\u0430\u043c\u0443/abuse
         if not check_rate_limit(user_id):
             log_event(
                 logger,
@@ -590,7 +595,7 @@ class ManyChatAsyncService:
             logger.info("[MANYCHAT:%s] /restart already in progress", user_id)
             await self._safe_send_text(
                 subscriber_id=user_id,
-                text="Сесія очищується. Напишіть, будь ласка, запит ще раз 🙂",
+                text="\u0421\u0435\u0441\u0456\u044f \u043e\u0447\u0438\u0449\u0443\u0454\u0442\u044c\u0441\u044f. \u041d\u0430\u043f\u0438\u0448\u0456\u0442\u044c, \u0431\u0443\u0434\u044c \u043b\u0430\u0441\u043a\u0430, \u0437\u0430\u043f\u0438\u0442 \u0449\u0435 \u0440\u0430\u0437 🙂",
                 channel=channel,
             )
             return
@@ -663,14 +668,14 @@ class ManyChatAsyncService:
                     exc_info=True,
                 )
 
+                        config = _get_manychat_config()
+            restart_cfg = config.get("restart_messages", {}) if isinstance(config, dict) else {}
             if deleted:
                 logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
-                response_text = "Сесія очищена. Розкажіть, будь ласка, що саме вас цікавить 🙂"
+                response_text = str(restart_cfg.get("done", "Session cleared. Please try again."))
             else:
                 logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
-                response_text = (
-                    "Сесія вже була очищена. Напишіть, будь ласка, що саме вас цікавить 🙂"
-                )
+                response_text = str(restart_cfg.get("already_done", "Session already cleared. Please try again."))
 
             # Push confirmation
             await self._safe_send_text(

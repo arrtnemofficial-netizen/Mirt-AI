@@ -12,7 +12,7 @@ from .offer import offer_node
 from .payment import payment_node
 from .upsell import upsell_node
 from .validation import validation_node
-from .vision import vision_node
+from .vision.node import vision_node
 
 
 __all__ = [

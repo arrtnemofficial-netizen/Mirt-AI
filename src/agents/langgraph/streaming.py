@@ -19,6 +19,9 @@ import logging
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -26,6 +29,11 @@ if TYPE_CHECKING:
     from langgraph.graph.graph import CompiledGraph
 
 logger = logging.getLogger(__name__)
+
+
+def _get_streaming_config() -> dict[str, Any]:
+    data = load_yaml_from_registry(SystemKeys.STREAMING.value)
+    return data if isinstance(data, dict) else {}
 
 
 class StreamEventType(str, Enum):
@@ -166,9 +174,9 @@ async def stream_with_status(
     Stream with human-readable status messages.
 
     Yields status updates that can be shown to users:
-    - "Перевіряю безпеку повідомлення..."
-    - "Аналізую фото..."
-    - "Готую відповідь..."
+    - "\u041f\u0435\u0440\u0435\u0432\u0456\u0440\u044f\u044e \u0431\u0435\u0437\u043f\u0435\u043a\u0443 \u043f\u043e\u0432\u0456\u0434\u043e\u043c\u043b\u0435\u043d\u043d\u044f..."
+    - "\u0410\u043d\u0430\u043b\u0456\u0437\u0443\u044e \u0444\u043e\u0442\u043e..."
+    - "\u0413\u043e\u0442\u0443\u044e \u0432\u0456\u0434\u043f\u043e\u0432\u0456\u0434\u044c..."
 
     Usage:
         async for update in stream_with_status(graph, state, session_id):
@@ -177,15 +185,9 @@ async def stream_with_status(
             elif update["type"] == "token":
                 append_to_response(update["token"])
     """
-    node_status_messages = {
-        "moderation": "Перевіряю безпеку повідомлення...",
-        "intent": "Аналізую запит...",
-        "vision": "Аналізую фото...",
-        "agent": "Готую відповідь...",
-        "offer": "Формую пропозицію...",
-        "payment": "Обробляю оплату...",
-        "validation": "Перевіряю відповідь...",
-    }
+    node_status_messages = _get_streaming_config().get("status_messages", {})
+    if not isinstance(node_status_messages, dict):
+        node_status_messages = {}
 
     config = {"configurable": {"thread_id": session_id}}
 
@@ -216,5 +218,5 @@ async def stream_with_status(
             if node_name == "end":
                 yield {
                     "type": "complete",
-                    "message": "Готово!",
+                    "message": "\u0413\u043e\u0442\u043e\u0432\u043e!",
                 }

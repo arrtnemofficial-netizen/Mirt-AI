@@ -71,6 +71,12 @@ We achieve reliability through the **Test Pyramid** (flat `tests/` layout):
 
 ---
 
+## ManyChat
+
+- `/webhooks/manychat`: Primary webhook (push mode + async service)
+
+---
+
 <div align="center">
 Built with ❤️ by MIRT Team
 </div>

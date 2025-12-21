@@ -1,0 +1,18 @@
+﻿# version: 1.0
+snitkix_status_titles:
+  new: "Нові заявки"
+  pending_payment: "Виставлено рахунок"
+  paid: "ОПЛАЧЕНО"
+  processing: "Оформлено замовлення"
+  shipped: "shipped"
+  delivered: "delivered"
+  cancelled: "cancelled"
+  returned: "returned"
+
+sitniks_status_titles:
+  first_touch: "Взято в роботу"
+  invoice_sent: "Виставлено рахунок"
+  ai_attention: "AI Увага"
+  new: "Нові заявки"
+  paid: "ОПЛАЧЕНО"
+  order_formed: "Оформлено замовлення"

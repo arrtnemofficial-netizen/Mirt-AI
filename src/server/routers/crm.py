@@ -85,9 +85,9 @@ async def sitniks_update_status(
     after the agent response is generated.
 
     Stages:
-    - first_touch: Set "Взято в роботу" + assign AI Manager
-    - give_requisites: Set "Виставлено рахунок"
-    - escalation: Set "AI Увага" + assign human manager
+    - first_touch: Set "\u0412\u0437\u044f\u0442\u043e \u0432 \u0440\u043e\u0431\u043e\u0442\u0443" + assign AI Manager
+    - give_requisites: Set "\u0412\u0438\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u043e \u0440\u0430\u0445\u0443\u043d\u043e\u043a"
+    - escalation: Set "AI \u0423\u0432\u0430\u0433\u0430" + assign human manager
 
     Auth: X-API-Key header or Authorization: Bearer token
     (uses MANYCHAT_VERIFY_TOKEN)

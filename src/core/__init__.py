@@ -21,6 +21,7 @@ from src.core.models import (
     Metadata,
     Product,
 )
+from src.core.debug_logger import debug_log
 from src.core.state_machine import EscalationLevel
 
 
@@ -38,5 +39,7 @@ __all__ = [
     "MessageRole",
     "MessageTag",
     "ModerationFlag",
+    # Utilities
+    "debug_log",
 ]
 

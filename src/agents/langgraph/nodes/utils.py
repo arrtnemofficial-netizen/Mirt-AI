@@ -8,6 +8,15 @@ from __future__ import annotations
 from typing import Any
 from functools import lru_cache
 
+__all__ = [
+    "extract_user_message",
+    "extract_assistant_message",
+    "extract_height_from_text",
+    "get_size_and_price_for_height",
+    "text_msg",
+    "image_msg",
+]
+
 
 def extract_user_message(messages: list[Any]) -> str:
     """
@@ -155,3 +164,41 @@ def get_size_and_price_for_height(
         size = "158-164"
 
     return size, prices.get(size, default_price)
+
+
+def text_msg(text: str, *, message_type: str = "text", **metadata: Any) -> dict[str, Any]:
+    """
+    Build LangGraph-compatible text bubble.
+
+    Args:
+        text: Body of the message.
+        message_type: Optional type (defaults to "text").
+        metadata: Extra fields to attach.
+
+    Returns:
+        Dict representing a message ready for agent_response/messages list.
+    """
+    return {
+        "type": message_type,
+        "text": text,
+        **metadata,
+    }
+
+
+def image_msg(url: str, *, caption: str | None = None, **metadata: Any) -> dict[str, Any]:
+    """
+    Build LangGraph-compatible image bubble.
+
+    Args:
+        url: Link to the image.
+        caption: Optional caption text.
+        metadata: Additional fields.
+    """
+    payload = {
+        "type": "image",
+        "image_url": url,
+        **metadata,
+    }
+    if caption:
+        payload["caption"] = caption
+    return payload

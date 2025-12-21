@@ -21,6 +21,8 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.main_agent import run_main
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
 from src.core.state_machine import State
 from src.services.core.observability import log_agent_step, log_trace, track_metric
 from src.services.domain.catalog.product_matcher import extract_requested_color
@@ -186,9 +188,11 @@ async def agent_node(
             and len(response.messages) > 1
         ):
             first_content = response.messages[0].content.strip().lower()
-            # Simple heuristic to detect UA greetings without hardcoding specific ones if possible,
-            # but here it's checking the LLM output.
-            if any(gr in first_content for gr in ["вітаю", "добрий", "привіт"]):
+            data = load_yaml_from_registry(SystemKeys.TEXTS.value)
+            greetings = []
+            if isinstance(data, dict):
+                greetings = data.get("greetings", {}).get("ua_keywords", [])
+            if any(gr in first_content for gr in greetings):
                 response.messages = response.messages[1:]
 
         # =====================================================================

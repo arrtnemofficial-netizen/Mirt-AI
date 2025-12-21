@@ -16,31 +16,31 @@ from pydantic import BaseModel, Field, field_validator
 class OrderStatus(str, Enum):
     """Order status for CRM."""
 
-    NEW = "new"  # Нове замовлення
-    PENDING_PAYMENT = "pending_payment"  # Очікує оплати
-    PAID = "paid"  # Оплачено
-    PROCESSING = "processing"  # В обробці
-    SHIPPED = "shipped"  # Відправлено
-    DELIVERED = "delivered"  # Доставлено
-    CANCELLED = "cancelled"  # Скасовано
-    RETURNED = "returned"  # Повернуто
+    NEW = "new"  # New order
+    PENDING_PAYMENT = "pending_payment"  # Pending payment
+    PAID = "paid"  # Paid
+    PROCESSING = "processing"  # Processing
+    SHIPPED = "shipped"  # Shipped
+    DELIVERED = "delivered"  # Delivered
+    CANCELLED = "cancelled"  # Cancelled
+    RETURNED = "returned"  # Returned
 
 
 class PaymentMethod(str, Enum):
     """Payment methods supported."""
 
-    FULL_PREPAY = "full_prepay"  # Повна передоплата
-    PARTIAL_PREPAY = "partial_prepay"  # Передплата 200 грн
-    CASH_ON_DELIVERY = "cash_on_delivery"  # Накладений платіж
+    FULL_PREPAY = "full_prepay"  # Full prepay
+    PARTIAL_PREPAY = "partial_prepay"  # Partial prepay
+    CASH_ON_DELIVERY = "cash_on_delivery"  # Cash on delivery
 
 
 class DeliveryMethod(str, Enum):
     """Delivery methods supported."""
 
-    NOVA_POSHTA = "nova_poshta"  # Нова Пошта
-    NOVA_POSHTA_COURIER = "nova_poshta_courier"  # Нова Пошта кур'єр
-    UKRPOSHTA = "ukrposhta"  # Укрпошта
-    SELF_PICKUP = "self_pickup"  # Самовивіз
+    NOVA_POSHTA = "nova_poshta"  # Nova Poshta
+    NOVA_POSHTA_COURIER = "nova_poshta_courier"  # Nova Poshta courier
+    UKRPOSHTA = "ukrposhta"  # Ukrposhta
+    SELF_PICKUP = "self_pickup"  # Self pickup
 
 
 class OrderItem(BaseModel):
@@ -277,11 +277,11 @@ def build_missing_data_prompt(validation: OrderValidationResult) -> str:
 
     prompts = []
     field_prompts = {
-        "full_name": _get_msg("AUTOMATION_MISSING_DATA_FULL_NAME", "ПІБ"),
-        "phone": _get_msg("AUTOMATION_MISSING_DATA_PHONE", "Телефон"),
-        "city": _get_msg("AUTOMATION_MISSING_DATA_CITY", "Місто"),
-        "nova_poshta": _get_msg("AUTOMATION_MISSING_DATA_NOVA_POSHTA", "НП"),
-        "products": _get_msg("AUTOMATION_MISSING_DATA_PRODUCTS", "Товари"),
+        "full_name": _get_msg("AUTOMATION_MISSING_DATA_FULL_NAME", "\u041f\u0406\u0411"),
+        "phone": _get_msg("AUTOMATION_MISSING_DATA_PHONE", "\u0422\u0435\u043b\u0435\u0444\u043e\u043d"),
+        "city": _get_msg("AUTOMATION_MISSING_DATA_CITY", "\u041c\u0456\u0441\u0442\u043e"),
+        "nova_poshta": _get_msg("AUTOMATION_MISSING_DATA_NOVA_POSHTA", "\u041d\u041f"),
+        "products": _get_msg("AUTOMATION_MISSING_DATA_PRODUCTS", "\u0422\u043e\u0432\u0430\u0440\u0438"),
     }
 
     for field in validation.missing_fields:

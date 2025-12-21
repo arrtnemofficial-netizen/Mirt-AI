@@ -53,8 +53,8 @@ def _generate_followup_text(current_state: str, last_product: str = "") -> str |
         template = _get_msg("AUTOMATION_FOLLOWUP_STATE_4") or _get_msg("AUTOMATION_FOLLOWUP_STATE_4_DEFAULT")
         labels_json = get_snippet_by_header("VISION_LABELS")
         labels = json.loads(labels_json[0]) if labels_json else {}
-        # Registry template: "Ще раздумуєте над {product}?..."
-        product_text = last_product if last_product else labels.get("order_genitive", "замовленням")
+        # Registry template: "\u0429\u0435 \u0440\u0430\u0437\u0434\u0443\u043c\u0443\u0454\u0442\u0435 \u043d\u0430\u0434 {product}?..."
+        product_text = last_product if last_product else labels.get("order_genitive", "\u0437\u0430\u043c\u043e\u0432\u043b\u0435\u043d\u043d\u044f\u043c")
         return template.format(product=product_text)
 
     return followup_templates.get(current_state, _get_msg("AUTOMATION_FOLLOWUP_DEFAULT", "How can I help?"))
@@ -199,7 +199,7 @@ async def manychat_create_order(
     phone = custom_fields.get("client_phone")
     city = custom_fields.get("client_city")
     nova_poshta = custom_fields.get("client_nova_poshta")
-    product_name = custom_fields.get("last_product", labels.get("default_product", "Товар"))
+    product_name = custom_fields.get("last_product", labels.get("default_product", "\u0422\u043e\u0432\u0430\u0440"))
     order_sum = custom_fields.get("order_sum", "0")
 
     try:

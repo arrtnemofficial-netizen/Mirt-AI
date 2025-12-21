@@ -18,10 +18,37 @@ from src.integrations.crm.error_handler import (
     get_crm_error_handler,
     retry_crm_order_in_state,
 )
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
 from src.services.core.observability import log_agent_step, track_metric
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_crm_error_config() -> dict[str, Any]:
+    data = load_yaml_from_registry(SystemKeys.CRM_ERROR.value)
+    return data if isinstance(data, dict) else {}
+
+
+def _get_crm_error_message(key: str, default: str = "") -> str:
+    config = _get_crm_error_config()
+    messages = config.get("messages", {})
+    if isinstance(messages, dict):
+        value = messages.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return default
+
+
+def _get_crm_error_keywords(key: str) -> list[str]:
+    config = _get_crm_error_config()
+    keywords = config.get("keywords", {})
+    if isinstance(keywords, dict):
+        values = keywords.get(key, [])
+        if isinstance(values, list):
+            return [str(v) for v in values if v]
+    return []
 
 
 async def crm_error_node(
@@ -102,14 +129,16 @@ async def _analyze_and_present_error(
     )
 
     # Build user message
-    user_message = error_result.get("message", "❌ Сталася помилка CRM")
+    user_message = error_result.get("message") or _get_crm_error_message("default_error", "CRM error")
 
     # Add retry options if available
     if error_result.get("can_retry"):
-        user_message += "\n\nВідповідаючи, ви можете:\n"
-        user_message += "• Написати 'повторити' або 'retry' для повторної спроби\n"
-        user_message += "• Написати 'оператор' або 'escalate' для передачі оператору\n"
-        user_message += "• Написати 'назад' для повернення до оформлення"
+        options_header = _get_crm_error_message("options_header", "You can:")
+        option_retry = _get_crm_error_message("option_retry", "Retry")
+        option_escalate = _get_crm_error_message("option_escalate", "Escalate")
+        option_back = _get_crm_error_message("option_back", "Back")
+        options_block = "\n".join([option_retry, option_escalate, option_back])
+        user_message += f"\n\n{options_header}\n{options_block}"
 
     # Create assistant response
     assistant_response = {
@@ -141,7 +170,7 @@ async def _analyze_and_present_error(
             "awaiting_user_choice": True,
             "step_number": state.get("step_number", 0) + 1,
         },
-        goto="crm_error",  # Stay in error node to handle user response
+        goto="crm_error",
     )
 
 
@@ -186,7 +215,7 @@ async def _handle_retry_choice(
 
     if retry_result.get("crm_retry_result", {}).get("success"):
         # Retry successful - proceed to upsell
-        success_message = "✅ Замовлення успішно відправлено до CRM! Продовжуємо оформлення..."
+        success_message = _get_crm_error_message("success_retry", "Order sent to CRM.")
 
         return Command(
             update={
@@ -204,7 +233,7 @@ async def _handle_retry_choice(
     else:
         # Retry failed - show error again
         error_message = retry_result.get("crm_retry_result", {}).get(
-            "message", "❌ Повторна спроба не вдалася"
+            "message", _get_crm_error_message("retry_failed", "Retry failed")
         )
 
         return Command(
@@ -238,7 +267,7 @@ async def _handle_escalate_choice(
         error_details=crm_error_result.get("message", "CRM operation failed"),
     )
 
-    escalation_message = escalate_result.get("message", "📞 Замовлення передано оператору")
+        escalation_message = escalate_result.get("message", _get_crm_error_message("escalated", "Escalated to operator"))
 
     track_metric("crm_error_escalated", 1, {"session_id": session_id})
 
@@ -264,7 +293,7 @@ async def _handle_back_choice(
     """Handle user's choice to go back to payment/offer."""
     logger.info("[CRM:ERROR] User chose back for session %s", session_id)
 
-    back_message = "🔙 Повертаємось до оформлення замовлення..."
+    back_message = _get_crm_error_message("back_message", "Returning to checkout...")
 
     return Command(
         update={
@@ -287,12 +316,15 @@ async def _show_options_again(
     session_id: str,
 ) -> Command[Literal["crm_error"]]:
     """Show options again when user choice is unclear."""
-    options_message = (
-        "Не зрозумів вибір. Будь ласка, оберіть:\n\n"
-        "• 'повторити' або 'retry' - для повторної спроби\n"
-        "• 'оператор' або 'escalate' - для передачі оператору\n"
-        "• 'назад' - для повернення до оформлення"
-    )
+    options_header = _get_crm_error_message("options_header", "You can:")
+    option_retry = _get_crm_error_message("option_retry", "Retry")
+    option_escalate = _get_crm_error_message("option_escalate", "Escalate")
+    option_back = _get_crm_error_message("option_back", "Back")
+    options_block = "\n".join([option_retry, option_escalate, option_back])
+    options_message = _get_crm_error_message(
+        "invalid_choice",
+        "Unknown choice. Please select:\n\n{options_block}",
+    ).format(options_block=options_block)
 
     return Command(
         update={
@@ -307,7 +339,6 @@ async def _show_options_again(
         goto="crm_error",
     )
 
-
 def _parse_user_intent(message: str) -> str:
     """Parse user intent from message."""
     if not message:
@@ -315,11 +346,15 @@ def _parse_user_intent(message: str) -> str:
 
     message_lower = message.lower().strip()
 
-    if any(word in message_lower for word in ["повторити", "retry", "знову", "спробувати"]):
+    retry_words = _get_crm_error_keywords("retry")
+    escalate_words = _get_crm_error_keywords("escalate")
+    back_words = _get_crm_error_keywords("back")
+
+    if any(word in message_lower for word in retry_words):
         return "retry"
-    elif any(word in message_lower for word in ["оператор", "escalate", "людина", "допомога"]):
+    if any(word in message_lower for word in escalate_words):
         return "escalate"
-    elif any(word in message_lower for word in ["назад", "back", "повернутись"]):
+    if any(word in message_lower for word in back_words):
         return "back"
-    else:
-        return "unknown"
+    return "unknown"
+

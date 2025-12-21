@@ -16,6 +16,8 @@ from src.core.conversation_state import ConversationState
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
 from src.services.message_store import MessageStore, StoredMessage
 
 
@@ -171,9 +173,7 @@ class ConversationHandler:
     session_store: SessionStore
     message_store: MessageStore
     runner: GraphRunner
-    fallback_message: str = field(
-        default="Вибачте, сталася технічна помилка. Спробуйте ще раз або зверніться до підтримки."
-    )
+    fallback_message: str = field(default="")
     max_retries: int = field(default=2)
     retry_delay: float = field(default=1.0)
 
@@ -198,6 +198,13 @@ class ConversationHandler:
         caught and converted to graceful fallback responses.
         """
         state: ConversationState | None = None
+
+        if not self.fallback_message:
+            data = load_yaml_from_registry(SystemKeys.TEXTS.value)
+            if isinstance(data, dict):
+                self.fallback_message = data.get("conversation", {}).get("fallback_message", "")
+            if not self.fallback_message:
+                self.fallback_message = "Technical error. Please try again."
 
         try:
             # Load or create session state

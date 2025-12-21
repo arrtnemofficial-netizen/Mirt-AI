@@ -1,16 +1,13 @@
 """
-CRM Order Mapper - контракт на order payload.
-=============================================
-Явна мапа escalation.reason/status → дії CRM.
-Визначає які поля LLM може ініціювати, а які ні.
+CRM Order Mapper - order payload contract.
+========================================
+Maps escalation reasons and agent outputs to CRM actions.
 
-Використання:
+Usage:
     from src.integrations.crm.order_mapper import OrderMapper, OrderPayload
 
-    # Створити order з agent response
     payload = OrderMapper.from_agent_response(response)
 
-    # Або з escalation
     action = OrderMapper.get_crm_action(escalation_reason)
 """
 
@@ -21,6 +18,10 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+
+from src.core.prompt_registry import load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
+from src.services.core.client_parser_config import get_client_parser_list
 
 
 logger = logging.getLogger(__name__)
@@ -100,11 +101,11 @@ class OrderProduct(BaseModel):
 class CustomerInfo(BaseModel):
     """Customer information for order."""
 
-    full_name: str = Field(default="", description="ПІБ")
-    phone: str = Field(default="", description="Телефон")
-    city: str = Field(default="", description="Місто")
-    nova_poshta: str = Field(default="", description="Відділення НП")
-    payment_method: str = Field(default="", description="Спосіб оплати")
+    full_name: str = Field(default="", description="Full name")
+    phone: str = Field(default="", description="Phone")
+    city: str = Field(default="", description="City")
+    nova_poshta: str = Field(default="", description="Nova Poshta branch")
+    payment_method: str = Field(default="", description="Payment method")
 
     @property
     def is_complete(self) -> bool:
@@ -250,29 +251,37 @@ class OrderMapper:
     def extract_customer_info(cls, messages: list[dict[str, Any]]) -> CustomerInfo:
         """
         Extract customer info from conversation messages.
-        Looks for patterns: ПІБ, телефон, місто, НП.
+        Looks for patterns: name, phone, city, NP.
         """
         import re
 
         info = CustomerInfo()
         all_text = " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
+        all_text_lower = all_text.lower()
 
         # Phone pattern
         phone_match = re.search(r"(\+?380\d{9}|\d{10})", all_text)
         if phone_match:
             info.phone = phone_match.group(1)
 
-        # Nova Poshta pattern
-        np_match = re.search(
-            r"(?:НП|Нова\s*пошта|відділення)\s*[№#]?\s*(\d+)", all_text, re.IGNORECASE
-        )
-        if np_match:
-            info.nova_poshta = f"Відділення №{np_match.group(1)}"
+        # Nova Poshta patterns from registry
+        np_patterns = get_client_parser_list("np_patterns")
+        for p in np_patterns:
+            np_match = re.search(p, all_text_lower, re.IGNORECASE)
+            if np_match:
+                data = load_yaml_from_registry(SystemKeys.TEXTS.value)
+                prefix = (
+                    data.get("ui", {}).get("np_branch_prefix", "Branch #")
+                    if isinstance(data, dict)
+                    else "Branch #"
+                )
+                info.nova_poshta = f"{prefix}{np_match.group(1)}"
+                break
 
-        # City pattern (common Ukrainian cities)
-        cities = ["київ", "харків", "одеса", "дніпро", "львів", "запоріжжя", "вінниця"]
+        # City matching (from registry)
+        cities = get_client_parser_list("cities")
         for city in cities:
-            if city in all_text.lower():
+            if city and city in all_text_lower:
                 info.city = city.capitalize()
                 break
 

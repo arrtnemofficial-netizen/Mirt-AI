@@ -11,6 +11,7 @@ Coordinates the vision pipeline:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -64,6 +65,31 @@ def _get_vision_node_templates() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _compute_vision_hash(session_id: str | None, image_url: str | None) -> str | None:
+    """Generate stable hash for session/image pair to guard against duplicates."""
+    session = (session_id or "").strip()
+    image = (image_url or "").strip()
+    if not session or not image:
+        return None
+    normalized = f"{session}|{image}"
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _build_duplicate_messages(templates: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compose friendly duplicate-photo response bubbles."""
+    duplicate_snippet = get_snippet_by_header("VISION_DUPLICATE_PHOTO")
+    duplicate_body = (
+        duplicate_snippet[0]
+        if duplicate_snippet
+        else templates.get(
+            "duplicate_photo_body",
+            "Ми вже проаналізували це фото й використовуємо попередній результат.",
+        )
+    )
+    greeting = templates.get("duplicate_photo_greeting") or templates.get("escalation_greeting", "Привіт!")
+    return [text_msg(greeting), text_msg(duplicate_body)]
+
+
 async def vision_node(
     state: dict[str, Any],
     runner: Callable[..., Any] | None = None,  # Kept for signature compatibility
@@ -103,6 +129,44 @@ async def vision_node(
     deps.image_url = state.get("image_url") or state.get("metadata", {}).get("image_url")
     deps.current_state = State.STATE_2_VISION.value
 
+    metadata = dict(state.get("metadata") or {})
+    vision_hash = _compute_vision_hash(session_id, deps.image_url)
+
+    if vision_hash and metadata.get("vision_hash_processed") == vision_hash:
+        duplicate_messages = _build_duplicate_messages(templates)
+        duplicate_metadata = {
+            **metadata,
+            "vision_hash_processed": vision_hash,
+            "vision_duplicate_detected": True,
+            "has_image": True,
+        }
+        track_metric("vision_duplicate_photo", 1)
+        log_agent_step(
+            session_id=session_id,
+            state=State.STATE_2_VISION.value,
+            intent="PHOTO_IDENT",
+            event="vision_duplicate",
+            extra={"vision_hash": vision_hash},
+        )
+        return {
+            "current_state": State.STATE_2_VISION.value,
+            "messages": duplicate_messages,
+            "selected_products": state.get("selected_products", []),
+            "dialog_phase": "VISION_DONE",
+            "has_image": True,
+            "metadata": duplicate_metadata,
+            "agent_response": {
+                "messages": duplicate_messages,
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_2_VISION.value,
+                    "intent": "PHOTO_IDENT",
+                    "vision_duplicate_detected": True,
+                },
+            },
+            "step_number": state.get("step_number", 0) + 1,
+        }
+
     def _missing_vision_artifacts() -> list[str]:
         base = Path(__file__).parent.parent.parent.parent / "data" / "vision" / "generated"
         required = ["model_rules.yaml", "test_set.json"]
@@ -112,18 +176,19 @@ async def vision_node(
             if not path.exists() or path.stat().st_size == 0:
                 missing.append(name)
         return missing
+
     def _normalize_text(value: str | None) -> str:
         text = (value or '').strip()
         if not text:
             return ''
         text = ' '.join(text.split())
         return text[:1].upper() + text[1:]
+
     def _get_greeting_bubble() -> str:
         snippet = get_snippet_by_header("VISION_GREETING")
         if snippet:
             return snippet[0]
         return templates.get("escalation_greeting", "Hello")
-
 
     # Helper for error escalation (notifications)
     def _handle_error_escalation(error_msg: str) -> dict[str, Any]:
@@ -235,7 +300,6 @@ async def vision_node(
         deps.image_url[:60] if deps.image_url else "None",
     )
 
-
     try:
         # Call vision agent
         response = await run_vision(message=user_message, deps=deps)
@@ -244,7 +308,7 @@ async def vision_node(
         logger.error("Vision agent error: %s", err)
         return _handle_error_escalation(err)
 
-    metadata = state.get("metadata", {})
+    metadata = metadata
     no_match_count = int(metadata.get("vision_no_match_count") or 0)
     catalog_row: dict[str, Any] | None = None
 

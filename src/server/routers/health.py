@@ -47,7 +47,7 @@ async def health() -> dict[str, Any]:
     status = "ok"
     checks: dict[str, Any] = {}
 
-    # Перевірка Supabase
+    # \u041f\u0435\u0440\u0435\u0432\u0456\u0440\u043a\u0430 Supabase
     try:
         client = get_supabase_client()
         if client:
@@ -60,7 +60,7 @@ async def health() -> dict[str, Any]:
         status = "degraded"
         logger.warning("Health check: Supabase unavailable: %s", e)
 
-    # Перевірка Redis (якщо Celery увімкнено)
+    # \u041f\u0435\u0440\u0435\u0432\u0456\u0440\u043a\u0430 Redis (\u044f\u043a\u0449\u043e Celery \u0443\u0432\u0456\u043c\u043a\u043d\u0435\u043d\u043e)
     if settings.CELERY_ENABLED:
         try:
             import redis

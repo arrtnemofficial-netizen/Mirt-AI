@@ -12,7 +12,7 @@ Quick Start:
 
     # 1. Run agent directly
     deps = AgentDeps(session_id="123", current_state="STATE_0_INIT")
-    response = await run_main("Привіт!", deps)
+    response = await run_main("Hello!", deps)
 
     # 2. Run via LangGraph
     graph = get_active_graph()

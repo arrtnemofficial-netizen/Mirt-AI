@@ -13,15 +13,18 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
+from src.conf.config import settings
 from src.services.client_data_parser import ClientData, parse_client_data
 from src.services.conversation import create_conversation_handler
 from src.services.infra.debouncer import MessageDebouncer
 from src.services.infra.media_utils import normalize_image_url
 from src.services.infra.message_store import MessageStore, create_message_store
-from src.core.prompt_registry import get_snippet_by_header
+from src.core.prompt_registry import get_snippet_by_header, load_yaml_from_registry
+from src.core.registry_keys import SystemKeys
 
 from .constants import (  # noqa: F401
     FIELD_AI_INTENT,
@@ -43,6 +46,18 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _get_manychat_config() -> dict[str, Any]:
+    data = load_yaml_from_registry(SystemKeys.MANYCHAT.value)
+    return data if isinstance(data, dict) else {}
+
+
+def _get_manychat_value(key: str, default: Any) -> Any:
+    config = _get_manychat_config()
+    value = config.get(key, default)
+    return value if value is not None else default
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +97,9 @@ class ManychatWebhook:
         self.store = store
         self.runner = runner or get_active_graph()
         self.message_store = message_store or create_message_store()
+        self.debouncer = MessageDebouncer(
+            delay=float(getattr(settings, "MANYCHAT_DEBOUNCE_SECONDS", 0.0))
+        )
         self._handler = create_conversation_handler(
             session_store=store,
             message_store=self.message_store,
@@ -91,12 +109,26 @@ class ManychatWebhook:
     async def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Process a ManyChat webhook body and produce a response envelope."""
         user_id, text = self._extract_user_and_text(payload)
+        image_url = self._extract_image_url(payload)
 
-        # Parse client data from message text (ПІБ, телефон, місто, НП)
+        # Parse client data from message text (name, phone, city, NP)
         client_data = parse_client_data(text)
 
-        # Use centralized handler with error handling
-        result = await self._handler.process_message(user_id, text)
+        pipeline_result = await process_manychat_pipeline(
+            handler=self._handler,
+            debouncer=self.debouncer,
+            user_id=user_id,
+            text=text,
+            image_url=image_url,
+            extra_metadata=None,
+        )
+        if pipeline_result is None:
+            return {
+                "version": "v2",
+                "content": {"messages": [], "actions": [], "quick_replies": []},
+            }
+
+        result = pipeline_result.result
 
         if result.is_fallback:
             logger.warning(
@@ -118,6 +150,19 @@ class ManychatWebhook:
             raise ManychatPayloadError("Missing subscriber or message text in payload")
         user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
         return user_id, text
+
+    @staticmethod
+    def _extract_image_url(payload: dict[str, Any]) -> str | None:
+        message = payload.get("message") or payload.get("data", {}).get("message") or {}
+        if isinstance(message, dict):
+            attachment = message.get("attachment") or {}
+            url = (
+                attachment.get("url")
+                or attachment.get("image_url")
+                or message.get("image_url")
+            )
+            return normalize_image_url(url) if url else None
+        return None
 
     def _to_manychat_response(
         self,
@@ -143,7 +188,7 @@ class ManychatWebhook:
                     {
                         "type": "image",
                         "url": product.photo_url,
-                        "caption": f"{product.name} - {product.price} грн",
+                        "caption": f"{product.name} - {product.price} \u0433\u0440\u043d",
                     }
                 )
 
@@ -200,7 +245,7 @@ class ManychatWebhook:
                     {"field_name": FIELD_ORDER_SUM, "field_value": str(last_product.price)}
                 )
 
-        # Add parsed client data (ПІБ, телефон, місто, НП)
+        # Add parsed client data (\u041f\u0406\u0411, \u0442\u0435\u043b\u0435\u0444\u043e\u043d, \u043c\u0456\u0441\u0442\u043e, \u041d\u041f)
         if client_data:
             if client_data.full_name:
                 fields.append(
@@ -244,37 +289,29 @@ class ManychatWebhook:
         return add_tags, remove_tags
 
     @staticmethod
+        @staticmethod
     def _build_quick_replies(agent_response: AgentResponse) -> list[dict[str, str]]:
         """Build Quick Reply buttons based on current state."""
         current_state = agent_response.metadata.current_state
         replies: list[dict[str, str]] = []
+        config = _get_manychat_config()
+        quick = config.get("quick_replies", {}) if isinstance(config, dict) else {}
 
-        # State-specific quick replies
         if current_state in ("STATE_0_INIT", "STATE_1_DISCOVERY"):
-            replies = [
-                {"type": "text", "caption": "👗 Сукні"},
-                {"type": "text", "caption": "👔 Костюми"},
-                {"type": "text", "caption": "🧥 Тренчі"},
-            ]
+            captions = quick.get("state_0_1", [])
+            replies = [{"type": "text", "caption": c} for c in captions]
         elif current_state == "STATE_3_SIZE_COLOR":
-            replies = [
-                {"type": "text", "caption": "📏 Розмірна сітка"},
-                {"type": "text", "caption": "🎨 Інші кольори"},
-            ]
+            captions = quick.get("state_3", [])
+            replies = [{"type": "text", "caption": c} for c in captions]
         elif current_state == "STATE_4_OFFER":
-            replies = [
-                {"type": "text", "caption": "✅ Беру!"},
-                {"type": "text", "caption": "🎨 Інший колір"},
-                {"type": "text", "caption": "📏 Інший розмір"},
-            ]
+            captions = quick.get("state_4", [])
+            replies = [{"type": "text", "caption": c} for c in captions]
         elif current_state == "STATE_5_PAYMENT_DELIVERY":
-            replies = [
-                {"type": "text", "caption": "💳 Повна оплата"},
-                {"type": "text", "caption": "💵 Передплата 200 грн"},
-            ]
+            captions = quick.get("state_5", [])
+            replies = [{"type": "text", "caption": c} for c in captions]
 
-        # Always add manager button for complex cases
         if agent_response.metadata.escalation_level != "NONE":
-            replies = [{"type": "text", "caption": "👩 Зв'язок з менеджером"}]
+            captions = quick.get("escalation", [])
+            replies = [{"type": "text", "caption": c} for c in captions]
 
         return replies

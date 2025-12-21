@@ -4,11 +4,11 @@ Time Travel - State rollback and forking.
 When things go wrong, go back in time.
 
 Use cases:
-- Customer: "Ні, я передумав, давай повернемось до вибору кольору"
-- Support: "Ой, клієнт натиснув не ту кнопку"
-- Debug: "Що сталося на кроці 5?"
+- Customer: "I changed my mind, go back to color selection"
+- Support: "Customer clicked the wrong button"
+- Debug: "What happened at step 5?"
 
-This is a KILLER FEATURE for support teams.
+This is a killer feature for support teams.
 """
 
 from __future__ import annotations

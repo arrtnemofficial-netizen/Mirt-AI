@@ -15,10 +15,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+import logging
 
 import yaml
 
 from src.core.prompt_registry import registry
+from src.conf.config import settings
 
 
 # =============================================================================
@@ -29,7 +31,7 @@ from src.core.prompt_registry import registry
 class State(str, Enum):
     """
     Agent conversation states.
-    Names match system_prompt_full.yaml exactly.
+    Names match registry-managed prompts exactly.
     """
 
     STATE_0_INIT = "STATE_0_INIT"
@@ -128,6 +130,37 @@ STATE_DISPLAY_NAMES = _load_state_display_names()
 
 
 # =============================================================================
+# DIALOG PHASE → STATE MAPPING
+# =============================================================================
+
+_PHASE_TO_STATE: dict[str, State] = {
+    "DISCOVERY": State.STATE_1_DISCOVERY,
+    "VISION_DONE": State.STATE_2_VISION,
+    "VISION_RETRY": State.STATE_2_VISION,
+    "SIZE_COLOR": State.STATE_3_SIZE_COLOR,
+    "OFFER_MADE": State.STATE_4_OFFER,
+    "WAITING_FOR_PAYMENT_PROOF": State.STATE_5_PAYMENT_DELIVERY,
+    "PAYMENT_DELIVERY": State.STATE_5_PAYMENT_DELIVERY,
+    "UPSELL_OFFERED": State.STATE_6_UPSELL,
+    "COMPLETED": State.STATE_7_END,
+    "ESCALATED": State.STATE_7_END,
+    "CRM_ERROR_HANDLING": State.STATE_5_PAYMENT_DELIVERY,
+}
+
+
+def expected_state_for_phase(phase: str | None) -> State | None:
+    """
+    Return FSM state that should correspond to the given dialog_phase.
+
+    Used by LangGraph guards to realign states when LLM output drifts.
+    """
+    if not phase:
+        return None
+    normalized = phase.strip().upper()
+    return _PHASE_TO_STATE.get(normalized)
+
+
+# =============================================================================
 # INTENTS (Single Source of Truth)
 # =============================================================================
 
@@ -135,7 +168,7 @@ STATE_DISPLAY_NAMES = _load_state_display_names()
 class Intent(str, Enum):
     """
     User intent classification labels.
-    Matches INTENT_LABELS in system_prompt_full.yaml.
+    Matches INTENT_LABELS in registry-managed prompts.
     """
 
     GREETING_ONLY = "GREETING_ONLY"
@@ -209,7 +242,7 @@ class Transition:
     condition: str | None = None  # Human-readable condition description
 
 
-# FSM Transition Table - extracted from system_prompt_full.yaml
+# FSM Transition Table - extracted from registry-managed prompts
 TRANSITIONS: list[Transition] = [
     # From STATE_0_INIT
     Transition(
@@ -419,8 +452,18 @@ def normalize_state(value: str) -> State:
 
     # Check legacy aliases first
     if upper in LEGACY_STATE_ALIASES:
+        if not settings.ENABLE_LEGACY_STATE_ALIASES:
+            logger.error("Legacy state alias blocked: %s", upper)
+            return State.STATE_0_INIT
+        logger.warning(
+            "Legacy state alias used: %s -> %s",
+            upper,
+            LEGACY_STATE_ALIASES[upper].value,
+        )
         return LEGACY_STATE_ALIASES[upper]
 
     # Try direct parse
     return State.from_string(upper)
 
+# Logger
+logger = logging.getLogger(__name__)

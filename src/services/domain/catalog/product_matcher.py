@@ -97,7 +97,7 @@ def _get_color_patterns() -> list[tuple[str, str]]:
 
 def extract_requested_color(text: str) -> str | None:
     """Extract color from text using registry patterns."""
-    t = (text or "").lower().replace("ё", "е")
+    t = (text or "").lower().replace("\u0451", "\u0435")
     t = " ".join(t.split())
 
     patterns = _get_color_patterns()
