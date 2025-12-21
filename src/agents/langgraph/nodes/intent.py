@@ -11,48 +11,13 @@ import logging
 from typing import Any
 
 from src.core.input_validator import validate_input_metadata
-<<<<<<< Updated upstream
-=======
 from src.core.state_machine import State
 from src.core.prompt_registry import get_snippet_by_header
->>>>>>> Stashed changes
 
 
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< Updated upstream
-# Intent keywords for quick detection
-INTENT_PATTERNS = {
-    "PAYMENT_DELIVERY": [
-        "купую", "беру", "оплата", "реквізит", "замовл", "оформ",
-        "карта", "переказ", "оплачу", "доставк", "нова пошта",
-    ],
-    "SIZE_HELP": [
-        "зріст", "розмір", "вік", "см", "років", "рік", "міс",
-        "скільки", "який розмір", "підбери", "підійде",
-    ],
-    "COLOR_HELP": [
-        "колір", "кольор", "інший", "чорн", "біл", "рожев",
-        "синій", "червон", "зелен",
-    ],
-    "COMPLAINT": [
-        "скарга", "проблем", "повернен", "брак", "жалоба", "обман",
-        "не працює", "зламан", "погано", "відмов",
-    ],
-    "PHOTO_IDENT": [
-        "фото", "фотографія", "зображення", "покажи фото", "можна фото",
-        "дивись фото", "картинка", "знімок", "фотк",
-    ],
-    "DISCOVERY_OR_QUESTION": [
-        "сукн", "костюм", "тренч", "плаття", "покаж", "є", "хочу",
-        "підбери", "порадь", "шукаю", "ціна", "скільки кошт",
-    ],
-    "GREETING_ONLY": [
-        "привіт", "вітаю", "добр", "hello", "hi", "хай",
-    ],
-}
-=======
 def _get_patterns(header: str) -> list[str]:
     """Get patterns from registry."""
     bubbles = get_snippet_by_header(header)
@@ -80,7 +45,6 @@ def get_intent_patterns() -> dict[str, list[str]]:
         "GREETING_ONLY": _get_patterns("INTENT_PATTERN_GREETING"),
         "THANKYOU_SMALLTALK": _get_patterns("INTENT_PATTERN_THANKYOU"),
     }
->>>>>>> Stashed changes
 
 
 def detect_intent_from_text(
@@ -103,22 +67,6 @@ def detect_intent_from_text(
 
 def _check_special_cases(text_lower: str, has_image: bool, current_state: str, patterns: dict) -> str | None:
     """Check special cases before keyword matching."""
-<<<<<<< Updated upstream
-    # Empty text with image
-    if not text_lower and has_image:
-        return "PHOTO_IDENT"
-
-    # Payment context takes priority in payment state
-    if current_state == "STATE_5_PAYMENT_DELIVERY":
-        if has_image:
-            return "PAYMENT_DELIVERY"
-        for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
-            if keyword in text_lower:
-                return "PAYMENT_DELIVERY"
-
-    # Photo identification (not in payment context)
-    if has_image:
-=======
     if not text_lower and has_image:
         return "PHOTO_IDENT"
 
@@ -143,7 +91,6 @@ def _check_special_cases(text_lower: str, has_image: bool, current_state: str, p
         for keyword in patterns["PAYMENT_DELIVERY"]:
             if keyword in text_lower:
                 return None
->>>>>>> Stashed changes
         return "PHOTO_IDENT"
 
     return None
@@ -156,11 +103,8 @@ def _match_keywords(text_lower: str, text_len: int, patterns: dict) -> str:
         "COMPLAINT",
         "SIZE_HELP",
         "COLOR_HELP",
-<<<<<<< Updated upstream
-=======
         "REQUEST_PHOTO",
         "PRODUCT_CATEGORY",
->>>>>>> Stashed changes
     ]
 
     for intent in priority_intents:
@@ -181,15 +125,6 @@ def _match_keywords(text_lower: str, text_len: int, patterns: dict) -> str:
 
 
 async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
-<<<<<<< Updated upstream
-    """
-    Detect intent from user input for smart routing.
-
-    This runs BEFORE LLM to enable conditional edges.
-    Fast and lightweight - no API calls.
-    """
-    # Skip if already escalating
-=======
     """Detect intent from user input for smart routing."""
     dialog_phase = state.get("dialog_phase", "")
     reset_for_new = dialog_phase == "COMPLETED"
@@ -206,7 +141,6 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
             "step_number": state.get("step_number", 0) + 1,
         }
 
->>>>>>> Stashed changes
     if state.get("should_escalate"):
         return {
             "detected_intent": "ESCALATION",
@@ -226,20 +160,8 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         current_state=metadata.current_state.value,
     )
 
-<<<<<<< Updated upstream
-    logger.debug(
-        "Intent detected: %s (text=%s, has_image=%s, state=%s)",
-        detected_intent,
-        user_content[:50] if user_content else "",
-        has_image,
-        metadata.current_state.value,
-    )
-
-    return {
-=======
     reset_now = reset_for_new and detected_intent != "THANKYOU_SMALLTALK"
     update = {
->>>>>>> Stashed changes
         "detected_intent": detected_intent,
         "has_image": has_image,
         "image_url": image_url,
@@ -250,8 +172,6 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         },
         "step_number": state.get("step_number", 0) + 1,
     }
-<<<<<<< Updated upstream
-=======
     if reset_now:
         update.update({
             "current_state": State.STATE_0_INIT.value,
@@ -269,4 +189,3 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
             },
         })
     return update
->>>>>>> Stashed changes

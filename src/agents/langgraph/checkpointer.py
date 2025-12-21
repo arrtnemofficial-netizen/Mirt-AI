@@ -155,9 +155,6 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=5)
         checkpointer = PostgresSaver(pool)
 
-<<<<<<< Updated upstream
-        logger.info("PostgreSQL checkpointer initialized successfully")
-=======
         async def check_connection(conn):
             """Check if connection is still alive before returning from pool."""
             try:
@@ -331,7 +328,6 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         checkpointer = InstrumentedAsyncPostgresSaver(pool)
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
->>>>>>> Stashed changes
         return checkpointer
 
     except ImportError:

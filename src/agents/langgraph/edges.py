@@ -12,15 +12,12 @@ from typing import Any, Literal
 
 from src.core.state_machine import State
 
-<<<<<<< Updated upstream
-=======
 from .nodes.intent import get_intent_patterns
 from .nodes.utils import extract_user_message
 
 # Import for intent detection
 from .state_prompts import detect_simple_intent
 
->>>>>>> Stashed changes
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +30,6 @@ AgentRoute = Literal["validation", "offer", "end"]
 OfferRoute = Literal["payment", "validation", "end"]
 
 
-<<<<<<< Updated upstream
-=======
 # =============================================================================
 # MASTER ROUTER (Turn-Based State Machine)
 # =============================================================================
@@ -332,7 +327,6 @@ def get_master_routes() -> dict[str, str]:
     }
 
 
->>>>>>> Stashed changes
 def route_after_moderation(state: dict[str, Any]) -> ModerationRoute:
     """
     Route after moderation check.

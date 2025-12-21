@@ -39,16 +39,6 @@ def _build_model() -> OpenAIModel:
         base_url = settings.OPENROUTER_BASE_URL
         model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
 
-<<<<<<< Updated upstream
-    if not api_key:
-        logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
-        if settings.LLM_PROVIDER == "openai":
-             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-             base_url = settings.OPENROUTER_BASE_URL
-             model_name = settings.AI_MODEL
-
-=======
->>>>>>> Stashed changes
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)
     return OpenAIModel(model_name, provider=provider)
@@ -87,8 +77,6 @@ _payment_prompt = """
 Відповідай УКРАЇНСЬКОЮ, тепло і підтримуюче 🤍
 """
 
-<<<<<<< Updated upstream
-=======
 
 def _get_payment_prompt() -> str:
     """Get payment prompt from .md file with fallback."""
@@ -103,7 +91,6 @@ def _get_payment_prompt() -> str:
         return _PAYMENT_PROMPT_FALLBACK
 
 
->>>>>>> Stashed changes
 _payment_agent: Agent[AgentDeps, PaymentResponse] | None = None
 
 
@@ -221,14 +208,6 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
         _payment_agent = Agent(  # type: ignore[call-overload]
             _build_model(),
             deps_type=AgentDeps,
-<<<<<<< Updated upstream
-            output_type=PaymentResponse,  # Changed from result_type (PydanticAI 1.23+)
-            system_prompt=_payment_prompt,
-            retries=2,
-        )
-        _payment_agent.system_prompt(_add_order_context)
-        # Register tools - use decorator syntax
-=======
             output_type=PaymentResponse,
             system_prompt=_get_payment_prompt(),
             retries=2,
@@ -236,7 +215,6 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
         _payment_agent.system_prompt(_add_order_context)
         _payment_agent.system_prompt(_add_payment_requisites)
         _payment_agent.system_prompt(_add_payment_subphase_prompt)
->>>>>>> Stashed changes
         _payment_agent.tool(name="extract_customer_data")(_extract_customer_data)
         _payment_agent.tool(name="check_order_ready")(_check_order_ready)
     return _payment_agent

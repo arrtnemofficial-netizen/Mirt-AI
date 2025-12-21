@@ -3,9 +3,6 @@ Offer Node - Product presentation.
 ==================================
 Presents product offer with price and details.
 This is where we close the sale.
-<<<<<<< Updated upstream
-Uses run_support directly with offer context.
-=======
 
 DELIBERATION FLOW:
 1. Pre-validation: Check prices against DB before LLM call
@@ -14,7 +11,6 @@ DELIBERATION FLOW:
 4. Return offer to customer
 
 Uses run_main directly with offer context.
->>>>>>> Stashed changes
 """
 
 from __future__ import annotations
@@ -24,11 +20,6 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from src.agents.pydantic.deps import create_deps_from_state
-<<<<<<< Updated upstream
-from src.agents.pydantic.support_agent import run_support
-from src.core.state_machine import State
-from src.services.observability import log_agent_step, track_metric
-=======
 from src.agents.pydantic.main_agent import run_offer
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
@@ -42,18 +33,11 @@ from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.services.data.catalog_service import CatalogService
 from src.services.core.observability import log_agent_step, track_metric
->>>>>>> Stashed changes
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-<<<<<<< Updated upstream
-    from src.agents.pydantic.models import SupportResponse
-
-
-logger = logging.getLogger(__name__)
-=======
     from src.agents.pydantic.models import OfferResponse
 def _merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     """Merge fields from incoming product into existing product, preserving truth."""
@@ -100,7 +84,6 @@ def _merge_products(
         )
 
     return merged_incoming
->>>>>>> Stashed changes
 
 
 async def offer_node(
@@ -147,15 +130,10 @@ async def offer_node(
     )
 
     try:
-<<<<<<< Updated upstream
-        # Call support agent with offer context
-        response: SupportResponse = await run_support(
-=======
         # =========================================================================
         # STEP 2: LLM CALL with deliberation
         # =========================================================================
         response: OfferResponse = await run_offer(
->>>>>>> Stashed changes
             message=user_message,
             deps=deps,
             message_history=None,
@@ -179,8 +157,6 @@ async def offer_node(
         # Build assistant message from response
         assistant_content = "\n".join(m.content for m in response.messages)
 
-<<<<<<< Updated upstream
-=======
         if settings.USE_OFFER_DELIBERATION and response.deliberation:
             delib = response.deliberation
 
@@ -271,7 +247,6 @@ async def offer_node(
                 new_phase="OFFER_MADE",
                 response_preview=preview_text,
             )
->>>>>>> Stashed changes
         return {
             "current_state": State.STATE_4_OFFER.value,
             "messages": [{"role": "assistant", "content": assistant_content}],

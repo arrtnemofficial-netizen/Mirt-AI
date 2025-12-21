@@ -11,12 +11,8 @@ from typing import Any
 
 from src.core.models import AgentResponse, DebugInfo, Escalation, Message, Metadata
 from src.core.state_machine import State
-<<<<<<< Updated upstream
-from src.services.observability import log_agent_step, track_metric
-=======
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.core.observability import log_agent_step, track_metric
->>>>>>> Stashed changes
 
 
 logger = logging.getLogger(__name__)
@@ -93,12 +89,8 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     # NOTIFY MANAGER
     # =========================================================================
     try:
-<<<<<<< Updated upstream
-        from src.services.notification_service import NotificationService
-=======
         from src.services.infra.notification_service import NotificationService
 
->>>>>>> Stashed changes
         notifier = NotificationService()
         
         # Get last user message for context

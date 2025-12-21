@@ -17,13 +17,9 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
-<<<<<<< Updated upstream
-from src.core.prompt_loader import get_system_prompt_text
-=======
 from src.core.human_responses import get_human_response
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry, get_snippet_by_header
->>>>>>> Stashed changes
 
 from .deps import AgentDeps
 from .models import VisionResponse
@@ -35,18 +31,6 @@ logger = logging.getLogger(__name__)
 VISION_GUIDE_PATH = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
 
 
-<<<<<<< Updated upstream
-def _load_vision_guide() -> str:
-    """Load vision recognition guide for better photo analysis."""
-    try:
-        if VISION_GUIDE_PATH.exists():
-            with open(VISION_GUIDE_PATH, encoding="utf-8") as f:
-                guide = json.load(f)
-            return json.dumps(guide, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.warning("Failed to load vision guide: %s", e)
-    return ""
-=======
 # Reference logic moved to VisionContextService
 
 
@@ -144,7 +128,6 @@ def _is_private_cdn_url(url: str) -> bool:
 
 
 # Vision guide logic replaced by prompt registry
->>>>>>> Stashed changes
 
 
 # =============================================================================
@@ -194,67 +177,15 @@ async def _search_products(
     products = await ctx.deps.catalog.search_products(query, category)
     
     if not products:
-<<<<<<< Updated upstream
-        return "На жаль, за вашим запитом нічого не знайдено."
-        
-    lines = ["Знайдені товари:"]
-=======
         return get_human_response("not_found")
 
     lines = [get_snippet_by_header("VISION_NO_PRODUCTS")[0]]
->>>>>>> Stashed changes
     for p in products:
         name = p.get("name")
         price = p.get("price")
         sizes = ", ".join(p.get("sizes", []))
         colors = ", ".join(p.get("colors", []))
         sku = p.get("sku", "N/A")
-<<<<<<< Updated upstream
-        lines.append(f"- {name} (SKU: {sku}, {price} грн). Розміри: {sizes}. Кольори: {colors}")
-        
-    return "\n".join(lines)
-
-
-def _get_vision_prompt() -> str:
-    """Build vision prompt with REAL catalog and recognition guide."""
-    # Load full catalog from the same source as support_agent
-    full_prompt = get_system_prompt_text("grok")
-
-    # Load vision recognition guide
-    vision_guide = _load_vision_guide()
-
-    vision_instructions = """
-# VISION AGENT - Аналіз фото товарів
-
-Ти спеціаліст з розпізнавання товарів MIRT_UA (Ольга).
-
-## ТВОЯ ЗАДАЧА:
-1. Проаналізуй фото яке надіслав клієнт
-2. Опиши що ти бачиш (колір, тип одягу, деталі)
-3. ВИКОРИСТОВУЙ інструмент `search_products` щоб знайти цей товар в базі даних!
-   - Шукай за ключовими словами (наприклад "рожева сукня", "костюм мерея")
-4. Якщо знайшов товар - поверни його деталі (назву, ціну, ID)
-5. Якщо не знайшов - запропонуй схожі
-
-## ФОРМАТ ВІДПОВІДІ:
-- Якщо знайшов товар: опиши його, дай ціну, запитай розмір
-- Якщо не впевнений: запропонуй схожі варіанти
-- Якщо не з каталогу: ввічливо поясни що не маємо такого
-
-## ЗАБОРОНЕНО:
-- Вигадувати товари яких немає в результатах пошуку
-- Називати ціни "зі стелі"
-- Пропонувати кольори/розміри яких немає
-
-Відповідай УКРАЇНСЬКОЮ, тепло як менеджер Ольга 🤍
-"""
-
-    # Build final prompt with vision guide
-    if vision_guide:
-        return f"{vision_instructions}\n---\n# VISION RECOGNITION GUIDE\n{vision_guide}"
-    else:
-        return vision_instructions
-=======
         tmpl = get_snippet_by_header("VISION_PRODUCT_LINE")[0]
         lines.append(tmpl.format(name=name, sku=sku, price=price, sizes=sizes, colors=colors))
 
@@ -286,7 +217,6 @@ async def _add_vision_context(ctx: RunContext[AgentDeps]) -> str:
     if not ctx.deps.vision:
         return ""
     return await ctx.deps.vision.get_full_context()
->>>>>>> Stashed changes
 
 
 _vision_agent: Agent[AgentDeps, VisionResponse] | None = None
@@ -310,10 +240,7 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
             system_prompt=_get_vision_prompt(),
             retries=2,
         )
-<<<<<<< Updated upstream
-=======
         _vision_agent.system_prompt(_add_vision_context)
->>>>>>> Stashed changes
         _vision_agent.system_prompt(_add_image_url)
         _vision_agent.tool(name="search_products")(_search_products)
     return _vision_agent
@@ -347,11 +274,6 @@ async def run_vision(
 
     agent = get_vision_agent()
 
-<<<<<<< Updated upstream
-    # Add image context to message
-    if deps.image_url and "[IMAGE_URL:" not in message:
-        message = f"{message}\n\n[IMAGE_URL: {deps.image_url}]"
-=======
     if not deps.image_url:
         logger.error("👁️ Vision agent called WITHOUT image! deps.image_url is empty.")
         return VisionResponse(
@@ -455,7 +377,6 @@ async def run_vision(
         if final_image_url and not final_image_url.startswith("data:")
         else "<base64>",
     )
->>>>>>> Stashed changes
 
     try:
         result = await asyncio.wait_for(
@@ -465,12 +386,8 @@ async def run_vision(
         return result.output  # output_type param, result.output attr
 
     except Exception as e:
-<<<<<<< Updated upstream
-        logger.exception("Vision agent error: %s", e)
-=======
         logger.exception("👁️ Vision agent error: %s", e)
         clarif = get_snippet_by_header("VISION_ASK_PHOTO")
->>>>>>> Stashed changes
         return VisionResponse(
             reply_to_user="Вибачте, не вдалося проаналізувати фото. Спробуйте надіслати ще раз 🤍",
             confidence=0.0,

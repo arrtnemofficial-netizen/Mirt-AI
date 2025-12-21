@@ -11,17 +11,12 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-<<<<<<< Updated upstream
-from src.agents.pydantic.deps import create_deps_from_state
-from src.agents.pydantic.support_agent import run_support
-=======
 from src.agents.langgraph.nodes.intent import get_intent_patterns
 from src.agents.langgraph.state_prompts import detect_simple_intent
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.main_agent import run_main
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
->>>>>>> Stashed changes
 from src.core.state_machine import State
 from src.services.core.observability import log_agent_step, track_metric
 
@@ -34,8 +29,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-<<<<<<< Updated upstream
-=======
 _UPSELL_DECLINE = (
     "нет",
     "ні",
@@ -115,7 +108,6 @@ def _build_crm_status_message(state: dict[str, Any]) -> str:
 
     return message
 
->>>>>>> Stashed changes
 
 async def upsell_node(
     state: dict[str, Any],
@@ -145,8 +137,6 @@ async def upsell_node(
     # Get current order for context
     ordered_products = state.get("offered_products", []) or state.get("selected_products", [])
 
-<<<<<<< Updated upstream
-=======
     # Check CRM order status and build status message
     crm_status_message = _build_crm_status_message(state)
 
@@ -182,7 +172,6 @@ async def upsell_node(
             "last_error": None,
         }
 
->>>>>>> Stashed changes
     # Create deps with upsell context
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_6_UPSELL.value

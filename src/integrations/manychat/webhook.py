@@ -17,10 +17,6 @@ from typing import TYPE_CHECKING, Any
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.services.client_data_parser import ClientData, parse_client_data
 from src.services.conversation import create_conversation_handler
-<<<<<<< Updated upstream
-from src.services.message_store import MessageStore, create_message_store
-from src.services.renderer import render_agent_response_text
-=======
 from src.services.infra.debouncer import MessageDebouncer
 from src.services.infra.media_utils import normalize_image_url
 from src.services.infra.message_store import MessageStore, create_message_store
@@ -37,7 +33,6 @@ from .response_builder import (
     build_manychat_quick_replies,
     build_manychat_v2_response,
 )
->>>>>>> Stashed changes
 
 
 if TYPE_CHECKING:

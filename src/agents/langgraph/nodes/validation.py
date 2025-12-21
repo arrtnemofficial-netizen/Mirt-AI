@@ -23,11 +23,7 @@ import logging
 from typing import Any
 
 from src.core.product_adapter import ProductAdapter
-<<<<<<< Updated upstream
-from src.services.observability import log_validation_result, track_metric
-=======
 from src.services.core.observability import log_trace, log_validation_result, track_metric
->>>>>>> Stashed changes
 
 
 logger = logging.getLogger(__name__)

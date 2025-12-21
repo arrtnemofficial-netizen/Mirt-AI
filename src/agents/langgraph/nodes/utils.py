@@ -65,8 +65,6 @@ def extract_assistant_message(messages: list[Any]) -> str:
                 return getattr(msg, "content", "")
 
     return ""
-<<<<<<< Updated upstream
-=======
 
 
 # =============================================================================
@@ -157,4 +155,3 @@ def get_size_and_price_for_height(
         size = "158-164"
 
     return size, prices.get(size, default_price)
->>>>>>> Stashed changes

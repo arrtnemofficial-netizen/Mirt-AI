@@ -285,15 +285,6 @@ class AgentMetrics:
 
         latency_data = summary.get("agent_step_latency_ms", {})
 
-<<<<<<< Updated upstream:src/services/observability.py
-        return cls(
-            total_requests=latency_data.get("count", 0),
-            avg_latency_ms=latency_data.get("avg", 0),
-            moderation_blocks=int(summary.get("moderation_blocks", {}).get("sum", 0)),
-            validation_failures=int(summary.get("validation_failures", {}).get("sum", 0)),
-            tool_calls=int(summary.get("tool_latency_ms", {}).get("count", 0)),
-        )
-=======
     def __init__(self):
         self._enabled = bool(getattr(settings, "ENABLE_OBSERVABILITY", True))
 
@@ -387,4 +378,3 @@ async def log_trace(
     await _tracer.log_trace(
         session_id=session_id, trace_id=trace_id, node_name=node_name, status=status, **kwargs
     )
->>>>>>> Stashed changes:src/services/core/observability.py

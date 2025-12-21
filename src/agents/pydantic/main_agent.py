@@ -91,9 +91,6 @@ def _get_model() -> OpenAIModel:
 
 def _get_base_prompt() -> str:
     """Get system prompt (lazy load)."""
-<<<<<<< Updated upstream:src/agents/pydantic/support_agent.py
-    return get_system_prompt_text("grok")
-=======
     base_identity = registry.get("system.base_identity").content
     domain_prompt = registry.get("main.main").content
     return f"{base_identity}\n\n{domain_prompt}"
@@ -117,7 +114,6 @@ async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:
 async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
     """Inject canonical payment requisites to avoid LLM hallucinations."""
     return "\n--- РЕКВІЗИТИ ДЛЯ ОПЛАТИ (SSOT) ---\n" + format_requisites_multiline()
->>>>>>> Stashed changes:src/agents/pydantic/main_agent.py
 
 
 # =============================================================================

@@ -22,8 +22,6 @@ class NotificationService:
         self.bot_token = settings.MANAGER_BOT_TOKEN.get_secret_value()
         self.chat_id = settings.MANAGER_CHAT_ID
 
-<<<<<<< Updated upstream:src/services/notification_service.py
-=======
     @staticmethod
     def _truncate(value: str | None, limit: int) -> str:
         text = (value or "").strip()
@@ -140,7 +138,6 @@ class NotificationService:
         message = "\n".join(lines).strip()
         return self._truncate(message, 3900)
 
->>>>>>> Stashed changes:src/services/infra/notification_service.py
     async def send_escalation_alert(
         self,
         session_id: str,
@@ -149,14 +146,6 @@ class NotificationService:
     ) -> bool:
         """
         Send escalation alert to manager.
-<<<<<<< Updated upstream:src/services/notification_service.py
-        
-        Args:
-            session_id: ID of the user session
-            reason: Reason for escalation
-            user_context: Optional context (e.g. last user message)
-=======
->>>>>>> Stashed changes:src/services/infra/notification_service.py
         """
         if not self.bot_token or not self.chat_id:
             logger.warning("Manager notification disabled: missing config")

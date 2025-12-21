@@ -33,10 +33,6 @@ class OrderService:
             Created order ID (str) or None if failed
         """
         if not self.client:
-<<<<<<< Updated upstream:src/services/order_service.py
-            logger.warning("Supabase client not available, cannot save order")
-            return None
-=======
             logger.error(
                 "[ORDER] CRITICAL: Supabase client not available - order will NOT be saved!"
             )
@@ -44,7 +40,6 @@ class OrderService:
             from src.services.core.exceptions import ServiceUnavailableError
 
             raise ServiceUnavailableError("database", "Cannot save order - database unavailable")
->>>>>>> Stashed changes:src/services/data/order_service.py
 
         try:
             # 1. Prepare Order Payload

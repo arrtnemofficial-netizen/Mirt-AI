@@ -122,8 +122,6 @@ def create_crm_order(
                 "[WORKER:CRM] Order created successfully: %s",
                 response.order_id,
             )
-<<<<<<< Updated upstream
-=======
 
             # Update CRM order status in database
             try:
@@ -151,7 +149,6 @@ def create_crm_order(
                     e,
                 )
 
->>>>>>> Stashed changes
             return {
                 "status": "created",
                 "order_id": response.order_id,
@@ -162,8 +159,6 @@ def create_crm_order(
                 "[WORKER:CRM] Order creation failed: %s",
                 response.error,
             )
-<<<<<<< Updated upstream
-=======
 
             # Update CRM order with failed status
             try:
@@ -190,7 +185,6 @@ def create_crm_order(
                     e,
                 )
 
->>>>>>> Stashed changes
             # Business logic error - don't retry
             raise PermanentError(f"CRM rejected order: {response.error}", error_code="CRM_REJECTED")
 

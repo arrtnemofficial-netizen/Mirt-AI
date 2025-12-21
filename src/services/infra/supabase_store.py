@@ -9,13 +9,8 @@ from langchain_core.messages import BaseMessage
 from src.agents import ConversationState
 from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
-<<<<<<< Updated upstream:src/services/supabase_store.py
-from src.services.session_store import SessionStore
-from src.services.supabase_client import get_supabase_client
-=======
 from src.services.infra.session_store import InMemorySessionStore, SessionStore, _serialize_for_json
 from src.services.infra.supabase_client import get_supabase_client
->>>>>>> Stashed changes:src/services/infra/supabase_store.py
 
 
 if TYPE_CHECKING:

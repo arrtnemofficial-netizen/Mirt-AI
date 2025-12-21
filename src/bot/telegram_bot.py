@@ -27,16 +27,10 @@ from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
 from src.core.state_machine import EscalationLevel, State, get_keyboard_for_state, normalize_state
 from src.services.conversation import ConversationHandler, create_conversation_handler
-<<<<<<< Updated upstream
-from src.services.message_store import MessageStore, create_message_store
-from src.services.renderer import render_agent_response_text
-from src.services.session_store import InMemorySessionStore, SessionStore
-=======
 from src.services.infra.debouncer import BufferedMessage, MessageDebouncer
 from src.services.infra.message_store import MessageStore, create_message_store
 from src.services.infra.renderer import render_agent_response_text
 from src.services.infra.session_store import InMemorySessionStore, SessionStore
->>>>>>> Stashed changes
 
 
 if TYPE_CHECKING:
@@ -101,17 +95,6 @@ def build_dispatcher(
 
     @dp.message(CommandStart())
     async def handle_start(message: Message) -> None:
-<<<<<<< Updated upstream
-        # Reset session state on /start
-        session_id = str(message.chat.id)
-        store.save(session_id, {
-            "messages": [],
-            "metadata": {"session_id": session_id},
-            "current_state": "STATE_0_INIT",
-        })
-        await message.answer("Можемо почати спілкування!")
-
-=======
         """Старт діалогу: м'який ресет стану.
 
         Використовується при першому запуску або коли користувач сам натиснув /start.
@@ -197,7 +180,6 @@ def build_dispatcher(
             _get_reply("BOT_RESTART_REPLY", "Сесію перезапустила. Надішліть фото або запитання.")
         )
 
->>>>>>> Stashed changes
     @dp.message(F.text)
     async def handle_text(message: Message) -> None:
         await _process_incoming(message, conversation_handler)
@@ -276,12 +258,6 @@ async def _dispatch_to_telegram(message: Message, agent_response: AgentResponse)
         if not chunk or not chunk.strip():
             continue
 
-<<<<<<< Updated upstream
-        is_last_text = (i == len(text_chunks) - 1) and not agent_response.products
-        await message.answer(
-            chunk,
-            reply_markup=keyboard if is_last_text else None,
-=======
     # Send product photos only for vision/photo-ident responses to avoid повторних фото
     if agent_response.metadata.intent == "PHOTO_IDENT":
         for _i, product in enumerate(agent_response.products):
@@ -317,7 +293,6 @@ async def run_polling(store: SessionStore | None = None) -> None:
         print(
             "⚠️ Using InMemorySessionStore - session state will be lost on restart!\n"
             "   Set SUPABASE_URL and SUPABASE_API_KEY for persistent session storage."
->>>>>>> Stashed changes
         )
 
     # Send product photos (last one with keyboard)

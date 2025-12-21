@@ -190,8 +190,6 @@ def moderate_user_message(text: str) -> ModerationResult:
 
     flags: list[str] = []
 
-<<<<<<< Updated upstream:src/services/moderation.py
-=======
     # Check for prompt injection FIRST
     from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
     
@@ -207,7 +205,6 @@ def moderate_user_message(text: str) -> ModerationResult:
             reason=_get_snippet_text("MODERATION_INJECTION_REASON", "Instruction manipulation attempt detected."),
         )
 
->>>>>>> Stashed changes:src/services/core/moderation.py
     # Check for forbidden terms
     banned_hits = detect_forbidden_terms(text)
     if banned_hits:

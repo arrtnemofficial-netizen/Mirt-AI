@@ -9,13 +9,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-<<<<<<< Updated upstream:src/services/catalog_service.py
-from src.services.supabase_client import get_supabase_client
-=======
 from src.services.core.exceptions import CatalogUnavailableError
 from src.services.core.observability import log_tool_execution, track_metric
 from src.services.infra.supabase_client import get_supabase_client
->>>>>>> Stashed changes:src/services/data/catalog_service.py
 
 logger = logging.getLogger(__name__)
 
