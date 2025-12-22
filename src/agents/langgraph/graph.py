@@ -40,6 +40,7 @@ from .nodes import (
     moderation_node,
     offer_node,
     payment_node,
+    sitniks_status,
     upsell_node,
     validation_node,
     vision_node,
@@ -99,6 +100,9 @@ def build_production_graph(
     async def _agent(state: dict[str, Any]) -> dict[str, Any]:
         return await agent_node(state, runner)
 
+    async def _sitniks_status(state: dict[str, Any]) -> dict[str, Any]:
+        return await sitniks_status.update_sitniks_status(state)
+
     async def _offer(state: dict[str, Any]) -> dict[str, Any]:
         return await offer_node(state, runner)
 
@@ -128,6 +132,7 @@ def build_production_graph(
     graph.add_node("intent", _intent)
     graph.add_node("vision", _vision)
     graph.add_node("agent", _agent)
+    graph.add_node("sitniks_status", _sitniks_status)
     graph.add_node("offer", _offer)
     graph.add_node("payment", _payment)
     graph.add_node("upsell", _upsell)
@@ -166,9 +171,12 @@ def build_production_graph(
         get_validation_routes(),
     )
 
-    # After agent: validate or make offer
+    # After agent: update Sitniks status, then route
+    graph.add_edge("agent", "sitniks_status")
+    
+    # After sitniks_status: validate or make offer
     graph.add_conditional_edges(
-        "agent",
+        "sitniks_status",
         route_after_agent,
         get_agent_routes(),
     )

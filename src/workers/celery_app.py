@@ -83,6 +83,7 @@ celery_app = Celery(
         "src.workers.tasks.health",
         "src.workers.tasks.messages",  # THE MAIN TASK!
         "src.workers.tasks.llm_usage",  # Token usage tracking
+        "src.workers.tasks.memory",  # Memory maintenance tasks
     ],
 )
 
@@ -163,6 +164,7 @@ celery_app.conf.task_routes = {
     "src.workers.tasks.messages.send_response": {"queue": "webhooks"},
     "src.workers.tasks.health.*": {"queue": "default"},
     "src.workers.tasks.llm_usage.*": {"queue": "default"},
+    "src.workers.tasks.memory.*": {"queue": "default"},
 }
 
 # =============================================================================

@@ -18,7 +18,7 @@ from typing import Any
 
 from src.conf.config import settings
 from src.services.infra.supabase_client import get_supabase_client
-from src.workers.tasks.crm import create_crm_order, sync_order_status
+from src.workers.dispatcher import dispatch_crm_order, dispatch_crm_order_status
 
 
 logger = logging.getLogger(__name__)
@@ -90,29 +90,32 @@ class CRMService:
                 order_data=order_data,
             )
 
-            # Trigger CRM order creation via Celery
-            task_result = create_crm_order.delay(
+            # Trigger CRM order creation via dispatcher
+            dispatch_result = dispatch_crm_order(
                 {
                     "external_id": external_id,
                     **order_data,
                 }
             )
 
-            # Update to queued status with task_id
+            # Update to queued status with task_id (if queued)
+            task_id = dispatch_result.get("task_id") if dispatch_result.get("queued") else None
             await self._update_order_status(
-                external_id=external_id, status="queued", task_id=task_result.id, error_message=None
+                external_id=external_id, status="queued" if task_id else "processing", task_id=task_id, error_message=None
             )
 
+            task_id = dispatch_result.get("task_id")
             logger.info(
-                "[CRM:SERVICE] Order creation task queued external_id=%s task_id=%s",
+                "[CRM:SERVICE] Order creation dispatched external_id=%s task_id=%s queued=%s",
                 external_id,
-                task_result.id,
+                task_id,
+                dispatch_result.get("queued", False),
             )
 
             return {
-                "status": "queued",
+                "status": "queued" if dispatch_result.get("queued") else "processing",
                 "external_id": external_id,
-                "task_id": task_result.id,
+                "task_id": task_id,
                 "session_id": session_id,
             }
 
@@ -194,11 +197,11 @@ class CRMService:
             # Update status in database
             await self._update_order_status(order_record["external_id"], new_status, metadata)
 
-            # Trigger session sync to notify user
-            sync_order_status.delay(
-                crm_order_id,
-                order_record["session_id"],
-                new_status,
+            # Trigger session sync to notify user via dispatcher
+            dispatch_crm_order_status(
+                order_id=crm_order_id,
+                session_id=order_record["session_id"],
+                new_status=new_status,
             )
 
             logger.info(

@@ -67,7 +67,14 @@ def build_followup_message(
 
     created_at = now or datetime.now(UTC)
     
-    snippet_name = f"FOLLOWUP_{index}"
+    # Use specific snippets for 4h (index 1) and 23h (index 2) followups
+    if index == 1:
+        snippet_name = "FOLLOWUP_4H"
+    elif index == 2:
+        snippet_name = "FOLLOWUP_23H"
+    else:
+        snippet_name = f"FOLLOWUP_{index}"
+    
     s = get_snippet_by_header(snippet_name)
     content = "".join(s) if s else "Hi! Just checking in."
 

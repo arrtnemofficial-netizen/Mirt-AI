@@ -87,10 +87,10 @@ class Settings(BaseSettings):
         description="Days after which conversations are summarized and pruned.",
     )
     FOLLOWUP_DELAYS_HOURS: str = Field(
-        default="24,72",
+        default="4,23",
         description=(
             "Comma-separated list of hour offsets for proactive follow-ups "
-            "(e.g. '24,72' sends after 24h and 72h of inactivity)."
+            "(e.g. '4,23' sends after 4h and 23h of inactivity)."
         ),
     )
 

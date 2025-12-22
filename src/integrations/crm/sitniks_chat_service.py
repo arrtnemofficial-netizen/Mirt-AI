@@ -385,16 +385,35 @@ class SitniksChatService:
         )
         result["status_set"] = status_ok
 
-        # 4. Assign AI manager
+        # 4. Assign AI manager (with fallback to "Павло")
         ai_manager_name = settings.SITNIKS_AI_MANAGER_NAME
         ai_manager_id = await self.get_manager_id_by_name(ai_manager_name)
+        
+        if not ai_manager_id:
+            # Fallback to "Павло" if AI manager not found
+            logger.warning(
+                "[SITNIKS] AI manager '%s' not found, trying fallback 'Павло'",
+                ai_manager_name,
+            )
+            pavlo_manager_id = await self.get_manager_id_by_name("Павло")
+            if pavlo_manager_id:
+                ai_manager_id = pavlo_manager_id
+                logger.info("[SITNIKS] Using fallback manager 'Павло' (ID: %d)", pavlo_manager_id)
+            else:
+                # Try alternative spellings
+                for alt_name in ["Pavlo", "Павло", "pavlo"]:
+                    alt_id = await self.get_manager_id_by_name(alt_name)
+                    if alt_id:
+                        ai_manager_id = alt_id
+                        logger.info("[SITNIKS] Using fallback manager '%s' (ID: %d)", alt_name, alt_id)
+                        break
+        
         if ai_manager_id:
             manager_ok = await self.assign_manager(chat_id, ai_manager_id)
             result["manager_assigned"] = manager_ok
         else:
-            logger.warning(
-                "[SITNIKS] AI manager '%s' not found in CRM",
-                ai_manager_name,
+            logger.error(
+                "[SITNIKS] Failed to find AI manager or fallback 'Павло' in CRM",
             )
 
         result["success"] = status_ok

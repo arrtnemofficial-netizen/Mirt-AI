@@ -127,6 +127,70 @@ def schedule_followup(
         return {"scheduled": False, "reason": "celery_disabled"}
 
 
+def dispatch_crm_order_status(
+    order_id: str,
+    session_id: str,
+    new_status: str | None = None,
+) -> dict:
+    """Dispatch CRM order status sync task.
+
+    Args:
+        order_id: CRM order ID
+        session_id: Session ID to update
+        new_status: New order status (if known from webhook)
+
+    Returns:
+        Task result or async task info
+    """
+    if settings.CELERY_ENABLED:
+        from src.workers.tasks.crm import sync_order_status
+
+        task = sync_order_status.delay(order_id, session_id, new_status)
+        logger.info("[DISPATCH] Queued CRM order status sync task %s", task.id)
+        return {"queued": True, "task_id": task.id}
+    else:
+        # Sync execution
+        from src.integrations.crm.snitkix import get_snitkix_client
+        from src.services.infra.supabase_client import get_supabase_client
+        from src.workers.sync_utils import run_sync
+
+        if not settings.snitkix_enabled:
+            return {"queued": False, "status": "crm_not_configured"}
+
+        async def _sync():
+            crm = get_snitkix_client()
+            if not new_status:
+                order_status = await crm.get_order_status(order_id)
+                new_status = order_status.status if order_status else None
+
+            if not new_status:
+                return {"status": "error", "reason": "status_not_found"}
+
+            # Update session state in Supabase
+            client = get_supabase_client()
+            if client:
+                client.table("agent_sessions").update(
+                    {
+                        "order_status": new_status,
+                        "order_id": order_id,
+                    }
+                ).eq("session_id", session_id).execute()
+
+            return {
+                "status": "synced",
+                "order_id": order_id,
+                "order_status": new_status,
+                "session_id": session_id,
+            }
+
+        try:
+            result = run_sync(_sync())
+            return {"queued": False, **result}
+        except Exception as e:
+            logger.exception("[DISPATCH] Sync order status failed: %s", e)
+            return {"queued": False, "status": "error", "error": str(e)}
+
+
 def dispatch_crm_order(order_data: dict[str, Any]) -> dict:
     """Dispatch CRM order creation task.
 

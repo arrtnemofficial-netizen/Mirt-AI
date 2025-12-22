@@ -51,18 +51,23 @@ def summarise_messages(messages: list[StoredMessage]) -> str:
 
 
 def update_user_summary(user_id: int, summary: str) -> None:
-    """Update summary field in mirt_users table."""
+    """Update summary field in users table.
+    
+    Note: Uses 'users' table (not 'mirt_users') as per schema.
+    """
     client = get_supabase_client()
     if not client:
         return
 
     try:
-        client.table(DBTable.USERS).upsert(
+        # Use 'users' table (not 'mirt_users') as per schema
+        client.table("users").upsert(
             {
-                "user_id": user_id,
+                "user_id": str(user_id),
                 "summary": summary,
             }
         ).execute()
+        logger.info("Updated summary for user %s in users table", user_id)
     except Exception as e:
         logger.error("Failed to update summary for user %s: %s", user_id, e)
 
