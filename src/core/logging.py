@@ -158,6 +158,34 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
+# Event titles mapping for emoji-formatted log messages
+# Based on data/prompts/system/vision.md LOG_TITLES
+LOG_EVENT_TITLES: dict[str, str] = {
+    "api_v1_payload_received": "📩 API: payload отримано",
+    "api_v1_payload_parsed": "🧾 API: payload розібрано",
+    "api_v1_task_scheduled": "🛰️ API: задача запланована",
+    "api_v1_task_timeout": "⏱️ API: timeout (45c)",
+    "manychat_task_scheduled": "🛰️ ManyChat: задача запланована",
+    "manychat_message_accepted": "📬 ManyChat: прийнято (202)",
+    "manychat_process_start": "🔥 ManyChat: старт обробки",
+    "manychat_rate_limited": "⏳ ManyChat: rate limit",
+    "manychat_restart_command": "🔄 ManyChat: /restart",
+    "manychat_image_attached": "🖼️ ManyChat: додано фото",
+    "manychat_subscriber_username": "🧾 ManyChat: username знайдено",
+    "manychat_subscriber_name": "👤 ManyChat: ім'я знайдено",
+    "manychat_debounce_superseded": "🧯 Debounce: запит замінено новішим",
+    "manychat_debounce_aggregated": "🧩 Debounce: зібрано повідомлення",
+    "manychat_fallback_triggered": "🆘 Fallback: спрацював",
+    "manychat_including_images": "🖼️ ManyChat: додаю фото товарів",
+    "manychat_push_attempt": "📤 ManyChat: push спроба",
+    "manychat_push_ok": "✅ ManyChat: push успішний",
+    "manychat_push_rejected": "⛔ ManyChat: push відхилено",
+    "manychat_push_failed": "❌ ManyChat: push не вдався",
+    "manychat_processing_error": "💥 ManyChat: помилка обробки",
+    "manychat_process_done": "🏁 ManyChat: обробку завершено",
+}
+
+
 def log_event(
     logger: logging.Logger,
     *,
@@ -165,10 +193,52 @@ def log_event(
     level: str | None = None,
     **kwargs: Any,
 ) -> None:
-    """Structured event logging helper."""
+    """Structured event logging helper with emoji formatting.
+    
+    Formats log messages with emoji titles from LOG_EVENT_TITLES and
+    structured data for better readability.
+    
+    Special formatting for 'manychat_process_done':
+        🏁 ManyChat: обробку завершено — {latency_ms}ms | {current_state} | {intent} | msgs={messages_count} | prod={products_count}
+    
+    Args:
+        logger: Logger instance to use
+        event: Event name (key in LOG_EVENT_TITLES)
+        level: Log level (debug, info, warning, error, critical)
+        **kwargs: Additional context fields (latency_ms, current_state, intent, etc.)
+    """
     lvl = (level or "info").lower()
     log_fn = getattr(logger, lvl, logger.info)
-    log_fn(event, extra={"event": event, **kwargs})
+    
+    # Get emoji title for the event
+    title = LOG_EVENT_TITLES.get(event, event)
+    
+    # Special formatting for manychat_process_done
+    if event == "manychat_process_done":
+        latency_ms = kwargs.get("latency_ms")
+        current_state = kwargs.get("current_state")
+        intent = kwargs.get("intent")
+        messages_count = kwargs.get("messages_count", 0)
+        products_count = kwargs.get("products_count", 0)
+        
+        # Build structured message
+        parts = [title]
+        if latency_ms is not None:
+            parts.append(f"— {latency_ms}ms")
+        if current_state:
+            parts.append(f"| {current_state}")
+        if intent:
+            parts.append(f"| {intent}")
+        parts.append(f"| msgs={messages_count}")
+        parts.append(f"| prod={products_count}")
+        
+        message = " ".join(parts)
+    else:
+        # For other events, use the title as-is
+        message = title
+    
+    # Log with structured data in extra
+    log_fn(message, extra={"event": event, **kwargs})
 
 
 def safe_preview(value: Any, max_len: int = 120) -> str:

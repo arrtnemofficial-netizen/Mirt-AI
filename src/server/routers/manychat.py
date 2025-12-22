@@ -61,13 +61,20 @@ async def manychat_webhook(
     if verify_token and verify_token != inbound_token:
         raise AuthenticationError("Invalid ManyChat token")
 
+    # Log payload received
+    trace_id = str(uuid.uuid4())
+    log_event(
+        logger,
+        event="api_v1_payload_received",
+        trace_id=trace_id,
+    )
+
     # Push mode: return immediately, process in background
     if settings.MANYCHAT_PUSH_MODE:
         from src.integrations.manychat.async_service import get_manychat_async_service
         from src.server.dependencies import get_session_store
 
         try:
-            trace_id = str(uuid.uuid4())
 
             # Extract user info from payload
             # Support both ManyChat webhook format and External Request format
@@ -107,6 +114,17 @@ async def manychat_webhook(
 
             if not text and not image_url:
                 raise ValidationError("Missing message text or image")
+
+            # Log payload parsed
+            log_event(
+                logger,
+                event="api_v1_payload_parsed",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                has_image=bool(image_url),
+                text_preview=safe_preview(text, 160),
+            )
 
             # IDEMPOTENCY (DB-backed, 24h TTL)
             message_id = None
@@ -164,6 +182,14 @@ async def manychat_webhook(
                     channel=channel,
                     task_id=task.id,
                 )
+                log_event(
+                    logger,
+                    event="api_v1_task_scheduled",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    task_id=task.id,
+                )
 
                 return {"status": "accepted"}
             else:
@@ -183,6 +209,14 @@ async def manychat_webhook(
                 log_event(
                     logger,
                     event="manychat_task_scheduled",
+                    trace_id=trace_id,
+                    user_id=user_id,
+                    channel=channel,
+                    status="background_tasks",
+                )
+                log_event(
+                    logger,
+                    event="api_v1_task_scheduled",
                     trace_id=trace_id,
                     user_id=user_id,
                     channel=channel,
