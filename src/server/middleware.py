@@ -346,15 +346,28 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         # Calculate duration
         duration_ms = (time.time() - start_time) * 1000
 
-        # Log request
-        logger.info(
-            "%s %s %d %.2fms client=%s",
-            method,
-            path,
-            response.status_code,
-            duration_ms,
-            client_ip,
-        )
+        # Log 404 errors with additional details
+        if response.status_code == 404:
+            logger.warning(
+                "[404_NOT_FOUND] %s %s %d %.2fms client=%s query=%s headers=%s",
+                method,
+                path,
+                response.status_code,
+                duration_ms,
+                client_ip,
+                str(request.url.query),
+                dict(request.headers),
+            )
+        else:
+            # Log request
+            logger.info(
+                "%s %s %d %.2fms client=%s",
+                method,
+                path,
+                response.status_code,
+                duration_ms,
+                client_ip,
+            )
 
         return response
 
@@ -369,5 +382,14 @@ def setup_middleware(app, *, enable_rate_limit: bool = True, enable_logging: boo
             requests_per_minute=60,
             requests_per_hour=1000,
             burst_size=10,
+            excluded_paths=[
+                "/health",
+                "/docs",
+                "/openapi.json",
+                "/webhooks/manychat",
+                "/webhooks/manychat/",
+                "/webhooks/snitkix",
+                "/webhooks/snitkix/",
+            ],
         )
         app.add_middleware(RateLimitMiddleware, config=config)

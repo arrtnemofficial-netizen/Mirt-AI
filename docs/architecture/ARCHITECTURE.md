@@ -65,9 +65,21 @@ flowchart TB
 ### 1. Ingestion & API (`src.server`)
 - **Framework:** FastAPI
 - **Endpoints:**
-  - `POST /webhooks/manychat`: Implements `process_manychat_pipeline` with debouncing (window: 2s).
-  - `POST /webhooks/telegram`: Direct dispatch to Celery.
-- **Middleware:** Custom `MessageDebouncer` using Redis locks to merge rapid inputs.
+  - `GET /health`: Health check with dependency status
+  - `GET /health/graph`: LangGraph-specific health check
+  - `GET /health/agents`: PydanticAI agents health check
+  - `GET /media/proxy`: Media proxy for images (optional, requires token)
+  - `POST /webhooks/manychat`: ManyChat webhook with debouncing (window: 2s)
+  - `POST /webhooks/telegram`: Telegram webhook (direct dispatch to Celery)
+  - `POST /webhooks/snitkix/order-status`: Snitkix CRM order status updates
+  - `POST /webhooks/snitkix/payment`: Snitkix CRM payment confirmations
+  - `POST /webhooks/snitkix/inventory`: Snitkix CRM inventory updates
+  - `POST /api/v1/sitniks/update-status`: Sitniks CRM status updates (for ManyChat/n8n)
+  - `POST /automation/mirt-summarize-prod-v1`: Summarization automation
+  - `POST /automation/mirt-followups-prod-v1`: Follow-up automation
+  - `POST /webhooks/manychat/followup`: ManyChat follow-up webhook
+  - `POST /webhooks/manychat/create-order`: ManyChat order creation webhook
+- **Middleware:** Custom `MessageDebouncer` using Redis locks to merge rapid inputs, 404 error logging
 
 ### 2. Message Processing (`src.workers.tasks.messages`)
 - **Task:** `process_message`

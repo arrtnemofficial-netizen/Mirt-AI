@@ -17,13 +17,6 @@ logger = logging.getLogger(__name__)
 # - Direct image URLs (.jpg, .png, etc.)
 # - Instagram CDN: cdn.instagram.com, fbcdn, scontent
 # - Instagram DM images: lookaside.fbsbx.com/ig_messaging_cdn
-_IMAGE_URL_PATTERN = re.compile(
-    r"(https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp|svg)|"
-    r"https?://(?:cdn\.)?(?:instagram|fbcdn|scontent|lookaside\.fbsbx)[^\s]+)",
-    re.IGNORECASE,
-)
-
-
 class SitniksUpdateRequest(BaseModel):
     """Request for updating Sitniks chat status from external systems."""
 

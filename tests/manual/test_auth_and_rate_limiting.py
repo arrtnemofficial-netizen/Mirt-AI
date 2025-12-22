@@ -73,6 +73,51 @@ class TestAPIEndpointSecurity:
         webhook_routes = [r for r in routes if "webhook" in r.lower()]
         assert len(webhook_routes) >= 0  # May have webhooks configured
 
+    def test_documented_endpoints_exist(self):
+        """All documented endpoints should be registered in the app."""
+        from src.server.main import app
+
+        # List of documented endpoints (from docs/ARCHITECTURE.md and other docs)
+        # These are the endpoints that should exist based on documentation
+        documented_endpoints = [
+            ("GET", "/health"),
+            ("GET", "/health/graph"),
+            ("GET", "/health/agents"),
+            ("GET", "/media/proxy"),
+            ("POST", "/webhooks/manychat"),
+            ("POST", "/webhooks/telegram"),
+            ("POST", "/webhooks/snitkix/order-status"),
+            ("POST", "/webhooks/snitkix/payment"),
+            ("POST", "/webhooks/snitkix/inventory"),
+            ("POST", "/api/v1/sitniks/update-status"),
+            ("POST", "/automation/mirt-summarize-prod-v1"),
+            ("POST", "/automation/mirt-followups-prod-v1"),
+            ("POST", "/webhooks/manychat/followup"),
+            ("POST", "/webhooks/manychat/create-order"),
+        ]
+
+        # Get all registered routes
+        registered_routes = {}
+        for route in app.routes:
+            if hasattr(route, "path") and hasattr(route, "methods"):
+                for method in route.methods:
+                    if method != "HEAD":  # Skip HEAD, it's auto-generated
+                        registered_routes[(method, route.path)] = True
+
+        # Check each documented endpoint exists
+        missing_endpoints = []
+        for method, path in documented_endpoints:
+            if (method, path) not in registered_routes:
+                missing_endpoints.append(f"{method} {path}")
+
+        if missing_endpoints:
+            # Get all registered routes for debugging
+            all_routes = sorted([f"{m} {p}" for m, p in registered_routes.keys()])
+            pytest.fail(
+                f"Documented endpoints not found in app: {', '.join(missing_endpoints)}. "
+                f"Registered routes: {', '.join(all_routes[:30])}"
+            )
+
 
 @pytest.mark.security
 class TestRateLimitingDesign:
