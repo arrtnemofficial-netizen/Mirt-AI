@@ -1,4 +1,4 @@
-"""ManyChat Push Client - sends messages via ManyChat API.
+"""ManyChat Push Client - Production-grade message delivery via ManyChat API.
 
 This module implements async push-based message delivery to ManyChat,
 eliminating webhook timeout issues while preserving all MIRT features:
@@ -7,9 +7,35 @@ eliminating webhook timeout issues while preserving all MIRT features:
 - Quick Replies (state-based buttons)
 - Images (product photos)
 
-Auto-retry logic:
-- If ManyChat returns 400 "Field not found" → retry WITHOUT actions
-- This handles cases where Custom Fields don't exist in user's ManyChat bot
+Features:
+- Circuit breaker protection against cascading failures
+- Automatic retry with exponential backoff for transient errors
+- Smart field error handling: retries without actions if fields don't exist
+- Input validation for production reliability
+- Message sanitization (removes unsupported fields, truncates long text)
+- Instagram-specific optimizations (split-send, safe mode, bubble delays)
+- Comprehensive error logging with root cause classification
+
+API Compliance:
+- ManyChat API v2 format (https://api.manychat.com/docs)
+- subscriber_id: string (not converted to int - supports all ID formats)
+- Text messages: max 2000 chars (auto-truncated)
+- Actions: max 5 per request (auto-truncated)
+- Image messages: no caption field (ManyChat limitation)
+
+Example:
+    ```python
+    from src.integrations.manychat.push_client import get_manychat_push_client
+
+    client = get_manychat_push_client()
+    success = await client.send_content(
+        subscriber_id="123456",
+        messages=[{"type": "text", "text": "Hello!"}],
+        channel="instagram",
+        set_field_values=[{"field_name": "ai_state", "field_value": "STATE_1"}],
+        add_tags=["ai_responded"],
+    )
+    ```
 """
 
 from __future__ import annotations
@@ -26,7 +52,7 @@ import httpx
 from src.conf.config import settings
 from src.core.circuit_breaker import MANYCHAT_BREAKER, CircuitOpenError
 from src.core.human_responses import calculate_typing_delay
-from src.core.logging import classify_root_cause, log_event, safe_preview
+from src.core.logging import classify_root_cause, log_event, log_with_root_cause, safe_preview
 
 
 logger = logging.getLogger(__name__)
@@ -67,41 +93,74 @@ class ManyChatPushClient:
         """Sanitize messages for ManyChat API format.
 
         ManyChat sendContent API format:
-        - Text: {"type": "text", "text": "..."}
+        - Text: {"type": "text", "text": "..."} (max 2000 chars per message)
         - Image: {"type": "image", "url": "..."} (NO caption field!)
+
+        Returns:
+            List of sanitized messages, empty if all invalid
         """
         sanitized = []
-        for msg in messages:
+        max_text_length = 2000  # ManyChat API limit
+
+        for idx, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                logger.warning("[MANYCHAT] Skipping invalid message[%d]: not a dict", idx)
+                continue
+
             msg_type = msg.get("type")
             if msg_type == "text":
                 text = msg.get("text", "").strip()
-                if text:
-                    sanitized.append({"type": "text", "text": text})
+                if not text:
+                    logger.debug("[MANYCHAT] Skipping empty text message[%d]", idx)
+                    continue
+
+                # Truncate if exceeds ManyChat limit
+                if len(text) > max_text_length:
+                    logger.warning(
+                        "[MANYCHAT] Truncating text message[%d] from %d to %d chars",
+                        idx,
+                        len(text),
+                        max_text_length,
+                    )
+                    text = text[:max_text_length]
+
+                sanitized.append({"type": "text", "text": text})
             elif msg_type == "image":
                 url = msg.get("url", "").strip()
-                if url:
-                    proxy_enabled = bool(getattr(settings, "MANYCHAT_IMAGE_PROXY_ENABLED", False))
-                    media_proxy_enabled = bool(getattr(settings, "MEDIA_PROXY_ENABLED", False))
-                    public_base_url = str(getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip(
-                        "/"
-                    )
+                if not url:
+                    logger.debug("[MANYCHAT] Skipping empty image URL message[%d]", idx)
+                    continue
 
-                    if (
-                        proxy_enabled
-                        and media_proxy_enabled
-                        and public_base_url.startswith("https://")
-                    ):
-                        token = str(getattr(settings, "MEDIA_PROXY_TOKEN", "") or "").strip()
-                        proxy_url = f"{public_base_url}/media/proxy?url={quote(url, safe='')}"
-                        if token:
-                            proxy_url += f"&token={quote(token, safe='')}"
-                        url = proxy_url
+                # Apply media proxy if enabled
+                proxy_enabled = bool(getattr(settings, "MANYCHAT_IMAGE_PROXY_ENABLED", False))
+                media_proxy_enabled = bool(getattr(settings, "MEDIA_PROXY_ENABLED", False))
+                public_base_url = str(getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/")
 
-                    # ManyChat sendContent does NOT support caption for images
-                    sanitized.append({"type": "image", "url": url})
+                if (
+                    proxy_enabled
+                    and media_proxy_enabled
+                    and public_base_url.startswith("https://")
+                ):
+                    token = str(getattr(settings, "MEDIA_PROXY_TOKEN", "") or "").strip()
+                    proxy_url = f"{public_base_url}/media/proxy?url={quote(url, safe='')}"
+                    if token:
+                        proxy_url += f"&token={quote(token, safe='')}"
+                    url = proxy_url
+
+                # ManyChat sendContent does NOT support caption for images
+                sanitized.append({"type": "image", "url": url})
             else:
-                # Pass through other types as-is
+                # Unknown message type - log warning but pass through
+                logger.warning(
+                    "[MANYCHAT] Unknown message type '%s' in message[%d], passing through",
+                    msg_type,
+                    idx,
+                )
                 sanitized.append(msg)
+
+        if not sanitized:
+            logger.warning("[MANYCHAT] All messages were invalid after sanitization")
+
         return sanitized
 
     def _build_actions(
@@ -261,9 +320,12 @@ class ManyChatPushClient:
         """
         # CIRCUIT BREAKER CHECK: Fail fast if ManyChat is down
         if not MANYCHAT_BREAKER.can_execute():
-            logger.warning(
-                "[MANYCHAT] Circuit OPEN - skipping request to %s",
-                subscriber_id,
+            log_with_root_cause(
+                logger,
+                "warning",
+                f"[MANYCHAT] Circuit OPEN - skipping request to {subscriber_id}",
+                root_cause="CIRCUIT_BREAKER_OPEN",
+                subscriber_id=subscriber_id,
             )
             raise CircuitOpenError("manychat")
 
@@ -298,11 +360,53 @@ class ManyChatPushClient:
         except httpx.TimeoutException as e:
             # TIMEOUT: Record failure for circuit breaker
             MANYCHAT_BREAKER.record_failure(e)
+            log_with_root_cause(
+                logger,
+                "error",
+                f"[MANYCHAT] Request timeout after 15s for subscriber {subscriber_id}",
+                error=e,
+                root_cause="MANYCHAT_TIMEOUT",
+                subscriber_id=subscriber_id,
+            )
             return False, "timeout", 0
+        except httpx.ConnectError as e:
+            # CONNECTION ERROR: Record failure for circuit breaker
+            MANYCHAT_BREAKER.record_failure(e)
+            log_with_root_cause(
+                logger,
+                "error",
+                f"[MANYCHAT] Connection error for subscriber {subscriber_id}",
+                error=e,
+                root_cause="MANYCHAT_CONNECTION_ERROR",
+                subscriber_id=subscriber_id,
+            )
+            return False, f"connection_error: {str(e)[:100]}", 0
+        except httpx.HTTPStatusError as e:
+            # HTTP ERROR: Already handled above, but catch here for completeness
+            status = e.response.status_code if e.response else 0
+            MANYCHAT_BREAKER.record_failure(e)
+            log_with_root_cause(
+                logger,
+                "error",
+                f"[MANYCHAT] HTTP error {status} for subscriber {subscriber_id}",
+                error=e,
+                root_cause=f"MANYCHAT_HTTP_{status}",
+                subscriber_id=subscriber_id,
+                status_code=status,
+            )
+            return False, e.response.text if e.response else str(e), status
         except Exception as e:
             # OTHER ERROR: Record failure for circuit breaker
             MANYCHAT_BREAKER.record_failure(e)
-            return False, str(e), 0
+            log_with_root_cause(
+                logger,
+                "error",
+                f"[MANYCHAT] Unexpected error for subscriber {subscriber_id}",
+                error=e,
+                root_cause="MANYCHAT_UNEXPECTED_ERROR",
+                subscriber_id=subscriber_id,
+            )
+            return False, f"{type(e).__name__}: {str(e)[:200]}", 0
 
     def _is_field_error(self, response_text: str) -> bool:
         """Check if error is due to missing Custom Fields."""
@@ -350,7 +454,7 @@ class ManyChatPushClient:
         set_field_values: list[dict[str, str]] | None = None,
         add_tags: list[str] | None = None,
         remove_tags: list[str] | None = None,
-        message_tag: str = "ACCOUNT_UPDATE",
+        message_tag: str = "CONFIRMED_EVENT_UPDATE",
         trace_id: str | None = None,
     ) -> bool:
         """Send content to a ManyChat subscriber.
@@ -359,7 +463,7 @@ class ManyChatPushClient:
         automatically retries WITHOUT actions (fields/tags).
 
         Args:
-            subscriber_id: ManyChat subscriber ID
+            subscriber_id: ManyChat subscriber ID (must be non-empty string)
             messages: List of message objects (text, image)
             channel: Channel type (instagram, facebook, whatsapp)
             quick_replies: Quick reply buttons
@@ -370,14 +474,133 @@ class ManyChatPushClient:
         Returns:
             True if sent successfully, False otherwise
         """
+        # VALIDATION: Input validation for production-grade reliability
         if not self.enabled:
             logger.warning("[MANYCHAT] Push client not configured (missing API key)")
             return False
 
+        if not subscriber_id or not isinstance(subscriber_id, str) or not subscriber_id.strip():
+            log_with_root_cause(
+                logger,
+                "error",
+                f"[MANYCHAT] Invalid subscriber_id: must be non-empty string, got {type(subscriber_id).__name__}",
+                root_cause="VALIDATION_ERROR",
+                subscriber_id=subscriber_id if subscriber_id else None,
+            )
+            return False
+
+        subscriber_id = subscriber_id.strip()
+
+        if not messages or not isinstance(messages, list):
+            log_with_root_cause(
+                logger,
+                "error",
+                "[MANYCHAT] Invalid messages: must be non-empty list",
+                root_cause="VALIDATION_ERROR",
+                subscriber_id=subscriber_id,
+            )
+            return False
+
+        valid_channels = {"instagram", "facebook", "whatsapp", "telegram"}
+        if channel not in valid_channels:
+            logger.warning(
+                "[MANYCHAT] Unknown channel '%s', using 'instagram'. Valid: %s",
+                channel,
+                valid_channels,
+            )
+            channel = "instagram"
+
+        # VALIDATION: Quick replies format
+        if quick_replies is not None:
+            if not isinstance(quick_replies, list):
+                log_with_root_cause(
+                    logger,
+                    "error",
+                    f"[MANYCHAT] quick_replies must be a list, got {type(quick_replies).__name__}",
+                    root_cause="VALIDATION_ERROR",
+                    subscriber_id=subscriber_id,
+                )
+                quick_replies = None
+            else:
+                # ManyChat limits to 11 quick replies
+                if len(quick_replies) > 11:
+                    logger.warning(
+                        "[MANYCHAT] Truncating quick_replies from %d to 11",
+                        len(quick_replies),
+                    )
+                    quick_replies = quick_replies[:11]
+
+        # VALIDATION: Tags format
+        if add_tags is not None and not isinstance(add_tags, list):
+            log_with_root_cause(
+                logger,
+                "error",
+                f"[MANYCHAT] add_tags must be a list, got {type(add_tags).__name__}",
+                root_cause="VALIDATION_ERROR",
+                subscriber_id=subscriber_id,
+            )
+            add_tags = None
+
+        if remove_tags is not None and not isinstance(remove_tags, list):
+            log_with_root_cause(
+                logger,
+                "error",
+                f"[MANYCHAT] remove_tags must be a list, got {type(remove_tags).__name__}",
+                root_cause="VALIDATION_ERROR",
+                subscriber_id=subscriber_id,
+            )
+            remove_tags = None
+
+        # VALIDATION: Field values format
+        if set_field_values is not None:
+            if not isinstance(set_field_values, list):
+                log_with_root_cause(
+                    logger,
+                    "error",
+                    f"[MANYCHAT] set_field_values must be a list, got {type(set_field_values).__name__}",
+                    root_cause="VALIDATION_ERROR",
+                    subscriber_id=subscriber_id,
+                )
+                set_field_values = None
+            else:
+                # Validate each field value has required keys
+                valid_fields = []
+                for idx, fv in enumerate(set_field_values):
+                    if not isinstance(fv, dict):
+                        logger.warning("[MANYCHAT] Skipping invalid field_value[%d]: not a dict", idx)
+                        continue
+                    if "field_name" not in fv:
+                        logger.warning("[MANYCHAT] Skipping field_value[%d]: missing 'field_name'", idx)
+                        continue
+                    valid_fields.append(fv)
+                set_field_values = valid_fields if valid_fields else None
+
+        # VALIDATION: Message tag (Facebook/Meta requirement for 24h messaging)
+        valid_message_tags = {
+            "CONFIRMED_EVENT_UPDATE",
+            "ACCOUNT_UPDATE",
+            "PAYMENT_UPDATE",
+            "SHIPPING_UPDATE",
+            "RESERVATION_UPDATE",
+            "ISSUE_RESOLUTION",
+            "APPOINTMENT_UPDATE",
+            "GAME_EVENT",
+            "TRANSPORTATION_UPDATE",
+            "FEATURE_FUNCTIONALITY_UPDATE",
+            "TICKET_UPDATE",
+        }
+        if message_tag not in valid_message_tags:
+            logger.warning(
+                "[MANYCHAT] Unknown message_tag '%s', using 'CONFIRMED_EVENT_UPDATE'. Valid: %s",
+                message_tag,
+                sorted(valid_message_tags),
+            )
+            message_tag = "CONFIRMED_EVENT_UPDATE"
+
         # Sanitize messages (remove unsupported fields like caption)
         clean_messages = self._sanitize_messages(messages)
         if not clean_messages:
-            logger.warning("[MANYCHAT] No valid messages to send")
+            logger.warning("[MANYCHAT] No valid messages to send after sanitization")
             return False
 
         safe_mode_instagram = bool(getattr(settings, "MANYCHAT_SAFE_MODE_INSTAGRAM", True))
@@ -432,9 +655,10 @@ class ManyChatPushClient:
             content["quick_replies"] = effective_quick_replies
 
         # Build payload
-        sub_id = int(subscriber_id) if subscriber_id.isdigit() else subscriber_id
+        # NOTE: ManyChat API accepts subscriber_id as string (verified in api_client.py)
+        # Converting to int can break for non-numeric IDs (e.g., "user_123" or UUIDs)
         payload: dict[str, Any] = {
-            "subscriber_id": sub_id,
+            "subscriber_id": subscriber_id,  # Keep as string - ManyChat API requirement
             "data": {
                 "version": "v2",
                 "content": content,
@@ -464,10 +688,14 @@ class ManyChatPushClient:
                     success_local, response_text_local, status_code_local = await self._do_send(
                         subscriber_id, payload_to_send, headers
                     )
-                except CircuitOpenError:
-                    logger.error(
-                        "[MANYCHAT] Circuit breaker OPEN - cannot send to %s",
-                        subscriber_id,
+                except CircuitOpenError as e:
+                    log_with_root_cause(
+                        logger,
+                        "error",
+                        f"[MANYCHAT] Circuit breaker OPEN - cannot send to {subscriber_id}",
+                        error=e,
+                        root_cause="CIRCUIT_BREAKER_OPEN",
+                        subscriber_id=subscriber_id,
                     )
                     return False
 
@@ -523,8 +751,15 @@ class ManyChatPushClient:
                         success_retry, response_retry, status_retry = await self._do_send(
                             subscriber_id, payload_retry, headers
                         )
-                    except CircuitOpenError:
-                        logger.error("[MANYCHAT] Circuit opened during retry")
+                    except CircuitOpenError as e:
+                        log_with_root_cause(
+                            logger,
+                            "error",
+                            "[MANYCHAT] Circuit opened during retry",
+                            error=e,
+                            root_cause="CIRCUIT_BREAKER_OPEN",
+                            subscriber_id=subscriber_id,
+                        )
                         return False
 
                     if success_retry:
@@ -616,7 +851,7 @@ class ManyChatPushClient:
                     content_one["quick_replies"] = effective_quick_replies
 
                 payload_one: dict[str, Any] = {
-                    "subscriber_id": sub_id,
+                    "subscriber_id": subscriber_id,  # Keep as string
                     "data": {
                         "version": "v2",
                         "content": content_one,

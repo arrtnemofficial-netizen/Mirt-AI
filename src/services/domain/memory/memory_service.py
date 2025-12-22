@@ -10,6 +10,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from src.core.logging import log_with_root_cause
 from src.services.infra.supabase_client import get_supabase_client
 
 
@@ -95,7 +96,12 @@ class MemoryService:
         self._models = None  # Lazy loaded
 
         if not self._enabled:
-            logger.warning("MemoryService disabled - Supabase client not available")
+            log_with_root_cause(
+                logger,
+                "warning",
+                "MemoryService disabled - Supabase client not available",
+                root_cause="STORAGE_NOT_AVAILABLE",
+            )
 
     @property
     def models(self):
@@ -143,7 +149,14 @@ class MemoryService:
             # Handle "no rows returned" gracefully
             if "0 rows" in str(e).lower():
                 return None
-            logger.error("Failed to get profile for user %s: %s", user_id, e)
+            log_with_root_cause(
+                logger,
+                "error",
+                f"Failed to get profile for user {user_id}",
+                error=e,
+                root_cause="STORAGE_ERROR",
+                user_id=user_id,
+            )
             return None
 
     async def get_or_create_profile(self, user_id: str) -> UserProfile:

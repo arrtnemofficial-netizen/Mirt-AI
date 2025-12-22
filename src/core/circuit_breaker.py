@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Callable, TypeVar
 if TYPE_CHECKING:
     pass
 
+from src.core.logging import log_with_root_cause
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -76,24 +78,31 @@ class CircuitBreaker:
             # Failure in half-open state - go back to open
             self.state = CircuitState.OPEN
             self.half_open_calls = 0
-            logger.warning(
-                "[CIRCUIT:%s] Failed in HALF_OPEN, state=OPEN: error_type=%s error_message=%s failure_count=%d last_failure_time=%.2f",
-                self.name,
-                error_type,
-                error_message,
-                self.failure_count,
-                self.last_failure_time,
+            log_with_root_cause(
+                logger,
+                "warning",
+                f"[CIRCUIT:{self.name}] Failed in HALF_OPEN, state=OPEN",
+                error=error,
+                root_cause="CIRCUIT_BREAKER_HALF_OPEN_FAILURE",
+                circuit_name=self.name,
+                error_type=error_type,
+                error_message=error_message,
+                failure_count=self.failure_count,
+                last_failure_time=self.last_failure_time,
             )
         elif self.failure_count >= self.failure_threshold:
             self.state = CircuitState.OPEN
-            logger.warning(
-                "[CIRCUIT:%s] OPEN after %d failures: error_type=%s error_message=%s failure_count=%d last_failure_time=%.2f",
-                self.name,
-                self.failure_count,
-                error_type,
-                error_message,
-                self.failure_count,
-                self.last_failure_time,
+            log_with_root_cause(
+                logger,
+                "warning",
+                f"[CIRCUIT:{self.name}] OPEN after {self.failure_count} failures",
+                error=error,
+                root_cause="CIRCUIT_BREAKER_OPENED",
+                circuit_name=self.name,
+                error_type=error_type,
+                error_message=error_message,
+                failure_count=self.failure_count,
+                last_failure_time=self.last_failure_time,
             )
         else:
             # Log failure but circuit still closed

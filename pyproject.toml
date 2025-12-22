@@ -110,6 +110,9 @@ addopts = [
     "-v",
     "--tb=short",
     "--strict-markers",
+    "--color=yes",
+    "--durations=10",
+    "--durations-min=0.5",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

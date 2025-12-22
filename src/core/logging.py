@@ -225,6 +225,84 @@ def classify_root_cause(
     return "UNKNOWN"
 
 
+def log_with_root_cause(
+    logger: logging.Logger,
+    level: str,
+    message: str,
+    *,
+    root_cause: str | None = None,
+    error: Exception | None = None,
+    auto_classify: bool = True,
+    **context: Any,
+) -> None:
+    """Log with root cause in [ROOT_CAUSE: ...] brackets for AI share detection.
+
+    This function ensures all production logs have structured root cause information
+    that can be easily parsed by monitoring systems and AI share detection.
+
+    Args:
+        logger: Logger instance to use
+        level: Log level (debug, info, warning, error, critical)
+        message: Base log message
+        root_cause: Explicit root cause (if None, will auto-classify from error)
+        error: Exception object (used for auto-classification if root_cause is None)
+        auto_classify: If True, automatically classify root cause from error
+        **context: Additional context fields (session_id, user_id, etc.)
+
+    Example:
+        ```python
+        logger = get_logger(__name__)
+        try:
+            result = await api_call()
+        except Exception as e:
+            log_with_root_cause(
+                logger,
+                "error",
+                "Failed to call API",
+                error=e,
+                status_code=500,
+                session_id="abc123",
+            )
+        # Output: "Failed to call API [ROOT_CAUSE: MANYCHAT_UPSTREAM_500]"
+        ```
+    """
+    # Normalize level
+    level = level.upper()
+    if level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        level = "INFO"
+
+    # Auto-classify root cause if not provided
+    if root_cause is None and auto_classify and error is not None:
+        root_cause = classify_root_cause(
+            error,
+            status_code=context.get("status_code"),
+            channel=context.get("channel"),
+            current_state=context.get("current_state"),
+            intent=context.get("intent"),
+        )
+
+    # Build message with root cause in brackets
+    if root_cause:
+        message = f"{message} [ROOT_CAUSE: {root_cause}]"
+
+    # Prepare extra context
+    extra = context.copy()
+    if root_cause:
+        extra["root_cause"] = root_cause
+    if error:
+        extra["error_type"] = type(error).__name__
+        extra["error_message"] = str(error)
+
+    # Get log function
+    log_fn = getattr(logger, level.lower(), logger.info)
+
+    # Log with exception info if error provided
+    if error:
+        log_fn(message, extra=extra, exc_info=error)
+    else:
+        log_fn(message, extra=extra)
+
+
 class LogContext:
     """Context manager for adding context to log records.
 

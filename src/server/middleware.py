@@ -348,15 +348,19 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         # Log 404 errors with additional details
         if response.status_code == 404:
-            logger.warning(
-                "[404_NOT_FOUND] %s %s %d %.2fms client=%s query=%s headers=%s",
-                method,
-                path,
-                response.status_code,
-                duration_ms,
-                client_ip,
-                str(request.url.query),
-                dict(request.headers),
+            from src.core.logging import log_with_root_cause
+
+            log_with_root_cause(
+                logger,
+                "warning",
+                f"[404_NOT_FOUND] {method} {path} {response.status_code} {duration_ms:.2f}ms client={client_ip}",
+                root_cause="ENDPOINT_NOT_FOUND",
+                method=method,
+                path=path,
+                status_code=404,
+                duration_ms=duration_ms,
+                client_ip=client_ip,
+                query=str(request.url.query),
             )
         else:
             # Log request

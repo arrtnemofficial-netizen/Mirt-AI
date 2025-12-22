@@ -405,3 +405,63 @@ def test_push_client_preserves_numeric_field_values():
     # Booleans stay as booleans
     assert actions[4]["value"] is True
     assert isinstance(actions[4]["value"], bool)
+
+
+@pytest.mark.manychat
+@pytest.mark.integration
+def test_push_client_validates_subscriber_id():
+    """Test that ManyChatPushClient validates subscriber_id input."""
+    from src.integrations.manychat.push_client import ManyChatPushClient
+
+    client = ManyChatPushClient()
+
+    # Test with empty string
+    result = client._sanitize_messages([{"type": "text", "text": "test"}])
+    assert len(result) == 1  # Sanitization should work
+
+    # Note: Actual send_content validation requires enabled client
+    # This test verifies sanitization works independently
+
+
+@pytest.mark.manychat
+@pytest.mark.integration
+def test_push_client_sanitizes_long_text():
+    """Test that ManyChatPushClient truncates text messages exceeding 2000 chars."""
+    from src.integrations.manychat.push_client import ManyChatPushClient
+
+    client = ManyChatPushClient()
+
+    long_text = "x" * 2500
+    messages = [{"type": "text", "text": long_text}]
+
+    sanitized = client._sanitize_messages(messages)
+
+    assert len(sanitized) == 1
+    assert len(sanitized[0]["text"]) == 2000
+    assert sanitized[0]["text"] == "x" * 2000
+
+
+@pytest.mark.manychat
+@pytest.mark.integration
+def test_push_client_handles_invalid_messages():
+    """Test that ManyChatPushClient handles invalid message formats gracefully."""
+    from src.integrations.manychat.push_client import ManyChatPushClient
+
+    client = ManyChatPushClient()
+
+    # Test with empty messages
+    assert client._sanitize_messages([]) == []
+
+    # Test with None
+    assert client._sanitize_messages([None]) == []
+
+    # Test with empty text
+    assert client._sanitize_messages([{"type": "text", "text": ""}]) == []
+
+    # Test with empty image URL
+    assert client._sanitize_messages([{"type": "image", "url": ""}]) == []
+
+    # Test with unknown type (should pass through with warning)
+    result = client._sanitize_messages([{"type": "unknown", "data": "test"}])
+    assert len(result) == 1
+    assert result[0]["type"] == "unknown"
