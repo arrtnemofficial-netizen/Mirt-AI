@@ -300,12 +300,13 @@ class ConversationHandler:
             )
             raise AgentInvocationError(error_msg, session_id=session_id) from ValueError("runner is None")
 
-        # Log runner type for diagnostics
-        logger.debug(
-            "Invoking agent for session %s with runner type: %s, has ainvoke: %s",
+        # Log runner type for diagnostics (use INFO level so it always appears)
+        logger.info(
+            "[SESSION %s] Runner validation: type=%s, has_ainvoke=%s, ainvoke_type=%s",
             session_id,
             type(self.runner).__name__,
             hasattr(self.runner, "ainvoke"),
+            type(getattr(self.runner, "ainvoke", None)).__name__ if hasattr(self.runner, "ainvoke") else "N/A",
         )
 
         # Validate runner has ainvoke method
@@ -318,11 +319,29 @@ class ConversationHandler:
             )
             raise AgentInvocationError(error_msg, session_id=session_id) from AttributeError("runner.ainvoke not found")
 
+        # Validate ainvoke is not None (can happen if attribute exists but is None)
+        ainvoke_method = getattr(self.runner, "ainvoke", None)
+        if ainvoke_method is None:
+            error_msg = f"Runner.ainvoke is None for session {session_id}. Type: {type(self.runner).__name__}"
+            logger.error(
+                "%s Runner type: %s, Runner repr: %s",
+                error_msg,
+                type(self.runner).__name__,
+                repr(self.runner)[:200],
+            )
+            raise AgentInvocationError(error_msg, session_id=session_id) from ValueError("runner.ainvoke is None")
+
         config = {"configurable": {"thread_id": thread_id}}
 
         for attempt in range(self.max_retries + 1):
             try:
-                result = await self.runner.ainvoke(state, config=config)
+                # Additional check: ensure ainvoke is callable
+                if not callable(ainvoke_method):
+                    error_msg = f"Runner.ainvoke is not callable for session {session_id}. Type: {type(ainvoke_method).__name__}"
+                    logger.error(error_msg)
+                    raise AgentInvocationError(error_msg, session_id=session_id) from TypeError("runner.ainvoke is not callable")
+                
+                result = await ainvoke_method(state, config=config)
                 if attempt > 0:
                     logger.info("Agent succeeded on retry %d for session %s", attempt, session_id)
                 return result

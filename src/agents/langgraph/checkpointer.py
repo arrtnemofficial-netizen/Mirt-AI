@@ -164,11 +164,15 @@ def _log_if_slow(
         )
 
 
-def _open_pool_on_demand(pool: Any) -> Any:
+async def _open_pool_on_demand(pool: Any) -> None:
     """Ensure AsyncConnectionPool is open before use."""
+    if pool is None:
+        return
     if hasattr(pool, "open") and not getattr(pool, "_opened", False):
-        return pool.open()
-    return None
+        open_result = pool.open()
+        # pool.open() may return a coroutine or None
+        if open_result is not None:
+            await open_result
 
 
 def _setting_int(settings: Any, key: str, default: int) -> int:

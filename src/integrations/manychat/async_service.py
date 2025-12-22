@@ -67,7 +67,20 @@ class ManyChatAsyncService:
         push_client: ManyChatPushClient | None = None,
     ) -> None:
         self.store = store
-        self.runner = runner or get_active_graph()
+        active_runner = runner or get_active_graph()
+        
+        # Validate runner is not None
+        if active_runner is None:
+            logger.error(
+                "ManyChatAsyncService.__init__: get_active_graph() returned None. "
+                "Graph was not initialized properly."
+            )
+            raise ValueError(
+                "Runner cannot be None. Graph must be initialized before creating ManyChatAsyncService. "
+                "Check that get_active_graph() returns a valid runner."
+            )
+        
+        self.runner = active_runner
         self.message_store = message_store or create_message_store()
         self.push_client = push_client or get_manychat_push_client()
         self._restart_inflight: set[str] = set()
