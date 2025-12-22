@@ -68,6 +68,9 @@ def normalize_phone(phone: str) -> str:
 
 def extract_phone(text: str) -> str | None:
     """Extract phone number from text."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     text_lower = text.lower()
 
     for pattern in PHONE_PATTERNS:
@@ -81,8 +84,13 @@ def extract_phone(text: str) -> str | None:
             match = compiled.search(text_lower)
             if match:
                 return normalize_phone(match.group(0))
-        except re.error:
-            # Skip invalid patterns
+        except re.error as e:
+            # Log problematic pattern for debugging
+            logger.warning(
+                "Invalid regex pattern in extract_phone (skipping): %s. Error: %s",
+                pattern[:100],
+                str(e)
+            )
             continue
 
     return None
@@ -90,6 +98,9 @@ def extract_phone(text: str) -> str | None:
 
 def extract_nova_poshta(text: str) -> str | None:
     """Extract Nova Poshta branch number from text."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     text_lower = text.lower()
 
     for pattern in NP_PATTERNS:
@@ -103,8 +114,13 @@ def extract_nova_poshta(text: str) -> str | None:
             match = compiled.search(text_lower)
             if match:
                 return match.group(1)
-        except re.error:
-            # Skip invalid patterns
+        except re.error as e:
+            # Log problematic pattern for debugging
+            logger.warning(
+                "Invalid regex pattern in extract_nova_poshta (skipping): %s. Error: %s",
+                pattern[:100],
+                str(e)
+            )
             continue
 
     if any(word in text_lower for word in NP_KEYWORDS):
@@ -135,8 +151,15 @@ def extract_city(text: str) -> str | None:
             match = compiled.search(text)
             if match:
                 return match.group(1).strip().title()
-        except re.error:
-            # Skip invalid patterns
+        except re.error as e:
+            # Log problematic pattern for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Invalid regex pattern in extract_city (skipping): %s. Error: %s",
+                pattern[:100],
+                str(e)
+            )
             continue
 
     return None
@@ -144,6 +167,9 @@ def extract_city(text: str) -> str | None:
 
 def extract_full_name(text: str) -> str | None:
     """Extract full name from text."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     clean_text = text
     for pattern in PHONE_PATTERNS:
         try:
@@ -154,11 +180,25 @@ def extract_full_name(text: str) -> str | None:
                 flags = re.IGNORECASE
             compiled = re.compile(pattern, flags)
             clean_text = compiled.sub("", clean_text)
-        except re.error:
-            # Skip invalid patterns
+        except re.error as e:
+            # Log problematic pattern for debugging
+            logger.warning(
+                "Invalid regex pattern in extract_full_name (skipping): %s. Error: %s",
+                pattern[:100],
+                str(e)
+            )
             continue
 
-    matches = re.findall(NAME_PATTERN, clean_text)
+    try:
+        matches = re.findall(NAME_PATTERN, clean_text)
+    except re.error as e:
+        # Log problematic pattern for debugging
+        logger.warning(
+            "Invalid NAME_PATTERN regex (skipping name extraction): %s. Error: %s",
+            NAME_PATTERN[:100] if NAME_PATTERN else "None",
+            str(e)
+        )
+        return None
 
     for match in matches:
         words = match.split()

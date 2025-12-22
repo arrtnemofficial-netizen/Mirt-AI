@@ -288,14 +288,13 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     try:
         # Create connection pool
         from psycopg_pool import AsyncConnectionPool
-        from langgraph.checkpoint.postgres import AsyncPostgresSaver
+        from langgraph.checkpoint.postgres import PostgresSaver
         import psycopg
 
         # First, setup tables with a separate autocommit connection
         # CREATE INDEX CONCURRENTLY requires autocommit mode
         setup_conn = psycopg.connect(database_url, autocommit=True)
         try:
-            from langgraph.checkpoint.postgres import PostgresSaver
             setup_checkpointer = PostgresSaver(setup_conn)
             setup_checkpointer.setup()
         finally:
@@ -365,7 +364,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         max_messages, max_chars, drop_base64 = get_checkpoint_compaction(settings)
 
-        class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
+        class InstrumentedAsyncPostgresSaver(PostgresSaver):
             async def _ensure_pool_open(self) -> None:
                 pool = getattr(self, "pool", None) or getattr(self, "conn", None)
                 await _open_pool_on_demand(pool)
@@ -471,13 +470,15 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                         "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
                     )
 
+        # PostgresSaver in 3.0.2 accepts connection/pool directly
+        # The pool will be used for async operations
         checkpointer = InstrumentedAsyncPostgresSaver(pool)
         
         # Store pool reference globally for warmup
         global _checkpointer_pool
         _checkpointer_pool = pool
 
-        logger.info("AsyncPostgresSaver checkpointer initialized successfully")
+        logger.info("PostgresSaver checkpointer initialized successfully")
         return checkpointer
 
     except ImportError as import_err:
