@@ -123,3 +123,42 @@ class CatalogService:
         if index < len(sizes):
             return sizes[index]
         return "164+"  # Out of range
+
+    def get_price_for_size(self, product: dict[str, Any], size: str | None = None) -> float:
+        """Get price for specific size, or base price."""
+        if not product:
+            return 0.0
+            
+        base_price = float(product.get("price", 0))
+        if not size:
+            return base_price
+            
+        price_by_size = product.get("price_by_size", {})
+        if not isinstance(price_by_size, dict):
+            return base_price
+            
+        # Try exact match or base price
+        return float(price_by_size.get(size, base_price))
+
+    def format_price_display(self, product: dict[str, Any]) -> str:
+        """Format price or price range for display."""
+        if not product:
+            return "0 грн"
+            
+        base_price = product.get("price", 0)
+        price_by_size = product.get("price_by_size", {})
+        
+        if not price_by_size or not isinstance(price_by_size, dict):
+            return f"{int(base_price)} грн"
+            
+        prices = [float(p) for p in price_by_size.values()]
+        if not prices:
+            return f"{int(base_price)} грн"
+            
+        p_min = int(min(prices))
+        p_max = int(max(prices))
+        
+        if p_min == p_max:
+            return f"{p_min} грн"
+            
+        return f"{p_min} - {p_max} грн"

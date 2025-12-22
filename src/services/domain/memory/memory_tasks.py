@@ -316,7 +316,7 @@ def run_maintenance_cli():
     else:
         result = asyncio.run(memory_maintenance())
 
-    print(f"Result: {result}")
+    logger.info(f"Memory maintenance result: {result}")
     return result
 
 

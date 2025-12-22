@@ -1,5 +1,6 @@
-# version: 1.0
-forbidden_terms: []
+forbidden_terms:
+  - "бомба"
+  - "наркотики"
 substitution_map:
   Р°: a
   Рµ: e

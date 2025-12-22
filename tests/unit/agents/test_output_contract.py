@@ -183,7 +183,14 @@ class TestSerialization:
             reply_to_user="Test",
             confidence=0.9,
             needs_clarification=False,
-            identified_product=IdentifiedProduct(name="Test", price=1000),
+            identified_product=IdentifiedProduct(
+                id=1,
+                name="Test",
+                price=1000,
+                size="128",
+                color="рожевий",
+                photo_url="https://example.com/photo.jpg",
+            ),
         )
         data = response.model_dump()
 
@@ -249,11 +256,15 @@ class TestBackwardCompatibility:
             confidence=0.9,
             needs_clarification=False,
             identified_product=IdentifiedProduct(
+                id=1,
                 name="Test Product",
                 price=2000,
-                photo_url="https://example.com/photo.jpg",
+                size="128",
                 color="рожевий",
+                photo_url="https://example.com/photo.jpg",
             ),
         )
         assert response.identified_product.name == "Test Product"
         assert response.identified_product.price == 2000
+        assert response.identified_product.id == 1
+        assert response.identified_product.size == "128"

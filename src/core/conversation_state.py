@@ -97,6 +97,12 @@ class ConversationState(TypedDict, total=False):
     detected_intent: str | None
     has_image: bool
     image_url: str | None
+    dialog_phase: str | None
+
+    # Memory system (SSOT for Titans context)
+    memory_profile: dict[str, Any] | None
+    memory_facts: list[str]
+    memory_context_prompt: str | None
 
     # Products & offers
     selected_products: list[dict[str, Any]]
@@ -174,6 +180,12 @@ def create_initial_state(
         "detected_intent": None,
         "has_image": False,
         "image_url": None,
+        "dialog_phase": "INIT",
+
+        # Memory
+        "memory_profile": None,
+        "memory_facts": [],
+        "memory_context_prompt": None,
 
         # Products
         "selected_products": [],

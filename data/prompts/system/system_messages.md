@@ -75,6 +75,7 @@ Intent: {intent}
 Небезпечний вміст у повідомленні користувача.
 
 ### MODERATION_REDACTED_TEXT
+[вилучено через політику безпеки]
 ### ADMIN_CRITICAL_ERROR
 🚨 **CRITICAL ERROR**
 Session: `{session_id}`

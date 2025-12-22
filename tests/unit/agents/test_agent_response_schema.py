@@ -144,10 +144,16 @@ class TestProductMatchContract:
         """ProductMatch creates valid product objects."""
         from src.agents.pydantic.models import ProductMatch
 
-        # Valid product
+        # Valid product with all required fields
         product = ProductMatch(
             id=1,
             name="Test Product",
             price=100.0,
+            size="128",
+            color="рожевий",
+            photo_url="https://example.com/photo.jpg",
         )
         assert product.name == "Test Product"
+        assert product.id == 1
+        assert product.size == "128"
+        assert product.color == "рожевий"

@@ -193,6 +193,12 @@ class SupportResponse(BaseModel):
         description="Required if event='escalation'",
     )
 
+    # OPTIONAL: deliberation for multi-role pattern
+    deliberation: str | None = Field(
+        default=None,
+        description="Internal deliberation/thinking process",
+    )
+
     # Additional: customer data extracted
     customer_data: CustomerDataExtracted | None = Field(
         default=None,

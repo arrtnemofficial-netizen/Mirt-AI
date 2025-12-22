@@ -109,6 +109,29 @@ async def health() -> dict[str, Any]:
         checks["llm"] = f"error: {type(e).__name__}"
         status = "degraded"
 
+    # External API circuit breakers
+    try:
+        from src.core.circuit_breaker import get_circuit_breaker
+
+        manychat_cb = get_circuit_breaker("manychat_api")
+        sitniks_cb = get_circuit_breaker("sitniks_api")
+
+        checks["external_apis"] = {
+            "manychat": manychat_cb.get_status(),
+            "sitniks": sitniks_cb.get_status(),
+        }
+
+        # Check if any critical API is down
+        if not manychat_cb.can_execute() and settings.MANYCHAT_API_KEY.get_secret_value():
+            status = "degraded"
+            logger.warning("Health check: ManyChat API circuit breaker is OPEN")
+        if not sitniks_cb.can_execute() and settings.snitkix_enabled:
+            status = "degraded"
+            logger.warning("Health check: Sitniks API circuit breaker is OPEN")
+    except Exception as e:
+        checks["external_apis"] = f"error: {type(e).__name__}"
+        logger.warning("Health check: Failed to check external API circuit breakers: %s", e)
+
     return {
         "status": status,
         "checks": checks,

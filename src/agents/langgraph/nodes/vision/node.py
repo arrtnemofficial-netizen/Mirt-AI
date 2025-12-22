@@ -22,6 +22,14 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.vision_agent import run_vision
 from src.core.state_machine import State
 from src.services.core.observability import log_agent_step, log_trace, track_metric
+from src.services.domain.vision.vision_ledger import (
+    LEDGER_STATUS_BLOCKED,
+    LEDGER_STATUS_ESCALATED,
+    LEDGER_STATUS_FAILED,
+    LEDGER_STATUS_PROCESSED,
+    LEDGER_STATUS_PROCESSING,
+    get_vision_ledger,
+)
 
 from ..utils import extract_user_message, text_msg
 from .builder import (
@@ -39,6 +47,12 @@ logger = logging.getLogger(__name__)
 
 # Keep strong references to background tasks to prevent GC
 _BG_TASKS: set[asyncio.Task] = set()
+
+LEDGER_FINAL_STATUSES = {
+    LEDGER_STATUS_PROCESSED,
+    LEDGER_STATUS_ESCALATED,
+    LEDGER_STATUS_BLOCKED,
+}
 
 
 def _get_vision_labels() -> dict[str, Any]:
@@ -131,14 +145,56 @@ async def vision_node(
 
     metadata = dict(state.get("metadata") or {})
     vision_hash = _compute_vision_hash(session_id, deps.image_url)
+    ledger = get_vision_ledger()
+    ledger_record = ledger.get_by_hash(vision_hash) if vision_hash else None
+    ledger_metadata_base = {
+        "session_id": session_id,
+        "trace_id": trace_id,
+        "current_state": State.STATE_2_VISION.value,
+    }
 
-    if vision_hash and metadata.get("vision_hash_processed") == vision_hash:
+    def _record_ledger_status(
+        status: str,
+        *,
+        confidence: float | None = None,
+        identified_product: Any | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not vision_hash:
+            return None
+        meta_payload = {**ledger_metadata_base}
+        if extra_metadata:
+            meta_payload.update(extra_metadata)
+        return ledger.record_result(
+            session_id=session_id,
+            image_hash=vision_hash,
+            status=status,
+            confidence=confidence,
+            identified_product=identified_product,
+            metadata=meta_payload,
+            error_message=error_message,
+        )
+
+    if vision_hash and ledger_record is None:
+        ledger_record = _record_ledger_status(
+            LEDGER_STATUS_PROCESSING,
+            extra_metadata={
+                "stage": "start",
+                "has_image": bool(deps.image_url),
+            },
+        )
+
+    vision_result_id = ledger_record.get("vision_result_id") if ledger_record else None
+
+    if ledger_record and ledger_record.get("status") in LEDGER_FINAL_STATUSES:
         duplicate_messages = _build_duplicate_messages(templates)
         duplicate_metadata = {
             **metadata,
             "vision_hash_processed": vision_hash,
             "vision_duplicate_detected": True,
             "has_image": True,
+            "vision_result_id": ledger_record.get("vision_result_id"),
         }
         track_metric("vision_duplicate_photo", 1)
         log_agent_step(
@@ -146,8 +202,10 @@ async def vision_node(
             state=State.STATE_2_VISION.value,
             intent="PHOTO_IDENT",
             event="vision_duplicate",
-            extra={"vision_hash": vision_hash},
+            extra={"vision_hash": vision_hash, "vision_result_id": ledger_record.get("vision_result_id")},
         )
+        if ledger_record.get("metadata"):
+            duplicate_metadata["ledger_snapshot"] = ledger_record["metadata"]
         return {
             "current_state": State.STATE_2_VISION.value,
             "messages": duplicate_messages,
@@ -162,6 +220,7 @@ async def vision_node(
                     "current_state": State.STATE_2_VISION.value,
                     "intent": "PHOTO_IDENT",
                     "vision_duplicate_detected": True,
+                    "vision_result_id": ledger_record.get("vision_result_id"),
                 },
             },
             "step_number": state.get("step_number", 0) + 1,
@@ -218,9 +277,17 @@ async def vision_node(
         _BG_TASKS.add(task)
         task.add_done_callback(_BG_TASKS.discard)
 
+        final_record = _record_ledger_status(
+            LEDGER_STATUS_FAILED,
+            error_message=error_msg[:200],
+            extra_metadata={"stage": "vision_error_escalation"},
+        )
         update = build_vision_error_escalation(error_msg, state.get("step_number", 0))
         # Add session_id to metadata which might be missing in pure builder
         update["agent_response"]["metadata"]["session_id"] = session_id
+        if final_record and final_record.get("vision_result_id"):
+            update["metadata"]["vision_result_id"] = final_record["vision_result_id"]
+            update["agent_response"]["metadata"]["vision_result_id"] = final_record["vision_result_id"]
         return update
 
     def _handle_missing_artifacts(missing: list[str]) -> dict[str, Any]:
@@ -255,6 +322,11 @@ async def vision_node(
         _BG_TASKS.add(task)
         task.add_done_callback(_BG_TASKS.discard)
 
+        final_record = _record_ledger_status(
+            LEDGER_STATUS_BLOCKED,
+            extra_metadata={"reason": "vision_artifacts_missing", "missing_artifacts": missing},
+        )
+
         user_message_text = templates.get(
             "artifacts_missing_user",
             "This product is currently unavailable. We can suggest alternatives.",
@@ -264,7 +336,7 @@ async def vision_node(
             text_msg(user_message_text),
         ]
 
-        return {
+        result = {
             "current_state": State.STATE_7_END.value,
             "messages": escalation_messages,
             "selected_products": [],
@@ -293,6 +365,10 @@ async def vision_node(
             },
             "step_number": state.get("step_number", 0) + 1,
         }
+        if final_record and final_record.get("vision_result_id"):
+            result["metadata"]["vision_result_id"] = final_record["vision_result_id"]
+            result["agent_response"]["metadata"]["vision_result_id"] = final_record["vision_result_id"]
+        return result
 
     logger.info(
         "[SESSION %s] Vision node started: image=%s",
@@ -306,6 +382,11 @@ async def vision_node(
     except Exception as e:
         err = str(e)
         logger.error("Vision agent error: %s", err)
+        _record_ledger_status(
+            LEDGER_STATUS_FAILED,
+            error_message=err[:200],
+            extra_metadata={"stage": "vision_agent_error"},
+        )
         return _handle_error_escalation(err)
 
     metadata = metadata
@@ -398,6 +479,7 @@ async def vision_node(
                         "session_id": session_id,
                         "current_state": State.STATE_2_VISION.value,
                         "intent": "PHOTO_IDENT",
+                        "vision_result_id": vision_result_id,
                     },
                 },
                 "step_number": state.get("step_number", 0) + 1,
@@ -485,6 +567,7 @@ async def vision_node(
                         "current_state": State.STATE_7_END.value,
                         "intent": "PHOTO_IDENT",
                         "escalation_level": "HARD",
+                        "vision_result_id": vision_result_id,
                     },
                 },
                 "step_number": state.get("step_number", 0) + 1,
@@ -525,6 +608,16 @@ async def vision_node(
         },
     )
 
+    # Record final success status
+    final_record = _record_ledger_status(
+        LEDGER_STATUS_PROCESSED,
+        confidence=response.confidence,
+        identified_product=response.identified_product,
+        extra_metadata={"stage": "success"}
+    )
+    if final_record and final_record.get("vision_result_id"):
+        vision_result_id = final_record["vision_result_id"]
+
     return {
         "current_state": State.STATE_2_VISION.value,
         "messages": response_messages,
@@ -538,6 +631,8 @@ async def vision_node(
             "has_image": True,
             "vision_greeted": True,
             "vision_no_match_count": no_match_count,
+            "vision_result_id": vision_result_id,
+            "vision_hash_processed": vision_hash,
         },
         "agent_response": {
             "messages": response_messages,
@@ -545,6 +640,7 @@ async def vision_node(
                 "session_id": session_id,
                 "current_state": State.STATE_2_VISION.value,
                 "intent": "PHOTO_IDENT",
+                "vision_result_id": vision_result_id,
             },
         },
         "step_number": state.get("step_number", 0) + 1,

@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
 from src.core.constants import MessageTag
-from src.services.followups import next_followup_due_at, run_followups
-from src.services.message_store import InMemoryMessageStore, StoredMessage
+from src.services.domain.engagement.followups import next_followup_due_at, run_followups
+from src.services.infra.message_store import InMemoryMessageStore, StoredMessage
 
 
 def test_next_followup_due_when_no_messages():

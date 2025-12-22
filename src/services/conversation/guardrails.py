@@ -50,40 +50,19 @@ def _safe_hash(value: str) -> str:
 
 def _guard_progress_fingerprint(state: "ConversationState") -> str:
     """Create a fingerprint of the conversation progress for loop detection."""
-    meta = state.get("metadata", {}) or {}
+    sm = state.get("metadata", {}) or {}
     payload = {
-        "current_state": state.get("current_state"),
-        "dialog_phase": state.get("dialog_phase"),
-        "detected_intent": state.get("detected_intent"),
-        "selected_products": [
-            (p.get("id"), p.get("name"), p.get("size"), p.get("color"))
-            for p in (state.get("selected_products") or [])
-            if isinstance(p, dict)
-        ],
-        "offered_products": [
-            (p.get("id"), p.get("name"), p.get("size"), p.get("color"))
-            for p in (state.get("offered_products") or [])
-            if isinstance(p, dict)
-        ],
-        "customer": {
-            "name": meta.get("customer_name"),
-            "phone": meta.get("customer_phone"),
-            "city": meta.get("customer_city"),
-            "nova_poshta": meta.get("customer_nova_poshta"),
-        },
-        "payment": {
-            "payment_details_sent": meta.get("payment_details_sent"),
-            "awaiting_payment_confirmation": meta.get("awaiting_payment_confirmation"),
-            "payment_confirmed": meta.get("payment_confirmed"),
-            "payment_proof_received": meta.get("payment_proof_received"),
-        },
-        "crm": {
-            "crm_external_id": state.get("crm_external_id"),
-            "crm_retry_count": state.get("crm_retry_count"),
-            "crm_status": (state.get("crm_order_result") or {}).get("status"),
-        },
+        "s": str(state.get("current_state")),
+        "p": str(state.get("dialog_phase")),
+        "i": str(state.get("detected_intent") or sm.get("intent") or ""),
+        "prod": [str(p.get("id")) for p in (state.get("selected_products") or []) if isinstance(p, dict)],
+        "cust": {
+            "n": sm.get("customer_name"),
+            "p": sm.get("customer_phone"),
+            "c": sm.get("customer_city"),
+        }
     }
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    raw = json.dumps(payload, sort_keys=True)
     return _safe_hash(raw)
 
 
@@ -106,10 +85,15 @@ def apply_transition_guardrails(
         is_transition_allowed,
     )
 
-    meta = after_state.get("metadata")
-    if not isinstance(meta, dict):
-        meta = {}
-        after_state["metadata"] = meta
+    if not isinstance(after_state.get("metadata"), dict):
+        after_state["metadata"] = {}
+    state_meta = after_state["metadata"]
+
+    # Clear stale recovery errors at start of turn
+    if "last_error" in after_state:
+        del after_state["last_error"]
+    if "last_error" in state_meta:
+        del state_meta["last_error"]
 
     # Validate dialog_phase
     dialog_phase = after_state.get("dialog_phase", "INIT")
@@ -163,14 +147,14 @@ def apply_transition_guardrails(
             },
         )
         after_state["current_state"] = expected_state.value
-        meta["current_state"] = expected_state.value
+        state_meta["current_state"] = expected_state.value
 
     # Validate transition
     before_state_enum = State.from_string(str(before_state.get("current_state")))
     after_state_enum = State.from_string(str(after_state.get("current_state")))
     intent_raw = (
         after_state.get("detected_intent")
-        or meta.get("intent")
+        or state_meta.get("intent")
         or before_state.get("detected_intent")
         or ""
     )
@@ -203,28 +187,38 @@ def apply_transition_guardrails(
             },
         )
         after_state["current_state"] = fallback_state.value
-        meta["current_state"] = fallback_state.value
+        state_meta["current_state"] = fallback_state.value
 
-    # Loop detection
-    guard = meta.get("_guard")
+    # Loop detection settings
+    warning_threshold = getattr(settings, "LOOP_GUARD_WARNING_THRESHOLD", 5)
+    soft_reset_threshold = getattr(settings, "LOOP_GUARD_SOFT_RESET", 10)
+    escalation_threshold = getattr(settings, "LOOP_GUARD_ESCALATION", 20)
+    debug_enabled = getattr(settings, "DEBUG_TRACE_LOGS", False)
+
+    # Loop detection logic
+    guard = state_meta.get("_guard")
     if not isinstance(guard, dict):
         guard = {}
 
     before_fp = _guard_progress_fingerprint(before_state)
     after_fp = _guard_progress_fingerprint(after_state)
     prev_count = int(guard.get("count") or 0)
+    turns = int(guard.get("turns") or 0) + 1
 
-    stagnant_this_turn = before_fp == after_fp
+    stagnant_this_turn = (before_fp == after_fp) or state_meta.get("FORCE_STAGNANT", False)
+    
+    # We use stagnant count for "true" loops.
     count = (prev_count + 1) if stagnant_this_turn else 0
 
     guard["fp"] = after_fp
     guard["count"] = count
+    guard["turns"] = turns
     guard["last_user_hash"] = _safe_hash(user_text.strip().lower())
     guard["before_fp"] = before_fp
-    meta["_guard"] = guard
+    state_meta["_guard"] = guard
 
     # Loop warnings and recovery
-    if count == 5:
+    if count == warning_threshold:
         track_metric(
             "loop_guard_warn",
             1,
@@ -233,15 +227,8 @@ def apply_transition_guardrails(
                 "state": str(after_state.get("current_state") or ""),
             },
         )
-        logger.warning(
-            "[SESSION %s] Guardrail: potential loop (count=%d, phase=%s, state=%s)",
-            session_id,
-            count,
-            after_state.get("dialog_phase"),
-            after_state.get("current_state"),
-        )
 
-    if count == 10:
+    if count == soft_reset_threshold:
         track_metric(
             "loop_guard_soft_recovery",
             1,
@@ -250,16 +237,13 @@ def apply_transition_guardrails(
                 "state": str(after_state.get("current_state") or ""),
             },
         )
-        logger.error(
-            "[SESSION %s] Guardrail: loop detected -> soft recovery to INIT (count=%d)",
-            session_id,
-            count,
-        )
         after_state["dialog_phase"] = "INIT"
         after_state["current_state"] = State.STATE_0_INIT.value
         after_state["detected_intent"] = None
         after_state["last_error"] = "loop_guard_soft_recovery"
-        if settings.DEBUG_TRACE_LOGS:
+        state_meta["last_error"] = "loop_guard_soft_recovery"
+        
+        if debug_enabled:
             debug_log.error(
                 session_id=session_id,
                 error_type="LoopGuard",
@@ -268,21 +252,21 @@ def apply_transition_guardrails(
 
     current_phase = after_state.get("dialog_phase", "INIT")
 
-    if count >= settings.LOOP_GUARD_WARNING_THRESHOLD:
-        if settings.DEBUG_TRACE_LOGS:
+    if count >= warning_threshold:
+        if debug_enabled:
             debug_log.warning(
                 session_id=session_id,
                 message=f"Loop warning (phase={current_phase}, count={count})",
             )
 
-    if count >= settings.LOOP_GUARD_SOFT_RESET and count < settings.LOOP_GUARD_ESCALATION:
-        if settings.DEBUG_TRACE_LOGS:
+    if count >= soft_reset_threshold and count < escalation_threshold:
+        if debug_enabled:
             debug_log.warning(
                 session_id=session_id,
                 message=f"Loop soft reset (phase={current_phase}, count={count})",
             )
 
-    if count >= settings.LOOP_GUARD_ESCALATION:
+    if count >= escalation_threshold:
         track_metric(
             "loop_guard_escalation",
             1,
@@ -291,17 +275,13 @@ def apply_transition_guardrails(
                 "state": str(after_state.get("current_state") or ""),
             },
         )
-        logger.error(
-            "[SESSION %s] Guardrail: loop detected -> escalation (count=%d)",
-            session_id,
-            count,
-        )
         after_state["dialog_phase"] = "COMPLAINT"
         after_state["current_state"] = State.STATE_8_COMPLAINT.value
         after_state["detected_intent"] = "COMPLAINT"
         after_state["escalation_reason"] = "Loop guard: too many repeated turns"
         after_state["should_escalate"] = True
         after_state["last_error"] = "loop_guard_escalation"
+        state_meta["last_error"] = "loop_guard_escalation"
         try:
             from src.core.human_responses import get_human_response
 
@@ -321,36 +301,16 @@ def apply_transition_guardrails(
             }
         except Exception:
             pass
-        if settings.DEBUG_TRACE_LOGS:
+        if debug_enabled:
             debug_log.error(
                 session_id=session_id,
                 error_type="LoopGuard",
                 message=f"Escalation (count={count})",
             )
 
-    # Defense-in-Depth log
-    agent_response = after_state.get("agent_response")
-    if isinstance(agent_response, dict):
-        messages = agent_response.get("messages")
-        if isinstance(messages, list):
-            text_messages = [
-                m for m in messages if isinstance(m, dict) and (m.get("type") in (None, "text"))
-            ]
-            first = text_messages[0] if text_messages else None
-            first_content = first.get("content") if isinstance(first, dict) else None
-            if isinstance(first_content, str):
-                if settings.DEBUG_TRACE_LOGS:
-                    debug_log.node_exit(
-                        session_id=session_id,
-                        node_name="guardrail_check",
-                        goto="end",
-                        new_phase=after_state.get("dialog_phase"),
-                        response_preview=str(first_content)[:50],
-                    )
-
+    after_state["metadata"] = state_meta
     return after_state
 
 
 # Backward compatibility alias
 _apply_transition_guardrails = apply_transition_guardrails
-

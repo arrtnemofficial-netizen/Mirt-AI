@@ -7,6 +7,7 @@ This file contains keyword patterns used by `intent.py` for routing.
 купую
 беру
 оплат
+оплач
 реквізит
 замовл
 оформ
@@ -34,8 +35,8 @@ ok
 підходить
 ---
 ### INTENT_PATTERN_PRODUCT_NAMES
-лагуна
-мрія
+лагун
+мрі
 ритм
 каприз
 валері
@@ -43,6 +44,8 @@ ok
 анна
 тренч
 еліт
+перший варіант
+другий
 ---
 ### INTENT_PATTERN_PRODUCT_CATEGORY
 костюм

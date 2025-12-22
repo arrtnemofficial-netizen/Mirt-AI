@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from src.services.supabase_client import get_supabase_client
+from src.services.infra.supabase_client import get_supabase_client
 
 
 def main():
@@ -86,7 +86,7 @@ def main():
             build_followup_message,
             next_followup_due_at,
         )
-        from src.services.message_store import StoredMessage
+        from src.services.infra.message_store import StoredMessage
 
         # Create old message (2 min ago)
         old_time = datetime.now(UTC) - timedelta(minutes=2)

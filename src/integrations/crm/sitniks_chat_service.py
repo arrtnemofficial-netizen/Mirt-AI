@@ -13,6 +13,8 @@ from typing import Any
 import httpx
 
 from src.conf.config import settings
+from src.core.circuit_breaker import CircuitBreakerOpenError, get_circuit_breaker
+from src.core.http_retry import http_request_with_retry
 from src.core.prompt_registry import load_yaml_from_registry
 from src.core.registry_keys import SystemKeys
 from src.services.infra.supabase_client import get_supabase_client
@@ -58,6 +60,7 @@ class SitniksChatService:
             self.api_key = str(api_key_secret) if api_key_secret else ""
         self.supabase = get_supabase_client()
         self._managers_cache: dict[str, int] = {}
+        self._circuit_breaker = get_circuit_breaker("sitniks_api", failure_threshold=5, recovery_timeout=60.0)
 
     @property
     def enabled(self) -> bool:
@@ -100,6 +103,10 @@ class SitniksChatService:
         # Remove @ if present
         username = username.lstrip("@").lower()
 
+        if not self._circuit_breaker.can_execute():
+            logger.warning("[SITNIKS] Circuit breaker OPEN, skipping find_chat_by_username")
+            return None
+
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 # Calculate time range
@@ -112,11 +119,16 @@ class SitniksChatService:
                     "limit": 50,
                 }
 
-                response = await client.get(
+                response = await http_request_with_retry(
+                    client,
+                    "GET",
                     f"{self.api_url}/open-api/chats",
+                    max_retries=3,
+                    initial_delay=1.0,
                     headers=self._get_headers(),
                     params=params,
                 )
+                self._circuit_breaker.record_success()
 
                 if response.status_code == 200:
                     data = response.json()
@@ -151,7 +163,10 @@ class SitniksChatService:
                     )
                     return None
 
+        except CircuitBreakerOpenError:
+            raise
         except Exception as e:
+            self._circuit_breaker.record_failure()
             logger.exception("[SITNIKS] Error finding chat: %s", e)
             return None
 
@@ -177,13 +192,22 @@ class SitniksChatService:
             logger.warning("[SITNIKS] No chat_id provided for status update")
             return False
 
+        if not self._circuit_breaker.can_execute():
+            logger.warning("[SITNIKS] Circuit breaker OPEN, skipping update_chat_status")
+            return False
+
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.patch(
+                response = await http_request_with_retry(
+                    client,
+                    "PATCH",
                     f"{self.api_url}/open-api/chats/{chat_id}/status",
+                    max_retries=3,
+                    initial_delay=1.0,
                     headers=self._get_headers(),
                     json={"status": status},
                 )
+                self._circuit_breaker.record_success()
 
                 if response.status_code == 200:
                     logger.info(
@@ -203,7 +227,10 @@ class SitniksChatService:
                     )
                     return False
 
+        except CircuitBreakerOpenError:
+            raise
         except Exception as e:
+            self._circuit_breaker.record_failure()
             logger.exception("[SITNIKS] Error updating status: %s", e)
             return False
 
@@ -214,8 +241,12 @@ class SitniksChatService:
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.get(
+                response = await http_request_with_retry(
+                    client,
+                    "GET",
                     f"{self.api_url}/open-api/managers",
+                    max_retries=3,
+                    initial_delay=1.0,
                     headers=self._get_headers(),
                 )
 
@@ -271,8 +302,12 @@ class SitniksChatService:
             async with httpx.AsyncClient(timeout=30) as client:
                 # Note: This endpoint path is assumed based on common patterns
                 # Actual endpoint may differ - check Sitniks docs
-                response = await client.patch(
+                response = await http_request_with_retry(
+                    client,
+                    "PATCH",
                     f"{self.api_url}/open-api/chats/{chat_id}",
+                    max_retries=3,
+                    initial_delay=1.0,
                     headers=self._get_headers(),
                     json={"assignedManagerId": manager_id},
                 )

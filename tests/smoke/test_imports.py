@@ -13,6 +13,11 @@ import pytest
 class TestCriticalImports:
     """Verify all critical modules can be imported without error."""
 
+    def test_config_importable(self):
+        """Configuration must import."""
+        from src.conf.config import settings
+        assert settings is not None
+
     def test_core_models_importable(self):
         """Core data models must import."""
         from src.core.models import AgentResponse, Product
@@ -71,10 +76,10 @@ class TestCriticalImports:
 
     def test_pydantic_agents_importable(self):
         """PydanticAI agents must import."""
-        from src.agents.pydantic.support_agent import get_support_agent
+        from src.agents.pydantic.main_agent import get_main_agent
 
-        assert get_support_agent is not None
-        assert callable(get_support_agent)
+        assert get_main_agent is not None
+        assert callable(get_main_agent)
 
     def test_pydantic_models_importable(self):
         """PydanticAI response models must import."""
@@ -84,10 +89,10 @@ class TestCriticalImports:
 
     def test_services_importable(self):
         """Core services must import."""
-        from src.services.catalog_service import CatalogService
+        from src.services.data.catalog_service import CatalogService
         from src.services.conversation import ConversationHandler
-        from src.services.memory_service import MemoryService
-        from src.services.order_service import OrderService
+        from src.services.domain.memory.memory_service import MemoryService
+        from src.services.data.order_service import OrderService
 
         assert CatalogService is not None
         assert OrderService is not None
@@ -102,17 +107,17 @@ class TestCriticalImports:
 
     def test_server_importable(self):
         """FastAPI server must import."""
+        try:
+            import src.server.routers as _routers
+            print(f"DEBUG: routers path: {_routers.__file__}")
+        except Exception as e:
+            import sys
+            print(f"DEBUG: sys.path: {sys.path}")
+            print(f"DEBUG: src.server in modules: {'src.server' in sys.modules}")
+            raise e
+        
         from src.server.main import app
-
         assert app is not None
-
-    def test_config_importable(self):
-        """Configuration must import."""
-        from src.conf.config import settings
-        from src.conf.payment_config import BANK_REQUISITES
-
-        assert settings is not None
-        assert BANK_REQUISITES is not None
 
 
 @pytest.mark.smoke

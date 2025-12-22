@@ -190,6 +190,10 @@ class Settings(BaseSettings):
         default=True,
         description="Allow legacy state aliases in normalize_state (temporary).",
     )
+    DEBUG_TRACE_LOGS: bool = Field(
+        default=False,
+        description="Enable detailed trace logging for debugging.",
+    )
     # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
     # - LangGraph v2 is now the only architecture
     # - PydanticAI handles tool planning automatically
@@ -236,6 +240,64 @@ def get_settings() -> Settings:
     """Return a cached settings instance."""
 
     return Settings()  # type: ignore[arg-type]
+
+
+def validate_required_settings(settings_instance: Settings | None = None) -> None:
+    """Validate that all required environment variables are set.
+
+    Raises RuntimeError if critical settings are missing.
+
+    Args:
+        settings_instance: Settings instance to validate. If None, uses global settings.
+    """
+    import logging
+    import os
+
+    logger = logging.getLogger(__name__)
+
+    if settings_instance is None:
+        settings_instance = get_settings()
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # Determine environment
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    is_production = env in ("production", "prod", "staging") or (
+        settings_instance.PUBLIC_BASE_URL != "http://localhost:8000"
+    )
+
+    # Critical settings (required in production)
+    if is_production:
+        if not settings_instance.OPENAI_API_KEY.get_secret_value():
+            errors.append("OPENAI_API_KEY is required in production")
+
+        if not settings_instance.SUPABASE_URL:
+            errors.append("SUPABASE_URL is required in production")
+
+        if not settings_instance.SUPABASE_API_KEY.get_secret_value():
+            errors.append("SUPABASE_API_KEY is required in production")
+
+    # Important settings (warnings in production)
+    if is_production:
+        if not settings_instance.MANYCHAT_API_KEY.get_secret_value():
+            warnings.append("MANYCHAT_API_KEY not set (ManyChat integration disabled)")
+
+        if not settings_instance.MANYCHAT_VERIFY_TOKEN:
+            warnings.append("MANYCHAT_VERIFY_TOKEN not set (ManyChat webhook validation disabled)")
+
+        if not settings_instance.REDIS_URL or settings_instance.REDIS_URL == "redis://localhost:6379/0":
+            warnings.append("REDIS_URL not configured (using default, may not work in production)")
+
+    # Log warnings
+    for warning in warnings:
+        logger.warning("Configuration warning: %s", warning)
+
+    # Raise errors
+    if errors:
+        error_msg = "Critical configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
 
 
 settings = get_settings()

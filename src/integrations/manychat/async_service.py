@@ -20,11 +20,10 @@ from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph
 from src.conf.config import settings
-from src.core.registry_keys import SystemKeys
-from src.core.prompt_registry import load_yaml_from_registry
-from src.core.fallbacks import FallbackType, get_fallback_response
-from src.core.logging import classify_root_cause, log_event, safe_preview
+from src.core.human_responses import get_human_response
+from src.core.logging import log_event, safe_preview
 from src.core.rate_limiter import check_rate_limit
+from src.services.client_data_parser import parse_client_data
 from src.services.conversation import create_conversation_handler
 from src.services.infra.debouncer import MessageDebouncer
 from src.services.infra.media_utils import normalize_image_url
@@ -35,7 +34,17 @@ from .push_client import ManyChatPushClient, get_manychat_push_client
 from .response_builder import (
     build_manychat_field_values,
     build_manychat_messages,
+    build_manychat_response,
     build_manychat_tags,
+    build_text_response,
+)
+from .service_utils import (
+    build_extra_metadata,
+    get_time_budget,
+    handle_restart_command,
+    maybe_push_interim,
+    safe_send_content,
+    safe_send_text,
 )
 
 
@@ -45,11 +54,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _get_manychat_config() -> dict[str, Any]:
-    data = load_yaml_from_registry(SystemKeys.MANYCHAT.value)
-    return data if isinstance(data, dict) else {}
 
 
 class ManyChatAsyncService:
@@ -133,162 +137,6 @@ class ManyChatAsyncService:
             products_count=len(getattr(response, "products", []) or []),
         )
 
-    def _build_extra_metadata(
-        self,
-        *,
-        user_id: str,
-        channel: str,
-        image_url: str | None,
-        subscriber_data: dict[str, Any] | None,
-        trace_id: str,
-    ) -> dict[str, Any]:
-        extra_metadata: dict[str, Any] = {}
-
-        if image_url:
-            extra_metadata.update({"has_image": True, "image_url": image_url})
-            log_event(
-                logger,
-                event="manychat_image_attached",
-                trace_id=trace_id,
-                user_id=user_id,
-                channel=channel,
-                has_image=True,
-                image_url_preview=safe_preview(image_url, 100),
-            )
-
-        if subscriber_data:
-            instagram_username = subscriber_data.get("instagram_username") or subscriber_data.get(
-                "username"
-            )
-            if instagram_username:
-                extra_metadata["instagram_username"] = instagram_username
-                log_event(
-                    logger,
-                    event="manychat_subscriber_username",
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    channel=channel,
-                )
-
-            name = (
-                subscriber_data.get("name")
-                or subscriber_data.get("full_name")
-                or subscriber_data.get("first_name")
-            )
-            if name:
-                extra_metadata["user_nickname"] = name
-                log_event(
-                    logger,
-                    event="manychat_subscriber_name",
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    channel=channel,
-                )
-
-        return extra_metadata
-
-    @staticmethod
-    def _get_time_budget(has_image: bool) -> float:
-        try:
-            text_budget = float(getattr(settings, "MANYCHAT_TEXT_TIME_BUDGET_SECONDS", 25.0))
-            vision_budget = float(getattr(settings, "MANYCHAT_VISION_TIME_BUDGET_SECONDS", 55.0))
-        except Exception:
-            text_budget, vision_budget = 25.0, 55.0
-        return vision_budget if has_image else text_budget
-
-    async def _safe_send_text(
-        self,
-        *,
-        subscriber_id: str,
-        text: str,
-        channel: str,
-        trace_id: str | None = None,
-    ) -> bool:
-        try:
-            return await self.push_client.send_text(
-                subscriber_id=subscriber_id,
-                text=text,
-                channel=channel,
-                trace_id=trace_id,
-            )
-        except TypeError:
-            return await self.push_client.send_text(
-                subscriber_id=subscriber_id,
-                text=text,
-                channel=channel,
-            )
-
-    async def _safe_send_content(
-        self,
-        *,
-        subscriber_id: str,
-        messages: list[dict[str, Any]],
-        channel: str,
-        quick_replies: list[dict[str, str]] | None,
-        set_field_values: list[dict[str, Any]] | None,
-        add_tags: list[str] | None,
-        remove_tags: list[str] | None,
-        trace_id: str | None = None,
-    ) -> bool:
-        try:
-            return await self.push_client.send_content(
-                subscriber_id=subscriber_id,
-                messages=messages,
-                channel=channel,
-                quick_replies=quick_replies,
-                set_field_values=set_field_values,
-                add_tags=add_tags,
-                remove_tags=remove_tags,
-                trace_id=trace_id,
-            )
-        except TypeError:
-            return await self.push_client.send_content(
-                subscriber_id=subscriber_id,
-                messages=messages,
-                channel=channel,
-                quick_replies=quick_replies,
-                set_field_values=set_field_values,
-                add_tags=add_tags,
-                remove_tags=remove_tags,
-            )
-
-    async def _maybe_push_interim(
-        self,
-        *,
-        user_id: str,
-        channel: str,
-        trace_id: str,
-        has_image: bool,
-    ) -> None:
-        """Push a short interim message if processing is taking too long."""
-        try:
-            fallback_after = float(getattr(settings, "MANYCHAT_FALLBACK_AFTER_SECONDS", 10.0))
-        except Exception:
-            fallback_after = 10.0
-
-        if fallback_after <= 0:
-            return
-
-        await asyncio.sleep(fallback_after)
-
-        # If we reached here, main processing likely still running.
-        # Keep it short: 1 bubble, no images.
-                config = _get_manychat_config()
-        interim_cfg = config.get("interim_messages", {}) if isinstance(config, dict) else {}
-        if has_image:
-            interim_text = str(interim_cfg.get("text_with_image", "Working on it...")).strip()
-        else:
-            interim_text = str(interim_cfg.get("text", "Working on it...")).strip()
-
-        if not interim_text:
-            return
-        await self._safe_send_text(
-            subscriber_id=user_id,
-            text=interim_text,
-            channel=channel,
-            trace_id=trace_id,
-        )
-
     async def process_message_async(
         self,
         *,
@@ -324,7 +172,7 @@ class ManyChatAsyncService:
             image_url=image_url,
         )
 
-        # RATE LIMITING: \u0417\u0430\u0445\u0438\u0441\u0442 \u0432\u0456\u0434 \u0441\u043f\u0430\u043c\u0443/abuse
+        # RATE LIMITING: Захист від спаму/abuse
         if not check_rate_limit(user_id):
             log_event(
                 logger,
@@ -335,7 +183,8 @@ class ManyChatAsyncService:
                 channel=channel,
             )
             fallback = get_fallback_response(FallbackType.RATE_LIMITED)
-            await self._safe_send_text(
+            await safe_send_text(
+                self.push_client,
                 subscriber_id=user_id,
                 text=str(fallback["text"]),
                 channel=channel,
@@ -354,16 +203,38 @@ class ManyChatAsyncService:
                     user_id=user_id,
                     channel=channel,
                 )
-                await self._handle_restart_command(user_id, channel)
+                if user_id in self._restart_inflight:
+                    logger.info("[MANYCHAT:%s] /restart already in progress", user_id)
+                    await safe_send_text(
+                        self.push_client,
+                        subscriber_id=user_id,
+                        text="Сесія очищується. Напишіть, будь ласка, запит ще раз 🙂",
+                        channel=channel,
+                    )
+                    return
+                self._restart_inflight.add(user_id)
+                try:
+                    await handle_restart_command(
+                        user_id=user_id,
+                        channel=channel,
+                        runner=self.runner,
+                        store=self.store,
+                        debouncer=self.debouncer,
+                        push_client=self.push_client,
+                        logger=logger,
+                    )
+                finally:
+                    self._restart_inflight.discard(user_id)
                 return
 
             # Build metadata including username info
-            extra_metadata = self._build_extra_metadata(
+            extra_metadata = build_extra_metadata(
                 user_id=user_id,
                 channel=channel,
                 image_url=image_url,
                 subscriber_data=subscriber_data,
                 trace_id=trace_id,
+                logger=logger,
             )
             extra_metadata = {**extra_metadata, "trace_id": trace_id, "channel": channel}
 
@@ -388,13 +259,15 @@ class ManyChatAsyncService:
             ) -> None:
                 nonlocal interim_task, has_image_final, time_budget
                 has_image_final = has_image
-                time_budget = self._get_time_budget(has_image)
+                time_budget = get_time_budget(has_image)
                 interim_task = asyncio.create_task(
-                    self._maybe_push_interim(
+                    maybe_push_interim(
+                        self.push_client,
                         user_id=user_id,
                         channel=channel,
                         trace_id=trace_id,
                         has_image=has_image,
+                        logger=logger,
                     )
                 )
                 log_event(
@@ -416,7 +289,7 @@ class ManyChatAsyncService:
                     text=text,
                     image_url=image_url,
                     extra_metadata=extra_metadata,
-                    time_budget_provider=self._get_time_budget,
+                    time_budget_provider=get_time_budget,
                     on_superseded=_on_superseded,
                     on_debounced=_on_debounced,
                 )
@@ -436,7 +309,8 @@ class ManyChatAsyncService:
 
                 fallback = get_fallback_response(FallbackType.LLM_TIMEOUT)
                 if fallback.get("text"):
-                    await self._safe_send_text(
+                    await safe_send_text(
+                        self.push_client,
                         subscriber_id=user_id,
                         text=str(fallback["text"]),
                         channel=channel,
@@ -451,12 +325,6 @@ class ManyChatAsyncService:
             result = pipeline_result.result
 
             if result.is_fallback:
-                root_cause = classify_root_cause(
-                    result.error,
-                    current_state=getattr(result.response.metadata, "current_state", None),
-                    intent=getattr(result.response.metadata, "intent", None),
-                    channel=channel,
-                )
                 log_event(
                     logger,
                     event="manychat_fallback_triggered",
@@ -464,8 +332,9 @@ class ManyChatAsyncService:
                     trace_id=trace_id,
                     user_id=user_id,
                     channel=channel,
-                    root_cause=root_cause,
                     error=safe_preview(result.error, 200),
+                    intent=getattr(result.response.metadata, "intent", None),
+                    current_state=getattr(result.response.metadata, "current_state", None),
                 )
 
             # Push response to ManyChat
@@ -480,7 +349,6 @@ class ManyChatAsyncService:
             )
 
         except Exception as e:
-            root_cause = classify_root_cause(e, channel=channel)
             log_event(
                 logger,
                 event="manychat_processing_error",
@@ -488,12 +356,17 @@ class ManyChatAsyncService:
                 trace_id=trace_id,
                 user_id=user_id,
                 channel=channel,
-                root_cause=root_cause,
                 error_type=type(e).__name__,
                 error=safe_preview(e, 200),
             )
             # Try to send error message
-            await self._push_error_message(user_id, channel, trace_id=trace_id)
+            await safe_send_text(
+                self.push_client,
+                subscriber_id=user_id,
+                text=get_human_response("error"),
+                channel=channel,
+                trace_id=trace_id,
+            )
 
     async def _push_response(
         self,
@@ -537,7 +410,8 @@ class ManyChatAsyncService:
             messages_count=len(messages),
         )
 
-        success = await self._safe_send_content(
+        success = await safe_send_content(
+            self.push_client,
             subscriber_id=user_id,
             messages=messages,
             channel=channel,
@@ -570,121 +444,59 @@ class ManyChatAsyncService:
                 channel=channel,
             )
 
-    @staticmethod
-    def _get_error_text() -> str:
-        """Get human-like error message."""
-        from src.core.human_responses import get_human_response
+    async def process_message_sync(
+        self,
+        *,
+        user_id: str,
+        text: str,
+        image_url: str | None = None,
+        channel: str = "instagram",
+        subscriber_data: dict[str, Any] | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Process message inline and return ManyChat response (sync mode)."""
+        trace_id = trace_id or str(uuid.uuid4())
+        image_url = normalize_image_url(image_url)
 
-        return get_human_response("error")
-
-    async def _push_error_message(self, user_id: str, channel: str, *, trace_id: str) -> None:
-        """Push a friendly error message."""
-        await self._safe_send_text(
-            subscriber_id=user_id,
-            text=self._get_error_text(),
+        # Build metadata
+        extra_metadata = build_extra_metadata(
+            user_id=user_id,
             channel=channel,
+            image_url=image_url,
+            subscriber_data=subscriber_data,
             trace_id=trace_id,
+            logger=logger,
         )
+        extra_metadata = {**extra_metadata, "trace_id": trace_id, "channel": channel}
 
-    async def _handle_restart_command(self, user_id: str, channel: str) -> None:
-        """Handle /restart command - clear session and confirm."""
-        import time as _time
+        pipeline_result = await process_manychat_pipeline(
+            handler=self._handler,
+            debouncer=self.debouncer,
+            user_id=user_id,
+            text=text or "",
+            image_url=image_url,
+            extra_metadata=extra_metadata,
+            time_budget_provider=get_time_budget,
+        )
+        if pipeline_result is None:
+            return build_text_response("")
 
-        _restart_start = _time.time()
-        if user_id in self._restart_inflight:
-            logger.info("[MANYCHAT:%s] /restart already in progress", user_id)
-            await self._safe_send_text(
-                subscriber_id=user_id,
-                text="\u0421\u0435\u0441\u0456\u044f \u043e\u0447\u0438\u0449\u0443\u0454\u0442\u044c\u0441\u044f. \u041d\u0430\u043f\u0438\u0448\u0456\u0442\u044c, \u0431\u0443\u0434\u044c \u043b\u0430\u0441\u043a\u0430, \u0437\u0430\u043f\u0438\u0442 \u0449\u0435 \u0440\u0430\u0437 🙂",
+        result = pipeline_result.result
+        if result.is_fallback:
+            log_event(
+                logger,
+                event="manychat_fallback_triggered_sync",
+                level="warning",
+                trace_id=trace_id,
+                user_id=user_id,
                 channel=channel,
-            )
-            return
-
-        self._restart_inflight.add(user_id)
-        try:
-            # Clear any pending debouncer buffers/timers so no stale aggregated message
-            # is processed after restart.
-            try:
-                self.debouncer.clear_session(user_id)
-            except Exception:
-                logger.debug(
-                    "[MANYCHAT:%s] Failed to clear debouncer session", user_id, exc_info=True
-                )
-
-            # CRITICAL: Also reset LangGraph checkpointer state for this thread.
-            # Otherwise, persistent checkpointers (Postgres) will restore an old dialog_phase
-            # (e.g., WAITING_FOR_PAYMENT_PROOF) even after SessionStore is cleared.
-            # NOTE: This is OPTIONAL - skip if it takes too long (>5 sec timeout)
-            try:
-                from src.agents.langgraph.state import create_initial_state
-
-                reset_state = create_initial_state(
-                    session_id=user_id,
-                    metadata={"channel": channel},
-                )
-                _lg_start = _time.time()
-                # Use timeout to prevent blocking - checkpointer reset is optional
-                await asyncio.wait_for(
-                    self.runner.aupdate_state(
-                        {"configurable": {"thread_id": user_id}},
-                        reset_state,
-                    ),
-                    timeout=5.0,  # Max 5 seconds for checkpointer reset
-                )
-                logger.info(
-                    "[MANYCHAT:%s] LangGraph state reset via /restart (%.2fs)",
-                    user_id,
-                    _time.time() - _lg_start,
-                )
-            except TimeoutError:
-                logger.warning(
-                    "[MANYCHAT:%s] LangGraph state reset timed out (>5s), skipping",
-                    user_id,
-                )
-            except Exception:
-                logger.debug(
-                    "[MANYCHAT:%s] Failed to reset LangGraph state via /restart",
-                    user_id,
-                    exc_info=True,
-                )
-
-            # Delete session from store
-            # CRITICAL: Use to_thread() to avoid blocking event loop!
-            _del_start = _time.time()
-            deleted = await asyncio.to_thread(self.store.delete, user_id)
-            logger.info(
-                "[MANYCHAT:%s] store.delete took %.2fs",
-                user_id,
-                _time.time() - _del_start,
+                error=safe_preview(result.error, 200),
+                intent=getattr(result.response.metadata, "intent", None),
+                current_state=getattr(result.response.metadata, "current_state", None),
             )
 
-            # Clear message history for this session (idempotent).
-            try:
-                await asyncio.to_thread(self.message_store.delete, user_id)
-            except Exception:
-                logger.debug(
-                    "[MANYCHAT:%s] Failed to clear message store via /restart",
-                    user_id,
-                    exc_info=True,
-                )
-
-                        config = _get_manychat_config()
-            restart_cfg = config.get("restart_messages", {}) if isinstance(config, dict) else {}
-            if deleted:
-                logger.info("[MANYCHAT:%s] Session cleared via /restart", user_id)
-                response_text = str(restart_cfg.get("done", "Session cleared. Please try again."))
-            else:
-                logger.info("[MANYCHAT:%s] /restart called but no session existed", user_id)
-                response_text = str(restart_cfg.get("already_done", "Session already cleared. Please try again."))
-
-            # Push confirmation
-            await self._safe_send_text(
-                subscriber_id=user_id,
-                text=response_text,
-                channel=channel,
-            )
-        finally:
-            self._restart_inflight.discard(user_id)
+        client_data = parse_client_data(text)
+        return build_manychat_response(result.response, client_data=client_data)
 
     @staticmethod
     def _build_quick_replies(_agent_response: AgentResponse) -> list[dict[str, str]]:
@@ -692,7 +504,6 @@ class ManyChatAsyncService:
 
         NOTE: ManyChat sendContent API does NOT support quick_replies for Instagram.
         The 'type: text' format causes "Unsupported quick reply type" error.
-        Returning empty list until proper format is determined.
 
         For now, users will type responses manually (which works fine).
         """

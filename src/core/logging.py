@@ -158,6 +158,29 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
+def log_event(
+    logger: logging.Logger,
+    *,
+    event: str,
+    level: str | None = None,
+    **kwargs: Any,
+) -> None:
+    """Structured event logging helper."""
+    lvl = (level or "info").lower()
+    log_fn = getattr(logger, lvl, logger.info)
+    log_fn(event, extra={"event": event, **kwargs})
+
+
+def safe_preview(value: Any, max_len: int = 120) -> str:
+    """Return a safe string preview of value."""
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
 class LogContext:
     """Context manager for adding context to log records.
 

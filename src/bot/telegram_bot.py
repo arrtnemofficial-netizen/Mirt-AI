@@ -554,7 +554,7 @@ async def run_polling(store: SessionStore | None = None) -> None:
 
 
 
-    print("🚀 Starting Telegram bot with INFO logging enabled...")
+    logger.info("🚀 Starting Telegram bot with INFO logging enabled...")
 
 
 
@@ -572,12 +572,9 @@ async def run_polling(store: SessionStore | None = None) -> None:
 
     if store is None:
 
-        print(
-
-            "⚠️ Using InMemorySessionStore - session state will be lost on restart!\n"
-
-            "   Set SUPABASE_URL and SUPABASE_API_KEY for persistent session storage."
-
+        logger.warning(
+            "⚠️ Using InMemorySessionStore - session state will be lost on restart! "
+            "Set SUPABASE_URL and SUPABASE_API_KEY for persistent session storage."
         )
 
 

@@ -14,11 +14,13 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
-from src.conf.config import settings
+from src.conf.config import settings, validate_required_settings
 from src.core.logging import setup_logging
 from src.server.dependencies import get_bot
+from src.server.exceptions import APIError
 from src.server.middleware import setup_middleware
 from src.server.routers import (
     automation_router,
@@ -64,6 +66,13 @@ def _init_sentry():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
+    # Validate required settings first
+    try:
+        validate_required_settings()
+    except RuntimeError as e:
+        logger.critical("Configuration validation failed: %s", e)
+        raise
+
     # Initialize Sentry first
     _init_sentry()
 
@@ -129,6 +138,20 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(APIError)
+async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
+    """Handle custom API exceptions."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail or exc.message,
+            "error": exc.message,
+        },
+        headers={"Retry-After": str(exc.retry_after)} if hasattr(exc, "retry_after") and exc.retry_after else None,
+    )
+
 
 # Setup middleware (rate limiting, request logging)
 setup_middleware(app, enable_rate_limit=True, enable_logging=True)

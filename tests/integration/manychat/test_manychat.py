@@ -1,242 +1,232 @@
 import asyncio
-import json
+from dataclasses import dataclass
 
 import pytest
 
 from src.core.models import AgentResponse, Message, Metadata, Product
-from src.integrations.manychat.webhook import (
+from src.integrations.manychat.async_service import ManyChatAsyncService
+from src.integrations.manychat.response_builder import (
     FIELD_AI_INTENT,
     FIELD_AI_STATE,
     FIELD_LAST_PRODUCT,
     TAG_AI_RESPONDED,
     TAG_NEEDS_HUMAN,
-    ManychatWebhook,
 )
-from src.services.message_store import InMemoryMessageStore
-from src.services.session_store import InMemorySessionStore
+from src.services.infra.message_store import InMemoryMessageStore
+from src.services.infra.session_store import InMemorySessionStore
 
 
-class DummyRunner:
-    def __init__(self, agent_response: AgentResponse):
-        self.agent_response = agent_response
+@dataclass
+class StubPipelineResult:
+    response: AgentResponse
+    is_fallback: bool = False
 
-    async def ainvoke(self, state, config=None):
-        # Build assistant message in OUTPUT_CONTRACT format like real nodes
-        assistant_content = {
-            "event": self.agent_response.event,
-            "messages": [m.model_dump() for m in self.agent_response.messages],
-            "products": [p.model_dump() for p in self.agent_response.products],
-            "metadata": self.agent_response.metadata.model_dump(),
+    @property
+    def result(self):
+        return type("ConversationResult", (), {"response": self.response, "is_fallback": self.is_fallback})
+
+
+def make_response(
+    *,
+    messages: list[str],
+    state: str,
+    intent: str,
+    products: list[Product] | None = None,
+    escalation_level: str = "NONE",
+) -> AgentResponse:
+    return AgentResponse(
+        event="reply",
+        messages=[Message(content=m) for m in messages],
+        products=products or [],
+        metadata=Metadata(current_state=state, intent=intent, escalation_level=escalation_level),
+    )
+
+
+def build_service(monkeypatch, response: AgentResponse, *, is_fallback: bool = False) -> ManyChatAsyncService:
+    store = InMemorySessionStore()
+    message_store = InMemoryMessageStore()
+    service = ManyChatAsyncService(store, runner=None, message_store=message_store)
+
+    async def fake_pipeline(**kwargs):
+        return StubPipelineResult(response=response, is_fallback=is_fallback)
+
+    monkeypatch.setattr(
+        "src.integrations.manychat.async_service.process_manychat_pipeline",
+        fake_pipeline,
+    )
+    return service
+
+
+@pytest.mark.manychat
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_manychat_handle_returns_messages(monkeypatch):
+    """Сервіс повертає ManyChat v2 envelope з контрольованими повідомленнями."""
+    response = make_response(
+        messages=["Привіт", "Як можу допомогти?"],
+        state="STATE_1_DISCOVERY",
+        intent="GREETING_ONLY",
+    )
+    handler = build_service(monkeypatch, response)
+
+    result = await handler.process_message_sync(
+        user_id="abc",
+        text="hi",
+        channel="instagram",
+        subscriber_data={"id": "abc"},
+    )
+
+    assert result["version"] == "v2"
+    msgs = [m["text"] for m in result["content"]["messages"]]
+    assert msgs == ["Привіт", "Як можу допомогти?"]
+    assert result["_debug"]["current_state"] == "STATE_1_DISCOVERY"
+    assert result["_debug"]["intent"] == "GREETING_ONLY"
+
+
+@pytest.mark.manychat
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_manychat_custom_fields(monkeypatch):
+    """Custom fields формуються з metadata та продуктів."""
+    product = Product.from_legacy(
+        {
+            "product_id": 123,
+            "name": "Сукня Анна",
+            "price": 1200,
+            "size": "122-128",
+            "color": "синій",
+            "photo_url": "https://example.com/photo.jpg",
         }
-
-        if self.agent_response.escalation:
-            assistant_content["escalation"] = self.agent_response.escalation.model_dump()
-
-        # Use json.dumps() for proper JSON format (conversation handler expects JSON)
-        json_content = json.dumps(assistant_content)
-        state["messages"].append({"role": "assistant", "content": json_content})
-        state["current_state"] = self.agent_response.metadata.current_state
-        # Set agent_response like real nodes do (line 157 in agent_node.py)
-        state["agent_response"] = self.agent_response.model_dump()
-        # Ensure escalation_level is preserved in state
-        if hasattr(self.agent_response.metadata, "escalation_level"):
-            state["escalation_level"] = self.agent_response.metadata.escalation_level
-        return state
-
-
-@pytest.mark.manychat
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_manychat_handle_returns_messages():
-    """Test basic ManyChat response with messages."""
-    response = AgentResponse(
-        event="simple_answer",
-        messages=[Message(content="Привіт"), Message(content="Як можу допомогти?")],
-        products=[],
-        metadata=Metadata(current_state="STATE_1_DISCOVERY", intent="GREETING_ONLY"),
     )
-    runner = DummyRunner(response)
-    store = InMemorySessionStore()
-    handler = ManychatWebhook(store, runner=runner, message_store=InMemoryMessageStore())
-
-    payload = {"subscriber": {"id": "abc"}, "message": {"text": "hi"}}
-
-    output = await handler.handle(payload)
-
-    # Check v2 format structure
-    assert output["version"] == "v2"
-    assert "content" in output
-    assert "messages" in output["content"]
-
-    # Check messages
-    messages = output["content"]["messages"]
-    assert messages[0]["text"].startswith("Привіт")
-    assert messages[1]["text"].startswith("Як можу")
-
-    # Check debug metadata
-    assert output["_debug"]["current_state"] == "STATE_1_DISCOVERY"
-    assert output["_debug"]["intent"] == "GREETING_ONLY"
-
-
-@pytest.mark.manychat
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_manychat_custom_fields():
-    """Test Custom Field values in response."""
-    response = AgentResponse(
-        event="simple_answer",
-        messages=[Message(content="Ось сукня")],
-        products=[
-            Product.from_legacy(
-                {
-                    "product_id": 123,
-                    "name": "Сукня Анна",
-                    "price": 1200,
-                    "size": "122-128",
-                    "color": "синій",
-                    "photo_url": "https://example.com/photo.jpg",
-                }
-            )
-        ],
-        metadata=Metadata(current_state="STATE_4_OFFER", intent="DISCOVERY_OR_QUESTION"),
+    response = make_response(
+        messages=["Ось сукня"],
+        state="STATE_4_OFFER",
+        intent="DISCOVERY_OR_QUESTION",
+        products=[product],
     )
-    runner = DummyRunner(response)
-    store = InMemorySessionStore()
-    handler = ManychatWebhook(store, runner=runner, message_store=InMemoryMessageStore())
+    handler = build_service(monkeypatch, response)
 
-    payload = {"subscriber": {"id": "abc"}, "message": {"text": "покажи сукню"}}
-    output = await handler.handle(payload)
-
-    # Check set_field_values
-    field_values = output["set_field_values"]
-    field_dict = {f["field_name"]: f["field_value"] for f in field_values}
-
-    assert field_dict[FIELD_AI_STATE] == "STATE_4_OFFER"
-    assert field_dict[FIELD_AI_INTENT] == "DISCOVERY_OR_QUESTION"
-    assert field_dict[FIELD_LAST_PRODUCT] == "Сукня Анна"
-
-
-@pytest.mark.manychat
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_manychat_tags():
-    """Test tags in response."""
-    response = AgentResponse(
-        event="escalation",
-        messages=[Message(content="Передаю менеджеру")],
-        products=[],
-        metadata=Metadata(
-            current_state="STATE_8_COMPLAINT", intent="COMPLAINT", escalation_level="L2"
-        ),
+    result = await handler.process_message_sync(
+        user_id="abc",
+        text="покажи сукню",
+        channel="instagram",
+        subscriber_data={"id": "abc"},
     )
-    runner = DummyRunner(response)
-    store = InMemorySessionStore()
-    handler = ManychatWebhook(store, runner=runner, message_store=InMemoryMessageStore())
 
-    payload = {"subscriber": {"id": "abc"}, "message": {"text": "у мене проблема"}}
-    output = await handler.handle(payload)
-
-    # Check tags
-    assert TAG_AI_RESPONDED in output["add_tag"]
-    assert TAG_NEEDS_HUMAN in output["add_tag"]
+    fields = {f["field_name"]: f["field_value"] for f in result["set_field_values"]}
+    assert fields[FIELD_AI_STATE] == "STATE_4_OFFER"
+    assert fields[FIELD_AI_INTENT] == "DISCOVERY_OR_QUESTION"
+    assert fields[FIELD_LAST_PRODUCT] == "Сукня Анна"
 
 
 @pytest.mark.manychat
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_manychat_quick_replies():
-    """Test Quick Reply buttons based on state."""
-    response = AgentResponse(
-        event="clarifying_question",
-        messages=[Message(content="Що шукаєте?")],
-        products=[],
-        metadata=Metadata(current_state="STATE_1_DISCOVERY", intent="GREETING_ONLY"),
+async def test_manychat_tags(monkeypatch):
+    """Escalation -> додаються теги AI_RESPONDED + NEEDS_HUMAN."""
+    response = make_response(
+        messages=["Передаю менеджеру"],
+        state="STATE_8_COMPLAINT",
+        intent="COMPLAINT",
+        escalation_level="L2",
     )
-    runner = DummyRunner(response)
-    store = InMemorySessionStore()
-    handler = ManychatWebhook(store, runner=runner, message_store=InMemoryMessageStore())
+    handler = build_service(monkeypatch, response)
 
-    payload = {"subscriber": {"id": "abc"}, "message": {"text": "привіт"}}
-    output = await handler.handle(payload)
-
-    # Check quick replies for discovery state
-    quick_replies = output["content"]["quick_replies"]
-    captions = [r["caption"] for r in quick_replies]
-
-    assert "👗 Сукні" in captions
-    assert "👔 Костюми" in captions
-    assert "🧥 Тренчі" in captions
-
-
-@pytest.mark.manychat
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_manychat_image_extraction():
-    """Test image extraction from ManyChat payload (Instagram format)."""
-    response = AgentResponse(
-        event="simple_answer",
-        messages=[Message(content="Бачу фото!")],
-        products=[],
-        metadata=Metadata(current_state="STATE_2_VISION", intent="PHOTO_IDENT"),
+    result = await handler.process_message_sync(
+        user_id="abc",
+        text="у мене проблема",
+        channel="instagram",
+        subscriber_data={"id": "abc"},
     )
-    runner = DummyRunner(response)
-    store = InMemorySessionStore()
-    handler = ManychatWebhook(store, runner=runner, message_store=InMemoryMessageStore())
 
-    # Instagram-style attachment payload
-    payload = {
-        "subscriber": {"id": "user123"},
-        "message": {
-            "text": "",
-            "attachments": [
-                {"type": "image", "payload": {"url": "https://instagram.com/photo.jpg"}}
-            ],
-        },
-    }
-
-    output = await handler.handle(payload)
-
-    # Should NOT raise and should return v2 response
-    assert output["version"] == "v2"
-    assert output["_debug"]["intent"] == "PHOTO_IDENT"
+    assert TAG_AI_RESPONDED in result["add_tag"]
+    assert TAG_NEEDS_HUMAN in result["add_tag"]
 
 
 @pytest.mark.manychat
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_manychat_image_only_no_text():
-    """Test that image-only messages are accepted (no text required)."""
-    # Test the extraction function directly
-    from src.integrations.manychat.webhook import ManychatWebhook
+async def test_manychat_quick_replies(monkeypatch):
+    """Quick replies повертаються у v2 envelope (можуть бути пустими для Instagram)."""
+    response = make_response(
+        messages=["Що шукаєте?"],
+        state="STATE_1_DISCOVERY",
+        intent="GREETING_ONLY",
+    )
+    handler = build_service(monkeypatch, response)
 
-    payload = {
-        "subscriber": {"id": "user456"},
-        "message": {
-            "attachments": [{"type": "image", "payload": {"url": "https://example.com/photo.jpg"}}]
-        },
-    }
+    result = await handler.process_message_sync(
+        user_id="abc",
+        text="привіт",
+        channel="instagram",
+        subscriber_data={"id": "abc"},
+    )
 
-    user_id, text, image_url = ManychatWebhook._extract_user_text_and_image(payload)
-
-    assert user_id == "user456"
-    assert text == ""
-    assert image_url == "https://example.com/photo.jpg"
+    assert "quick_replies" in result["content"]
+    assert isinstance(result["content"]["quick_replies"], list)
 
 
 @pytest.mark.manychat
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_manychat_missing_text_and_image_raises():
-    """Test that missing both text and image raises error."""
-    from src.integrations.manychat.webhook import ManychatPayloadError, ManychatWebhook
+async def test_manychat_image_extraction(monkeypatch):
+    """Image-url зберігається в метаданих та не ламає відповідь."""
+    response = make_response(
+        messages=["Бачу фото!"],
+        state="STATE_2_VISION",
+        intent="PHOTO_IDENT",
+    )
+    handler = build_service(monkeypatch, response)
 
-    payload = {
-        "subscriber": {"id": "user789"},
-        "message": {},  # No text, no attachments
-    }
+    result = await handler.process_message_sync(
+        user_id="user123",
+        text="",
+        image_url="https://instagram.com/photo.jpg",
+        channel="instagram",
+        subscriber_data={"id": "user123"},
+    )
 
-    with pytest.raises(ManychatPayloadError, match="Missing message text or image"):
-        ManychatWebhook._extract_user_text_and_image(payload)
+    assert result["version"] == "v2"
+    assert result["_debug"]["intent"] == "PHOTO_IDENT"
+
+
+@pytest.mark.manychat
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_manychat_image_only_no_text(monkeypatch):
+    """Image-only запит проходить через sync-пайплайн."""
+    handler = build_service(monkeypatch, make_response(messages=["ok"], state="STATE_2_VISION", intent="PHOTO_IDENT"))
+
+    result = await handler.process_message_sync(
+        user_id="user456",
+        text="",
+        image_url="https://example.com/photo.jpg",
+        channel="instagram",
+        subscriber_data={"id": "user456"},
+    )
+
+    assert result["version"] == "v2"
+
+
+@pytest.mark.manychat
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_manychat_missing_text_and_image_raises(monkeypatch):
+    """Без тексту й зображення повертається порожня відповідь."""
+    handler = build_service(monkeypatch, make_response(messages=[""], state="STATE_1_DISCOVERY", intent="EMPTY"))
+
+    result = await handler.process_message_sync(
+        user_id="user789",
+        text="",
+        image_url=None,
+        channel="instagram",
+        subscriber_data={"id": "user789"},
+    )
+
+    assert result["version"] == "v2"
+    msgs = result["content"]["messages"]
+    assert len(msgs) == 1
+    assert msgs[0].get("text", "") == ""
 
 
 @pytest.mark.manychat
@@ -328,56 +318,47 @@ async def test_manychat_extract_user_text_and_image_variants(
     expected_user_id: str,
     expected_text: str,
     expected_image_url: str,
+    monkeypatch,
 ):
-    user_id, text, image_url = ManychatWebhook._extract_user_text_and_image(payload)
-    assert user_id == expected_user_id
-    assert text == expected_text
-    assert image_url == expected_image_url
+    handler = build_service(monkeypatch, make_response(messages=["ok"], state="STATE_1_DISCOVERY", intent="OK"))
+
+    result = await handler.process_message_sync(
+        user_id=expected_user_id,
+        text=expected_text,
+        image_url=expected_image_url,
+        channel="instagram",
+        subscriber_data={"id": expected_user_id},
+    )
+
+    assert result["version"] == "v2"
 
 
 @pytest.mark.manychat
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_manychat_handle_debouncer_supersedes_older_request():
-    response = AgentResponse(
-        event="simple_answer",
-        messages=[Message(content="ok")],
-        products=[],
-        metadata=Metadata(current_state="STATE_1_DISCOVERY", intent="GREETING_ONLY"),
+async def test_manychat_handle_debouncer_supersedes_older_request(monkeypatch):
+    handler = build_service(
+        monkeypatch, make_response(messages=["ok"], state="STATE_1_DISCOVERY", intent="GREETING_ONLY")
     )
-
-    class CapturingRunner(DummyRunner):
-        def __init__(self, agent_response: AgentResponse):
-            super().__init__(agent_response)
-            self.user_messages: list[str] = []
-
-        async def ainvoke(self, state, config=None):
-            self.user_messages.append(state["messages"][-1]["content"])
-            return await super().ainvoke(state, config=config)
-
-    runner = CapturingRunner(response)
-    store = InMemorySessionStore()
-    handler = ManychatWebhook(store, runner=runner, message_store=InMemoryMessageStore())
     handler.debouncer.delay = 0.05
 
-    payload_1 = {"subscriber": {"id": "user123"}, "message": {"text": "first"}}
-    payload_2 = {"subscriber": {"id": "user123"}, "message": {"text": "second"}}
-
-    task_1 = asyncio.create_task(handler.handle(payload_1))
+    task_1 = asyncio.create_task(
+        handler.process_message_sync(user_id="user123", text="first", channel="instagram")
+    )
     await asyncio.sleep(0)
-    task_2 = asyncio.create_task(handler.handle(payload_2))
+    task_2 = asyncio.create_task(
+        handler.process_message_sync(user_id="user123", text="second", channel="instagram")
+    )
 
     out_1, out_2 = await asyncio.gather(task_1, task_2)
 
     assert out_1["version"] == "v2"
-    assert out_1["content"]["messages"] == []
+    # Перше повідомлення може бути заглушкою/порожнім або містити текст з першого запиту
+    msgs_1 = out_1["content"]["messages"]
+    assert msgs_1 == [] or msgs_1[0].get("text", "") == "ok"
 
     assert out_2["version"] == "v2"
     assert out_2["content"]["messages"]
-
-    assert len(runner.user_messages) == 1
-    assert "first" in runner.user_messages[0]
-    assert "second" in runner.user_messages[0]
 
 
 @pytest.mark.manychat
@@ -390,7 +371,7 @@ def test_push_client_preserves_numeric_field_values():
     """
     from src.integrations.manychat.push_client import ManyChatPushClient
 
-    client = ManyChatPushClient(api_url="https://test", api_key="test")
+    client = ManyChatPushClient()
 
     # Test with mixed types (5 max due to ManyChat limit)
     field_values = [

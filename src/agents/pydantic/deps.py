@@ -42,6 +42,7 @@ class AgentDeps:
 
     session_id: str
     user_id: str = ""
+    trace_id: str = ""
 
     current_state: StateType = "STATE_0_INIT"
     channel: str = "instagram"
@@ -76,6 +77,7 @@ class AgentDeps:
         self,
         session_id: str,
         user_id: str = "",
+        trace_id: str = "",
         current_state: StateType = "STATE_0_INIT",
         channel: str = "instagram",
         language: str = "uk",
@@ -97,6 +99,7 @@ class AgentDeps:
     ) -> None:
         self.session_id = session_id
         self.user_id = user_id
+        self.trace_id = trace_id
         self.current_state = current_state
         self.channel = channel
         self.language = language

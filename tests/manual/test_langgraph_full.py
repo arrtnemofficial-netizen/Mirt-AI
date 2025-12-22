@@ -37,6 +37,8 @@ from dotenv import load_dotenv
 
 load_dotenv(project_root / ".env")
 
+import pytest
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -198,6 +200,7 @@ CONVERSATION_SCENARIOS = [
 # =============================================================================
 
 
+@pytest.mark.asyncio
 async def test_graph_compilation() -> dict[str, Any]:
     """Test that graph compiles correctly."""
     console.print("\n[bold cyan]═══ TEST: Graph Compilation ═══[/bold cyan]")
@@ -246,6 +249,7 @@ async def test_graph_compilation() -> dict[str, Any]:
     return result
 
 
+@pytest.mark.asyncio
 async def test_single_invocation() -> dict[str, Any]:
     """Test single graph invocation."""
     console.print("\n[bold cyan]═══ TEST: Single Invocation ═══[/bold cyan]")
@@ -303,8 +307,11 @@ async def test_single_invocation() -> dict[str, Any]:
     return result
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", CONVERSATION_SCENARIOS)
 async def test_conversation_scenario(scenario: ConversationScenario) -> dict[str, Any]:
     """Test a multi-turn conversation scenario."""
+    import time
     console.print(f"\n[bold cyan]═══ SCENARIO: {scenario.name} ═══[/bold cyan]")
     console.print(f"[dim]{scenario.description}[/dim]")
 
@@ -433,6 +440,7 @@ async def test_conversation_scenario(scenario: ConversationScenario) -> dict[str
     return result
 
 
+@pytest.mark.asyncio
 async def test_state_persistence() -> dict[str, Any]:
     """Test that state persists across invocations."""
     console.print("\n[bold cyan]═══ TEST: State Persistence ═══[/bold cyan]")
@@ -498,6 +506,7 @@ async def test_state_persistence() -> dict[str, Any]:
     return result
 
 
+@pytest.mark.asyncio
 async def test_self_correction() -> dict[str, Any]:
     """Test self-correction loop behavior."""
     console.print("\n[bold cyan]═══ TEST: Self-Correction Loop ═══[/bold cyan]")

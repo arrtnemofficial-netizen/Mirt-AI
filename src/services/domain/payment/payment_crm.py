@@ -100,8 +100,23 @@ async def create_and_submit_order(
             "source": "telegram" if "telegram" in str(user_id) else "manychat",
         }
 
-        # 1. DB Persistence (Lazy import to avoid cycles)
-        from src.services.infra.supabase_client import get_supabase_client
+        # 0. Ledger Idempotency Check
+        vision_result_id = metadata.get("vision_result_id")
+        if vision_result_id:
+            from src.services.domain.vision.vision_ledger import get_vision_ledger
+            ledger = get_vision_ledger()
+            # We don't have a direct 'get_by_id' in current VisionLedger, 
+            # but we can assume if it's in metadata and we want strictly 
+            # one order per vision_result, we should check existing orders.
+            # However, standard practice is to use the ledger to block duplicates.
+            # If vision_result_id exists and we already have an order for it, block.
+            from src.services.infra.supabase_client import get_supabase_client
+            supabase = get_supabase_client()
+            if supabase:
+                existing_order = supabase.table("crm_orders").select("id").eq("metadata->>vision_result_id", vision_result_id).execute()
+                if existing_order.data:
+                    logger.info("[SESSION %s] Order already exists for vision_result_id %s, skipping", session_id, vision_result_id)
+                    return {"status": "success", "message": "Duplicate blocked via vision_result_id", "order_id": existing_order.data[0]["id"]}
         supabase = get_supabase_client()
         if supabase:
             try:

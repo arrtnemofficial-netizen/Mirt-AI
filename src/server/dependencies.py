@@ -14,7 +14,7 @@ from fastapi import Depends
 
 from src.bot.telegram_bot import build_bot, build_dispatcher
 from src.conf.config import Settings, get_settings
-from src.integrations.manychat.webhook import ManychatWebhook
+from src.integrations.manychat.async_service import ManyChatAsyncService, get_manychat_async_service
 from src.services.infra.message_store import MessageStore, create_message_store
 from src.services.infra.session_store import InMemorySessionStore, SessionStore
 from src.services.infra.supabase_store import create_supabase_store
@@ -53,17 +53,16 @@ def get_dispatcher(
     return build_dispatcher(store, message_store)
 
 
-def get_manychat_handler(
+def get_manychat_service(
     store: Annotated[SessionStore, Depends(get_session_store)],
-    message_store: Annotated[MessageStore, Depends(get_message_store)],
-) -> ManychatWebhook:
-    """Create the ManyChat webhook handler with injected dependencies."""
-    return ManychatWebhook(store, message_store=message_store)
+) -> ManyChatAsyncService:
+    """Create the ManyChat async service (shared for sync/push flows)."""
+    return get_manychat_async_service(store)
 
 
 # Cached instances for reuse across requests
 _dispatcher_instance: Dispatcher | None = None
-_manychat_instance: ManychatWebhook | None = None
+_manychat_service_instance: ManyChatAsyncService | None = None
 
 
 def get_cached_dispatcher() -> Dispatcher:
@@ -76,14 +75,13 @@ def get_cached_dispatcher() -> Dispatcher:
     return _dispatcher_instance
 
 
-def get_cached_manychat_handler() -> ManychatWebhook:
-    """Get cached ManyChat handler instance."""
-    global _manychat_instance
-    if _manychat_instance is None:
+def get_cached_manychat_service() -> ManyChatAsyncService:
+    """Get cached ManyChat service instance."""
+    global _manychat_service_instance
+    if _manychat_service_instance is None:
         store = get_session_store()
-        message_store = get_message_store()
-        _manychat_instance = ManychatWebhook(store, message_store=message_store)
-    return _manychat_instance
+        _manychat_service_instance = get_manychat_async_service(store)
+    return _manychat_service_instance
 
 
 # Type aliases for endpoint injection
@@ -91,15 +89,15 @@ SessionStoreDep = Annotated[SessionStore, Depends(get_session_store)]
 MessageStoreDep = Annotated[MessageStore, Depends(get_message_store)]
 BotDep = Annotated[Bot, Depends(get_bot)]
 DispatcherDep = Annotated[Dispatcher, Depends(get_cached_dispatcher)]
-ManychatHandlerDep = Annotated[ManychatWebhook, Depends(get_cached_manychat_handler)]
+ManychatServiceDep = Annotated[ManyChatAsyncService, Depends(get_cached_manychat_service)]
 
 
 def reset_dependencies() -> None:
     """Reset all cached dependencies (useful for testing)."""
-    global _dispatcher_instance, _manychat_instance
+    global _dispatcher_instance, _manychat_service_instance
 
     _dispatcher_instance = None
-    _manychat_instance = None
+    _manychat_service_instance = None
 
     # Clear lru_cache
     get_session_store.cache_clear()

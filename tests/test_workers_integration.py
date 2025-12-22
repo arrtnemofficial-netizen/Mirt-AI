@@ -67,7 +67,7 @@ class TestHealthTasks:
         from src.workers.tasks.health import worker_health_check
 
         # Mock Supabase
-        with patch("src.services.supabase_client.get_supabase_client") as mock:
+        with patch("src.services.infra.supabase_client.get_supabase_client") as mock:
             mock_client = MagicMock()
             mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(
                 data=[]
@@ -96,7 +96,7 @@ class TestSummarizationTasks:
 
     def test_summarize_session_with_messages(self):
         """Summarization should work with old messages."""
-        from src.services.message_store import StoredMessage
+        from src.services.infra.message_store import StoredMessage
         from src.workers.tasks.summarization import summarize_session
 
         old_time = datetime.now(UTC) - timedelta(days=5)
@@ -126,7 +126,7 @@ class TestFollowupTasks:
 
     def test_followup_not_due(self):
         """Followup should not trigger if not due."""
-        from src.services.message_store import StoredMessage
+        from src.services.infra.message_store import StoredMessage
         from src.workers.tasks.followups import send_followup
 
         # Recent message - followup not due
@@ -149,7 +149,7 @@ class TestFollowupTasks:
 
     def test_followup_triggered(self):
         """Followup should trigger when due."""
-        from src.services.message_store import StoredMessage
+        from src.services.infra.message_store import StoredMessage
         from src.workers.tasks.followups import send_followup
 
         # Old message - followup due (with 1 hour schedule)

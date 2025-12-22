@@ -28,7 +28,98 @@ from langgraph.checkpoint.memory import MemorySaver
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
 
+import time
+from typing import Any
+
 logger = logging.getLogger(__name__)
+
+
+def _compact_payload(
+    checkpoint: dict[str, Any],
+    max_messages: int = 200,
+    max_chars: int = 4000,
+    drop_base64: bool = True,
+) -> dict[str, Any]:
+    """
+    Compact checkpoint payload to keep database size manageable.
+    - Limits total number of messages in state
+    - Truncates very long messages
+    - Optionally removes base64 image data
+    """
+    if not isinstance(checkpoint, dict) or "channel_values" not in checkpoint:
+        return checkpoint
+
+    cv = checkpoint["channel_values"]
+    if "messages" not in cv or not isinstance(cv["messages"], list):
+        return checkpoint
+
+    messages = cv["messages"]
+    
+    # 1. Limit message count (keep tail)
+    if len(messages) > max_messages:
+        messages = messages[-max_messages:]
+    
+    compacted = []
+    for msg in messages:
+        # For LangChain messages or dicts
+        content = getattr(msg, "content", None)
+        is_obj = True
+        if content is None and isinstance(msg, dict):
+            content = msg.get("content")
+            is_obj = False
+        
+        if isinstance(content, str):
+            # 2. Drop base64
+            if drop_base64 and ("base64" in content or "data:image" in content):
+                content = "[IMAGE DATA REMOVED]"
+            
+            # 3. Truncate chars
+            if len(content) > max_chars:
+                content = content[:max_chars] + "... [TRUNCATED]"
+            
+            if is_obj:
+                msg.content = content
+            else:
+                msg["content"] = content
+        
+        compacted.append(msg)
+    
+    cv["messages"] = compacted
+    return checkpoint
+
+
+def _log_if_slow(
+    op: str,
+    t0: float,
+    config: Any,
+    payload: Any = None,
+    slow_threshold_s: float = 1.0,
+) -> None:
+    dt = time.perf_counter() - t0
+    if dt > slow_threshold_s:
+        session_id = (
+            config.get("configurable", {}).get("thread_id", "unknown")
+            if isinstance(config, dict)
+            else "unknown"
+        )
+        logger.warning(
+            f"SLOW CHECKPOINTER OP: {op} took {dt:.2f}s for session {session_id}"
+        )
+
+
+def _open_pool_on_demand(pool: Any) -> Any:
+    """Ensure AsyncConnectionPool is open before use."""
+    if hasattr(pool, "open") and not getattr(pool, "_opened", False):
+        return pool.open()
+    return None
+
+
+def _setting_int(settings: Any, key: str, default: int) -> int:
+    return int(getattr(settings, key, default))
+
+
+def _setting_float(settings: Any, key: str, default: float) -> float:
+    return float(getattr(settings, key, default))
 
 
 class SerializableMemorySaver(MemorySaver):

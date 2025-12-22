@@ -128,11 +128,12 @@ class TestSensitiveDataHandling:
 
     def test_payment_data_structure(self):
         """Payment data should have proper structure."""
-        from src.conf.payment_config import BANK_REQUISITES
+        from src.services.domain.payment.payment_config import get_payment_section
 
-        # IBAN should be present but we don't log it
-        assert hasattr(BANK_REQUISITES, "iban")
-        assert len(BANK_REQUISITES.iban) > 0
+        bank_info = get_payment_section("bank_requisites")
+        # IBAN or card should be present
+        assert "iban" in bank_info or "card" in bank_info
+        # We don't check for specific length as it's a test for structure
 
     def test_user_data_not_exposed_in_errors(self):
         """Error messages should not contain user data."""

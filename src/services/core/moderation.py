@@ -124,6 +124,21 @@ def redact_pii(text: str) -> str:
     return redacted
 
 
+def detect_prompt_injection(text: str) -> bool:
+    """Detect simple prompt injection patterns."""
+    lower_text = text.lower()
+    patterns = [
+        "ignore all previous",
+        "ignore earlier instructions",
+        "forget everything",
+        "new role",
+        "start by saying",
+        "system prompt",
+        "instruction manipulation",
+    ]
+    return any(pattern in lower_text for pattern in patterns)
+
+
 def moderate_user_message(text: str) -> ModerationResult:
     """Perform full moderation check on user message.
 
@@ -146,7 +161,7 @@ def moderate_user_message(text: str) -> ModerationResult:
 
     # Check for prompt injection FIRST
     from src.core.prompt_registry import get_snippet_by_header
-    
+
     def _get_snippet_text(header: str, default: str) -> str:
         s = get_snippet_by_header(header)
         return "\n".join(s) if s else default
@@ -183,4 +198,3 @@ def moderate_user_message(text: str) -> ModerationResult:
         flags=flags,
         reason=None,
     )
-

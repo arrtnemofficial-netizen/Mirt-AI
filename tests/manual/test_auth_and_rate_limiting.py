@@ -80,13 +80,13 @@ class TestRateLimitingDesign:
 
     def test_debouncer_exists(self):
         """Debouncer service should exist for rate limiting."""
-        from src.services.debouncer import MessageDebouncer
+        from src.services.infra.debouncer import MessageDebouncer
 
         assert MessageDebouncer is not None
 
     def test_debouncer_has_timeout(self):
         """Debouncer should have configurable timeout."""
-        from src.services.debouncer import MessageDebouncer
+        from src.services.infra.debouncer import MessageDebouncer
 
         # Create debouncer - check it's instantiable
         debouncer = MessageDebouncer()

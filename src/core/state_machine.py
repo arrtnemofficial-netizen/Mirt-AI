@@ -145,7 +145,13 @@ _PHASE_TO_STATE: dict[str, State] = {
     "COMPLETED": State.STATE_7_END,
     "ESCALATED": State.STATE_7_END,
     "CRM_ERROR_HANDLING": State.STATE_5_PAYMENT_DELIVERY,
+    "WAITING_FOR_SIZE": State.STATE_3_SIZE_COLOR,
+    "WAITING_FOR_COLOR": State.STATE_3_SIZE_COLOR,
+    "SIZE_COLOR_DONE": State.STATE_4_OFFER,
 }
+
+# Backward compatibility alias
+DIALOG_PHASE_TO_STATE = _PHASE_TO_STATE
 
 
 def expected_state_for_phase(phase: str | None) -> State | None:
@@ -360,6 +366,33 @@ def get_next_state(current_state: State, intent: Intent) -> State:
         if t.from_state == current_state and intent in t.when_intents:
             return t.to_state
     return current_state
+
+
+def is_transition_allowed(
+    from_state: State,
+    to_state: State,
+    intent: Intent,
+    dialog_phase: str | None = None,
+) -> bool:
+    """
+    Check if a transition from from_state to to_state is allowed given intent and phase.
+    """
+    # 1. Stay in same state is always allowed
+    if from_state == to_state:
+        return True
+
+    # 2. Check phase realignment
+    expected = expected_state_for_phase(dialog_phase)
+    if expected == to_state:
+        return True
+
+    # 3. Check explicit transition table
+    for t in TRANSITIONS:
+        if t.from_state == from_state and t.to_state == to_state:
+            if intent in t.when_intents:
+                return True
+
+    return False
 
 
 # =============================================================================

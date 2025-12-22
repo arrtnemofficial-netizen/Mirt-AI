@@ -10,8 +10,10 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 
 from src.conf.config import settings
 from src.core.logging import log_event, safe_preview
-from src.integrations.manychat.webhook import ManychatPayloadError
-from src.server.dependencies import get_cached_manychat_handler
+# from src.integrations.manychat.webhook import ManychatPayloadError (REMOVED)
+from src.server.dependencies import get_cached_manychat_service
+from src.server.exceptions import AuthenticationError, ExternalServiceError, ValidationError
+from src.services.client_data_parser import parse_client_data
 from src.services.infra.webhook_dedupe import WebhookDedupeStore
 
 logger = logging.getLogger(__name__)
@@ -57,7 +59,7 @@ async def manychat_webhook(
             inbound_token = auth_value
 
     if verify_token and verify_token != inbound_token:
-        raise HTTPException(status_code=401, detail="Invalid ManyChat token")
+        raise AuthenticationError("Invalid ManyChat token")
 
     # Push mode: return immediately, process in background
     if settings.MANYCHAT_PUSH_MODE:
@@ -93,7 +95,7 @@ async def manychat_webhook(
             channel = payload.get("type") or "instagram"
 
             if not text and not image_url:
-                raise HTTPException(status_code=400, detail="Missing message text or image")
+                raise ValidationError("Missing message text or image")
 
             # IDEMPOTENCY (DB-backed, 24h TTL)
             message_id = None
@@ -183,15 +185,52 @@ async def manychat_webhook(
             )
             return {"status": "accepted"}
 
-        except HTTPException:
+        except (HTTPException, ValidationError, AuthenticationError):
             raise
         except Exception as exc:
-            logger.exception("[MANYCHAT] Error in push mode: %s", exc)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            logger.exception("[MANYCHAT] Unexpected error in push mode: %s", exc)
+            raise ExternalServiceError("manychat", f"Unexpected error: {str(exc)[:200]}") from exc
 
     # Response mode: wait for AI and return response
-    handler = get_cached_manychat_handler()
+    service = get_cached_manychat_service()
     try:
-        return await handler.handle(payload)
-    except ManychatPayloadError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # For sync response mode, reuse the same pipeline and response_builder
+        subscriber = payload.get("subscriber") or payload.get("user") or {}
+        message = payload.get("message") or payload.get("data", {}).get("message") or {}
+        user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+        text = ""
+        image_url = None
+
+        if isinstance(message, dict):
+            text = message.get("text") or message.get("content") or ""
+            for attachment in message.get("attachments", []):
+                if attachment.get("type") == "image":
+                    image_url = attachment.get("payload", {}).get("url")
+                    break
+            if not image_url:
+                image_url = message.get("image") or message.get("image_url")
+
+        # Also check data.image_url
+        if not image_url:
+            data = payload.get("data", {})
+            image_url = data.get("image_url") or data.get("photo_url")
+
+        if not text and not image_url:
+            raise ValidationError("Missing message text or image")
+
+        response = await service.process_message_sync(
+            user_id=user_id,
+            text=text or "",
+            image_url=image_url,
+            channel=payload.get("type") or "instagram",
+            subscriber_data=subscriber,
+            trace_id=str(uuid.uuid4()),
+        )
+        return response
+    except (ValueError, ValidationError) as exc:
+        if isinstance(exc, ValidationError):
+            raise
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover
+        logger.exception("[MANYCHAT] Unexpected error in response mode: %s", exc)
+        raise ExternalServiceError("manychat", f"Unexpected error: {str(exc)[:200]}") from exc

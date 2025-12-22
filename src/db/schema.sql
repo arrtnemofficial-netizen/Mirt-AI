@@ -78,11 +78,32 @@ create table if not exists order_items (
 create index if not exists idx_order_items_order_id on order_items(order_id);
 
 -- ============================================================================
+-- CRM ORDERS TABLE (mapping external_id -> CRM order with idempotency)
+-- ============================================================================
+create table if not exists crm_orders (
+    id bigint primary key generated always as identity,
+    session_id text not null,
+    external_id text not null,
+    crm_order_id text,
+    status text not null default 'pending',
+    task_id text,
+    order_data jsonb,
+    metadata jsonb,
+    error_message text,
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+
+create unique index if not exists ux_crm_orders_external_id on crm_orders(external_id);
+create index if not exists idx_crm_orders_status on crm_orders(status);
+
+-- ============================================================================
 -- RLS POLICIES (Row Level Security)
 -- ============================================================================
 alter table products enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
+alter table crm_orders enable row level security;
 
 -- Allow read access to products for everyone (public catalog)
 create policy "Public products read access" 

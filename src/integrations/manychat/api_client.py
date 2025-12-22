@@ -24,6 +24,8 @@ from typing import Any
 import httpx
 
 from src.conf.config import settings
+from src.core.circuit_breaker import CircuitBreakerOpenError, get_circuit_breaker
+from src.core.http_retry import http_request_with_retry
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,7 @@ class ManyChatClient:
         )
         self.base_url = MANYCHAT_API_BASE
         self._client: httpx.AsyncClient | None = None
+        self._circuit_breaker = get_circuit_breaker("manychat_api", failure_threshold=5, recovery_timeout=60.0)
 
     @property
     def headers(self) -> dict[str, str]:
@@ -134,10 +137,18 @@ class ManyChatClient:
             logger.warning("[MANYCHAT] API not configured, skipping send_message")
             return False
 
+        if not self._circuit_breaker.can_execute():
+            logger.warning("[MANYCHAT] Circuit breaker OPEN, skipping send_message")
+            return False
+
         client = await self._get_client()
         try:
-            response = await client.post(
+            response = await http_request_with_retry(
+                client,
+                "POST",
                 "/sending/sendContent",
+                max_retries=3,
+                initial_delay=1.0,
                 json={
                     "subscriber_id": subscriber_id,
                     "data": {
@@ -149,17 +160,21 @@ class ManyChatClient:
                     "message_tag": message_tag,
                 },
             )
-            response.raise_for_status()
+            self._circuit_breaker.record_success()
             logger.info("[MANYCHAT] Sent message to %s: %s", subscriber_id, text[:50])
             return True
         except httpx.HTTPStatusError as e:
+            self._circuit_breaker.record_failure()
             logger.error(
-                "[MANYCHAT] Failed to send message: %s - %s",
+                "[MANYCHAT] Failed to send message after retries: %s - %s",
                 e.response.status_code,
-                e.response.text,
+                e.response.text[:200],
             )
             return False
+        except CircuitBreakerOpenError:
+            raise
         except Exception as e:
+            self._circuit_breaker.record_failure()
             logger.error("[MANYCHAT] Error sending message: %s", e)
             return False
 

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.agents.pydantic.memory_models import (
+from src.services.domain.memory.memory_models import (
     ChildProfile,
     CommerceInfo,
     DeleteFact,

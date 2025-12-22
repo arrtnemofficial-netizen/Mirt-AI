@@ -74,68 +74,53 @@ def process_message(
         raise PermanentError("Empty message", error_code="EMPTY_MESSAGE")
 
     try:
-        # Import agent here to avoid circular imports
-        from src.agents import get_active_graph as create_agent_graph  # Fixed typo: was src.agent
-        from src.services.infra.message_store import StoredMessage, create_message_store
+        # Import dependencies
+        from src.agents import get_active_graph
+        from src.services.conversation import create_conversation_handler
+        from src.services.infra.message_store import create_message_store
+        from src.services.infra.session_store import create_session_store
 
-        # Get or create message store
+        # Create dependencies
+        session_store = create_session_store()
         message_store = create_message_store()
+        runner = get_active_graph()
 
-        # Store user message
-        user_msg = StoredMessage(
-            session_id=session_id,
-            role="user",
-            content=user_message.strip(),
-            created_at=datetime.now(UTC),
-            metadata=metadata or {},
+        # Create conversation handler
+        handler = create_conversation_handler(
+            session_store=session_store,
+            message_store=message_store,
+            runner=runner,
         )
-        message_store.append(user_msg)
 
-        # Get conversation history
-        history = message_store.list(session_id, limit=20)
-
-        # Build context for agent
-        context = {
-            "session_id": session_id,
-            "user_id": user_id,
+        # Build extra metadata
+        extra_metadata = {
             "platform": platform,
-            "history": [{"role": m.role, "content": m.content} for m in history],
-            "metadata": metadata or {},
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+            **(metadata or {}),
         }
 
-        # Run agent (async)
-        async def _run_agent():
-            graph = create_agent_graph()
-            result = await graph.ainvoke(
-                {
-                    "messages": [{"role": "user", "content": user_message}],
-                    "context": context,
-                }
+        # Process message using ConversationHandler (async)
+        async def _process():
+            result = await handler.process_message(
+                session_id=session_id,
+                text=user_message.strip(),
+                extra_metadata=extra_metadata,
             )
             return result
 
-        result = run_sync(_run_agent())
+        conversation_result = run_sync(_process())
 
-        # Extract response
+        # Extract response text from AgentResponse
         response_text = ""
-        if result and "messages" in result:
-            last_msg = result["messages"][-1]
-            if hasattr(last_msg, "content"):
-                response_text = last_msg.content
-            elif isinstance(last_msg, dict):
-                response_text = last_msg.get("content", "")
+        if conversation_result.response and conversation_result.response.messages:
+            response_text = " ".join(
+                msg.content for msg in conversation_result.response.messages if msg.content
+            )
 
         if not response_text:
             response_text = get_human_response("error")
-
-        # Store assistant response
-        assistant_msg = StoredMessage(
-            session_id=session_id,
-            role="assistant",
-            content=response_text,
-            created_at=datetime.now(UTC),
-        )
-        message_store.append(assistant_msg)
 
         logger.info(
             "[WORKER:MSG] Message processed session=%s response_len=%d",
