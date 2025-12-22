@@ -8,7 +8,7 @@
 
 **Production-Ready AI Stylist for MIRT Clothing Brand**
 
-[📖 Implementation Docs](DOCUMENTATION.md) • [🏗️ Architecture](docs/ARCHITECTURE.md) • [⚙️ Deployment](docs/DEPLOYMENT.md)
+[📖 Документація](docs/README.md) • [🏗️ Architecture](docs/architecture/ARCHITECTURE.md) • [⚙️ Deployment](docs/deployment/DEPLOYMENT.md) • [🔒 Правила безпеки](docs/quality/SAFEGUARDS_RULES.md)
 
 </div>
 

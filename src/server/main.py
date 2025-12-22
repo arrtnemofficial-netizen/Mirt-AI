@@ -76,6 +76,17 @@ async def lifespan(app: FastAPI):
     # Initialize Sentry first
     _init_sentry()
 
+    # Initialize OpenTelemetry tracing
+    try:
+        from src.services.core.observability import setup_opentelemetry_tracing
+
+        if setup_opentelemetry_tracing():
+            logger.info("OpenTelemetry distributed tracing enabled")
+        else:
+            logger.debug("OpenTelemetry tracing not available (optional dependency)")
+    except Exception as e:
+        logger.warning("Failed to initialize OpenTelemetry tracing: %s", e)
+
     # Configure logging (JSON in production, pretty in development)
     is_production = settings.PUBLIC_BASE_URL != "http://localhost:8000"
     setup_logging(

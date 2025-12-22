@@ -6,8 +6,11 @@ Central context container passed to agent.run(...) as ctx.deps.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -124,7 +127,17 @@ class AgentDeps:
         if self._db is None:
             from src.services.data.order_service import OrderService
 
+            # SAFEGUARD_1: Log creation of heavy clients (network connections)
+            logger.info(
+                "[AGENT_DEPS] Creating OrderService (lazy loading) for session=%s",
+                self.session_id,
+            )
             self._db = OrderService()
+            # SAFEGUARD_2: Verify singleton (check if same instance)
+            logger.debug(
+                "[AGENT_DEPS] OrderService created: id=%s",
+                id(self._db),
+            )
         return self._db
 
     @property
@@ -132,7 +145,17 @@ class AgentDeps:
         if self._catalog is None:
             from src.services.data.catalog_service import CatalogService
 
+            # SAFEGUARD_1: Log creation of heavy clients (network connections)
+            logger.info(
+                "[AGENT_DEPS] Creating CatalogService (lazy loading) for session=%s",
+                self.session_id,
+            )
             self._catalog = CatalogService()
+            # SAFEGUARD_2: Verify singleton (check if same instance)
+            logger.debug(
+                "[AGENT_DEPS] CatalogService created: id=%s",
+                id(self._catalog),
+            )
         return self._catalog
 
     @property
@@ -140,7 +163,17 @@ class AgentDeps:
         if self._memory is None:
             from src.services.domain.memory.memory_service import MemoryService
 
+            # SAFEGUARD_1: Log creation of heavy clients (network connections)
+            logger.info(
+                "[AGENT_DEPS] Creating MemoryService (lazy loading) for session=%s",
+                self.session_id,
+            )
             self._memory = MemoryService()
+            # SAFEGUARD_2: Verify singleton (check if same instance)
+            logger.debug(
+                "[AGENT_DEPS] MemoryService created: id=%s",
+                id(self._memory),
+            )
         return self._memory
 
     @property
@@ -148,7 +181,17 @@ class AgentDeps:
         if self._vision is None:
             from src.services.domain.vision.vision_context import VisionContextService
 
+            # SAFEGUARD_1: Log creation of heavy clients (network connections)
+            logger.info(
+                "[AGENT_DEPS] Creating VisionContextService (lazy loading) for session=%s",
+                self.session_id,
+            )
             self._vision = VisionContextService(self.catalog)
+            # SAFEGUARD_2: Verify singleton (check if same instance)
+            logger.debug(
+                "[AGENT_DEPS] VisionContextService created: id=%s",
+                id(self._vision),
+            )
         return self._vision
 
     def get_customer_data_summary(self) -> str:

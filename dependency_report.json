@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-12-22T17:53:32.052565",
+  "timestamp": "2025-12-22T18:21:48.831012",
   "requirements_file": "C:\\Users\\Zoroo\\Documents\\GitHub\\Mirt-AI\\requirements.txt",
   "pyproject_file": "C:\\Users\\Zoroo\\Documents\\GitHub\\Mirt-AI\\pyproject.toml",
   "total_packages": 11,
@@ -22,7 +22,7 @@
       },
       {
         "package": "pydantic",
-        "current": "2.10.0",
+        "current": "2.11.2",
         "latest": "2.12.5"
       },
       {
@@ -69,7 +69,7 @@
       },
       {
         "package": "pydantic",
-        "current": "2.10.0",
+        "current": "2.11.2",
         "latest": "2.12.5"
       },
       {

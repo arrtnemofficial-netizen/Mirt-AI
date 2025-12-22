@@ -45,11 +45,47 @@ def _compact_payload(
     - Limits total number of messages in state
     - Truncates very long messages
     - Optionally removes base64 image data
+    
+    SAFEGUARDS:
+    - Whitelist critical fields (selected_products, customer_*)
+    - Logging size before/after compaction
+    - Optional disable via COMPACTION_ENABLED env var
     """
+    from src.conf.config import get_settings
+
+    settings = get_settings()
+    
+    # SAFEGUARD_4: Optional disable for debugging
+    if not settings.COMPACTION_ENABLED:
+        logger.debug("[COMPACTION] Disabled via COMPACTION_ENABLED=false")
+        return checkpoint
+
     if not isinstance(checkpoint, dict) or "channel_values" not in checkpoint:
         return checkpoint
 
     cv = checkpoint["channel_values"]
+    
+    # SAFEGUARD_1: Whitelist critical fields - preserve them
+    CRITICAL_FIELDS = {
+        "selected_products",
+        "customer_name",
+        "customer_phone",
+        "customer_city",
+        "customer_nova_poshta",
+    }
+    
+    # Store critical fields before compaction
+    critical_data = {}
+    for field in CRITICAL_FIELDS:
+        if field in cv:
+            critical_data[field] = cv[field]
+    
+    # SAFEGUARD_2: Log size before compaction
+    import json
+    payload_before = json.dumps(checkpoint, default=str)
+    payload_size_before = len(payload_before)
+    messages_before = len(cv.get("messages", [])) if "messages" in cv else 0
+    
     if "messages" not in cv or not isinstance(cv["messages"], list):
         return checkpoint
 
@@ -85,6 +121,27 @@ def _compact_payload(
         compacted.append(msg)
     
     cv["messages"] = compacted
+    
+    # SAFEGUARD_1: Restore critical fields (they should never be compacted)
+    for field, value in critical_data.items():
+        cv[field] = value
+    
+    # SAFEGUARD_2: Log size after compaction
+    payload_after = json.dumps(checkpoint, default=str)
+    payload_size_after = len(payload_after)
+    messages_after = len(cv.get("messages", []))
+    
+    compaction_ratio = payload_size_after / payload_size_before if payload_size_before > 0 else 1.0
+    
+    logger.info(
+        "[COMPACTION] Payload compacted: size_before=%d size_after=%d ratio=%.2f messages_before=%d messages_after=%d",
+        payload_size_before,
+        payload_size_after,
+        compaction_ratio,
+        messages_before,
+        messages_after,
+    )
+    
     return checkpoint
 
 

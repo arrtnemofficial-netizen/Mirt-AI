@@ -15,6 +15,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.core.circuit_breaker import CircuitBreakerOpenError, get_circuit_breaker
 from src.core.prompt_registry import registry
 from src.agents.pydantic.main_agent_config import (
     get_main_agent_section,
@@ -458,6 +459,17 @@ def get_offer_agent() -> Agent[AgentDeps, OfferResponse]:
 
 
 # =============================================================================
+# CIRCUIT BREAKER (for LLM protection)
+# =============================================================================
+
+_llm_circuit_breaker = get_circuit_breaker(
+    "pydantic_ai_main_agent",
+    failure_threshold=3,
+    recovery_timeout=60.0,
+)
+
+
+# =============================================================================
 # RUNNER FUNCTION (for LangGraph nodes)
 # =============================================================================
 
@@ -482,6 +494,31 @@ async def run_main(
     """
     import asyncio
 
+    # Check circuit breaker before attempting LLM call
+    if not _llm_circuit_breaker.can_execute():
+        logger.warning(
+            "Circuit breaker OPEN for main agent (session %s). Escalating.",
+            deps.session_id,
+        )
+        return SupportResponse(
+            event="escalation",
+            messages=[
+                MessageItem(
+                    content=_get_error_text(
+                        "overload",
+                        "System temporarily unavailable. A manager will follow up.",
+                    )
+                )
+            ],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id or "",
+                current_state=deps.current_state or "STATE_0_INIT",
+                intent="UNKNOWN_OR_EMPTY",
+                escalation_level="L2",
+            ),
+            escalation=EscalationInfo(reason="CIRCUIT_BREAKER_OPEN"),
+        )
+
     agent = get_main_agent()
 
     try:
@@ -494,12 +531,27 @@ async def run_main(
             timeout=120,  # Increased for slow API tiers
         )
 
+        # Record success in circuit breaker
+        _llm_circuit_breaker.record_success()
+
+        # Record tracing attributes
+        if span:
+            span.set_attribute("event", result.output.event)
+            span.set_attribute("messages_count", len(result.output.messages))
+            if result.output.products:
+                span.set_attribute("products_count", len(result.output.products))
+
         # result.output is the typed output (SupportResponse)
         # Note: output_type param (not result_type) but result.output (not result.response)
         return result.output
 
     except TimeoutError:
         logger.error("Support agent timeout for session %s", deps.session_id)
+        if span:
+            span.set_attribute("error", True)
+            span.set_attribute("error_type", "TimeoutError")
+        timeout_error = TimeoutError("Support agent timeout")
+        _llm_circuit_breaker.record_failure(timeout_error)
         return SupportResponse(
             event="escalation",
             messages=[
@@ -519,8 +571,35 @@ async def run_main(
             escalation=EscalationInfo(reason="LLM_TIMEOUT"),
         )
 
+    except CircuitBreakerOpenError:
+        # Re-raise circuit breaker errors (shouldn't happen here, but handle gracefully)
+        logger.error("Circuit breaker error for session %s", deps.session_id)
+        return SupportResponse(
+            event="escalation",
+            messages=[
+                MessageItem(
+                    content=_get_error_text(
+                        "overload",
+                        "System temporarily unavailable. A manager will follow up.",
+                    )
+                )
+            ],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id or "",
+                current_state=deps.current_state or "STATE_0_INIT",
+                intent="UNKNOWN_OR_EMPTY",
+                escalation_level="L2",
+            ),
+            escalation=EscalationInfo(reason="CIRCUIT_BREAKER_OPEN"),
+        )
+
     except Exception as e:
         logger.exception("Support agent error: %s", e)
+        if span:
+            span.set_attribute("error", True)
+            span.set_attribute("error_type", type(e).__name__)
+            span.set_attribute("error_message", str(e)[:200])
+        _llm_circuit_breaker.record_failure(e)
         return SupportResponse(
             event="escalation",
             messages=[
@@ -541,6 +620,13 @@ async def run_main(
         )
 
 
+_offer_circuit_breaker = get_circuit_breaker(
+    "pydantic_ai_offer_agent",
+    failure_threshold=3,
+    recovery_timeout=60.0,
+)
+
+
 async def run_offer(
     message: str,
     deps: AgentDeps,
@@ -550,6 +636,31 @@ async def run_offer(
     Run offer agent and return structured response with deliberation.
     """
     import asyncio
+
+    # Check circuit breaker before attempting LLM call
+    if not _offer_circuit_breaker.can_execute():
+        logger.warning(
+            "Circuit breaker OPEN for offer agent (session %s). Escalating.",
+            deps.session_id,
+        )
+        return OfferResponse(
+            event="escalation",
+            messages=[
+                MessageItem(
+                    content=_get_error_text(
+                        "overload",
+                        "System temporarily unavailable. A manager will follow up.",
+                    )
+                )
+            ],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id or "",
+                current_state=deps.current_state or "STATE_0_INIT",
+                intent="UNKNOWN_OR_EMPTY",
+                escalation_level="L2",
+            ),
+            escalation=EscalationInfo(reason="CIRCUIT_BREAKER_OPEN"),
+        )
 
     agent = get_offer_agent()
 
@@ -562,10 +673,12 @@ async def run_offer(
             ),
             timeout=45,
         )
+        _offer_circuit_breaker.record_success()
         return result.output
 
     except Exception as e:
         logger.exception("Offer agent error: %s", e)
+        _offer_circuit_breaker.record_failure(e)
         return OfferResponse(
             event="escalation",
             messages=[MessageItem(content=_get_error_response())],

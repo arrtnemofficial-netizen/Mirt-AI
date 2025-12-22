@@ -132,6 +132,86 @@ async def health() -> dict[str, Any]:
         checks["external_apis"] = f"error: {type(e).__name__}"
         logger.warning("Health check: Failed to check external API circuit breakers: %s", e)
 
+    # LangGraph health check
+    try:
+        from src.agents import get_active_graph
+
+        graph = get_active_graph()
+        if graph:
+            checks["langgraph"] = {"status": "ok", "graph_compiled": True}
+        else:
+            checks["langgraph"] = {"status": "error", "error": "Graph not initialized"}
+            status = "degraded"
+    except Exception as e:
+        checks["langgraph"] = {"status": "error", "error": str(e)[:100]}
+        status = "degraded"
+        logger.warning("Health check: LangGraph unavailable: %s", e)
+
+    # PydanticAI agents health check
+    try:
+        from src.agents.pydantic.main_agent import get_main_agent, get_offer_agent
+        from src.agents.pydantic.vision_agent import get_vision_agent
+        from src.agents.pydantic.payment_agent import get_payment_agent
+
+        main_agent = get_main_agent()
+        offer_agent = get_offer_agent()
+        vision_agent = get_vision_agent()
+        payment_agent = get_payment_agent()
+
+        checks["pydantic_ai_agents"] = {
+            "status": "ok",
+            "main_agent": "available",
+            "offer_agent": "available",
+            "vision_agent": "available",
+            "payment_agent": "available",
+        }
+    except Exception as e:
+        checks["pydantic_ai_agents"] = {"status": "error", "error": str(e)[:100]}
+        status = "degraded"
+        logger.warning("Health check: PydanticAI agents unavailable: %s", e)
+
+    # Checkpointer health check
+    try:
+        from src.agents.langgraph.checkpointer import get_checkpointer, is_persistent
+
+        checkpointer = get_checkpointer()
+        if checkpointer:
+            checks["checkpointer"] = {
+                "status": "ok",
+                "persistent": is_persistent(),
+            }
+        else:
+            checks["checkpointer"] = {"status": "error", "error": "Checkpointer not initialized"}
+            status = "degraded"
+    except Exception as e:
+        checks["checkpointer"] = {"status": "error", "error": str(e)[:100]}
+        status = "degraded"
+        logger.warning("Health check: Checkpointer unavailable: %s", e)
+
+    # PydanticAI circuit breakers status
+    try:
+        from src.core.circuit_breaker import get_circuit_breaker
+
+        main_cb = get_circuit_breaker("pydantic_ai_main_agent")
+        offer_cb = get_circuit_breaker("pydantic_ai_offer_agent")
+        vision_cb = get_circuit_breaker("pydantic_ai_vision_agent")
+        payment_cb = get_circuit_breaker("pydantic_ai_payment_agent")
+
+        checks["pydantic_ai_circuit_breakers"] = {
+            "main_agent": main_cb.get_status(),
+            "offer_agent": offer_cb.get_status(),
+            "vision_agent": vision_cb.get_status(),
+            "payment_agent": payment_cb.get_status(),
+        }
+
+        # Check if any agent circuit breaker is OPEN
+        if not main_cb.can_execute() or not offer_cb.can_execute():
+            status = "degraded"
+            logger.warning("Health check: Some PydanticAI agent circuit breakers are OPEN")
+    except Exception as e:
+        checks["pydantic_ai_circuit_breakers"] = {"status": "error", "error": str(e)[:100]}
+        logger.warning("Health check: Failed to check PydanticAI circuit breakers: %s", e)
+
     return {
         "status": status,
         "checks": checks,
@@ -141,3 +221,71 @@ async def health() -> dict[str, Any]:
         "llm_provider": settings.LLM_PROVIDER,
         "active_model": settings.active_llm_model,
     }
+
+
+@router.get("/health/graph")
+async def health_graph() -> dict[str, Any]:
+    """Health check for LangGraph specifically."""
+    try:
+        from src.agents import get_active_graph
+        from src.agents.langgraph.checkpointer import get_checkpointer, is_persistent
+
+        graph = get_active_graph()
+        checkpointer = get_checkpointer()
+
+        return {
+            "status": "ok",
+            "graph_compiled": graph is not None,
+            "checkpointer": {
+                "initialized": checkpointer is not None,
+                "persistent": is_persistent(),
+            },
+        }
+    except Exception as e:
+        logger.exception("Graph health check failed: %s", e)
+        return {
+            "status": "error",
+            "error": str(e)[:200],
+        }
+
+
+@router.get("/health/agents")
+async def health_agents() -> dict[str, Any]:
+    """Health check for PydanticAI agents specifically."""
+    try:
+        from src.agents.pydantic.main_agent import get_main_agent, get_offer_agent
+        from src.agents.pydantic.vision_agent import get_vision_agent
+        from src.agents.pydantic.payment_agent import get_payment_agent
+        from src.core.circuit_breaker import get_circuit_breaker
+
+        main_agent = get_main_agent()
+        offer_agent = get_offer_agent()
+        vision_agent = get_vision_agent()
+        payment_agent = get_payment_agent()
+
+        main_cb = get_circuit_breaker("pydantic_ai_main_agent")
+        offer_cb = get_circuit_breaker("pydantic_ai_offer_agent")
+        vision_cb = get_circuit_breaker("pydantic_ai_vision_agent")
+        payment_cb = get_circuit_breaker("pydantic_ai_payment_agent")
+
+        return {
+            "status": "ok",
+            "agents": {
+                "main_agent": "available",
+                "offer_agent": "available",
+                "vision_agent": "available",
+                "payment_agent": "available",
+            },
+            "circuit_breakers": {
+                "main_agent": main_cb.get_status(),
+                "offer_agent": offer_cb.get_status(),
+                "vision_agent": vision_cb.get_status(),
+                "payment_agent": payment_cb.get_status(),
+            },
+        }
+    except Exception as e:
+        logger.exception("Agents health check failed: %s", e)
+        return {
+            "status": "error",
+            "error": str(e)[:200],
+        }

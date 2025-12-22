@@ -20,6 +20,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.core.circuit_breaker import CircuitBreakerOpenError, get_circuit_breaker
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry, get_snippet_by_header
 
@@ -253,6 +254,17 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
 
 
 # =============================================================================
+# CIRCUIT BREAKER (for LLM protection)
+# =============================================================================
+
+_vision_circuit_breaker = get_circuit_breaker(
+    "pydantic_ai_vision_agent",
+    failure_threshold=3,
+    recovery_timeout=60.0,
+)
+
+
+# =============================================================================
 # RUNNER
 # =============================================================================
 
@@ -274,6 +286,19 @@ async def run_vision(
         Validated VisionResponse
     """
     import asyncio
+
+    # Check circuit breaker before attempting LLM call
+    if not _vision_circuit_breaker.can_execute():
+        logger.warning(
+            "Circuit breaker OPEN for vision agent (session %s). Escalating.",
+            deps.session_id,
+        )
+        return VisionResponse(
+            reply_to_user=get_human_response("photo_error"),
+            confidence=0.0,
+            needs_clarification=True,
+            clarification_question="Система тимчасово недоступна. Спробуйте пізніше.",
+        )
 
     agent = get_vision_agent()
 
@@ -384,13 +409,26 @@ async def run_vision(
 
     try:
         result = await asyncio.wait_for(
-            agent.run(message, deps=deps, message_history=message_history),
+            agent.run(*user_input, deps=deps, message_history=message_history),
             timeout=120,  # Increased for slow API tiers
         )
+        # Record success in circuit breaker
+        _vision_circuit_breaker.record_success()
         return result.output  # output_type param, result.output attr
+
+    except CircuitBreakerOpenError:
+        logger.error("Circuit breaker error for vision agent (session %s)", deps.session_id)
+        clarif = get_snippet_by_header("VISION_ASK_PHOTO")
+        return VisionResponse(
+            reply_to_user=get_human_response("photo_analysis_error"),
+            confidence=0.0,
+            needs_clarification=True,
+            clarification_question="Система тимчасово недоступна. Спробуйте пізніше.",
+        )
 
     except Exception as e:
         logger.exception("👁️ Vision agent error: %s", e)
+        _vision_circuit_breaker.record_failure(e)
         clarif = get_snippet_by_header("VISION_ASK_PHOTO")
         return VisionResponse(
             reply_to_user=get_human_response("photo_analysis_error"),

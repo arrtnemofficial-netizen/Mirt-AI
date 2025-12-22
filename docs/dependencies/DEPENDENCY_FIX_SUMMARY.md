@@ -32,6 +32,15 @@ The conflict is caused by:
     pydantic-ai-slim[openai] 1.23.0 depends on openai>=1.107.2; extra == "openai"
 ```
 
+**Проблема 4:** Конфлікт pydantic vs ag-ui-protocol
+```
+ERROR: Cannot install -r requirements.txt because these package versions have conflicting dependencies.
+
+The conflict is caused by:
+    The user requested pydantic==2.10.0
+    ag-ui-protocol 0.1.8/0.1.9/0.1.10 depends on pydantic<3.0.0 and >=2.11.2
+```
+
 ### Рішення
 
 **Оновлено версії для сумісності:**
@@ -40,9 +49,10 @@ The conflict is caused by:
    - `aiogram 3.23.0` підтримує `pydantic<2.13,>=2.4.1`
    - Це дозволяє використовувати `pydantic>=2.10`
 
-2. **pydantic**: `2.9.2 → 2.10.0`
-   - Мінімальна версія для `pydantic-ai-slim 1.23.0`
-   - Сумісна з `aiogram 3.23.0`
+2. **pydantic**: `2.9.2 → 2.10.0 → 2.11.2`
+   - Спочатку оновлено до `2.10.0` (мінімальна версія для `pydantic-ai-slim 1.23.0`)
+   - Потім оновлено до `2.11.2` (мінімальна версія для `ag-ui-protocol`, залежність `pydantic-ai-slim[ag-ui]`)
+   - Сумісна з `aiogram 3.23.0` (підтримує `pydantic<2.13,>=2.4.1`)
 
 3. **fastapi**: `0.115.2 → 0.120.0`
    - `fastapi 0.120.0` підтримує `starlette<0.49.0,>=0.40.0`
@@ -57,7 +67,7 @@ The conflict is caused by:
 **requirements.txt:**
 ```diff
 - pydantic==2.9.2
-+ pydantic==2.10.0
++ pydantic==2.11.2
 - aiogram==3.15.0
 + aiogram==3.23.0
 - fastapi==0.115.2
@@ -69,7 +79,7 @@ The conflict is caused by:
 **pyproject.toml:**
 ```diff
 - "pydantic==2.9.2",
-+ "pydantic==2.10.0",
++ "pydantic==2.11.2",
 - "aiogram==3.15.0",
 + "aiogram==3.23.0",
 - "fastapi==0.115.2",
@@ -91,7 +101,7 @@ The conflict is caused by:
 
 Всі залежності тепер сумісні:
 - `pydantic-ai 1.23.0` ✅ (вимагає `pydantic>=2.10`)
-- `pydantic 2.10.0` ✅ (сумісна з `aiogram 3.23.0`)
+- `pydantic 2.11.2` ✅ (мінімальна версія для `ag-ui-protocol`, сумісна з `aiogram 3.23.0`)
 - `aiogram 3.23.0` ✅ (підтримує `pydantic<2.13,>=2.4.1`)
 - `fastapi 0.120.0` ✅ (підтримує `starlette<0.49.0,>=0.40.0`, сумісна з `pydantic-ai-slim[ag-ui]`)
 - `openai>=1.107.2` ✅ (мінімальна версія для `pydantic-ai-slim[openai]`, сумісна з `httpx==0.27.2`)

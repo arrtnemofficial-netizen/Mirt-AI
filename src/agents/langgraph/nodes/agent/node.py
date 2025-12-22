@@ -53,6 +53,17 @@ async def agent_node(
     trace_id = state.get("trace_id", "")
     current_state = state.get("current_state", State.STATE_0_INIT.value)
 
+    # OpenTelemetry tracing
+    from src.services.core.observability import get_tracer, is_tracing_enabled
+
+    tracer = get_tracer() if is_tracing_enabled() else None
+    span = None
+    if tracer:
+        span = tracer.start_span("langgraph.agent_node")
+        span.set_attribute("session_id", session_id)
+        span.set_attribute("current_state", current_state)
+        span.set_attribute("trace_id", trace_id)
+
     user_message = extract_user_message(state.get("messages", []))
 
     if not user_message:
@@ -376,6 +387,10 @@ async def agent_node(
 
     except Exception as e:
         logger.error("Agent node failed for session %s: %s", session_id, e)
+        if span:
+            span.set_attribute("error", True)
+            span.set_attribute("error_type", type(e).__name__)
+            span.set_attribute("error_message", str(e)[:200])
         await log_trace(
              session_id=session_id, trace_id=trace_id, node_name="agent_node",
              status="ERROR", error_message=str(e), state_name=current_state
@@ -386,3 +401,6 @@ async def agent_node(
             "retry_count": state.get("retry_count", 0) + 1,
             "step_number": state.get("step_number", 0) + 1,
         }
+    finally:
+        if span:
+            span.end()

@@ -94,6 +94,12 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Checkpoint compaction safeguards
+    COMPACTION_ENABLED: bool = Field(
+        default=True,
+        description="Enable checkpoint payload compaction (disable for debugging).",
+    )
+
     # Snitkix CRM integration
     SNITKIX_API_URL: str = Field(default="", description="Snitkix CRM API base URL.")
     SNITKIX_API_KEY: SecretStr = Field(default=SecretStr(""), description="Snitkix CRM API key.")

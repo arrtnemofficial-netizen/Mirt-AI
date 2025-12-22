@@ -61,22 +61,50 @@ class CircuitBreaker:
             self.state = CircuitState.CLOSED
             self.half_open_calls = 0
 
-    def record_failure(self) -> None:
-        """Record failed call."""
+    def record_failure(self, error: Exception | None = None) -> None:
+        """Record failed call.
+        
+        SAFEGUARD_2: Detailed logging with error_type, error_message, failure_count, last_failure_time.
+        """
         self.failure_count += 1
         self.last_failure_time = time.time()
+        
+        error_type = type(error).__name__ if error else "Unknown"
+        error_message = str(error)[:200] if error else "No error details"
 
         if self.state == CircuitState.HALF_OPEN:
             # Failure in half-open state - go back to open
             self.state = CircuitState.OPEN
             self.half_open_calls = 0
-            logger.warning("[CIRCUIT:%s] Failed in HALF_OPEN, state=OPEN", self.name)
+            logger.warning(
+                "[CIRCUIT:%s] Failed in HALF_OPEN, state=OPEN: error_type=%s error_message=%s failure_count=%d last_failure_time=%.2f",
+                self.name,
+                error_type,
+                error_message,
+                self.failure_count,
+                self.last_failure_time,
+            )
         elif self.failure_count >= self.failure_threshold:
             self.state = CircuitState.OPEN
             logger.warning(
-                "[CIRCUIT:%s] OPEN after %d failures",
+                "[CIRCUIT:%s] OPEN after %d failures: error_type=%s error_message=%s failure_count=%d last_failure_time=%.2f",
                 self.name,
                 self.failure_count,
+                error_type,
+                error_message,
+                self.failure_count,
+                self.last_failure_time,
+            )
+        else:
+            # Log failure but circuit still closed
+            logger.debug(
+                "[CIRCUIT:%s] Failure recorded: error_type=%s error_message=%s failure_count=%d/%d last_failure_time=%.2f",
+                self.name,
+                error_type,
+                error_message,
+                self.failure_count,
+                self.failure_threshold,
+                self.last_failure_time,
             )
 
     def can_execute(self) -> bool:
@@ -91,7 +119,11 @@ class CircuitBreaker:
                 self.half_open_calls = 0
                 self.success_count = 0
                 logger.info("[CIRCUIT:%s] Transitioning to HALF_OPEN", self.name)
-                return True
+                # After transitioning to HALF_OPEN, check if we can execute (increment counter)
+                if self.half_open_calls < self.half_open_max_calls:
+                    self.half_open_calls += 1
+                    return True
+                return False
             return False
 
         # HALF_OPEN: allow limited calls
@@ -101,12 +133,20 @@ class CircuitBreaker:
         return False
 
     def get_status(self) -> dict[str, Any]:
-        """Get current circuit breaker status."""
+        """Get current circuit breaker status.
+        
+        SAFEGUARD_4: Metrics for monitoring (state, failure_count, last_failure_time, can_execute).
+        """
+        current_time = time.time()
+        time_since_last_failure = current_time - self.last_failure_time if self.last_failure_time > 0 else 0.0
         return {
             "state": self.state.value,
             "failure_count": self.failure_count,
             "last_failure_time": self.last_failure_time,
+            "time_since_last_failure": time_since_last_failure,
             "can_execute": self.can_execute(),
+            "recovery_timeout": self.recovery_timeout,
+            "failure_threshold": self.failure_threshold,
         }
 
 
@@ -150,4 +190,5 @@ class CircuitBreakerOpenError(Exception):
     """Raised when circuit breaker is open and request is rejected."""
 
     pass
+
 

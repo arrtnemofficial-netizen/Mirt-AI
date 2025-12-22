@@ -339,6 +339,11 @@ async def invoke_with_retry(
     This is a fallback for catastrophic failures that the graph
     can't handle internally (e.g., network issues).
 
+    SAFEGUARDS:
+    - Blacklist for unsafe operations (payment, order creation)
+    - Detailed logging (error_type, error_message, attempt_number, node_name)
+    - Max delay cap (30s)
+
     Args:
         state: Initial state
         session_id: Session identifier
@@ -350,43 +355,100 @@ async def invoke_with_retry(
     """
     import asyncio
 
+    # SAFEGUARD_1: Blacklist for unsafe operations
+    UNSAFE_NODES = {"payment", "order_creation", "create_order"}
+    current_state = state.get("current_state", "")
+    current_node = state.get("current_node", "")
+    
+    # Check if we're in an unsafe node
+    is_unsafe = (
+        any(unsafe in current_state.lower() for unsafe in UNSAFE_NODES)
+        or any(unsafe in current_node.lower() for unsafe in UNSAFE_NODES)
+        or state.get("dialog_phase") == "payment"
+    )
+    
+    if is_unsafe:
+        logger.warning(
+            "[RETRY] Blacklisted: unsafe operation detected (state=%s, node=%s). No retry for payment/order operations.",
+            current_state,
+            current_node,
+        )
+        # For unsafe operations, invoke once without retry
+        if graph is None:
+            graph = get_production_graph()
+        config = {"configurable": {"thread_id": session_id}}
+        try:
+            return await graph.ainvoke(state, config=config)
+        except Exception as e:
+            logger.error(
+                "[RETRY] Unsafe operation failed (no retry): error_type=%s error_message=%s",
+                type(e).__name__,
+                str(e)[:200],
+            )
+            return {
+                **state,
+                "should_escalate": True,
+                "escalation_reason": f"Unsafe operation failed (no retry): {type(e).__name__}",
+                "last_error": str(e),
+            }
+
     if graph is None:
         graph = get_production_graph()
 
     config = {"configurable": {"thread_id": session_id}}
     last_error: Exception | None = None
+    max_delay_cap = 30  # SAFEGUARD_3: Max delay cap (30s)
 
     for attempt in range(max_attempts):
         try:
             result = await graph.ainvoke(state, config=config)
             if attempt > 0:
-                logger.info("Graph succeeded on attempt %d", attempt + 1)
+                logger.info(
+                    "[RETRY] Graph succeeded on attempt %d/%d for session=%s",
+                    attempt + 1,
+                    max_attempts,
+                    session_id,
+                )
             return result
         except Exception as e:
             last_error = e
+            error_type = type(e).__name__
+            error_message = str(e)[:200]
+            node_name = current_node or state.get("current_node", "unknown")
+            
             if attempt < max_attempts - 1:
-                wait_time = (attempt + 1) * 2  # Exponential backoff
+                # SAFEGUARD_3: Max delay cap
+                wait_time = min((attempt + 1) * 2, max_delay_cap)  # Exponential backoff with cap
+                
+                # SAFEGUARD_2: Detailed logging
                 logger.warning(
-                    "Graph invocation failed (attempt %d/%d): %s. Retrying in %ds...",
+                    "[RETRY] Graph invocation failed: attempt=%d/%d session=%s error_type=%s error_message=%s node_name=%s retry_delay=%ds",
                     attempt + 1,
                     max_attempts,
-                    str(e)[:100],
+                    session_id,
+                    error_type,
+                    error_message,
+                    node_name,
                     wait_time,
                 )
                 await asyncio.sleep(wait_time)
             else:
+                # SAFEGUARD_2: Detailed logging for final failure
                 logger.error(
-                    "Graph failed after %d attempts: %s",
+                    "[RETRY] Graph failed after %d attempts: session=%s error_type=%s error_message=%s node_name=%s",
                     max_attempts,
-                    str(e),
+                    session_id,
+                    error_type,
+                    error_message,
+                    node_name,
                 )
 
     # All attempts failed - return error state
     return {
         **state,
         "should_escalate": True,
-        "escalation_reason": f"System error after {max_attempts} attempts: {last_error}",
-        "last_error": str(last_error),
+        "escalation_reason": f"System error after {max_attempts} attempts: {type(last_error).__name__ if last_error else 'Unknown'}",
+        "last_error": str(last_error) if last_error else "Unknown error",
     }
 
 

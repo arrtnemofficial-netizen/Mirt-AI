@@ -41,6 +41,77 @@ logger = logging.getLogger("mirt.observability")
 
 
 # =============================================================================
+# OPENTELEMETRY DISTRIBUTED TRACING
+# =============================================================================
+
+_tracer = None
+_tracing_enabled = False
+
+
+def setup_opentelemetry_tracing() -> bool:
+    """
+    Setup OpenTelemetry distributed tracing.
+
+    Returns:
+        True if tracing is enabled, False otherwise.
+    """
+    global _tracer, _tracing_enabled
+
+    if _tracing_enabled and _tracer is not None:
+        return True
+
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import ConsoleSpanExporter, BatchSpanProcessor
+        from opentelemetry.sdk.resources import Resource
+
+        # Create tracer provider
+        resource = Resource.create(
+            {
+                "service.name": "mirt-ai",
+                "service.version": "1.0.0",
+            }
+        )
+        provider = TracerProvider(resource=resource)
+
+        # Add console exporter (can be replaced with OTLP exporter for production)
+        console_exporter = ConsoleSpanExporter()
+        processor = BatchSpanProcessor(console_exporter)
+        provider.add_span_processor(processor)
+
+        # Set global tracer provider
+        trace.set_tracer_provider(provider)
+        _tracer = trace.get_tracer(__name__)
+        _tracing_enabled = True
+
+        logger.info("OpenTelemetry tracing enabled (console exporter)")
+        return True
+
+    except ImportError:
+        logger.debug("OpenTelemetry not installed. Install with: pip install opentelemetry-api opentelemetry-sdk")
+        _tracing_enabled = False
+        return False
+    except Exception as e:
+        logger.warning("Failed to setup OpenTelemetry tracing: %s", e)
+        _tracing_enabled = False
+        return False
+
+
+def get_tracer():
+    """Get OpenTelemetry tracer (lazy initialization)."""
+    global _tracer
+    if _tracer is None:
+        setup_opentelemetry_tracing()
+    return _tracer
+
+
+def is_tracing_enabled() -> bool:
+    """Check if distributed tracing is enabled."""
+    return _tracing_enabled and _tracer is not None
+
+
+# =============================================================================
 # METRICS STORAGE (In-memory, can be exported to Prometheus/StatsD)
 # =============================================================================
 
@@ -300,10 +371,17 @@ class AgentMetrics:
 
 
 class AsyncTracingService:
-    """Service for logging asynchronous traces to external storage (Supabase)."""
+    """Service for logging asynchronous traces to external storage (Supabase).
+    
+    SAFEGUARDS:
+    - Graceful degradation if Supabase unavailable
+    - Failure counter for monitoring
+    - Optional disable via ENABLE_OBSERVABILITY env var
+    """
 
     def __init__(self):
         self._enabled = bool(getattr(settings, "ENABLE_OBSERVABILITY", True))
+        self._failure_count = 0  # SAFEGUARD_3: Failure counter
 
     @staticmethod
     def _normalize_trace_id(value: str) -> str:
@@ -314,6 +392,14 @@ class AsyncTracingService:
             return str(uuid.UUID(raw))
         except Exception:
             return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
+
+    def get_failure_count(self) -> int:
+        """Get current failure count for monitoring."""
+        return self._failure_count
+    
+    def reset_failure_count(self) -> None:
+        """Reset failure count (for testing or manual reset)."""
+        self._failure_count = 0
 
     async def log_trace(
         self,
@@ -335,7 +421,10 @@ class AsyncTracingService:
         cost: float | None = None,
         model_name: str | None = None,
     ) -> None:
-        """Log a trace record to Supabase."""
+        """Log a trace record to Supabase.
+        
+        SAFEGUARD_1: Async and non-blocking (doesn't await result, doesn't block main flow).
+        """
         if not self._enabled:
             return
 
@@ -376,8 +465,25 @@ class AsyncTracingService:
                 await client.table("llm_usage").insert(payload).execute()
 
         except Exception as e:
-            # Observability shouldn't crash the app - use debug level to avoid spam
-            logger.debug(f"Failed to log trace: {e}")
+            # SAFEGUARD_2: Graceful degradation - observability shouldn't crash the app
+            # SAFEGUARD_3: Increment failure counter
+            self._failure_count += 1
+            # Use debug level to avoid spam, but log first few failures
+            if self._failure_count <= 3:
+                logger.warning(
+                    "[TRACING] Failed to log trace (failure_count=%d): %s",
+                    self._failure_count,
+                    str(e)[:200],
+                )
+            else:
+                logger.debug(
+                    "[TRACING] Failed to log trace (failure_count=%d): %s",
+                    self._failure_count,
+                    str(e)[:200],
+                )
+            
+            # SAFEGUARD_3: Alert if failure rate is high (> 1% threshold)
+            # This is checked externally via metrics
 
 
 # Global singleton

@@ -15,6 +15,7 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.core.circuit_breaker import CircuitBreakerOpenError, get_circuit_breaker
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry
 from src.services.domain.payment.payment_config import get_payment_section
@@ -248,6 +249,17 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
 
 
 # =============================================================================
+# CIRCUIT BREAKER (for LLM protection)
+# =============================================================================
+
+_payment_circuit_breaker = get_circuit_breaker(
+    "pydantic_ai_payment_agent",
+    failure_threshold=3,
+    recovery_timeout=60.0,
+)
+
+
+# =============================================================================
 # RUNNER
 # =============================================================================
 
@@ -260,6 +272,18 @@ async def run_payment(
     """Run payment agent for order processing."""
     import asyncio
 
+    # Check circuit breaker before attempting LLM call
+    if not _payment_circuit_breaker.can_execute():
+        logger.warning(
+            "Circuit breaker OPEN for payment agent (session %s). Escalating.",
+            deps.session_id,
+        )
+        return PaymentResponse(
+            reply_to_user="Система тимчасово недоступна. Менеджер зв'яжеться з вами.",
+            missing_fields=["name", "phone", "city", "nova_poshta"],
+            order_ready=False,
+        )
+
     agent = get_payment_agent()
 
     try:
@@ -267,10 +291,20 @@ async def run_payment(
             agent.run(message, deps=deps, message_history=message_history),
             timeout=30,
         )
+        _payment_circuit_breaker.record_success()
         return result.output
+
+    except CircuitBreakerOpenError:
+        logger.error("Circuit breaker error for payment agent (session %s)", deps.session_id)
+        return PaymentResponse(
+            reply_to_user="Система тимчасово недоступна. Менеджер зв'яжеться з вами.",
+            missing_fields=["name", "phone", "city", "nova_poshta"],
+            order_ready=False,
+        )
 
     except Exception as e:
         logger.exception("Payment agent error: %s", e)
+        _payment_circuit_breaker.record_failure(e)
         return PaymentResponse(
             reply_to_user=get_human_response("payment_error"),
             missing_fields=["name", "phone", "city", "nova_poshta"],
