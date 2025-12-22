@@ -103,8 +103,14 @@ def extract_requested_color(text: str) -> str | None:
     patterns = _get_color_patterns()
 
     for needle, canonical in patterns:
-        if re.search(rf"\b{re.escape(needle)}\b", t, flags=re.IGNORECASE):
-            return canonical
+        try:
+            pattern = rf"\b{re.escape(needle)}\b"
+            compiled = re.compile(pattern, re.IGNORECASE)
+            if compiled.search(t):
+                return canonical
+        except re.error:
+            # Skip invalid patterns
+            continue
     return None
 
 

@@ -267,16 +267,21 @@ class OrderMapper:
         # Nova Poshta patterns from registry
         np_patterns = get_client_parser_list("np_patterns")
         for p in np_patterns:
-            np_match = re.search(p, all_text_lower, re.IGNORECASE)
-            if np_match:
-                data = load_yaml_from_registry(SystemKeys.TEXTS.value)
-                prefix = (
-                    data.get("ui", {}).get("np_branch_prefix", "Branch #")
-                    if isinstance(data, dict)
-                    else "Branch #"
-                )
-                info.nova_poshta = f"{prefix}{np_match.group(1)}"
-                break
+            try:
+                compiled = re.compile(p, re.IGNORECASE)
+                np_match = compiled.search(all_text_lower)
+                if np_match:
+                    data = load_yaml_from_registry(SystemKeys.TEXTS.value)
+                    prefix = (
+                        data.get("ui", {}).get("np_branch_prefix", "Branch #")
+                        if isinstance(data, dict)
+                        else "Branch #"
+                    )
+                    info.nova_poshta = f"{prefix}{np_match.group(1)}"
+                    break
+            except re.error:
+                # Skip invalid patterns
+                continue
 
         # City matching (from registry)
         cities = get_client_parser_list("cities")

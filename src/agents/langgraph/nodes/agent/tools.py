@@ -145,13 +145,18 @@ def extract_size_from_response(messages: list) -> str | None:
 
         for pattern in patterns:
             # Use re.IGNORECASE for proper Unicode handling
-            match = re.search(pattern, content, re.IGNORECASE)
-            if match:
-                size = match.group(1)
-                # Normalize dash
-                size = size.replace("–", "-")
-                logger.debug("Extracted size '%s' from: %s", size, content[:50])
-                return size
+            try:
+                compiled = re.compile(pattern, re.IGNORECASE)
+                match = compiled.search(content)
+                if match:
+                    size = match.group(1)
+                    # Normalize dash
+                    size = size.replace("–", "-")
+                    logger.debug("Extracted size '%s' from: %s", size, content[:50])
+                    return size
+            except re.error:
+                # Skip invalid patterns
+                continue
 
     return None
 
