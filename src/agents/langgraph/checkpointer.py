@@ -229,6 +229,7 @@ class CheckpointerType(str, Enum):
 
 _checkpointer: BaseCheckpointSaver | None = None
 _checkpointer_type: CheckpointerType | None = None
+_checkpointer_pool: Any | None = None  # Store pool reference for warmup
 
 
 # =============================================================================
@@ -286,22 +287,19 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
     try:
         # Create connection pool
-        from psycopg_pool import ConnectionPool
-        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg_pool import AsyncConnectionPool
+        from langgraph.checkpoint.postgres import AsyncPostgresSaver
         import psycopg
 
         # First, setup tables with a separate autocommit connection
         # CREATE INDEX CONCURRENTLY requires autocommit mode
         setup_conn = psycopg.connect(database_url, autocommit=True)
         try:
+            from langgraph.checkpoint.postgres import PostgresSaver
             setup_checkpointer = PostgresSaver(setup_conn)
             setup_checkpointer.setup()
         finally:
             setup_conn.close()
-
-        # Now create the pool for actual checkpointing
-        pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=5)
-        checkpointer = PostgresSaver(pool)
 
         async def check_connection(conn):
             """Check if connection is still alive before returning from pool."""
@@ -474,6 +472,10 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     )
 
         checkpointer = InstrumentedAsyncPostgresSaver(pool)
+        
+        # Store pool reference globally for warmup
+        global _checkpointer_pool
+        _checkpointer_pool = pool
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
         return checkpointer
@@ -597,3 +599,36 @@ def get_current_checkpointer_type() -> CheckpointerType | None:
 def is_persistent() -> bool:
     """Check if the current checkpointer is persistent (survives restarts)."""
     return _checkpointer_type in (CheckpointerType.POSTGRES, CheckpointerType.REDIS)
+
+
+async def warmup_checkpointer_pool() -> bool:
+    """
+    Warm up the checkpointer connection pool to avoid first-request delay.
+    
+    Returns:
+        True if warmup succeeded, False otherwise (non-blocking)
+    """
+    global _checkpointer_pool, _checkpointer_type
+    
+    try:
+        # Ensure checkpointer is initialized
+        get_checkpointer()
+        
+        # If using Postgres checkpointer, try to open the pool
+        if _checkpointer_type == CheckpointerType.POSTGRES and _checkpointer_pool:
+            if hasattr(_checkpointer_pool, "open"):
+                try:
+                    await _checkpointer_pool.open()
+                    logger.info("Checkpointer pool warmed up successfully")
+                    return True
+                except Exception as e:
+                    logger.warning("Failed to open checkpointer pool: %s", e)
+                    return False
+        
+        # For MemorySaver or other non-pool checkpointers, warmup is not needed
+        logger.debug("Checkpointer warmup not needed (using %s)", _checkpointer_type)
+        return True
+        
+    except Exception as e:
+        logger.warning("Checkpointer warmup failed: %s", e)
+        return False
