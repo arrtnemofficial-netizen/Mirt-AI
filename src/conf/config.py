@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     MANYCHAT_PAGE_ID: str = Field(
         default="", description="Optional page/app identifier for routing incoming ManyChat events."
     )
+    MANYCHAT_PUSH_MODE: bool = Field(
+        default=True,
+        description=(
+            "Enable push mode for ManyChat webhooks. "
+            "When true: returns 202 immediately and processes async (recommended). "
+            "When false: waits for AI response (legacy, may timeout on long operations)."
+        ),
+    )
 
     SUPABASE_URL: str = Field(
         default="", description="Supabase project URL for session persistence."
