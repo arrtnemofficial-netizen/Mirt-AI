@@ -23,6 +23,15 @@ The conflict is caused by:
     pydantic-ai-slim[ag-ui,...] 1.23.0 depends on starlette>=0.45.3; extra == "ag-ui"
 ```
 
+**Проблема 3:** Конфлікт openai vs pydantic-ai-slim[openai]
+```
+ERROR: Cannot install -r requirements.txt because these package versions have conflicting dependencies.
+
+The conflict is caused by:
+    The user requested openai==1.60.1
+    pydantic-ai-slim[openai] 1.23.0 depends on openai>=1.107.2; extra == "openai"
+```
+
 ### Рішення
 
 **Оновлено версії для сумісності:**
@@ -39,6 +48,10 @@ The conflict is caused by:
    - `fastapi 0.120.0` підтримує `starlette<0.49.0,>=0.40.0`
    - Це дозволяє використовувати `starlette>=0.45.3` (вимагається `pydantic-ai-slim[ag-ui]`)
 
+4. **openai**: `1.60.1 → >=1.107.2`
+   - Мінімальна версія для `pydantic-ai-slim[openai] 1.23.0`
+   - Сумісна з `httpx==0.27.2` та `pydantic==2.10.0`
+
 ### Зміни в файлах
 
 **requirements.txt:**
@@ -49,6 +62,8 @@ The conflict is caused by:
 + aiogram==3.23.0
 - fastapi==0.115.2
 + fastapi==0.120.0
+- openai==1.60.1
++ openai>=1.107.2
 ```
 
 **pyproject.toml:**
@@ -59,6 +74,8 @@ The conflict is caused by:
 + "aiogram==3.23.0",
 - "fastapi==0.115.2",
 + "fastapi==0.120.0",
+- "openai==1.60.1",
++ "openai>=1.107.2",
 ```
 
 ### Перевірка сумісності
@@ -77,6 +94,7 @@ The conflict is caused by:
 - `pydantic 2.10.0` ✅ (сумісна з `aiogram 3.23.0`)
 - `aiogram 3.23.0` ✅ (підтримує `pydantic<2.13,>=2.4.1`)
 - `fastapi 0.120.0` ✅ (підтримує `starlette<0.49.0,>=0.40.0`, сумісна з `pydantic-ai-slim[ag-ui]`)
+- `openai>=1.107.2` ✅ (мінімальна версія для `pydantic-ai-slim[openai]`, сумісна з `httpx==0.27.2`)
 
 ### Додаткові виправлення
 

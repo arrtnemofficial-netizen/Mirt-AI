@@ -1,8 +1,8 @@
 {
-  "timestamp": "2025-12-22T17:35:46.888828",
+  "timestamp": "2025-12-22T17:53:32.052565",
   "requirements_file": "C:\\Users\\Zoroo\\Documents\\GitHub\\Mirt-AI\\requirements.txt",
   "pyproject_file": "C:\\Users\\Zoroo\\Documents\\GitHub\\Mirt-AI\\pyproject.toml",
-  "total_packages": 12,
+  "total_packages": 11,
   "version_sync": {
     "mismatches": [],
     "synced": true
@@ -19,11 +19,6 @@
         "package": "langgraph",
         "current": "1.0.4",
         "latest": "1.0.5"
-      },
-      {
-        "package": "openai",
-        "current": "1.60.1",
-        "latest": "2.14.0"
       },
       {
         "package": "pydantic",
@@ -71,11 +66,6 @@
         "package": "langgraph",
         "current": "1.0.4",
         "latest": "1.0.5"
-      },
-      {
-        "package": "openai",
-        "current": "1.60.1",
-        "latest": "2.14.0"
       },
       {
         "package": "pydantic",

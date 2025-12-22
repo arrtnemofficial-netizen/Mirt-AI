@@ -1,7 +1,7 @@
 # --- Core Application ---
 pydantic-ai==1.23.0
 langgraph==1.0.4
-openai==1.60.1
+openai>=1.107.2
 pydantic==2.10.0
 pydantic-settings==2.7.1
 
