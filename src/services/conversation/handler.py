@@ -499,6 +499,10 @@ class ConversationHandler:
             current_state = state.get("current_state", StateEnum.default())
 
         fallback_text = self.fallback_message or self._get_fallback()
+        # Ensure fallback text is not empty
+        if not fallback_text or not fallback_text.strip():
+            from src.core.human_responses import get_human_response
+            fallback_text = get_human_response("error")
         fallback_response = AgentResponse(
             event="escalation",
             messages=[Message(content=fallback_text)],

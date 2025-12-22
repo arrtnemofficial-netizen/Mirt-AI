@@ -495,7 +495,19 @@ class ManyChatAsyncService:
                 current_state=getattr(result.response.metadata, "current_state", None),
             )
 
-        client_data = parse_client_data(text)
+        # Parse client data (non-critical, so wrap in try-except)
+        try:
+            client_data = parse_client_data(text or "")
+        except Exception as parse_error:
+            logger.warning(
+                "Failed to parse client data from text (len=%d): %s",
+                len(text or ""),
+                str(parse_error)[:200],
+            )
+            # Use empty client data if parsing fails
+            from src.services.client_data_parser import ClientData
+            client_data = ClientData()
+        
         return build_manychat_response(result.response, client_data=client_data)
 
     @staticmethod

@@ -480,10 +480,11 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
         return checkpointer
 
-    except ImportError:
-        logger.error(
-            "langgraph-checkpoint-postgres not installed! "
-            "Run: pip install langgraph-checkpoint-postgres"
+    except ImportError as import_err:
+        logger.warning(
+            "langgraph-checkpoint-postgres not available (fallback to MemorySaver). "
+            "For production persistence, install: pip install langgraph-checkpoint-postgres. "
+            f"Import error: {import_err}"
         )
         return SerializableMemorySaver()
 

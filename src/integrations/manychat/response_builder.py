@@ -38,7 +38,13 @@ TAG_ORDER_PAID = "order_paid"
 def build_manychat_messages(agent_response, *, include_product_images: bool = True) -> list[dict[str, Any]]:
     """Build ManyChat message list from AgentResponse."""
     text_chunks = render_agent_response_text(agent_response)
-    messages: list[dict[str, Any]] = [{"type": "text", "text": chunk} for chunk in text_chunks]
+    messages: list[dict[str, Any]] = [{"type": "text", "text": chunk} for chunk in text_chunks if chunk and chunk.strip()]
+
+    # Ensure at least one message exists (fallback if empty)
+    if not messages:
+        from src.core.human_responses import get_human_response
+        fallback_text = get_human_response("error")
+        messages = [{"type": "text", "text": fallback_text}]
 
     if include_product_images:
         for product in agent_response.products:

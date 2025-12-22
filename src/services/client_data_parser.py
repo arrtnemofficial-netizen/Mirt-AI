@@ -71,9 +71,19 @@ def extract_phone(text: str) -> str | None:
     text_lower = text.lower()
 
     for pattern in PHONE_PATTERNS:
-        match = re.search(pattern, text_lower)
-        if match:
-            return normalize_phone(match.group(0))
+        try:
+            # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
+            # If pattern has inline flags, don't add re.IGNORECASE to avoid conflict
+            flags = 0
+            if not re.search(r"\(\?[iI]", pattern):
+                flags = re.IGNORECASE
+            compiled = re.compile(pattern, flags)
+            match = compiled.search(text_lower)
+            if match:
+                return normalize_phone(match.group(0))
+        except re.error:
+            # Skip invalid patterns
+            continue
 
     return None
 
@@ -84,7 +94,12 @@ def extract_nova_poshta(text: str) -> str | None:
 
     for pattern in NP_PATTERNS:
         try:
-            compiled = re.compile(pattern, re.IGNORECASE)
+            # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
+            # If pattern has inline flags, don't add re.IGNORECASE to avoid conflict
+            flags = 0
+            if not re.search(r"\(\?[iI]", pattern):
+                flags = re.IGNORECASE
+            compiled = re.compile(pattern, flags)
             match = compiled.search(text_lower)
             if match:
                 return match.group(1)
@@ -111,7 +126,12 @@ def extract_city(text: str) -> str | None:
 
     for pattern in CITY_PATTERNS:
         try:
-            compiled = re.compile(pattern, re.IGNORECASE)
+            # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
+            # If pattern has inline flags, don't add re.IGNORECASE to avoid conflict
+            flags = 0
+            if not re.search(r"\(\?[iI]", pattern):
+                flags = re.IGNORECASE
+            compiled = re.compile(pattern, flags)
             match = compiled.search(text)
             if match:
                 return match.group(1).strip().title()
@@ -127,7 +147,12 @@ def extract_full_name(text: str) -> str | None:
     clean_text = text
     for pattern in PHONE_PATTERNS:
         try:
-            compiled = re.compile(pattern, re.IGNORECASE)
+            # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
+            # If pattern has inline flags, don't add re.IGNORECASE to avoid conflict
+            flags = 0
+            if not re.search(r"\(\?[iI]", pattern):
+                flags = re.IGNORECASE
+            compiled = re.compile(pattern, flags)
             clean_text = compiled.sub("", clean_text)
         except re.error:
             # Skip invalid patterns
