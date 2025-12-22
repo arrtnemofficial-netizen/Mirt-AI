@@ -141,14 +141,32 @@ def check_known_conflicts(requirements: dict[str, str]) -> list[dict[str, Any]]:
     # Known conflict: pydantic vs aiogram
     if "pydantic" in requirements and "aiogram" in requirements:
         pydantic_version = requirements["pydantic"]
+        aiogram_version = requirements.get("aiogram", "unknown")
+        
+        # Check if aiogram version supports pydantic>=2.10
         # aiogram 3.15.0 requires pydantic<2.10 and >=2.4.1
-        if pydantic_version.startswith("2.1") or pydantic_version.startswith("2.12"):
-            conflicts.append({
-                "type": "version_conflict",
-                "packages": ["pydantic", "aiogram"],
-                "issue": "aiogram 3.15.0 requires pydantic<2.10, but pydantic>=2.10 is specified",
-                "fixed": pydantic_version == "2.9.2",
-            })
+        # aiogram 3.23.0 requires pydantic<2.13,>=2.4.1 (supports 2.10, 2.11, 2.12)
+        try:
+            aiogram_major, aiogram_minor = map(int, aiogram_version.split(".")[:2])
+            if aiogram_major == 3 and aiogram_minor < 23:
+                # Old aiogram versions require pydantic<2.10
+                if pydantic_version.startswith("2.1") or pydantic_version.startswith("2.12"):
+                    conflicts.append({
+                        "type": "version_conflict",
+                        "packages": ["pydantic", "aiogram"],
+                        "issue": f"aiogram {aiogram_version} requires pydantic<2.10, but pydantic>={pydantic_version} is specified. Upgrade aiogram to 3.23.0+",
+                        "fixed": False,
+                    })
+                elif pydantic_version == "2.10.0" and aiogram_version >= "3.23.0":
+                    # Fixed: aiogram 3.23.0+ supports pydantic 2.10
+                    conflicts.append({
+                        "type": "version_conflict",
+                        "packages": ["pydantic", "aiogram"],
+                        "issue": "aiogram and pydantic versions are compatible",
+                        "fixed": True,
+                    })
+        except (ValueError, AttributeError):
+            pass
 
     # Check openai httpx compatibility
     if "openai" in requirements and "httpx" in requirements:

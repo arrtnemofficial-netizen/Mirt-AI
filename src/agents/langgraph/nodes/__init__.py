@@ -10,7 +10,7 @@ from .intent import intent_detection_node
 from .moderation import moderation_node
 from .offer import offer_node
 from .payment import payment_node
-from .sitniks_status import sitniks_status
+from .sitniks_status import update_sitniks_status as sitniks_status
 from .upsell import upsell_node
 from .validation import validation_node
 from .vision.node import vision_node

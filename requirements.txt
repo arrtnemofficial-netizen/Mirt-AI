@@ -2,14 +2,14 @@
 pydantic-ai==1.23.0
 langgraph==1.0.4
 openai==1.60.1
-pydantic==2.9.2
+pydantic==2.10.0
 pydantic-settings==2.7.1
 
 # --- Server & Networking ---
 fastapi==0.115.2
 uvicorn==0.32.0
 httpx==0.27.2
-aiogram==3.15.0
+aiogram==3.23.0
 
 # --- Database & External Services ---
 supabase==2.9.1
