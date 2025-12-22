@@ -110,8 +110,10 @@ async def manychat_webhook(
 
             # IDEMPOTENCY (DB-backed, 24h TTL)
             message_id = None
-            if isinstance(message, dict):
-                message_id = _extract_manychat_message_id(payload, message)
+            # Extract message_id from payload (works for both formats)
+            message_obj = payload.get("message") or {}
+            if isinstance(message_obj, dict):
+                message_id = _extract_manychat_message_id(payload, message_obj)
 
             if message_id:
                 from src.services.infra.supabase_client import get_supabase_client
