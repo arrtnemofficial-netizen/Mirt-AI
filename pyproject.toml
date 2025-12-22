@@ -27,12 +27,14 @@ classifiers = [
 
 dependencies = [
     # Core Application
-    # OPTIMIZED: Only install openai and logfire extras (not all providers)
+    # OPTIMIZED: Use pydantic-ai-slim with only openai and logfire extras
     # This reduces dependency resolution time from ~5min to ~30s
-    "pydantic-ai[openai,logfire]==1.23.0",
+    # NOTE: pydantic-ai 1.23.0 doesn't have extras, must use pydantic-ai-slim
+    "pydantic-ai-slim[openai,logfire]==1.23.0",
     "langgraph==1.0.4",
     "openai>=1.107.2",
-    "pydantic==2.11.2",
+    # FIXED: realtime 2.27.0 requires pydantic>=2.11.7, aiogram 3.23.0 requires pydantic<2.13
+    "pydantic>=2.11.7,<2.13",
     "pydantic-settings==2.7.1",
     # Server & Networking
     "fastapi==0.120.0",
