@@ -233,7 +233,6 @@ class CheckpointerType(str, Enum):
 
 _checkpointer: BaseCheckpointSaver | None = None
 _checkpointer_type: CheckpointerType | None = None
-_checkpointer_pool: Any | None = None  # Store pool reference for warmup
 
 
 # =============================================================================
@@ -291,8 +290,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         return SerializableMemorySaver()
 
     try:
-        # Create connection pool
-        from psycopg_pool import AsyncConnectionPool
+        # Import PostgresSaver and psycopg for connection management
         from langgraph.checkpoint.postgres import PostgresSaver
         import psycopg
 
@@ -305,79 +303,31 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         finally:
             setup_conn.close()
 
-        async def check_connection(conn):
-            """Check if connection is still alive before returning from pool."""
-            try:
-                await conn.execute("SELECT 1")
-            except Exception:
-                raise  # Connection is dead, pool will discard it
-
-        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 1)
-        pool_max_size = _setting_int(settings, "CHECKPOINTER_POOL_MAX_SIZE", 5)
-        pool_timeout_s = _setting_float(settings, "CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
-        pool_max_idle_s = _setting_float(settings, "CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
-        connect_timeout_s = _setting_float(settings, "CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 10.0)
-
-        statement_timeout_ms = _setting_int(settings, "CHECKPOINTER_STATEMENT_TIMEOUT_MS", 8000)
-        lock_timeout_ms = _setting_int(settings, "CHECKPOINTER_LOCK_TIMEOUT_MS", 2000)
-
-        pool_min_size = max(pool_min_size, 0)
-        pool_max_size = max(pool_max_size, 1)
-        pool_min_size = min(pool_min_size, pool_max_size)
-
-        options = None
-        if statement_timeout_ms > 0 or lock_timeout_ms > 0:
-            parts: list[str] = []
-            if statement_timeout_ms > 0:
-                parts.append(f"-c statement_timeout={statement_timeout_ms}")
-            if lock_timeout_ms > 0:
-                parts.append(f"-c lock_timeout={lock_timeout_ms}")
-            options = " ".join(parts) if parts else None
-
-        pool_kwargs: dict[str, Any] = {
-            "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
-            "connect_timeout": connect_timeout_s,
-        }
-        if options:
-            pool_kwargs["options"] = options
-
-        try:
-            pool = AsyncConnectionPool(
-                conninfo=database_url,
-                min_size=pool_min_size,
-                max_size=pool_max_size,
-                max_idle=pool_max_idle_s,
-                check=check_connection,  # Verify connection health before use
-                timeout=pool_timeout_s,
-                open=False,
-                kwargs=pool_kwargs,
-            )
-        except TypeError:
-            pool = AsyncConnectionPool(
-                conninfo=database_url,
-                min_size=pool_min_size,
-                max_size=pool_max_size,
-                max_idle=pool_max_idle_s,
-                check=check_connection,  # Verify connection health before use
-                timeout=pool_timeout_s,
-                kwargs=pool_kwargs,
-            )
-
         slow_threshold_s = _setting_float(settings, "CHECKPOINTER_SLOW_LOG_SECONDS", 1.0)
 
         from src.services.core.trim_policy import get_checkpoint_compaction
 
         max_messages, max_chars, drop_base64 = get_checkpoint_compaction(settings)
 
+        # Create a connection for PostgresSaver initialization
+        # PostgresSaver.__init__ expects a connection object (conn: '_internal.Conn'), not a pool
+        # The connection is stored by PostgresSaver and used for database operations
+        init_conn = psycopg.connect(database_url, autocommit=False)
+        
         class InstrumentedAsyncPostgresSaver(PostgresSaver):
+            """PostgresSaver with instrumentation and compaction."""
+            
+            # PostgresSaver uses the connection passed to __init__ for database operations
+            # We don't need _ensure_pool_open since PostgresSaver manages the connection
             async def _ensure_pool_open(self) -> None:
-                pool = getattr(self, "pool", None) or getattr(self, "conn", None)
-                await _open_pool_on_demand(pool)
+                # PostgresSaver uses the connection passed during initialization
+                # This method is kept for compatibility but is a no-op
+                pass
 
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
-                    await self._ensure_pool_open()
+                    # PostgresSaver handles connection internally via the conn passed to __init__
                     result = await super().aget_tuple(*args, **kwargs)
                     return result
                 finally:
@@ -404,7 +354,6 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             async def aput(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
-                    await self._ensure_pool_open()
                     if len(args) > 1:
                         payload = _compact_payload(
                             args[1],
@@ -424,7 +373,6 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             async def aput_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
-                    await self._ensure_pool_open()
                     if len(args) > 1:
                         payload = _compact_payload(
                             args[1],
@@ -475,13 +423,13 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                         "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
                     )
 
-        # PostgresSaver in 3.0.2 accepts connection/pool directly
-        # The pool will be used for async operations
-        checkpointer = InstrumentedAsyncPostgresSaver(pool)
+        # PostgresSaver.__init__ expects a connection object (conn: '_internal.Conn')
+        # PostgresSaver stores and uses this connection for database operations
+        # The connection must remain open for PostgresSaver to function
+        checkpointer = InstrumentedAsyncPostgresSaver(init_conn)
         
-        # Store pool reference globally for warmup
-        global _checkpointer_pool
-        _checkpointer_pool = pool
+        # Note: init_conn is stored by PostgresSaver and should not be closed manually
+        # PostgresSaver will manage the connection lifecycle
 
         logger.info("PostgresSaver checkpointer initialized successfully")
         return checkpointer
@@ -610,27 +558,22 @@ def is_persistent() -> bool:
 
 async def warmup_checkpointer_pool() -> bool:
     """
-    Warm up the checkpointer connection pool to avoid first-request delay.
+    Warm up the checkpointer connection to avoid first-request delay.
     
     Returns:
         True if warmup succeeded, False otherwise (non-blocking)
     """
-    global _checkpointer_pool, _checkpointer_type
+    global _checkpointer_type
     
     try:
         # Ensure checkpointer is initialized
         get_checkpointer()
         
-        # If using Postgres checkpointer, try to open the pool
-        if _checkpointer_type == CheckpointerType.POSTGRES and _checkpointer_pool:
-            if hasattr(_checkpointer_pool, "open"):
-                try:
-                    await _checkpointer_pool.open()
-                    logger.info("Checkpointer pool warmed up successfully")
-                    return True
-                except Exception as e:
-                    logger.warning("Failed to open checkpointer pool: %s", e)
-                    return False
+        # PostgresSaver manages its own connection internally
+        # No explicit warmup needed - connection is created during initialization
+        if _checkpointer_type == CheckpointerType.POSTGRES:
+            logger.info("PostgresSaver checkpointer initialized (connection managed internally)")
+            return True
         
         # For MemorySaver or other non-pool checkpointers, warmup is not needed
         logger.debug("Checkpointer warmup not needed (using %s)", _checkpointer_type)
