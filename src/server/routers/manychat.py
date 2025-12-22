@@ -70,29 +70,40 @@ async def manychat_webhook(
             trace_id = str(uuid.uuid4())
 
             # Extract user info from payload
+            # Support both ManyChat webhook format and External Request format
             subscriber = payload.get("subscriber") or payload.get("user") or {}
-            message = payload.get("message") or payload.get("data", {}).get("message") or {}
+            
+            # External Request format: {type, clientId, message, image_url}
+            # Webhook format: {subscriber: {id}, message: {text}, ...}
+            if payload.get("clientId") or payload.get("sessionId"):
+                # External Request / n8n format
+                user_id = str(payload.get("clientId") or payload.get("sessionId") or payload.get("client_id") or payload.get("session_id") or "unknown")
+                text = payload.get("message") or payload.get("messages") or ""
+                image_url = payload.get("image_url") or payload.get("imageUrl") or payload.get("photo_url") or payload.get("photoUrl") or payload.get("image") or payload.get("photo")
+                channel = payload.get("type") or "instagram"
+            else:
+                # Standard ManyChat webhook format
+                message = payload.get("message") or payload.get("data", {}).get("message") or {}
+                user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+                text = ""
+                image_url = None
 
-            user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
-            text = ""
-            image_url = None
+                if isinstance(message, dict):
+                    text = message.get("text") or message.get("content") or ""
+                    # Extract image from attachments
+                    for attachment in message.get("attachments", []):
+                        if attachment.get("type") == "image":
+                            image_url = attachment.get("payload", {}).get("url")
+                            break
+                    if not image_url:
+                        image_url = message.get("image") or message.get("image_url")
 
-            if isinstance(message, dict):
-                text = message.get("text") or message.get("content") or ""
-                # Extract image from attachments
-                for attachment in message.get("attachments", []):
-                    if attachment.get("type") == "image":
-                        image_url = attachment.get("payload", {}).get("url")
-                        break
+                # Also check data.image_url
                 if not image_url:
-                    image_url = message.get("image") or message.get("image_url")
+                    data = payload.get("data", {})
+                    image_url = data.get("image_url") or data.get("photo_url")
 
-            # Also check data.image_url
-            if not image_url:
-                data = payload.get("data", {})
-                image_url = data.get("image_url") or data.get("photo_url")
-
-            channel = payload.get("type") or "instagram"
+                channel = payload.get("type") or "instagram"
 
             if not text and not image_url:
                 raise ValidationError("Missing message text or image")
@@ -194,26 +205,38 @@ async def manychat_webhook(
     # Response mode: wait for AI and return response
     service = get_cached_manychat_service()
     try:
-        # For sync response mode, reuse the same pipeline and response_builder
+        # Support both ManyChat webhook format and External Request format
         subscriber = payload.get("subscriber") or payload.get("user") or {}
-        message = payload.get("message") or payload.get("data", {}).get("message") or {}
-        user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
-        text = ""
-        image_url = None
+        
+        # External Request format: {type, clientId, message, image_url}
+        if payload.get("clientId") or payload.get("sessionId"):
+            # External Request / n8n format
+            user_id = str(payload.get("clientId") or payload.get("sessionId") or payload.get("client_id") or payload.get("session_id") or "unknown")
+            text = payload.get("message") or payload.get("messages") or ""
+            image_url = payload.get("image_url") or payload.get("imageUrl") or payload.get("photo_url") or payload.get("photoUrl") or payload.get("image") or payload.get("photo")
+            channel = payload.get("type") or "instagram"
+        else:
+            # Standard ManyChat webhook format
+            message = payload.get("message") or payload.get("data", {}).get("message") or {}
+            user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
+            text = ""
+            image_url = None
 
-        if isinstance(message, dict):
-            text = message.get("text") or message.get("content") or ""
-            for attachment in message.get("attachments", []):
-                if attachment.get("type") == "image":
-                    image_url = attachment.get("payload", {}).get("url")
-                    break
+            if isinstance(message, dict):
+                text = message.get("text") or message.get("content") or ""
+                for attachment in message.get("attachments", []):
+                    if attachment.get("type") == "image":
+                        image_url = attachment.get("payload", {}).get("url")
+                        break
+                if not image_url:
+                    image_url = message.get("image") or message.get("image_url")
+
+            # Also check data.image_url
             if not image_url:
-                image_url = message.get("image") or message.get("image_url")
+                data = payload.get("data", {})
+                image_url = data.get("image_url") or data.get("photo_url")
 
-        # Also check data.image_url
-        if not image_url:
-            data = payload.get("data", {})
-            image_url = data.get("image_url") or data.get("photo_url")
+            channel = payload.get("type") or "instagram"
 
         if not text and not image_url:
             raise ValidationError("Missing message text or image")
