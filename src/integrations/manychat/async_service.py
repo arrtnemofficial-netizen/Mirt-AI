@@ -497,8 +497,33 @@ class ManyChatAsyncService:
 
         # Parse client data (non-critical, so wrap in try-except)
         try:
+            # #region agent log
+            import json
+            import time
+            try:
+                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "async_service.py:parse_client_data:entry", "message": "parse_client_data called", "data": {"text_len": len(text) if text else 0, "text_preview": text[:100] if text else None}, "timestamp": int(time.time() * 1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            
             client_data = parse_client_data(text or "")
+            
+            # #region agent log
+            try:
+                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "async_service.py:parse_client_data:success", "message": "parse_client_data succeeded", "data": {"has_phone": bool(client_data.phone), "has_name": bool(client_data.full_name)}, "timestamp": int(time.time() * 1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
         except Exception as parse_error:
+            # #region agent log
+            try:
+                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "async_service.py:parse_client_data:error", "message": "parse_client_data failed", "data": {"error": str(parse_error), "error_type": type(parse_error).__name__, "text_len": len(text) if text else 0}, "timestamp": int(time.time() * 1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
             logger.warning(
                 "Failed to parse client data from text (len=%d): %s",
                 len(text or ""),

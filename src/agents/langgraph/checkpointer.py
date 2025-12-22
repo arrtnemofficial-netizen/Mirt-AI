@@ -253,10 +253,11 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     # Try to get database URL from environment
     database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
 
+    # Import settings at function start to ensure it's always available
+    from src.conf.config import settings
+    
     if not database_url:
         # Try to build from Supabase settings
-        from src.conf.config import settings
-
         if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_API_KEY"):
             # Supabase connection string format
             supabase_url = str(settings.SUPABASE_URL)
