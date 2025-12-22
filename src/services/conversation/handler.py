@@ -273,11 +273,15 @@ class ConversationHandler:
             return self._build_fallback_result(session_id, state, str(e))
 
         except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)
             logger.exception(
-                "Unexpected error processing message for session %s",
+                "Unexpected error processing message for session %s: %s: %s",
                 session_id,
+                error_type,
+                error_msg[:500],  # Limit error message length
             )
-            return self._build_fallback_result(session_id, state, str(e))
+            return self._build_fallback_result(session_id, state, f"{error_type}: {error_msg}")
 
     async def _invoke_agent(self, state: ConversationState) -> ConversationState:
         """Invoke the LangGraph agent with retry logic."""
