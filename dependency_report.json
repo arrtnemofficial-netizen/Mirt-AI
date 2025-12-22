@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-12-22T17:24:32.570431",
+  "timestamp": "2025-12-22T17:35:46.888828",
   "requirements_file": "C:\\Users\\Zoroo\\Documents\\GitHub\\Mirt-AI\\requirements.txt",
   "pyproject_file": "C:\\Users\\Zoroo\\Documents\\GitHub\\Mirt-AI\\pyproject.toml",
   "total_packages": 12,
@@ -37,7 +37,7 @@
       },
       {
         "package": "fastapi",
-        "current": "0.115.2",
+        "current": "0.120.0",
         "latest": "0.127.0"
       },
       {
@@ -89,7 +89,7 @@
       },
       {
         "package": "fastapi",
-        "current": "0.115.2",
+        "current": "0.120.0",
         "latest": "0.127.0"
       },
       {
