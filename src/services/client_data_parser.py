@@ -83,9 +83,14 @@ def extract_nova_poshta(text: str) -> str | None:
     text_lower = text.lower()
 
     for pattern in NP_PATTERNS:
-        match = re.search(pattern, text_lower, re.IGNORECASE)
-        if match:
-            return match.group(1)
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+            match = compiled.search(text_lower)
+            if match:
+                return match.group(1)
+        except re.error:
+            # Skip invalid patterns
+            continue
 
     if any(word in text_lower for word in NP_KEYWORDS):
         numbers = re.findall(r"\b(\d{1,4})\b", text)
@@ -105,9 +110,14 @@ def extract_city(text: str) -> str | None:
             return city.title()
 
     for pattern in CITY_PATTERNS:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1).strip().title()
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+            match = compiled.search(text)
+            if match:
+                return match.group(1).strip().title()
+        except re.error:
+            # Skip invalid patterns
+            continue
 
     return None
 
@@ -116,7 +126,12 @@ def extract_full_name(text: str) -> str | None:
     """Extract full name from text."""
     clean_text = text
     for pattern in PHONE_PATTERNS:
-        clean_text = re.sub(pattern, "", clean_text, flags=re.IGNORECASE)
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+            clean_text = compiled.sub("", clean_text)
+        except re.error:
+            # Skip invalid patterns
+            continue
 
     matches = re.findall(NAME_PATTERN, clean_text)
 
