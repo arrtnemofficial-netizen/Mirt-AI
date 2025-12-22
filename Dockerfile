@@ -86,6 +86,9 @@ FROM production AS development
 
 USER root
 
+# Copy pyproject.toml needed for installing dev dependencies
+COPY pyproject.toml .
+
 # Install dev dependencies from pyproject.toml
 RUN pip install --no-cache-dir ".[dev]"
 
