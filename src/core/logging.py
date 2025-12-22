@@ -181,6 +181,50 @@ def safe_preview(value: Any, max_len: int = 120) -> str:
     return text[: max_len - 3] + "..."
 
 
+def classify_root_cause(
+    error: Any,
+    *,
+    current_state: str | None = None,
+    intent: str | None = None,
+    channel: str | None = None,
+    status_code: int | None = None,
+) -> str:
+    """Classify error root cause for structured logging."""
+    msg = str(error or "").lower()
+    state = (current_state or "").upper()
+    intent_norm = (intent or "").upper()
+    channel_norm = (channel or "").lower()
+
+    if status_code is not None:
+        if status_code == 400 and ("field" in msg and "not found" in msg):
+            return "MANYCHAT_FIELD_NOT_FOUND"
+        if 400 <= status_code < 500:
+            return f"MANYCHAT_REJECTED_{status_code}"
+        if status_code >= 500:
+            return f"MANYCHAT_UPSTREAM_{status_code}"
+
+    if "agentresponse" in msg and "no attribute" in msg:
+        return "CONTRACT_MISMATCH"
+    if "timeout" in msg or "timed out" in msg:
+        return "LLM_TIMEOUT"
+    if "rate limit" in msg or "429" in msg:
+        return "LLM_RATE_LIMIT"
+    if "vision" in msg or "image" in msg or "cdn" in msg:
+        return "VISION_ERROR"
+    if "supabase" in msg or "postgres" in msg or "psycopg" in msg:
+        return "STORAGE_ERROR"
+    if "manychat" in msg:
+        return "MANYCHAT_ERROR"
+
+    if intent_norm == "PHOTO_IDENT" or "VISION" in state:
+        return "VISION_FLOW_ERROR"
+    if state.startswith("STATE_"):
+        return f"STATE_FLOW_ERROR:{state}"
+    if channel_norm:
+        return f"CHANNEL_ERROR:{channel_norm}"
+    return "UNKNOWN"
+
+
 class LogContext:
     """Context manager for adding context to log records.
 

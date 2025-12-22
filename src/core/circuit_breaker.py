@@ -192,3 +192,15 @@ class CircuitBreakerOpenError(Exception):
     pass
 
 
+class CircuitOpenError(Exception):
+    """Raised when circuit is open and request is blocked."""
+
+    def __init__(self, breaker_name: str):
+        self.breaker_name = breaker_name
+        super().__init__(f"Circuit breaker '{breaker_name}' is OPEN")
+
+
+# Pre-defined breakers for main services
+MANYCHAT_BREAKER = get_circuit_breaker("manychat", failure_threshold=3, recovery_timeout=30.0)
+
+

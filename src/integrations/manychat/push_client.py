@@ -1,48 +1,108 @@
+"""ManyChat Push Client - sends messages via ManyChat API.
+
+This module implements async push-based message delivery to ManyChat,
+eliminating webhook timeout issues while preserving all MIRT features:
+- Custom Fields (ai_state, ai_intent, last_product, order_sum)
+- Tags (ai_responded, needs_human, order_started, order_paid)
+- Quick Replies (state-based buttons)
+- Images (product photos)
+
+Auto-retry logic:
+- If ManyChat returns 400 "Field not found" → retry WITHOUT actions
+- This handles cases where Custom Fields don't exist in user's ManyChat bot
+"""
+
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
+import time
 from typing import Any
+from urllib.parse import quote
+
+import httpx
+
+from src.conf.config import settings
+from src.core.circuit_breaker import MANYCHAT_BREAKER, CircuitOpenError
+from src.core.human_responses import calculate_typing_delay
+from src.core.logging import classify_root_cause, log_event, safe_preview
+
 
 logger = logging.getLogger(__name__)
 
+# Error patterns that trigger retry without actions
+_FIELD_ERROR_PATTERNS = (
+    "field with same name not found",
+    "field not found",
+    "wrong dynamic message format",
+)
+
 
 class ManyChatPushClient:
-    """Lightweight stub push client used for tests/sync responses.
+    """Client for pushing messages to ManyChat via their API."""
 
-    In production, replace with real ManyChat API sendContent implementation.
-    """
-
-    async def send_text(
+    def __init__(
         self,
-        *,
-        subscriber_id: str,
-        text: str,
-        channel: str,
-        trace_id: str | None = None,
-    ) -> bool:
-        logger.debug("[MANYCHAT PUSH] send_text user=%s channel=%s trace=%s", subscriber_id, channel, trace_id)
-        return True
+        api_url: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        self._api_url = (
+            api_url or getattr(settings, "MANYCHAT_API_URL", "https://api.manychat.com")
+        ).rstrip("/")
 
-    async def send_content(
-        self,
-        *,
-        subscriber_id: str,
-        messages: list[dict[str, Any]],
-        channel: str,
-        quick_replies: list[dict[str, str]] | None = None,
-        set_field_values: list[dict[str, Any]] | None = None,
-        add_tags: list[str] | None = None,
-        remove_tags: list[str] | None = None,
-        trace_id: str | None = None,
-    ) -> bool:
-        logger.debug(
-            "[MANYCHAT PUSH] send_content user=%s channel=%s trace=%s messages=%d",
-            subscriber_id,
-            channel,
-            trace_id,
-            len(messages),
-        )
-        return True
+        # Handle SecretStr
+        api_key_setting = api_key or getattr(settings, "MANYCHAT_API_KEY", None)
+        if api_key_setting and hasattr(api_key_setting, "get_secret_value"):
+            self._api_key = api_key_setting.get_secret_value()
+        else:
+            self._api_key = str(api_key_setting) if api_key_setting else ""
+
+    @property
+    def enabled(self) -> bool:
+        """Check if push mode is configured."""
+        return bool(self._api_url and self._api_key)
+
+    def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Sanitize messages for ManyChat API format.
+
+        ManyChat sendContent API format:
+        - Text: {"type": "text", "text": "..."}
+        - Image: {"type": "image", "url": "..."} (NO caption field!)
+        """
+        sanitized = []
+        for msg in messages:
+            msg_type = msg.get("type")
+            if msg_type == "text":
+                text = msg.get("text", "").strip()
+                if text:
+                    sanitized.append({"type": "text", "text": text})
+            elif msg_type == "image":
+                url = msg.get("url", "").strip()
+                if url:
+                    proxy_enabled = bool(getattr(settings, "MANYCHAT_IMAGE_PROXY_ENABLED", False))
+                    media_proxy_enabled = bool(getattr(settings, "MEDIA_PROXY_ENABLED", False))
+                    public_base_url = str(getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip(
+                        "/"
+                    )
+
+                    if (
+                        proxy_enabled
+                        and media_proxy_enabled
+                        and public_base_url.startswith("https://")
+                    ):
+                        token = str(getattr(settings, "MEDIA_PROXY_TOKEN", "") or "").strip()
+                        proxy_url = f"{public_base_url}/media/proxy?url={quote(url, safe='')}"
+                        if token:
+                            proxy_url += f"&token={quote(token, safe='')}"
+                        url = proxy_url
+
+                    # ManyChat sendContent does NOT support caption for images
+                    sanitized.append({"type": "image", "url": url})
+            else:
+                # Pass through other types as-is
+                sanitized.append(msg)
+        return sanitized
 
     def _build_actions(
         self,
@@ -50,45 +110,593 @@ class ManyChatPushClient:
         add_tags: list[str] | None,
         remove_tags: list[str] | None,
     ) -> list[dict[str, Any]]:
-        """Preserve numeric types; mimic sendContent actions format (simplified)."""
+        """Build actions list for ManyChat, respecting 5 action limit.
+
+        IMPORTANT: ManyChat requires correct data types:
+        - Number fields: numeric value (not string)
+        - Text fields: string value
+        - Boolean fields: true/false (not string)
+        """
         actions: list[dict[str, Any]] = []
 
-        for field in set_field_values or []:
-            val = field.get("field_value")
-            # Auto-parse numeric strings for ManyChat Number fields
-            if isinstance(val, str) and val.strip():
-                try:
-                    if val.isdigit():
-                        val = int(val)
+        # Add field values - preserve original types for ManyChat compatibility
+        if set_field_values:
+            for item in set_field_values:
+                field_name = str(item.get("field_name") or "").strip()
+                raw_value = item.get("field_value")
+
+                if not field_name:
+                    continue
+
+                # Determine the correct value type for ManyChat
+                if raw_value is None:
+                    field_value: Any = ""
+                elif isinstance(raw_value, bool):
+                    # Boolean must stay boolean
+                    field_value = raw_value
+                elif isinstance(raw_value, (int, float)):
+                    # Numbers must stay numeric
+                    field_value = raw_value
+                elif isinstance(raw_value, str):
+                    # Try to parse numeric strings for Number fields
+                    stripped = raw_value.strip()
+                    if stripped.replace(".", "", 1).replace("-", "", 1).isdigit():
+                        try:
+                            field_value = float(stripped) if "." in stripped else int(stripped)
+                        except ValueError:
+                            field_value = stripped
                     else:
-                        # Try float if it looks like a decimal number
-                        val = float(val)
-                except (ValueError, TypeError):
-                    pass
+                        field_value = stripped
+                else:
+                    field_value = str(raw_value)
 
-            actions.append(
-                {
-                    "action": "set_field_value",
-                    "field_name": field.get("field_name"),
-                    "value": val,
-                }
-            )
+                actions.append(
+                    {
+                        "action": "set_field_value",
+                        "field_name": field_name,
+                        "value": field_value,
+                    }
+                )
 
+        # Add tags
         if add_tags:
-            actions.append({"action": "add_tag", "tag_name": add_tags})
-        if remove_tags:
-            actions.append({"action": "remove_tag", "tag_name": remove_tags})
+            for tag in add_tags:
+                actions.append({"action": "add_tag", "tag_name": tag})
 
-        # ManyChat обмежує 5 actions; тут не обрізаємо, бо тест тільки перевіряє типи
+        # Remove tags
+        if remove_tags:
+            for tag in remove_tags:
+                actions.append({"action": "remove_tag", "tag_name": tag})
+
+        # ManyChat limits to 5 actions
+        if len(actions) > 5:
+            logger.warning("[MANYCHAT] Truncating actions from %d to 5", len(actions))
+            actions = actions[:5]
+
         return actions
 
+    @staticmethod
+    def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        """Redact and truncate payload for safe logging.
 
-# Simple singleton for parity with previous API
-_client: ManyChatPushClient | None = None
+        NOTE: Avoid logging PII or long message bodies.
+        """
+        try:
+            redacted = {
+                "subscriber_id": payload.get("subscriber_id"),
+                "message_tag": payload.get("message_tag"),
+                "data": {
+                    "version": (payload.get("data") or {}).get("version"),
+                    "content": {},
+                },
+            }
+
+            content = (payload.get("data") or {}).get("content") or {}
+            redacted_content: dict[str, Any] = {
+                "type": content.get("type"),
+                "messages": [],
+                "actions": [],
+            }
+
+            # Messages: truncate text and urls
+            for msg in content.get("messages") or []:
+                msg_type = msg.get("type")
+                if msg_type == "text":
+                    text = str(msg.get("text") or "")
+                    if len(text) > 200:
+                        text = text[:200] + "…"
+                    redacted_content["messages"].append({"type": "text", "text": text})
+                elif msg_type == "image":
+                    url = str(msg.get("url") or "")
+                    if len(url) > 120:
+                        url = url[:120] + "…"
+                    redacted_content["messages"].append({"type": "image", "url": url})
+                else:
+                    redacted_content["messages"].append({"type": msg_type or "unknown"})
+
+            # Actions: keep only action kind + field/tag names (values are redacted)
+            for act in content.get("actions") or []:
+                action_type = act.get("action")
+                if action_type == "set_field_value":
+                    field_name = str(act.get("field_name") or "")
+                    redacted_content["actions"].append(
+                        {
+                            "action": "set_field_value",
+                            "field_name": field_name,
+                            "value": "<redacted>",
+                        }
+                    )
+                elif action_type in ("add_tag", "remove_tag"):
+                    redacted_content["actions"].append(
+                        {
+                            "action": action_type,
+                            "tag_name": act.get("tag_name"),
+                        }
+                    )
+                else:
+                    redacted_content["actions"].append({"action": action_type or "unknown"})
+
+            # Quick replies (if present)
+            if content.get("quick_replies"):
+                redacted_content["quick_replies_count"] = len(content.get("quick_replies") or [])
+
+            redacted["data"]["content"] = redacted_content
+            return redacted
+        except Exception:
+            return {"_redact_failed": True}
+
+    async def _do_send(
+        self,
+        subscriber_id: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> tuple[bool, str, int]:
+        """Execute the actual HTTP request with circuit breaker protection.
+
+        Returns:
+            (success, response_text, status_code)
+
+        Raises:
+            CircuitOpenError: If circuit breaker is open (ManyChat unavailable)
+        """
+        # CIRCUIT BREAKER CHECK: Fail fast if ManyChat is down
+        if not MANYCHAT_BREAKER.can_execute():
+            logger.warning(
+                "[MANYCHAT] Circuit OPEN - skipping request to %s",
+                subscriber_id,
+            )
+            raise CircuitOpenError("manychat")
+
+        start_time = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    f"{self._api_url}/fb/sending/sendContent",
+                    json=payload,
+                    headers=headers,
+                )
+
+                latency_ms = (time.time() - start_time) * 1000
+
+                if response.status_code == 200:
+                    # SUCCESS: Record for circuit breaker
+                    MANYCHAT_BREAKER.record_success()
+                    logger.debug(
+                        "[MANYCHAT] Request OK in %.0fms",
+                        latency_ms,
+                    )
+                elif response.status_code >= 500:
+                    # SERVER ERROR: Record failure for circuit breaker
+                    MANYCHAT_BREAKER.record_failure(Exception(f"HTTP {response.status_code}"))
+                # 4xx errors don't trigger circuit breaker (client errors)
+
+                return (
+                    response.status_code == 200,
+                    response.text,
+                    response.status_code,
+                )
+        except httpx.TimeoutException as e:
+            # TIMEOUT: Record failure for circuit breaker
+            MANYCHAT_BREAKER.record_failure(e)
+            return False, "timeout", 0
+        except Exception as e:
+            # OTHER ERROR: Record failure for circuit breaker
+            MANYCHAT_BREAKER.record_failure(e)
+            return False, str(e), 0
+
+    def _is_field_error(self, response_text: str) -> bool:
+        """Check if error is due to missing Custom Fields."""
+        lower_text = response_text.lower()
+        return any(pattern in lower_text for pattern in _FIELD_ERROR_PATTERNS)
+
+    @staticmethod
+    def _is_transient_status(status_code: int) -> bool:
+        return status_code in (0, 408, 429) or status_code >= 500
+
+    @staticmethod
+    def _get_retry_config() -> tuple[int, float, float]:
+        try:
+            max_retries = int(getattr(settings, "MANYCHAT_PUSH_MAX_RETRIES", 2))
+        except Exception:
+            max_retries = 2
+        try:
+            base_delay = float(getattr(settings, "MANYCHAT_PUSH_RETRY_BASE_DELAY_SECONDS", 0.5))
+        except Exception:
+            base_delay = 0.5
+        try:
+            max_delay = float(getattr(settings, "MANYCHAT_PUSH_RETRY_MAX_DELAY_SECONDS", 3.0))
+        except Exception:
+            max_delay = 3.0
+        max_retries = max(max_retries, 0)
+        if base_delay < 0:
+            base_delay = 0.0
+        max_delay = max(max_delay, base_delay)
+        return max_retries, base_delay, max_delay
+
+    @staticmethod
+    def _compute_retry_delay(base_delay: float, max_delay: float, attempt: int) -> float:
+        # Exponential backoff with jitter (bounded).
+        delay = min(max_delay, base_delay * (2 ** max(attempt - 1, 0)))
+        jitter = random.uniform(0.0, delay * 0.25) if delay > 0 else 0.0
+        return min(max_delay, delay + jitter)
+
+    async def send_content(
+        self,
+        subscriber_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        channel: str = "instagram",
+        quick_replies: list[dict[str, str]] | None = None,
+        set_field_values: list[dict[str, str]] | None = None,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+        message_tag: str = "ACCOUNT_UPDATE",
+        trace_id: str | None = None,
+    ) -> bool:
+        """Send content to a ManyChat subscriber.
+
+        Auto-retry: If ManyChat returns 400 with 'Field not found' error,
+        automatically retries WITHOUT actions (fields/tags).
+
+        Args:
+            subscriber_id: ManyChat subscriber ID
+            messages: List of message objects (text, image)
+            channel: Channel type (instagram, facebook, whatsapp)
+            quick_replies: Quick reply buttons
+            set_field_values: Custom fields to update
+            add_tags: Tags to add
+            remove_tags: Tags to remove
+
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.enabled:
+            logger.warning("[MANYCHAT] Push client not configured (missing API key)")
+            return False
+
+        # Sanitize messages (remove unsupported fields like caption)
+        clean_messages = self._sanitize_messages(messages)
+        if not clean_messages:
+            logger.warning("[MANYCHAT] No valid messages to send")
+            return False
+
+        safe_mode_instagram = bool(getattr(settings, "MANYCHAT_SAFE_MODE_INSTAGRAM", True))
+        disable_actions_instagram = bool(
+            getattr(settings, "MANYCHAT_INSTAGRAM_DISABLE_ACTIONS", True)
+        )
+        split_send_instagram = bool(getattr(settings, "MANYCHAT_INSTAGRAM_SPLIT_SEND", True))
+        bubble_delay_seconds = float(
+            getattr(settings, "MANYCHAT_INSTAGRAM_BUBBLE_DELAY_SECONDS", 5.0)
+        )
+
+        # IMPORTANT: Instagram delivery must be fast (UX + 45s SLA).
+        # Cap artificial delays so a multi-bubble response doesn't take minutes.
+        max_typing_delay_instagram = float(
+            getattr(settings, "MANYCHAT_INSTAGRAM_MAX_TYPING_DELAY_SECONDS", 2.0)
+        )
+        max_interbubble_delay_total_instagram = float(
+            getattr(settings, "MANYCHAT_INSTAGRAM_MAX_INTERBUBBLE_DELAY_SECONDS", 10.0)
+        )
+
+        allowed_fields_raw = str(
+            getattr(settings, "MANYCHAT_INSTAGRAM_ALLOWED_FIELDS", "ai_state,ai_intent")
+        )
+        allowed_fields = {f.strip() for f in allowed_fields_raw.split(",") if f and f.strip()}
+
+        # Instagram sendContent is strict and frequently rejects actions/quick replies.
+        # Default to safe mode: no quick replies; actions are restricted to a minimal allowlist.
+        effective_quick_replies = quick_replies
+        if channel == "instagram" and safe_mode_instagram:
+            effective_quick_replies = None
+
+        # Build actions (may be empty)
+        if channel == "instagram" and disable_actions_instagram:
+            actions = []
+        elif channel == "instagram" and safe_mode_instagram:
+            filtered_fields = [
+                fv
+                for fv in (set_field_values or [])
+                if str(fv.get("field_name") or "").strip() in allowed_fields
+            ]
+            actions = self._build_actions(filtered_fields, add_tags=None, remove_tags=None)
+        else:
+            actions = self._build_actions(set_field_values, add_tags, remove_tags)
+
+        # Build content structure
+        content: dict[str, Any] = {
+            "type": channel,
+            "messages": clean_messages,
+            "actions": actions,
+        }
+        if effective_quick_replies:
+            content["quick_replies"] = effective_quick_replies
+
+        # Build payload
+        sub_id = int(subscriber_id) if subscriber_id.isdigit() else subscriber_id
+        payload: dict[str, Any] = {
+            "subscriber_id": sub_id,
+            "data": {
+                "version": "v2",
+                "content": content,
+            },
+            "message_tag": message_tag,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        async def _send_with_retry(
+            *,
+            payload_to_send: dict[str, Any],
+            had_actions: bool,
+        ) -> bool:
+            """Send payload with limited retries on transient failures.
+
+            Also retries once without actions when ManyChat rejects fields.
+            """
+            max_retries, base_delay, max_delay = self._get_retry_config()
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    success_local, response_text_local, status_code_local = await self._do_send(
+                        subscriber_id, payload_to_send, headers
+                    )
+                except CircuitOpenError:
+                    logger.error(
+                        "[MANYCHAT] Circuit breaker OPEN - cannot send to %s",
+                        subscriber_id,
+                    )
+                    return False
+
+                if success_local:
+                    return True
+
+                if status_code_local and status_code_local < 500:
+                    root_cause = classify_root_cause(
+                        response_text_local,
+                        channel=channel,
+                        status_code=status_code_local,
+                    )
+                    log_event(
+                        logger,
+                        event="manychat_push_rejected",
+                        level="warning",
+                        trace_id=trace_id,
+                        user_id=subscriber_id,
+                        channel=channel,
+                        status_code=status_code_local,
+                        root_cause=root_cause,
+                        error=safe_preview(response_text_local, 200),
+                    )
+                    logger.warning(
+                        "[MANYCHAT] Push rejected: %d %s | payload=%s",
+                        status_code_local,
+                        response_text_local[:200],
+                        self._redact_payload(payload_to_send),
+                    )
+
+                if (
+                    status_code_local == 400
+                    and had_actions
+                    and self._is_field_error(response_text_local)
+                ):
+                    logger.warning(
+                        "[MANYCHAT] Field error detected, retrying WITHOUT actions: %s",
+                        response_text_local[:100],
+                    )
+
+                    content_retry = dict((payload_to_send.get("data") or {}).get("content") or {})
+                    content_retry["actions"] = []
+
+                    payload_retry = {
+                        **payload_to_send,
+                        "data": {
+                            **(payload_to_send.get("data") or {}),
+                            "content": content_retry,
+                        },
+                    }
+
+                    try:
+                        success_retry, response_retry, status_retry = await self._do_send(
+                            subscriber_id, payload_retry, headers
+                        )
+                    except CircuitOpenError:
+                        logger.error("[MANYCHAT] Circuit opened during retry")
+                        return False
+
+                    if success_retry:
+                        log_event(
+                            logger,
+                            event="manychat_push_ok",
+                            trace_id=trace_id,
+                            user_id=subscriber_id,
+                            channel=channel,
+                            messages_count=len(
+                                ((payload_retry.get("data") or {}).get("content") or {}).get(
+                                    "messages"
+                                )
+                                or []
+                            ),
+                            status="retry_without_actions",
+                        )
+                        logger.info(
+                            "[MANYCHAT] Pushed %d messages to %s (retry without actions)",
+                            len(
+                                ((payload_retry.get("data") or {}).get("content") or {}).get(
+                                    "messages"
+                                )
+                                or []
+                            ),
+                            subscriber_id,
+                        )
+                        return True
+
+                    if status_retry and status_retry < 500:
+                        logger.warning(
+                            "[MANYCHAT] Retry rejected: %d %s | payload=%s",
+                            status_retry,
+                            str(response_retry)[:200],
+                            self._redact_payload(payload_retry),
+                        )
+                    return False
+
+                if self._is_transient_status(status_code_local) and attempt <= max_retries:
+                    delay = self._compute_retry_delay(base_delay, max_delay, attempt)
+                    logger.warning(
+                        "[MANYCHAT] Transient failure (status=%s). Retrying in %.2fs (attempt %d/%d)",
+                        status_code_local,
+                        delay,
+                        attempt,
+                        max_retries,
+                    )
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    continue
+
+                return False
+
+        # Instagram split-send mode: send each bubble as its own sendContent call.
+        # This improves UI (separate bubbles) and allows a real inter-bubble delay.
+        if channel == "instagram" and split_send_instagram and len(clean_messages) > 1:
+            first_text_len = 0
+            if clean_messages and clean_messages[0].get("type") == "text":
+                first_text_len = len(str(clean_messages[0].get("text") or ""))
+            delay = calculate_typing_delay(first_text_len)
+            delay = min(delay, max_typing_delay_instagram)
+            logger.debug(
+                "[MANYCHAT] Typing delay (split): %.2fs for %d chars",
+                delay,
+                first_text_len,
+            )
+            await asyncio.sleep(delay)
+
+            effective_bubble_delay = bubble_delay_seconds
+            if max_interbubble_delay_total_instagram > 0:
+                effective_bubble_delay = min(
+                    effective_bubble_delay,
+                    max_interbubble_delay_total_instagram / max(len(clean_messages) - 1, 1),
+                )
+
+            for idx, msg in enumerate(clean_messages):
+                is_last = idx == (len(clean_messages) - 1)
+                actions_for_msg = []
+                if not disable_actions_instagram:
+                    actions_for_msg = actions if idx == 0 else []
+
+                content_one: dict[str, Any] = {
+                    "type": channel,
+                    "messages": [msg],
+                    "actions": actions_for_msg,
+                }
+                # Only attach quick replies to the last bubble (and only if allowed).
+                if is_last and effective_quick_replies:
+                    content_one["quick_replies"] = effective_quick_replies
+
+                payload_one: dict[str, Any] = {
+                    "subscriber_id": sub_id,
+                    "data": {
+                        "version": "v2",
+                        "content": content_one,
+                    },
+                    "message_tag": message_tag,
+                }
+
+                ok_one = await _send_with_retry(
+                    payload_to_send=payload_one,
+                    had_actions=bool(actions_for_msg),
+                )
+                if not ok_one:
+                    return False
+
+                if not is_last and effective_bubble_delay > 0:
+                    await asyncio.sleep(effective_bubble_delay)
+
+            logger.info(
+                "[MANYCHAT] Pushed %d messages to %s (split-send)",
+                len(clean_messages),
+                subscriber_id,
+            )
+            return True
+
+        # Default mode: one sendContent call with all messages.
+        total_text_length = sum(
+            len(m.get("text", "")) for m in clean_messages if m.get("type") == "text"
+        )
+        delay = calculate_typing_delay(total_text_length)
+        if channel == "instagram":
+            delay = min(delay, max_typing_delay_instagram)
+        logger.debug("[MANYCHAT] Typing delay: %.2fs for %d chars", delay, total_text_length)
+        await asyncio.sleep(delay)
+
+        ok = await _send_with_retry(payload_to_send=payload, had_actions=bool(actions))
+        if ok:
+            log_event(
+                logger,
+                event="manychat_push_ok",
+                trace_id=trace_id,
+                user_id=subscriber_id,
+                channel=channel,
+                messages_count=len(clean_messages),
+                status="sent",
+            )
+            logger.info(
+                "[MANYCHAT] Pushed %d messages to %s (actions=%d, ig_actions_disabled=%s)",
+                len(clean_messages),
+                subscriber_id,
+                len(actions),
+                str(bool(channel == "instagram" and disable_actions_instagram)).lower(),
+            )
+            return True
+
+        return False
+
+    async def send_text(
+        self,
+        subscriber_id: str,
+        text: str,
+        *,
+        channel: str = "instagram",
+        trace_id: str | None = None,
+    ) -> bool:
+        """Send a simple text message."""
+        return await self.send_content(
+            subscriber_id=subscriber_id,
+            messages=[{"type": "text", "text": text}],
+            channel=channel,
+            trace_id=trace_id,
+        )
+
+
+# Singleton
+_push_client: ManyChatPushClient | None = None
 
 
 def get_manychat_push_client() -> ManyChatPushClient:
-    global _client
-    if _client is None:
-        _client = ManyChatPushClient()
-    return _client
+    """Get singleton push client instance."""
+    global _push_client
+    if _push_client is None:
+        _push_client = ManyChatPushClient()
+    return _push_client
