@@ -102,7 +102,8 @@ cd mirt-ai
 # Setup
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install --upgrade pip build
+pip install -e ".[dev]"
 
 # Configure
 cp .env.example .env

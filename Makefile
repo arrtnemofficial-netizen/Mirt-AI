@@ -8,7 +8,8 @@ BIN := $(VENV)/bin
 # Setup
 setup:
 	$(PYTHON) -m venv $(VENV)
-	$(BIN)/pip install -r requirements.txt
+	$(BIN)/pip install --upgrade pip build
+	$(BIN)/pip install -e ".[dev]"
 
 # Development
 format:

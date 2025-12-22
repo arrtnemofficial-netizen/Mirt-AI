@@ -9,7 +9,7 @@
 
 ### 1. Prerequisites
 - **Python:** 3.11+ (Strict requirement due to `StrEnum` usage).
-- **Poetry/Pip:** `requirements.txt` is the SSOT.
+- **Pip:** `pyproject.toml` is the SSOT (PEP 621 standard).
 - **Docker:** For local Redis/Postgres.
 
 ### 2. Local Setup
@@ -25,8 +25,9 @@ python -m venv venv
 # Linux/Mac:
 source venv/bin/activate
 
-# Install deps
-pip install -r requirements.txt
+# Install deps (editable mode with dev dependencies)
+pip install --upgrade pip build
+pip install -e ".[dev]"
 ```
 
 ### 3. Running Services (Local)

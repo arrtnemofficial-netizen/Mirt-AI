@@ -37,7 +37,8 @@ This repository contains the **v5.0 Enterprise Implementation** of MIRT AI.
 ### 2. Run Local
 ```bash
 # Install
-pip install -r requirements.txt
+pip install --upgrade pip build
+pip install -e ".[dev]"
 
 # Start Web Server (FastAPI)
 uvicorn src.server.main:app --reload

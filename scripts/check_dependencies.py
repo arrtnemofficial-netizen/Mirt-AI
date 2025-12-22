@@ -19,7 +19,6 @@ from typing import Any
 from urllib.request import urlopen
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 PYPROJECT_FILE = PROJECT_ROOT / "pyproject.toml"
 
 
@@ -104,22 +103,10 @@ def check_pip_conflicts() -> list[str]:
 
 
 def check_version_sync() -> dict[str, Any]:
-    """Check if requirements.txt and pyproject.toml are in sync."""
-    req_deps = parse_requirements(REQUIREMENTS_FILE)
+    """Check pyproject.toml dependencies (requirements.txt removed, using pyproject.toml as SSOT)."""
     pyproject_deps = parse_pyproject(PYPROJECT_FILE)
-
-    mismatches = []
-    for package, req_version in req_deps.items():
-        if package in pyproject_deps:
-            pyproject_version = pyproject_deps[package]
-            if req_version != pyproject_version and req_version != "latest":
-                mismatches.append({
-                    "package": package,
-                    "requirements.txt": req_version,
-                    "pyproject.toml": pyproject_version,
-                })
-
-    return {"mismatches": mismatches, "synced": len(mismatches) == 0}
+    # No sync check needed - pyproject.toml is the single source of truth
+    return {"mismatches": [], "synced": True}
 
 
 def check_known_conflicts(requirements: dict[str, str]) -> list[dict[str, Any]]:
@@ -236,17 +223,15 @@ def check_version_currency(requirements: dict[str, str]) -> dict[str, Any]:
 
 def generate_report() -> dict[str, Any]:
     """Generate comprehensive dependency report."""
-    requirements = parse_requirements(REQUIREMENTS_FILE)
     pyproject_deps = parse_pyproject(PYPROJECT_FILE)
 
     report = {
         "timestamp": datetime.now().isoformat(),
-        "requirements_file": str(REQUIREMENTS_FILE),
         "pyproject_file": str(PYPROJECT_FILE),
-        "total_packages": len(requirements),
+        "total_packages": len(pyproject_deps),
         "version_sync": check_version_sync(),
-        "known_conflicts": check_known_conflicts(requirements),
-        "version_currency": check_version_currency(requirements),
+        "known_conflicts": check_known_conflicts(pyproject_deps),
+        "version_currency": check_version_currency(pyproject_deps),
         "transitive_deps": check_transitive_dependencies(),
         "pip_check": check_pip_conflicts(),
     }
@@ -264,16 +249,9 @@ def print_report(report: dict[str, Any]) -> None:
     print()
 
     # Version sync
-    print("📋 VERSION SYNCHRONIZATION")
+    print("📋 DEPENDENCY SOURCE")
     print("-" * 80)
-    if report["version_sync"]["synced"]:
-        print("✅ requirements.txt and pyproject.toml are in sync")
-    else:
-        print("❌ VERSION MISMATCHES FOUND:")
-        for mismatch in report["version_sync"]["mismatches"]:
-            print(f"   {mismatch['package']}:")
-            print(f"      requirements.txt: {mismatch['requirements.txt']}")
-            print(f"      pyproject.toml:   {mismatch['pyproject.toml']}")
+    print("✅ Using pyproject.toml as single source of truth (PEP 621)")
     print()
 
     # Known conflicts

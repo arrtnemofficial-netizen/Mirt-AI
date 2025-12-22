@@ -21,10 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies from pyproject.toml
+# Copy pyproject.toml and package structure needed for installation
+COPY pyproject.toml .
+COPY src/ ./src/
+COPY data/ ./data/
+RUN pip install --no-cache-dir --upgrade pip build && \
+    pip install --no-cache-dir .
 
 # -----------------------------------------------------------------------------
 # Stage 2: Production
@@ -83,13 +86,8 @@ FROM production AS development
 
 USER root
 
-# Install dev dependencies (with versions matching requirements.txt)
-RUN pip install --no-cache-dir \
-    pytest==9.0.1 \
-    pytest-asyncio==1.3.0 \
-    pytest-cov \
-    ruff \
-    mypy
+# Install dev dependencies from pyproject.toml
+RUN pip install --no-cache-dir ".[dev]"
 
 # Switch back to non-root
 USER mirt

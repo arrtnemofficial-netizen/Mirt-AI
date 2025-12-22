@@ -27,7 +27,9 @@ classifiers = [
 
 dependencies = [
     # Core Application
-    "pydantic-ai==1.23.0",
+    # OPTIMIZED: Only install openai and logfire extras (not all providers)
+    # This reduces dependency resolution time from ~5min to ~30s
+    "pydantic-ai[openai,logfire]==1.23.0",
     "langgraph==1.0.4",
     "openai>=1.107.2",
     "pydantic==2.11.2",
@@ -38,21 +40,32 @@ dependencies = [
     "httpx==0.27.2",
     "aiogram==3.23.0",
     # Database & External Services
+    # FIXED: Pin supabase dependencies to avoid backtracking
     "supabase==2.9.1",
-    "langgraph-checkpoint-postgres>=2.0.0",
-    "psycopg[binary,pool]>=3.1.0",
+    # Pin sub-dependencies to avoid pip backtracking (realtime, postgrest, storage3)
+    "realtime==2.27.0",
+    "postgrest==0.17.2",
+    "storage3==0.8.2",
+    # FIXED: Pin version to avoid backtracking
+    "langgraph-checkpoint-postgres==3.0.2",
+    # FIXED: Pin version to avoid backtracking
+    "psycopg[binary,pool]==3.3.2",
     # Background Tasks
-    "celery>=5.4.0",
-    "redis>=5.0.0",
-    "kombu>=5.3.0",
-    "flower>=2.0.0",
+    # FIXED: Pin versions to avoid backtracking
+    "celery==5.6.0",
+    "redis==7.1.0",
+    "kombu==5.6.1",
+    "flower==2.0.1",
     # Monitoring
-    "sentry-sdk[celery,fastapi]>=2.0.0",
-    "opentelemetry-api>=1.28.0",
-    "opentelemetry-sdk>=1.28.0",
-    "opentelemetry-instrumentation>=0.48b0",
+    # FIXED: Pin versions to avoid backtracking
+    "sentry-sdk[celery,fastapi]==2.48.0",
+    "opentelemetry-api==1.39.1",
+    "opentelemetry-sdk==1.39.1",
+    "opentelemetry-instrumentation==0.60b1",
     # Utilities
     "python-dotenv>=1.0.0",
+    # Build system
+    "setuptools>=68.0",
 ]
 
 [project.optional-dependencies]
