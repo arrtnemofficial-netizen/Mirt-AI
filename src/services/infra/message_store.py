@@ -70,8 +70,14 @@ class SupabaseMessageStore:
         try:
             self.client.table(self.table).insert(payload).execute()
         except Exception as e:
-            logger.error("Failed to append message to Supabase: %s", e)
-            raise
+            # Don't fail the entire message processing if Supabase is unavailable
+            # This is a non-critical operation - messages can still be processed
+            logger.warning(
+                "Failed to append message to Supabase (non-critical): %s. "
+                "Message processing will continue.",
+                e,
+            )
+            # Don't raise - allow processing to continue
 
     def _update_user_interaction(self, user_id: int) -> None:
         """Update last_interaction_at for user."""
@@ -153,7 +159,9 @@ class SupabaseMessageStore:
 
 
 def create_message_store() -> MessageStore:
+    from src.conf.config import settings
+
     client = get_supabase_client()
     if client:
-        return SupabaseMessageStore(client)
+        return SupabaseMessageStore(client, table=settings.SUPABASE_MESSAGES_TABLE)
     return InMemoryMessageStore()

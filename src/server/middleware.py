@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -19,7 +20,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from fastapi import Request, Response
     from starlette.types import ASGIApp
 
 

@@ -66,7 +66,7 @@ class DBTable:
     """Database table names constants."""
 
     USERS = "mirt_users"
-    MESSAGES = "mirt_messages"
+    MESSAGES = "messages"  # Changed from mirt_messages to match actual table name
     SESSIONS = "agent_sessions"
     LLM_USAGE = "llm_usage"
 
