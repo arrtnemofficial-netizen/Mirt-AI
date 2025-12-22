@@ -23,6 +23,7 @@ from src.server.dependencies import get_bot
 from src.server.exceptions import APIError
 from src.server.middleware import setup_middleware
 from src.server.routers import (
+    api_v1_router,
     automation_router,
     health_router,
     manychat_router,
@@ -175,6 +176,7 @@ app.include_router(health_router)
 app.include_router(telegram_router)
 app.include_router(media_router)
 app.include_router(manychat_router)
+app.include_router(api_v1_router)
 app.include_router(snitkix_router)
 app.include_router(sitniks_router)
 app.include_router(automation_router)
