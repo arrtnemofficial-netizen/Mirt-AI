@@ -260,13 +260,23 @@ class OrderMapper:
         all_text_lower = all_text.lower()
 
         # Phone pattern
-        phone_match = re.search(r"(\+?380\d{9}|\d{10})", all_text)
-        if phone_match:
-            info.phone = phone_match.group(1)
+        try:
+            phone_match = re.search(r"(\+?380\d{9}|\d{10})", all_text)
+            if phone_match:
+                info.phone = phone_match.group(1)
+        except re.error as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Regex error in order_mapper.extract_customer_info (phone pattern): %s (pos=%s)",
+                str(e),
+                getattr(e, "pos", "unknown"),
+            )
+            # Continue without phone extraction
 
         # Nova Poshta patterns from registry
         np_patterns = get_client_parser_list("np_patterns")
-        for p in np_patterns:
+        for idx, p in enumerate(np_patterns):
             try:
                 compiled = re.compile(p, re.IGNORECASE)
                 np_match = compiled.search(all_text_lower)
@@ -279,8 +289,17 @@ class OrderMapper:
                     )
                     info.nova_poshta = f"{prefix}{np_match.group(1)}"
                     break
-            except re.error:
-                # Skip invalid patterns
+            except re.error as e:
+                # Log problematic pattern for debugging
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "Invalid regex pattern in order_mapper.extract_customer_info np_patterns[%d] (skipping): %s. Error: %s (pos=%s)",
+                    idx,
+                    p[:100] if p else "None",
+                    str(e),
+                    getattr(e, "pos", "unknown"),
+                )
                 continue
 
         # City matching (from registry)

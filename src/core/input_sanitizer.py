@@ -88,8 +88,16 @@ def sanitize_text(text: str) -> tuple[str, bool]:
         logger.debug("Removed control characters from input")
 
     # 2. Normalize whitespace (collapse multiple spaces, preserve newlines)
-    sanitized = re.sub(r"[ \t]+", " ", sanitized)
-    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)  # Max 2 consecutive newlines
+    try:
+        sanitized = re.sub(r"[ \t]+", " ", sanitized)
+        sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)  # Max 2 consecutive newlines
+    except re.error as e:
+        logger.warning(
+            "Regex error in sanitize_text (whitespace normalization): %s (pos=%s)",
+            str(e),
+            getattr(e, "pos", "unknown"),
+        )
+        # Continue with current sanitized value
     if sanitized != text:
         was_modified = True
 
@@ -104,13 +112,21 @@ def sanitize_text(text: str) -> tuple[str, bool]:
     sanitized = html.escape(sanitized, quote=False)
 
     # 5. Detect prompt injection patterns (log but don't modify - let moderation handle)
-    if PROMPT_INJECTION_REGEX.search(sanitized):
+    try:
+        if PROMPT_INJECTION_REGEX.search(sanitized):
+            logger.warning(
+                "Potential prompt injection detected in message (length=%d)",
+                len(sanitized),
+            )
+            # Don't modify the text - let the moderation layer handle it
+            # This allows the system to track and respond appropriately
+    except re.error as e:
         logger.warning(
-            "Potential prompt injection detected in message (length=%d)",
-            len(sanitized),
+            "Regex error in sanitize_text (prompt injection detection): %s (pos=%s)",
+            str(e),
+            getattr(e, "pos", "unknown"),
         )
-        # Don't modify the text - let the moderation layer handle it
-        # This allows the system to track and respond appropriately
+        # Continue without injection detection for this message
 
     # 6. Remove null bytes
     if "\x00" in sanitized:

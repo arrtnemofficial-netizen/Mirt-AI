@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -54,7 +55,13 @@ NAME_PATTERN = get_client_parser_value(
 
 def normalize_phone(phone: str) -> str:
     """Normalize phone number to +380XXXXXXXXX format."""
-    digits = re.sub(r"\D", "", phone)
+    logger = logging.getLogger(__name__)
+    
+    try:
+        digits = re.sub(r"\D", "", phone)
+    except re.error as e:
+        logger.warning("Regex error in normalize_phone: %s (pos=%s)", str(e), getattr(e, "pos", "unknown"))
+        return phone  # Return original if regex fails
 
     if digits.startswith("380") and len(digits) == 12:
         return f"+{digits}"
@@ -68,7 +75,6 @@ def normalize_phone(phone: str) -> str:
 
 def extract_phone(text: str) -> str | None:
     """Extract phone number from text."""
-    import logging
     import json
     import time
     logger = logging.getLogger(__name__)
@@ -208,10 +214,27 @@ def extract_nova_poshta(text: str) -> str | None:
             continue
 
     if any(word in text_lower for word in NP_KEYWORDS):
-        numbers = re.findall(r"\b(\d{1,4})\b", text)
-        for num in numbers:
-            if 1 <= int(num) <= 9999:
-                return num
+        try:
+            numbers = re.findall(r"\b(\d{1,4})\b", text)
+            for num in numbers:
+                if 1 <= int(num) <= 9999:
+                    return num
+        except re.error as e:
+            # #region agent log
+            try:
+                import json
+                import time
+                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_nova_poshta:findall_error", "message": "Regex error in extract_nova_poshta findall", "data": {"error": str(e), "error_type": type(e).__name__, "error_pos": getattr(e, "pos", "unknown")}, "timestamp": int(time.time() * 1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            logger.warning(
+                "Regex error in extract_nova_poshta (findall fallback): %s (pos=%s)",
+                str(e),
+                getattr(e, "pos", "unknown"),
+            )
+            # Continue without keyword-based extraction
 
     return None
 
@@ -389,9 +412,37 @@ def extract_full_name(text: str) -> str | None:
 
 def parse_client_data(text: str) -> ClientData:
     """Parse all client data from a message text."""
+    logger = logging.getLogger(__name__)
+    
+    # Safely extract each field with individual error handling
+    full_name = None
+    phone = None
+    city = None
+    nova_poshta = None
+    
+    try:
+        full_name = extract_full_name(text)
+    except Exception as e:
+        logger.warning("Failed to extract full_name: %s", str(e)[:200])
+    
+    try:
+        phone = extract_phone(text)
+    except Exception as e:
+        logger.warning("Failed to extract phone: %s", str(e)[:200])
+    
+    try:
+        city = extract_city(text)
+    except Exception as e:
+        logger.warning("Failed to extract city: %s", str(e)[:200])
+    
+    try:
+        nova_poshta = extract_nova_poshta(text)
+    except Exception as e:
+        logger.warning("Failed to extract nova_poshta: %s", str(e)[:200])
+    
     return ClientData(
-        full_name=extract_full_name(text),
-        phone=extract_phone(text),
-        city=extract_city(text),
-        nova_poshta=extract_nova_poshta(text),
+        full_name=full_name,
+        phone=phone,
+        city=city,
+        nova_poshta=nova_poshta,
     )

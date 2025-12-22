@@ -57,6 +57,9 @@ def normalize_text(text: str) -> str:
     - Removes diacritics
     - Collapses repeated characters
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Lowercase
     result = text.lower()
 
@@ -73,10 +76,18 @@ def normalize_text(text: str) -> str:
     result = "".join(normalized)
 
     # Collapse repeated characters (e.g., "booomba" -> "bomba")
-    result = re.sub(r"(.)\1{2,}", r"\1", result)
+    try:
+        result = re.sub(r"(.)\1{2,}", r"\1", result)
+    except re.error as e:
+        logger.warning("Regex error in normalize_text (collapse repeated): %s (pos=%s)", str(e), getattr(e, "pos", "unknown"))
+        # Continue with original result
 
     # Remove non-alphanumeric except spaces
-    result = re.sub(r"[^\w\s]", "", result)
+    try:
+        result = re.sub(r"[^\w\s]", "", result)
+    except re.error as e:
+        logger.warning("Regex error in normalize_text (remove non-alphanumeric): %s (pos=%s)", str(e), getattr(e, "pos", "unknown"))
+        # Continue with previous result
 
     return result
 
