@@ -290,6 +290,34 @@ class ConversationHandler:
         thread_id = metadata.get("thread_id", session_id)
         last_error: Exception | None = None
 
+        # Validate runner is not None
+        if self.runner is None:
+            error_msg = f"Runner is None for session {session_id}. Graph was not initialized properly."
+            logger.error(
+                "%s Runner type: None, Runner value: %s",
+                error_msg,
+                self.runner,
+            )
+            raise AgentInvocationError(error_msg, session_id=session_id) from ValueError("runner is None")
+
+        # Log runner type for diagnostics
+        logger.debug(
+            "Invoking agent for session %s with runner type: %s, has ainvoke: %s",
+            session_id,
+            type(self.runner).__name__,
+            hasattr(self.runner, "ainvoke"),
+        )
+
+        # Validate runner has ainvoke method
+        if not hasattr(self.runner, "ainvoke"):
+            error_msg = f"Runner for session {session_id} does not have ainvoke method. Type: {type(self.runner).__name__}"
+            logger.error(
+                "%s Runner attributes: %s",
+                error_msg,
+                dir(self.runner) if self.runner else "N/A",
+            )
+            raise AgentInvocationError(error_msg, session_id=session_id) from AttributeError("runner.ainvoke not found")
+
         config = {"configurable": {"thread_id": thread_id}}
 
         for attempt in range(self.max_retries + 1):
@@ -544,6 +572,37 @@ def create_conversation_handler(
     fallback_message: str | None = None,
 ) -> ConversationHandler:
     """Factory function to create a ConversationHandler with dependencies."""
+    # Validate runner is not None
+    if runner is None:
+        logger.error(
+            "create_conversation_handler called with None runner. "
+            "This indicates the graph was not initialized properly."
+        )
+        raise ValueError(
+            "runner cannot be None. Use get_active_graph() to get a valid runner, "
+            "or ensure the graph is properly initialized before creating the handler."
+        )
+
+    # Log runner type for diagnostics
+    logger.debug(
+        "Creating ConversationHandler with runner type: %s, has ainvoke: %s",
+        type(runner).__name__,
+        hasattr(runner, "ainvoke"),
+    )
+
+    # Validate runner has ainvoke method (check protocol compliance)
+    if not hasattr(runner, "ainvoke"):
+        logger.error(
+            "create_conversation_handler called with invalid runner. "
+            "Type: %s, Attributes: %s",
+            type(runner).__name__,
+            [attr for attr in dir(runner) if not attr.startswith("_")][:10],
+        )
+        raise ValueError(
+            f"runner must implement GraphRunner protocol (have ainvoke method). "
+            f"Got type: {type(runner).__name__}"
+        )
+
     kwargs: dict[str, Any] = {
         "session_store": session_store,
         "message_store": message_store,

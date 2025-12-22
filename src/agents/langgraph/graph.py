@@ -266,6 +266,20 @@ def get_production_graph(
             runner,
             checkpointer,
         )
+        
+        # Assert that graph was created successfully
+        if _production_graph is None:
+            raise RuntimeError(
+                "build_production_graph returned None. "
+                "This indicates a critical error in graph initialization."
+            )
+
+    # Additional safety check (should never happen if build_production_graph works correctly)
+    if _production_graph is None:
+        raise RuntimeError(
+            "_production_graph is None after initialization. "
+            "This should never happen. Check build_production_graph implementation."
+        )
 
     return _production_graph
 
