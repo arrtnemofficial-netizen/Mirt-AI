@@ -75,52 +75,19 @@ def normalize_phone(phone: str) -> str:
 
 def extract_phone(text: str) -> str | None:
     """Extract phone number from text."""
-    import json
-    import time
     logger = logging.getLogger(__name__)
-    
-    # #region agent log
-    try:
-        with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "client_data_parser.py:extract_phone:entry", "message": "extract_phone called", "data": {"text_len": len(text) if text else 0, "text_preview": text[:50] if text else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
-    
     text_lower = text.lower()
 
     for idx, pattern in enumerate(PHONE_PATTERNS):
-        # #region agent log
-        try:
-            with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_phone:pattern_check", "message": "Checking pattern", "data": {"pattern_idx": idx, "pattern": pattern, "pattern_len": len(pattern), "pattern_pos47": pattern[47:52] if len(pattern) > 47 else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
-        
         try:
             # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
             # If pattern has inline flags, don't add re.IGNORECASE to avoid conflict
             flags = 0
             try:
                 inline_flags_check = re.search(r"\(\?[iI]", pattern)
-            except re.error as check_err:
-                # #region agent log
-                try:
-                    with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "client_data_parser.py:extract_phone:flags_check_error", "message": "Error checking inline flags", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(check_err)}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception:
-                    pass
-                # #endregion
+            except re.error:
+                # If checking for inline flags fails, assume no inline flags
                 inline_flags_check = None
-            
-            # #region agent log
-            try:
-                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "client_data_parser.py:extract_phone:flags_check", "message": "Inline flags check", "data": {"pattern_idx": idx, "has_inline_flags": bool(inline_flags_check), "will_use_ignorecase": not bool(inline_flags_check)}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             
             if not inline_flags_check:
                 flags = re.IGNORECASE
@@ -129,19 +96,12 @@ def extract_phone(text: str) -> str | None:
             if match:
                 return normalize_phone(match.group(0))
         except re.error as e:
-            # #region agent log
-            try:
-                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_phone:regex_error", "message": "Regex error in extract_phone", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(e), "error_type": type(e).__name__}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
-            
-            # Log problematic pattern for debugging
             logger.warning(
-                "Invalid regex pattern in extract_phone (skipping): %s. Error: %s",
-                pattern[:100],
-                str(e)
+                "Invalid regex pattern in extract_phone[%d] (skipping): %.100s. Error: %s (pos=%s)",
+                idx,
+                pattern[:100] if pattern else "None",
+                str(e),
+                getattr(e, "pos", "unknown"),
             )
             continue
 
@@ -150,29 +110,11 @@ def extract_phone(text: str) -> str | None:
 
 def extract_nova_poshta(text: str) -> str | None:
     """Extract Nova Poshta branch number from text."""
-    import logging
-    import json
-    import time
     logger = logging.getLogger(__name__)
-    
-    # #region agent log
-    try:
-        with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_nova_poshta:entry", "message": "extract_nova_poshta called", "data": {"text_len": len(text) if text else 0, "text_preview": text[:50] if text else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
     
     text_lower = text.lower()
 
     for idx, pattern in enumerate(NP_PATTERNS):
-        # #region agent log
-        try:
-            with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_nova_poshta:pattern_check", "message": "Checking pattern", "data": {"pattern_idx": idx, "pattern": pattern, "pattern_len": len(pattern), "pattern_pos47": pattern[47:52] if len(pattern) > 47 else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         
         try:
             # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
@@ -181,13 +123,6 @@ def extract_nova_poshta(text: str) -> str | None:
             try:
                 inline_flags_check = re.search(r"\(\?[iI]", pattern)
             except re.error as check_err:
-                # #region agent log
-                try:
-                    with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "client_data_parser.py:extract_nova_poshta:flags_check_error", "message": "Error checking inline flags", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(check_err)}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception:
-                    pass
-                # #endregion
                 inline_flags_check = None
             
             if not inline_flags_check:
@@ -197,13 +132,6 @@ def extract_nova_poshta(text: str) -> str | None:
             if match:
                 return match.group(1)
         except re.error as e:
-            # #region agent log
-            try:
-                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_nova_poshta:regex_error", "message": "Regex error in extract_nova_poshta", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(e), "error_type": type(e).__name__}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             
             # Log problematic pattern for debugging
             logger.warning(
@@ -220,15 +148,6 @@ def extract_nova_poshta(text: str) -> str | None:
                 if 1 <= int(num) <= 9999:
                     return num
         except re.error as e:
-            # #region agent log
-            try:
-                import json
-                import time
-                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_nova_poshta:findall_error", "message": "Regex error in extract_nova_poshta findall", "data": {"error": str(e), "error_type": type(e).__name__, "error_pos": getattr(e, "pos", "unknown")}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             logger.warning(
                 "Regex error in extract_nova_poshta (findall fallback): %s (pos=%s)",
                 str(e),
@@ -241,18 +160,7 @@ def extract_nova_poshta(text: str) -> str | None:
 
 def extract_city(text: str) -> str | None:
     """Extract city name from text."""
-    import logging
-    import json
-    import time
     logger = logging.getLogger(__name__)
-    
-    # #region agent log
-    try:
-        with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_city:entry", "message": "extract_city called", "data": {"text_len": len(text) if text else 0, "text_preview": text[:50] if text else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
     
     text_lower = text.lower()
 
@@ -261,13 +169,6 @@ def extract_city(text: str) -> str | None:
             return city.title()
 
     for idx, pattern in enumerate(CITY_PATTERNS):
-        # #region agent log
-        try:
-            with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_city:pattern_check", "message": "Checking pattern", "data": {"pattern_idx": idx, "pattern": pattern, "pattern_len": len(pattern), "pattern_pos47": pattern[47:52] if len(pattern) > 47 else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         
         try:
             # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
@@ -276,13 +177,6 @@ def extract_city(text: str) -> str | None:
             try:
                 inline_flags_check = re.search(r"\(\?[iI]", pattern)
             except re.error as check_err:
-                # #region agent log
-                try:
-                    with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "client_data_parser.py:extract_city:flags_check_error", "message": "Error checking inline flags", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(check_err)}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception:
-                    pass
-                # #endregion
                 inline_flags_check = None
             
             if not inline_flags_check:
@@ -292,13 +186,6 @@ def extract_city(text: str) -> str | None:
             if match:
                 return match.group(1).strip().title()
         except re.error as e:
-            # #region agent log
-            try:
-                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_city:regex_error", "message": "Regex error in extract_city", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(e), "error_type": type(e).__name__}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             
             # Log problematic pattern for debugging
             logger.warning(
@@ -313,28 +200,10 @@ def extract_city(text: str) -> str | None:
 
 def extract_full_name(text: str) -> str | None:
     """Extract full name from text."""
-    import logging
-    import json
-    import time
     logger = logging.getLogger(__name__)
-    
-    # #region agent log
-    try:
-        with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "client_data_parser.py:extract_full_name:entry", "message": "extract_full_name called", "data": {"text_len": len(text) if text else 0, "text_preview": text[:100] if text else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
     
     clean_text = text
     for idx, pattern in enumerate(PHONE_PATTERNS):
-        # #region agent log
-        try:
-            with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_full_name:pattern_sub", "message": "Substituting pattern", "data": {"pattern_idx": idx, "pattern": pattern, "pattern_len": len(pattern), "pattern_pos47": pattern[47:52] if len(pattern) > 47 else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         
         try:
             # Check if pattern already has inline flags (e.g., (?i) or (?i:...))
@@ -343,13 +212,6 @@ def extract_full_name(text: str) -> str | None:
             try:
                 inline_flags_check = re.search(r"\(\?[iI]", pattern)
             except re.error as check_err:
-                # #region agent log
-                try:
-                    with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "client_data_parser.py:extract_full_name:flags_check_error", "message": "Error checking inline flags", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(check_err)}, "timestamp": int(time.time() * 1000)}) + "\n")
-                except Exception:
-                    pass
-                # #endregion
                 inline_flags_check = None
             
             if not inline_flags_check:
@@ -357,13 +219,6 @@ def extract_full_name(text: str) -> str | None:
             compiled = re.compile(pattern, flags)
             clean_text = compiled.sub("", clean_text)
         except re.error as e:
-            # #region agent log
-            try:
-                with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C,D", "location": "client_data_parser.py:extract_full_name:regex_error", "message": "Regex error in extract_full_name pattern sub", "data": {"pattern_idx": idx, "pattern": pattern, "error": str(e), "error_type": type(e).__name__, "error_msg": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             
             # Log problematic pattern for debugging
             logger.warning(
@@ -372,25 +227,10 @@ def extract_full_name(text: str) -> str | None:
                 str(e)
             )
             continue
-
-    # #region agent log
-    try:
-        with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "client_data_parser.py:extract_full_name:name_pattern_check", "message": "Checking NAME_PATTERN", "data": {"name_pattern": NAME_PATTERN, "name_pattern_len": len(NAME_PATTERN) if NAME_PATTERN else 0, "name_pattern_pos47": NAME_PATTERN[47:52] if NAME_PATTERN and len(NAME_PATTERN) > 47 else None, "clean_text_len": len(clean_text)}, "timestamp": int(time.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
     
     try:
         matches = re.findall(NAME_PATTERN, clean_text)
     except re.error as e:
-        # #region agent log
-        try:
-            with open(r"c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B,C", "location": "client_data_parser.py:extract_full_name:name_pattern_error", "message": "Regex error in NAME_PATTERN", "data": {"name_pattern": NAME_PATTERN, "error": str(e), "error_type": type(e).__name__, "error_msg": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         
         # Log problematic pattern for debugging
         logger.warning(

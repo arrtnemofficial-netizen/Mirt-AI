@@ -26,44 +26,56 @@ MAX_MESSAGE_LENGTH = 10000
 CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]")
 
 # Common prompt injection patterns
+# NOTE: Patterns without inline flags - using re.IGNORECASE flag on compilation
+# to avoid "global flags not at the start" error when joining with |
 PROMPT_INJECTION_PATTERNS = [
-    r"(?i)ignore\s+(all\s+)?previous\s+instructions?",
-    r"(?i)forget\s+(all\s+)?previous\s+instructions?",
-    r"(?i)you\s+are\s+now\s+(a\s+)?(different|new)",
-    r"(?i)system\s*:",
-    r"(?i)assistant\s*:",
-    r"(?i)user\s*:",
-    r"(?i)role\s*:",
-    r"(?i)act\s+as\s+if",
-    r"(?i)pretend\s+to\s+be",
-    r"(?i)disregard\s+(all\s+)?previous",
-    r"(?i)override\s+(all\s+)?previous",
-    r"(?i)new\s+instructions?\s*:",
-    r"(?i)new\s+task\s*:",
-    r"(?i)new\s+system\s+message",
-    r"(?i)new\s+prompt",
-    r"(?i)bypass\s+(all\s+)?(safety|security|filters?)",
-    r"(?i)jailbreak",
-    r"(?i)hack",
-    r"(?i)exploit",
-    r"(?i)vulnerability",
-    r"(?i)secret\s+(key|token|password)",
-    r"(?i)api\s+key",
-    r"(?i)admin\s+(access|privileges?)",
-    r"(?i)root\s+access",
-    r"(?i)sudo",
-    r"(?i)execute\s+(command|code)",
-    r"(?i)run\s+(command|code)",
-    r"(?i)<script",
-    r"(?i)javascript\s*:",
-    r"(?i)onerror\s*=",
-    r"(?i)onload\s*=",
-    r"(?i)eval\s*\(",
-    r"(?i)exec\s*\(",
+    r"ignore\s+(all\s+)?previous\s+instructions?",
+    r"forget\s+(all\s+)?previous\s+instructions?",
+    r"you\s+are\s+now\s+(a\s+)?(different|new)",
+    r"system\s*:",
+    r"assistant\s*:",
+    r"user\s*:",
+    r"role\s*:",
+    r"act\s+as\s+if",
+    r"pretend\s+to\s+be",
+    r"disregard\s+(all\s+)?previous",
+    r"override\s+(all\s+)?previous",
+    r"new\s+instructions?\s*:",
+    r"new\s+task\s*:",
+    r"new\s+system\s+message",
+    r"new\s+prompt",
+    r"bypass\s+(all\s+)?(safety|security|filters?)",
+    r"jailbreak",
+    r"hack",
+    r"exploit",
+    r"vulnerability",
+    r"secret\s+(key|token|password)",
+    r"api\s+key",
+    r"admin\s+(access|privileges?)",
+    r"root\s+access",
+    r"sudo",
+    r"execute\s+(command|code)",
+    r"run\s+(command|code)",
+    r"<script",
+    r"javascript\s*:",
+    r"onerror\s*=",
+    r"onload\s*=",
+    r"eval\s*\(",
+    r"exec\s*\(",
 ]
 
-# Compile patterns once
-PROMPT_INJECTION_REGEX = re.compile("|".join(PROMPT_INJECTION_PATTERNS))
+# Compile patterns once with IGNORECASE flag instead of inline (?i) flags
+# This avoids "global flags not at the start" error when patterns are joined with |
+try:
+    PROMPT_INJECTION_REGEX = re.compile("|".join(PROMPT_INJECTION_PATTERNS), re.IGNORECASE)
+except re.error as e:
+    logger.error(
+        "Failed to compile PROMPT_INJECTION_REGEX: %s (pos=%s). Using empty pattern as fallback.",
+        str(e),
+        getattr(e, "pos", "unknown"),
+    )
+    # Fallback: regex that matches nothing
+    PROMPT_INJECTION_REGEX = re.compile(r"(?!.)", re.IGNORECASE)
 
 
 def sanitize_text(text: str) -> tuple[str, bool]:
