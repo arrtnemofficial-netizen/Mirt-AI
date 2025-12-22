@@ -392,6 +392,8 @@ def setup_middleware(app, *, enable_rate_limit: bool = True, enable_logging: boo
                 "/openapi.json",
                 "/webhooks/manychat",
                 "/webhooks/manychat/",
+                "/api/v1/messages",
+                "/api/v1/messages/",
                 "/webhooks/snitkix",
                 "/webhooks/snitkix/",
             ],

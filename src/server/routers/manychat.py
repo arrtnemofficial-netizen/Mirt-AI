@@ -259,3 +259,20 @@ async def manychat_webhook(
     except Exception as exc:  # pragma: no cover
         logger.exception("[MANYCHAT] Unexpected error in response mode: %s", exc)
         raise ExternalServiceError("manychat", f"Unexpected error: {str(exc)[:200]}") from exc
+
+
+# Alias route for /api/v1/messages - uses the same handler as /webhooks/manychat
+# This allows clients to use either endpoint with identical functionality
+router.add_api_route(
+    "/api/v1/messages",
+    manychat_webhook,
+    methods=["POST"],
+    tags=["manychat", "api"],
+    summary="Handle incoming messages (alias for /webhooks/manychat)",
+    description=(
+        "Alternative endpoint for message processing. "
+        "Uses the same handler as /webhooks/manychat with identical functionality: "
+        "supports push mode (async) and response mode (sync), "
+        "handles both ManyChat webhook format and External Request format."
+    ),
+)
