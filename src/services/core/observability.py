@@ -462,7 +462,11 @@ class AsyncTracingService:
             try:
                 await client.table("llm_traces").insert(payload).execute()
             except Exception:
-                await client.table("llm_usage").insert(payload).execute()
+                # Fallback to llm_usage table (may not have node_name column)
+                # Remove node_name if it doesn't exist in schema
+                fallback_payload = payload.copy()
+                fallback_payload.pop("node_name", None)  # Remove node_name for llm_usage table
+                await client.table("llm_usage").insert(fallback_payload).execute()
 
         except Exception as e:
             # SAFEGUARD_2: Graceful degradation - observability shouldn't crash the app

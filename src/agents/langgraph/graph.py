@@ -101,7 +101,7 @@ def build_production_graph(
         return await agent_node(state, runner)
 
     async def _sitniks_status(state: dict[str, Any]) -> dict[str, Any]:
-        return await sitniks_status.update_sitniks_status(state)
+        return await sitniks_status(state)
 
     async def _offer(state: dict[str, Any]) -> dict[str, Any]:
         return await offer_node(state, runner)
