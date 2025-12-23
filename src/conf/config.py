@@ -6,8 +6,9 @@ Reads environment variables for API access and runtime tuning.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -201,7 +202,8 @@ class Settings(BaseSettings):
         default=False,
         description=(
             "If True, state prompts must be loaded from data/prompts/states/*.md; "
-            "code fallback prompts are not allowed."
+            "code fallback prompts are not allowed. "
+            "In production/staging, this is automatically set to True for safety."
         ),
     )
     FOLLOWUP_DELAYS_HOURS: str = Field(
@@ -506,6 +508,28 @@ class Settings(BaseSettings):
             except ValueError:
                 continue
         return [h for h in hours if h > 0]
+
+    @model_validator(mode="after")
+    def validate_environment_settings(self) -> Self:
+        """Validate and enforce production-safe settings."""
+        # Use SENTRY_ENVIRONMENT as indicator of deployment environment
+        env = self.SENTRY_ENVIRONMENT.lower() if self.SENTRY_ENVIRONMENT else "development"
+        is_production = env in ("production", "prod", "staging")
+        
+        if is_production:
+            # In production/staging, enforce prompt fallback disable for safety
+            if not self.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "DISABLE_CODE_STATE_PROMPTS_FALLBACK is False in %s environment. "
+                    "Auto-enabling for production safety.",
+                    env,
+                )
+                # Auto-enable for production safety
+                self.DISABLE_CODE_STATE_PROMPTS_FALLBACK = True
+        
+        return self
 
     class Config:
         env_file = ".env"

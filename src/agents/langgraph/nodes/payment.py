@@ -336,26 +336,17 @@ async def _handle_delivery_data(
 
     user_text_for_proof = user_message if isinstance(user_message, str) else str(user_message)
     user_text_lower_for_proof = user_text_for_proof.lower()
-    payment_confirm_keywords = (
-        "оплатила",
-        "оплатив",
-        "оплачено",
-        "переказала",
-        "переказав",
-        "відправила скрін",
-        "відправив скрін",
-        "квитанц",
-        "скрін",
-        "скрин",
-        "готово",
-    )
+    
+    # Use SSOT rules module instead of duplicated keywords
+    from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+    
     has_payment_url = ("http://" in user_text_lower_for_proof) or (
         "https://" in user_text_lower_for_proof
     )
-    has_payment_proof_pre = (
-        has_image_now
-        or has_payment_url
-        or any(k in user_text_lower_for_proof for k in payment_confirm_keywords)
+    has_payment_proof_pre = detect_payment_proof(
+        user_text_lower_for_proof,
+        has_image=has_image_now,
+        has_url=has_payment_url,
     )
 
     logger.info(

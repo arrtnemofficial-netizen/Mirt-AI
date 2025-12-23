@@ -167,6 +167,15 @@ def _log_if_slow(
     slow_threshold_s: float,
 ) -> None:
     elapsed = time.perf_counter() - started_at
+    elapsed_ms = elapsed * 1000.0
+    
+    # Track checkpointer latency metric (always, not just when slow)
+    try:
+        from src.services.observability import track_metric
+        track_metric("checkpointer_latency_ms", elapsed_ms, {"operation": op})
+    except Exception:
+        pass  # Don't fail if observability is unavailable
+    
     if elapsed < slow_threshold_s:
         return
     thread_id = _extract_thread_id(config)

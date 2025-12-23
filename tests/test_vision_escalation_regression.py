@@ -67,7 +67,15 @@ class TestVisionEscalationRegression:
                 assert result["dialog_phase"] == "ESCALATED", (
                     f"Vision not identified should escalate, got phase {result['dialog_phase']}"
                 )
-                assert result.get("escalation_level") == "SOFT"
+                # After hotfix: escalation_level is contract-compliant (L1/L2), UX mode stored separately
+                assert result.get("escalation_level") == "L1", (
+                    f"Soft escalation should map to L1 (contract-compliant), got {result.get('escalation_level')}"
+                )
+                # Check that UX mode is preserved in metadata
+                metadata = result.get("metadata", {})
+                assert metadata.get("escalation_mode") == "SOFT", (
+                    f"Soft UX mode should be preserved in metadata.escalation_mode, got {metadata.get('escalation_mode')}"
+                )
                 
                 # Check that user got soft message
                 messages = result.get("messages", [])
@@ -129,6 +137,14 @@ class TestVisionEscalationRegression:
                     assert result["dialog_phase"] == "ESCALATED", (
                         f"Product not in catalog should escalate, got phase {result['dialog_phase']}"
                     )
-                    assert result.get("escalation_level") == "SOFT"
+                    # After hotfix: escalation_level is contract-compliant (L1/L2)
+                    assert result.get("escalation_level") == "L1", (
+                        f"Soft escalation should map to L1 (contract-compliant), got {result.get('escalation_level')}"
+                    )
+                    # Check that UX mode is preserved in metadata
+                    metadata = result.get("metadata", {})
+                    assert metadata.get("escalation_mode") == "SOFT", (
+                        f"Soft UX mode should be preserved in metadata.escalation_mode, got {metadata.get('escalation_mode')}"
+                    )
                     assert mock_create_task.called, "Expected background notification task to be scheduled"
 

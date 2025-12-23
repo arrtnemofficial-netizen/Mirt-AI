@@ -240,12 +240,11 @@ async def offer_node(
         # Check if response asks for delivery data (місто, відділення, ПІБ, телефон)
         # SAFETY: Convert None to empty string to prevent TypeError in join()
         response_text = " ".join([str(m.get("content", "") or "") for m in assistant_messages]).lower()
-        delivery_keywords = [
-            "місто", "відділення", "нової пошти", "нова пошта", "піб", "прізвище",
-            "телефон", "номер телефону", "надішліть", "напишіть", "вкажіть",
-            "бронюємо", "зарезервувати", "оформити", "замовлення"
-        ]
-        asks_for_delivery = any(keyword in response_text for keyword in delivery_keywords)
+        
+        # Use SSOT rules module instead of duplicated keywords
+        from src.agents.langgraph.rules.offer_transition import detect_delivery_request
+        
+        asks_for_delivery = detect_delivery_request(response_text)
         
         # Check intent from LLM response
         response_intent = response.metadata.intent if hasattr(response.metadata, "intent") else ""

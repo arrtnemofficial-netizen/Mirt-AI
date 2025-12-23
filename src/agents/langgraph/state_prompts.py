@@ -185,12 +185,13 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
             break
     
     user_message_lower = user_message.lower() if user_message else ""
-    payment_confirmation_keywords = [
-        "оплатила", "оплатив", "переказала", "переказав",
-        "відправила скрін", "відправив скрін", "скрін", "квитанцію",
-        "доказ оплати", "оплачено", "переказано"
-    ]
-    user_says_paid = any(keyword in user_message_lower for keyword in payment_confirmation_keywords)
+    # Use SSOT rules module - but for sub-phase detection, we want to detect "оплатила" even without image/URL
+    # (because user saying "оплатила" means they claim to have paid, even if proof not attached yet)
+    from src.agents.langgraph.rules.payment_proof import PAYMENT_PROOF_KEYWORDS, PAYMENT_PROOF_WEAK_KEYWORDS
+    
+    # Check if user says they paid - for sub-phase, we accept weak keywords even without image/URL
+    # because "оплатила" alone indicates user claims payment happened
+    user_says_paid = any(k in user_message_lower for k in PAYMENT_PROOF_KEYWORDS)
 
     # Check if we have customer data
     has_name = bool(metadata.get("customer_name"))

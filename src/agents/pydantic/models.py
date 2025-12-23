@@ -12,7 +12,7 @@ Structured Output Models - Based on OUTPUT_CONTRACT from system_prompt_full.yaml
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -101,13 +101,42 @@ class ResponseMetadata(BaseModel):
     - session_id: Copy from input as-is. If null -> ''
     - current_state: MUST be valid STATE_NAME
     - intent: MUST be valid INTENT_LABEL
-    - escalation_level: NONE/L1/L2
+    - escalation_level: NONE/L1/L2/L3 (normalizes SOFT→L1, HARD→L2)
     """
 
     session_id: str = Field(default="", description="Copy from input as-is. NEVER generate!")
     current_state: StateType = Field(default="STATE_0_INIT")
     intent: IntentType = Field(default="UNKNOWN_OR_EMPTY")
     escalation_level: EscalationLevel = Field(default="NONE")
+
+    @field_validator("escalation_level", mode="before")
+    @classmethod
+    def normalize_escalation_level(cls, v: Any) -> str:
+        """
+        Normalize escalation_level to allowed enum values.
+        
+        Accepts: "SOFT"/"soft" → "L1", "HARD"/"hard" → "L2", empty/None → "NONE".
+        This ensures backward compatibility if legacy code writes "SOFT"/"HARD".
+        
+        Returns: Canonical escalation level ("NONE", "L1", "L2", or "L3").
+        """
+        if not v or v == "":
+            return "NONE"
+        
+        v_str = str(v).upper().strip()
+        
+        # Map legacy UX modes to escalation levels
+        if v_str in ("SOFT", "SOFT_ESCALATION"):
+            return "L1"
+        if v_str in ("HARD", "HARD_ESCALATION"):
+            return "L2"
+        
+        # Validate against allowed values
+        if v_str in ("NONE", "L1", "L2", "L3"):
+            return v_str
+        
+        # Unknown value → default to NONE (don't crash in production)
+        return "NONE"
 
 
 # =============================================================================

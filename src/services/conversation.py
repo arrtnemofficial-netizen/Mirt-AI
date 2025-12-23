@@ -599,6 +599,17 @@ class ConversationHandler:
             # CRITICAL: Use to_thread() to avoid blocking event loop!
             await asyncio.to_thread(self.session_store.save, session_id, result_state)
 
+            # Track end-to-end latency metric
+            end_to_end_latency_ms = (_time.time() - _proc_start) * 1000.0
+            track_metric(
+                "end_to_end_latency_ms",
+                end_to_end_latency_ms,
+                {
+                    "state": agent_response.metadata.current_state,
+                    "intent": agent_response.metadata.intent or "unknown",
+                },
+            )
+
             # Notify manager for ANY escalation-like outcome.
             # This covers cases where the graph finishes with goto="end" (e.g. payment proof)
             # and therefore does not pass through escalation_node.

@@ -245,11 +245,15 @@ async def agent_node(
     try:
         # Call PydanticAI agent with proper DI
         # Returns STRUCTURED SupportResponse (OUTPUT_CONTRACT format)
+        llm_start_time = time.perf_counter()
         response: SupportResponse = await run_support(
             message=user_message,
             deps=deps,
             message_history=None,
         )
+        llm_latency_ms = (time.perf_counter() - llm_start_time) * 1000.0
+        # Track LLM latency metric
+        track_metric("llm_latency_ms", llm_latency_ms, {"state": current_state, "intent": response.metadata.intent or "unknown"})
 
         # DETAILED LOGGING: What did the agent return?
         first_msg = response.messages[0].content[:100] if response.messages else "None"
@@ -321,19 +325,10 @@ async def agent_node(
             new_products = [p.model_dump() for p in response.products]
             user_text = user_message if isinstance(user_message, str) else str(user_message)
             user_text_lower = user_text.lower()
-            add_keywords = (
-                "ще",
-                "додай",
-                "добав",
-                "також",
-                "і ще",
-                "ще один",
-                "ще одну",
-                "другий",
-                "другу",
-                "+",
-            )
-            has_explicit_add_intent = any(k in user_text_lower for k in add_keywords)
+            # Use SSOT rules module instead of duplicated keywords
+            from src.agents.langgraph.rules.cart_intent import detect_add_to_cart
+            
+            has_explicit_add_intent = detect_add_to_cart(user_text_lower)
             
             # In payment state, ONLY append if explicit add intent
             # Otherwise, ignore new products (they're likely hallucination/side-effect)

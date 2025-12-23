@@ -170,10 +170,26 @@ class NotificationService:
             details=details,
         )
 
-        # If image_url is provided, send photo with caption
+        # If image_url is provided, try to send photo with caption
+        # BUT: Skip sendPhoto for private CDN URLs (Instagram/Facebook CDN) - Telegram can't fetch them
         image_url = details.get("image_url") if details else None
         if image_url:
-            return await self._send_telegram_photo(image_url, message)
+            # Check if URL is from private CDN (Instagram/Facebook)
+            image_url_str = str(image_url).lower()
+            is_private_cdn = (
+                "lookaside.fbsbx.com" in image_url_str
+                or "ig_messaging_cdn" in image_url_str
+                or "fbcdn.net" in image_url_str
+            )
+            
+            if is_private_cdn:
+                # Private CDN → Telegram can't fetch, send text with URL instead
+                logger.info("Skipping sendPhoto for private CDN URL, sending text with URL")
+                message_with_url = f"{message}\n\n📷 Image URL: {image_url}"
+                return await self._send_telegram_message(message_with_url)
+            else:
+                # Public URL → try sendPhoto
+                return await self._send_telegram_photo(image_url, message)
         
         return await self._send_telegram_message(message)
 

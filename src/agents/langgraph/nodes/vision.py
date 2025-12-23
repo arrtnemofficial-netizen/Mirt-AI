@@ -636,14 +636,15 @@ async def vision_node(
             "dialog_phase": "ESCALATED",
             "has_image": False,
             "image_url": None,
-            "escalation_level": "HARD",
+            "escalation_level": "L2",  # HARD escalation → L2 (contract-compliant)
             "metadata": {
                 **state.get("metadata", {}),
                 "vision_error": error_msg[:200],
                 "needs_clarification": False,
                 "has_image": False,
-                "escalation_level": "HARD",
+                "escalation_level": "L2",  # HARD → L2
                 "escalation_reason": "vision_error",
+                "escalation_mode": "HARD",  # UX mode (soft/hard) stored separately
             },
             "agent_response": {
                 "messages": escalation_messages,
@@ -651,7 +652,8 @@ async def vision_node(
                     "session_id": session_id,
                     "current_state": State.STATE_0_INIT.value,
                     "intent": "PHOTO_IDENT",
-                    "escalation_level": "HARD",
+                    "escalation_level": "L2",  # HARD → L2
+                    "notes": "escalation_mode=HARD",  # UX mode in notes
                 },
             },
             "step_number": state.get("step_number", 0) + 1,
@@ -790,15 +792,16 @@ async def vision_node(
             "dialog_phase": "ESCALATED",
             "has_image": False,
             # Soft UX, but manager is notified immediately (dual-track)
-            "escalation_level": "SOFT",
+            "escalation_level": "L1",  # SOFT escalation → L1 (contract-compliant)
             "metadata": {
                 **state.get("metadata", {}),
                 "vision_confidence": response.confidence,
                 "needs_clarification": False,
                 "has_image": False,
                 "vision_greeted": True,
-                "escalation_level": "SOFT",
+                "escalation_level": "L1",  # SOFT → L1
                 "escalation_reason": escalation_reason,
+                "escalation_mode": "SOFT",  # UX mode (soft/hard) stored separately
             },
             "agent_response": {
                 "messages": escalation_messages,
@@ -806,7 +809,8 @@ async def vision_node(
                     "session_id": session_id,
                     "current_state": State.STATE_0_INIT.value,
                     "intent": "PHOTO_IDENT",
-                    "escalation_level": "SOFT",
+                    "escalation_level": "L1",  # SOFT → L1
+                    "notes": "escalation_mode=SOFT",  # UX mode in notes
                 },
             },
             "step_number": state.get("step_number", 0) + 1,
@@ -1033,7 +1037,7 @@ async def vision_node(
     escalation_level = "NONE"
     if not selected_products and not response.needs_clarification:
         # Product not identified and not asking for clarification = escalate
-        escalation_level = "SOFT"  # Manager will see this in CRM
+        escalation_level = "L1"  # SOFT escalation → L1 (contract-compliant)
 
     return {
         "current_state": next_state,

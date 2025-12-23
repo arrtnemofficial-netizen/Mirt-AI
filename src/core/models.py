@@ -89,6 +89,36 @@ class Metadata(BaseModel):
     notes: str = ""
     moderation_flags: list[str] = Field(default_factory=list)
 
+    @field_validator("escalation_level", mode="before")
+    @classmethod
+    def normalize_escalation_level(cls, v: Any) -> str:
+        """
+        Normalize escalation_level to allowed enum values.
+        
+        Accepts: "SOFT"/"soft" → "L1", "HARD"/"hard" → "L2", empty/None → "NONE".
+        This ensures backward compatibility if legacy code writes "SOFT"/"HARD".
+        
+        Returns: Canonical escalation level ("NONE", "L1", "L2", or "L3").
+        """
+        if not v or v == "":
+            return "NONE"
+        
+        v_str = str(v).upper().strip()
+        
+        # Map legacy UX modes to escalation levels
+        if v_str in ("SOFT", "SOFT_ESCALATION"):
+            return "L1"
+        if v_str in ("HARD", "HARD_ESCALATION"):
+            return "L2"
+        
+        # Validate against allowed values
+        if v_str in ("NONE", "L1", "L2", "L3"):
+            return v_str
+        
+        # Unknown value → default to NONE (don't crash in production)
+        # In dev, we could raise, but for production safety, normalize to NONE
+        return "NONE"
+
     @field_validator("current_state", mode="before")
     @classmethod
     def normalize_state(cls, v: Any) -> str:
