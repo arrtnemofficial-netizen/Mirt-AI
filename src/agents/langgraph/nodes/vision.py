@@ -40,6 +40,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _BG_TASKS: set[asyncio.Task] = set()
+# Track active escalation tasks per session to prevent duplicates
+_ACTIVE_ESCALATIONS: set[str] = set()
 
 
 # =============================================================================
@@ -603,31 +605,44 @@ async def vision_node(
             text_msg("Будь ласка, очікуйте відповідь від менеджера."),
         ]
 
-        async def _send_notification_background() -> None:
-            try:
-                from src.services.notification_service import NotificationService
+        # SAFETY: Prevent duplicate escalations for the same session
+        session_key = f"{session_id}_vision_error"
+        if session_key in _ACTIVE_ESCALATIONS:
+            logger.warning(
+                "🚨 [SESSION %s] Escalation already in progress, skipping duplicate",
+                session_id,
+            )
+        else:
+            _ACTIVE_ESCALATIONS.add(session_key)
 
-                notification = NotificationService()
-                await notification.send_escalation_alert(
-                    session_id=session_id or "unknown",
-                    reason="vision_error",
-                    user_context=user_message,
-                    details={
-                        "trace_id": trace_id,
-                        "dialog_phase": "ESCALATED",
-                        "current_state": State.STATE_0_INIT.value,
-                        "intent": "PHOTO_IDENT",
-                        "error": error_msg[:200],
-                        "image_url": deps.image_url if deps else None,
-                    },
-                )
-                logger.info("[SESSION %s] Telegram notification sent to manager", session_id)
-            except Exception as notif_err:
-                logger.warning("Failed to send Telegram notification: %s", notif_err)
+            async def _send_notification_background() -> None:
+                try:
+                    from src.services.notification_service import NotificationService
 
-        task = asyncio.create_task(_send_notification_background())
-        _BG_TASKS.add(task)
-        task.add_done_callback(_BG_TASKS.discard)
+                    notification = NotificationService()
+                    await notification.send_escalation_alert(
+                        session_id=session_id or "unknown",
+                        reason="vision_error",
+                        user_context=user_message,
+                        details={
+                            "trace_id": trace_id,
+                            "dialog_phase": "ESCALATED",
+                            "current_state": State.STATE_0_INIT.value,
+                            "intent": "PHOTO_IDENT",
+                            "error": error_msg[:200],
+                            "image_url": deps.image_url if deps else None,
+                        },
+                    )
+                    logger.info("[SESSION %s] Telegram notification sent to manager", session_id)
+                except Exception as notif_err:
+                    logger.warning("Failed to send Telegram notification: %s", notif_err)
+                finally:
+                    # Remove from active escalations after completion
+                    _ACTIVE_ESCALATIONS.discard(session_key)
+
+            task = asyncio.create_task(_send_notification_background())
+            _BG_TASKS.add(task)
+            task.add_done_callback(_BG_TASKS.discard)
 
         return {
             "current_state": State.STATE_0_INIT.value,
@@ -754,54 +769,66 @@ async def vision_node(
         if no_product_identified:
             escalation_reason = "product_not_identified"
 
+        # STANDARD ESCALATION MESSAGE: Only greeting + "will check availability"
+        # Do NOT ask for more details - manager will handle it
         escalation_messages = [
             text_msg("Вітаю 🎀"),
             text_msg("Зараз уточню по цьому товару наявність 🙌🏻"),
         ]
-        if user_message and len(user_message.strip()) > 10:
-            escalation_messages.append(
-                text_msg("Чи можете описати товар детальніше або надіслати фото з іншого ракурсу?")
+        # REMOVED: Don't ask for more details/clarification - this is escalation, manager will handle
+
+        # SAFETY: Prevent duplicate escalations for the same session
+        session_key = f"{session_id}_vision_escalation"
+        if session_key in _ACTIVE_ESCALATIONS:
+            logger.warning(
+                "🚨 [SESSION %s] Escalation already in progress, skipping duplicate",
+                session_id,
             )
+        else:
+            _ACTIVE_ESCALATIONS.add(session_key)
 
-        async def _send_notification_background():
-            try:
-                from src.services.notification_service import NotificationService
+            async def _send_notification_background():
+                try:
+                    from src.services.notification_service import NotificationService
 
-                notification = NotificationService()
-                reason_parts = []
-                if product_not_in_catalog:
-                    reason_parts.append("Товар не знайдено в каталозі")
-                if no_product_identified:
-                    reason_parts.append("Товар не ідентифіковано")
-                if low_confidence:
-                    reason_parts.append(f"Низька впевненість ({confidence*100:.0f}%)")
-                reason = " / ".join(reason_parts) if reason_parts else "Товар не знайдено"
+                    notification = NotificationService()
+                    reason_parts = []
+                    if product_not_in_catalog:
+                        reason_parts.append("Товар не знайдено в каталозі")
+                    if no_product_identified:
+                        reason_parts.append("Товар не ідентифіковано")
+                    if low_confidence:
+                        reason_parts.append(f"Низька впевненість ({confidence*100:.0f}%)")
+                    reason = " / ".join(reason_parts) if reason_parts else "Товар не знайдено"
 
-                await notification.send_escalation_alert(
-                    session_id=session_id or "unknown",
-                    reason=reason,
-                    user_context=user_message,
-                    details={
-                        "trace_id": trace_id,
-                        "dialog_phase": "ESCALATED",
-                        "current_state": State.STATE_0_INIT.value,
-                        "intent": "PHOTO_IDENT",
-                        "confidence": confidence * 100,
-                        "image_url": deps.image_url if deps else None,
-                        "vision_identified": claimed_name,
-                        "escalation_reason": escalation_reason,
-                    },
-                )
-                logger.info(
-                    "📲 [SESSION %s] Telegram notification sent to manager (dual-track escalation)",
-                    session_id,
-                )
-            except Exception as notif_err:
-                logger.warning("Failed to send Telegram notification: %s", notif_err)
+                    await notification.send_escalation_alert(
+                        session_id=session_id or "unknown",
+                        reason=reason,
+                        user_context=user_message,
+                        details={
+                            "trace_id": trace_id,
+                            "dialog_phase": "ESCALATED",
+                            "current_state": State.STATE_0_INIT.value,
+                            "intent": "PHOTO_IDENT",
+                            "confidence": confidence * 100,
+                            "image_url": deps.image_url if deps else None,
+                            "vision_identified": claimed_name,
+                            "escalation_reason": escalation_reason,
+                        },
+                    )
+                    logger.info(
+                        "📲 [SESSION %s] Telegram notification sent to manager (dual-track escalation)",
+                        session_id,
+                    )
+                except Exception as notif_err:
+                    logger.warning("Failed to send Telegram notification: %s", notif_err)
+                finally:
+                    # Remove from active escalations after completion
+                    _ACTIVE_ESCALATIONS.discard(session_key)
 
-        task = asyncio.create_task(_send_notification_background())
-        _BG_TASKS.add(task)
-        task.add_done_callback(_BG_TASKS.discard)
+            task = asyncio.create_task(_send_notification_background())
+            _BG_TASKS.add(task)
+            task.add_done_callback(_BG_TASKS.discard)
 
         return {
             "current_state": State.STATE_0_INIT.value,

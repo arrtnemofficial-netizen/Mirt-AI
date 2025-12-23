@@ -497,6 +497,7 @@ def route_after_agent(state: dict[str, Any]) -> AgentRoute:
         "WAITING_FOR_PAYMENT_PROOF",  # Чекаємо скрін
         "UPSELL_OFFERED",  # Чекаємо відповідь на допродаж
         "COMPLETED",  # Діалог завершено
+        "ESCALATED",  # Ескалація до менеджера - чекаємо відповіді від менеджера
     }
 
     if dialog_phase in waiting_phases:
