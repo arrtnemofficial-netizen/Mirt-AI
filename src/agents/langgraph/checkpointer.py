@@ -313,11 +313,17 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         # Create AsyncConnectionPool for async checkpointer
         # AsyncPostgresSaver requires AsyncConnectionPool for production use
+        # ROOT CAUSE FIX: Disable prepared statements to prevent DuplicatePreparedStatement errors
+        # Prepared statements cause conflicts when multiple connections in pool try to create
+        # statements with same name. For checkpointing, prepared statements don't provide significant
+        # performance benefit, so disabling them eliminates the conflict.
+        # prepare_threshold=0 disables prepared statements (use regular queries instead)
         pool = AsyncConnectionPool(
             conninfo=database_url,
             min_size=2,
             max_size=10,
             open=False,  # Will be opened explicitly after creation
+            kwargs={"prepare_threshold": 0},  # Disable prepared statements to prevent conflicts
         )
         
         # Open pool explicitly (required, open=True is deprecated)
