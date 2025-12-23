@@ -318,23 +318,31 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         # statements with same name. For checkpointing, prepared statements don't provide significant
         # performance benefit, so disabling them eliminates the conflict.
         # 
-        # IMPORTANT: prepare_threshold must be set via conninfo string, not kwargs
-        # psycopg reads prepare_threshold from connection string parameters
-        # Format: "postgresql://...?prepare_threshold=0"
-        import urllib.parse
-        parsed = urllib.parse.urlparse(database_url)
-        query_params = urllib.parse.parse_qs(parsed.query)
-        query_params["prepare_threshold"] = ["0"]  # Disable prepared statements
-        new_query = urllib.parse.urlencode(query_params, doseq=True)
-        database_url_with_prepare = urllib.parse.urlunparse(
-            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
-        )
+        # IMPORTANT: prepare_threshold must be passed via kwargs to AsyncConnectionPool
+        # This parameter is passed to psycopg.AsyncConnection constructor for each connection in pool
+        # prepare_threshold=0 disables automatic prepared statement creation
+        # 
+        # ADDITIONAL SAFEGUARD: configure callback executes DEALLOCATE ALL on each connection
+        # This ensures no prepared statements persist when connection is reused from pool
+        async def configure_connection(conn):
+            """Configure connection to prevent prepared statement conflicts.
+            
+            This callback runs on each connection when it's acquired from the pool.
+            DEALLOCATE ALL removes any existing prepared statements, preventing conflicts.
+            """
+            try:
+                await conn.execute("DEALLOCATE ALL")
+            except Exception as e:
+                # Log but don't fail - connection might not have any prepared statements
+                logger.debug("[CHECKPOINTER] DEALLOCATE ALL warning: %s", type(e).__name__)
         
         pool = AsyncConnectionPool(
-            conninfo=database_url_with_prepare,  # Use modified URL with prepare_threshold=0
+            conninfo=database_url,  # Original URL without modifications
             min_size=2,
             max_size=10,
             open=False,  # Will be opened explicitly after creation
+            kwargs={"prepare_threshold": 0},  # Disable prepared statements to prevent conflicts
+            configure=configure_connection,  # Additional safeguard: clean prepared statements on reuse
         )
         
         # Open pool explicitly (required, open=True is deprecated)

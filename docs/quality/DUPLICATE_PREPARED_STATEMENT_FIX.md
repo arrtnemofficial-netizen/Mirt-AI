@@ -2,7 +2,7 @@
 
 **Дата:** 2025-12-23  
 **Версия:** 1.0  
-**Статус:** ✅ FIXED
+**Статус:** ✅ FIXED (v2 - правильная реализация)
 
 ---
 
@@ -43,37 +43,47 @@
 
 **Реализация:**
 ```python
-# IMPORTANT: prepare_threshold must be set via conninfo string, not kwargs
-# psycopg reads prepare_threshold from connection string parameters
-import urllib.parse
-parsed = urllib.parse.urlparse(database_url)
-query_params = urllib.parse.parse_qs(parsed.query)
-query_params["prepare_threshold"] = ["0"]  # Disable prepared statements
-new_query = urllib.parse.urlencode(query_params, doseq=True)
-database_url_with_prepare = urllib.parse.urlunparse(
-    (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
-)
+# IMPORTANT: prepare_threshold must be passed via kwargs to AsyncConnectionPool
+# This parameter is passed to psycopg.AsyncConnection constructor for each connection in pool
+# prepare_threshold=0 disables automatic prepared statement creation
+# 
+# ADDITIONAL SAFEGUARD: configure callback executes DEALLOCATE ALL on each connection
+# This ensures no prepared statements persist when connection is reused from pool
+async def configure_connection(conn):
+    """Configure connection to prevent prepared statement conflicts."""
+    try:
+        await conn.execute("DEALLOCATE ALL")
+    except Exception as e:
+        logger.debug("[CHECKPOINTER] DEALLOCATE ALL warning: %s", type(e).__name__)
 
 pool = AsyncConnectionPool(
-    conninfo=database_url_with_prepare,  # Use modified URL with prepare_threshold=0
+    conninfo=database_url,  # Original URL without modifications
     min_size=2,
     max_size=10,
     open=False,
+    kwargs={"prepare_threshold": 0},  # Disable prepared statements
+    configure=configure_connection,  # Additional safeguard: clean prepared statements on reuse
 )
 ```
 
 **Что делает `prepare_threshold=0`:**
-- Отключает автоматическое создание prepared statements
+- Отключает автоматическое создание prepared statements в psycopg
 - Все запросы выполняются как обычные SQL запросы
 - Устраняет конфликт имен prepared statements
+
+**Что делает `configure` callback с `DEALLOCATE ALL`:**
+- Выполняется при каждом использовании соединения из пула
+- Удаляет все существующие prepared statements из сессии
+- Дополнительная защита на случай если `prepare_threshold=0` не сработает полностью
 
 ---
 
 ## Изменения
 
 ### 1. `src/agents/langgraph/checkpointer.py`
-- Модифицирован `database_url` для добавления `prepare_threshold=0` в query string
-- Параметр передается через conninfo строку (не через kwargs), так как psycopg читает его из URL
+- Добавлен `kwargs={"prepare_threshold": 0}` в `AsyncConnectionPool` для отключения prepared statements
+- Добавлен `configure` callback с `DEALLOCATE ALL` как дополнительная защита
+- Параметр передается через kwargs (не через URI), так как `prepare_threshold` не является валидным параметром PostgreSQL URI
 - Добавлены комментарии объясняющие решение
 
 ### 2. `src/services/conversation/handler.py`
