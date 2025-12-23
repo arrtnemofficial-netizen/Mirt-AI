@@ -309,38 +309,35 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         max_messages, max_chars, drop_base64 = get_checkpoint_compaction(settings)
 
-        # Create a connection for PostgresSaver initialization
-        # PostgresSaver.__init__ expects a connection object (conn: '_internal.Conn'), not a pool
-        # The connection is stored by PostgresSaver and used for database operations
+        # Create PostgresSaver instance using connection
+        # PostgresSaver.__init__ expects a connection object (conn: '_internal.Conn')
         init_conn = psycopg.connect(database_url, autocommit=False)
+        base_checkpointer = PostgresSaver(init_conn)
         
-        class InstrumentedAsyncPostgresSaver(PostgresSaver):
-            """PostgresSaver with instrumentation and compaction."""
+        # Use composition instead of inheritance to avoid super() NotImplementedError issues
+        # Wrap PostgresSaver and delegate all method calls to it
+        class InstrumentedAsyncPostgresSaver:
+            """Wrapper around PostgresSaver with instrumentation and compaction."""
             
-            # PostgresSaver uses the connection passed to __init__ for database operations
-            # We don't need _ensure_pool_open since PostgresSaver manages the connection
-            async def _ensure_pool_open(self) -> None:
-                # PostgresSaver uses the connection passed during initialization
-                # This method is kept for compatibility but is a no-op
-                pass
-
+            def __init__(self, base: PostgresSaver):
+                self._base = base
+            
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
+                result = None
                 try:
-                    # PostgresSaver handles connection internally via the conn passed to __init__
-                    result = await super().aget_tuple(*args, **kwargs)
+                    # Delegate directly to base PostgresSaver instance
+                    result = await self._base.aget_tuple(*args, **kwargs)
                     return result
                 finally:
                     config = args[0] if args else None
                     payload = None
                     try:
-                        if (
-                            isinstance(locals().get("result"), tuple)
-                            and len(locals()["result"]) > 0
-                        ):
-                            payload = locals()["result"][0]
-                        else:
-                            payload = locals().get("result")
+                        if result is not None:
+                            if isinstance(result, tuple) and len(result) > 0:
+                                payload = result[0]
+                            else:
+                                payload = result
                     except Exception:
                         payload = None
                     _log_if_slow(
@@ -362,7 +359,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                             drop_base64=drop_base64,
                         )
                         args = (args[0], payload, *args[2:])
-                    return await super().aput(*args, **kwargs)
+                    return await self._base.aput(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
                     payload = args[1] if len(args) > 1 else None
@@ -381,7 +378,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                             drop_base64=drop_base64,
                         )
                         args = (args[0], payload, *args[2:])
-                    return await super().aput_writes(*args, **kwargs)
+                    return await self._base.aput_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
                     payload = args[1] if len(args) > 1 else None
@@ -396,7 +393,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             def get_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
-                    return super().get_tuple(*args, **kwargs)
+                    return self._base.get_tuple(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
                     _log_if_slow(
@@ -406,7 +403,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             def put(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
-                    return super().put(*args, **kwargs)
+                    return self._base.put(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
                     _log_if_slow(
@@ -416,20 +413,19 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             def put_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
-                    return super().put_writes(*args, **kwargs)
+                    return self._base.put_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
                     _log_if_slow(
                         "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
                     )
+            
+            # Delegate any other methods/properties to base
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self._base, name)
 
-        # PostgresSaver.__init__ expects a connection object (conn: '_internal.Conn')
-        # PostgresSaver stores and uses this connection for database operations
-        # The connection must remain open for PostgresSaver to function
-        checkpointer = InstrumentedAsyncPostgresSaver(init_conn)
-        
-        # Note: init_conn is stored by PostgresSaver and should not be closed manually
-        # PostgresSaver will manage the connection lifecycle
+        # Create instrumented wrapper around PostgresSaver
+        checkpointer = InstrumentedAsyncPostgresSaver(base_checkpointer)
 
         logger.info("PostgresSaver checkpointer initialized successfully")
         return checkpointer
