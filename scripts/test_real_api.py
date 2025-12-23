@@ -2,14 +2,14 @@
 """
 🔥 HARDCORE TEST: PydanticAI + LangGraph with REAL API
 =======================================================
-Comprehensive test of the entire agent pipeline using real OpenRouter API.
+Comprehensive test of the entire agent pipeline using real OpenAI GPT-5.1 API.
 Tests the most difficult, edge-case scenarios.
 
 Usage:
     python scripts/test_real_api.py
 
 Requirements:
-    - OPENROUTER_API_KEY in .env
+    - OPENAI_API_KEY in .env
     - All dependencies installed
 """
 
@@ -420,15 +420,15 @@ async def run_all_tests() -> list[dict[str, Any]]:
     from src.conf.config import settings
     
     # Verify API key is configured
-    api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+    api_key = settings.OPENAI_API_KEY.get_secret_value()
     if not api_key:
-        console.print("[red]ERROR: OPENROUTER_API_KEY not configured in .env[/red]")
+        console.print("[red]ERROR: OPENAI_API_KEY not configured in .env[/red]")
         sys.exit(1)
     
     console.print(Panel(
         f"[bold green]🔥 HARDCORE API TEST[/bold green]\n\n"
         f"Model: {settings.AI_MODEL}\n"
-        f"Provider: OpenRouter\n"
+        f"Provider: OpenAI GPT-5.1\n"
         f"Tests: {len(HARDCORE_TESTS)}",
         title="Test Configuration",
     ))

@@ -117,31 +117,19 @@ class LLMFallbackService:
         self._setup_providers()
     
     def _setup_providers(self) -> None:
-        """Initialize LLM providers in priority order."""
-        # Primary: OpenAI (if configured)
+        """Initialize LLM providers (OpenAI GPT-5.1 only)."""
+        # OpenAI GPT-5.1 only (OpenRouter removed)
         openai_key = settings.OPENAI_API_KEY.get_secret_value()
-        if openai_key:
+        if not openai_key:
+            logger.warning("[LLM_FALLBACK] OPENAI_API_KEY not configured")
+        else:
             self.providers.append(LLMProvider(
                 name="openai",
                 api_key=openai_key,
                 base_url="https://api.openai.com/v1",
-                model=settings.LLM_MODEL_GPT,
+                model=settings.LLM_MODEL_GPT,  # GPT-5.1 only
                 priority=1,
             ))
-        
-        # Fallback: OpenRouter (if configured)
-        openrouter_key = settings.OPENROUTER_API_KEY.get_secret_value()
-        if openrouter_key:
-            self.providers.append(LLMProvider(
-                name="openrouter",
-                api_key=openrouter_key,
-                base_url=settings.OPENROUTER_BASE_URL,
-                model=settings.AI_MODEL,
-                priority=2,
-            ))
-        
-        # Sort by priority
-        self.providers.sort(key=lambda p: p.priority)
         
         logger.info(
             "[LLM_FALLBACK] Initialized with %d providers: %s",

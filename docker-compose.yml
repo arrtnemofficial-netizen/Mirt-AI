@@ -22,13 +22,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # OpenRouter / AI Model
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      - AI_MODEL=${AI_MODEL:-x-ai/grok-4.1-fast}
+      # OpenAI GPT-5.1 only (OpenRouter removed)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_MODEL=${AI_MODEL:-gpt-5.1}
 
-      # OpenAI (for embeddings)
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # OpenAI GPT-5.1 (OpenRouter removed)
 
       # Telegram
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -80,9 +78,8 @@ services:
     profiles:
       - polling
     environment:
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      - AI_MODEL=${AI_MODEL:-x-ai/grok-4.1-fast}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_MODEL=${AI_MODEL:-gpt-5.1}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_API_KEY=${SUPABASE_API_KEY}
@@ -152,7 +149,7 @@ services:
       - CELERY_CONCURRENCY=4
       - CELERY_MAX_TASKS_PER_CHILD=100
       # Copy all app env vars
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_API_KEY=${SUPABASE_API_KEY}
@@ -236,12 +233,10 @@ volumes:
 # =============================================================================
 # Copy to .env and fill in your values:
 #
-# OPENROUTER_API_KEY=sk-or-...
-# OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-# AI_MODEL=x-ai/grok-4.1-fast
+# OPENAI_API_KEY=sk-...  # Required: OpenAI GPT-5.1 API key
+# AI_MODEL=gpt-5.1  # OpenAI GPT-5.1 only (OpenRouter removed)
 # TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 # PUBLIC_BASE_URL=https://your-domain.example
 # SUPABASE_URL=https://your-project.supabase.co
 # SUPABASE_API_KEY=your-service-key
-# OPENAI_API_KEY=sk-...  # Optional, for embeddings
 # =============================================================================

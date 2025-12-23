@@ -2,8 +2,7 @@
 MIRT AI Prompt Evaluation Runner v1.0
 =====================================
 Тестування промптів з реальними API викликами до:
-- Grok 4.1 Fast (через OpenRouter)
-- GPT-5.1 Judge
+- OpenAI GPT-5.1 (OpenRouter removed)
 
 Запуск: python tests/eval/run_eval.py [dataset]
 """
@@ -51,19 +50,17 @@ def load_system_prompt() -> str:
     return "You are a helpful assistant for MIRT children's clothing store."
 
 
-async def call_openrouter(
+async def call_openai(
     model_name: str, messages: list[dict[str, str]], api_key: str, max_tokens: int = 2048
 ) -> dict[str, Any]:
-    """Call OpenRouter API (Grok, etc.)."""
+    """Call OpenAI API (GPT-5.1)."""
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
+            "https://api.openai.com/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://mirt.store",
-                "X-Title": "MIRT AI Eval",
             },
             json={
                 "model": model_name,
@@ -105,8 +102,8 @@ async def call_assistant_model(
     messages.append({"role": "user", "content": user_content})
 
     try:
-        if model.api.type == "openrouter":
-            result = await call_openrouter(
+        if model.api.type == "openai":
+            result = await call_openai(
                 model.api.model_name,
                 messages,
                 api_key,
@@ -171,9 +168,12 @@ async def call_judge(
 """
 
     try:
-        result = await call_openrouter(
-            judge.api.model_name, [{"role": "user", "content": judge_prompt}], api_key, 1024
-        )
+        if judge.api.type == "openai":
+            result = await call_openai(
+                judge.api.model_name, [{"role": "user", "content": judge_prompt}], api_key, 1024
+            )
+        else:
+            return rule_based_judge(test, assistant_response)
 
         judge_content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
 

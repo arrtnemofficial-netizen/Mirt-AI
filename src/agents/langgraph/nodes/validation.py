@@ -53,9 +53,9 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
     errors: list[str] = []
 
-    # Get latest assistant response
-    messages = state.get("messages", [])
-    assistant_response = _get_latest_assistant_response(messages)
+    # Get latest structured assistant response
+    # Prefer the typed/structured payload stored in state by agent nodes.
+    assistant_response = _get_latest_assistant_response(state)
 
     if not assistant_response:
         # No response to validate - might be first step
@@ -70,7 +70,11 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         product_errors = _validate_products(products)
         errors.extend(product_errors)
 
-        # Check for hallucination
+        # Catalog-aware validation (prevents hallucinations even without tool_results)
+        catalog_errors = await _validate_products_against_catalog(products)
+        errors.extend(catalog_errors)
+
+        # Check for hallucination vs tool results (when available)
         tool_results = state.get("tool_plan_result", {}).get("tool_results", [])
         hallucination_errors = _check_for_hallucination(products, tool_results)
         errors.extend(hallucination_errors)
@@ -114,20 +118,144 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _get_latest_assistant_response(messages: list[Any]) -> dict[str, Any] | None:
+def _get_latest_assistant_response(state: dict[str, Any]) -> dict[str, Any] | None:
     """Extract latest assistant response as dict.
 
-    Handles both dict format and LangChain Message objects.
+    Priority:
+    1) `state["agent_response"]` (structured/typed output from PydanticAI agents)
+    2) Parse the latest assistant message content as JSON (best-effort)
     """
+    agent_payload = state.get("agent_response")
+    if isinstance(agent_payload, dict) and agent_payload:
+        return agent_payload
+
     from .utils import extract_assistant_message
 
-    content = extract_assistant_message(messages)
+    content = extract_assistant_message(state.get("messages", []))
     if content:
         try:
             return json.loads(content)
         except (json.JSONDecodeError, TypeError):
-            pass
+            return None
     return None
+
+
+def _norm_text(v: Any) -> str:
+    return " ".join(str(v or "").strip().split()).lower()
+
+
+def _norm_list(v: Any) -> list[str]:
+    if not v:
+        return []
+    if isinstance(v, list):
+        return [_norm_text(x) for x in v if str(x or "").strip()]
+    return [_norm_text(v)]
+
+
+def _expected_price(catalog_product: dict[str, Any], size: str | None) -> float | None:
+    """Resolve expected price for a product/size from catalog payload."""
+    # Some environments store per-size pricing in `price_by_size` (json) even if schema.sql
+    # only has `price`. Support both.
+    price_by_size = catalog_product.get("price_by_size")
+    if isinstance(price_by_size, dict) and size:
+        try:
+            if size in price_by_size:
+                return float(price_by_size[size])
+        except Exception:
+            pass
+    try:
+        return float(catalog_product.get("price", 0) or 0)
+    except Exception:
+        return None
+
+
+async def _validate_products_against_catalog(products: list[dict[str, Any]]) -> list[str]:
+    """Validate that products exist in catalog and key fields match SSOT."""
+    errors: list[str] = []
+
+    ids: list[int] = []
+    for p in products:
+        pid = p.get("id") or p.get("product_id")
+        try:
+            if pid is None:
+                continue
+            ids.append(int(pid))
+        except Exception:
+            errors.append(f"Invalid product id: {pid!r}")
+
+    ids = [i for i in ids if i > 0]
+    if not ids:
+        return errors
+
+    # Lazy import to avoid heavier deps on module import.
+    try:
+        from src.services.data.catalog_service import CatalogService
+
+        catalog = CatalogService()
+        catalog_items = await catalog.get_products_by_ids(ids)
+    except Exception as e:
+        # If catalog is unavailable, treat as a validation failure (better to retry/escalate
+        # than to send potentially hallucinated products).
+        return [f"Catalog validation unavailable: {type(e).__name__}"]
+
+    by_id: dict[int, dict[str, Any]] = {}
+    for item in catalog_items or []:
+        try:
+            item_id = int(item.get("id"))
+            by_id[item_id] = item
+        except Exception:
+            continue
+
+    for p in products:
+        pid_raw = p.get("id") or p.get("product_id")
+        try:
+            pid = int(pid_raw)
+        except Exception:
+            continue
+
+        catalog_p = by_id.get(pid)
+        if not catalog_p:
+            errors.append(f"Product {pid} not found in catalog")
+            continue
+
+        # Name must match catalog (case/whitespace-insensitive).
+        out_name = _norm_text(p.get("name"))
+        cat_name = _norm_text(catalog_p.get("name"))
+        if out_name and cat_name and out_name != cat_name:
+            errors.append(f"Product {pid}: name mismatch (catalog='{catalog_p.get('name')}', got='{p.get('name')}')")
+
+        # Size must be available in catalog sizes (if provided in output).
+        out_size = str(p.get("size") or "").strip()
+        if out_size:
+            sizes = _norm_list(catalog_p.get("sizes"))
+            if sizes and _norm_text(out_size) not in sizes:
+                errors.append(f"Product {pid}: size '{out_size}' not available")
+
+        # Color must be available in catalog colors (if provided in output).
+        out_color = str(p.get("color") or "").strip()
+        if out_color:
+            colors = _norm_list(catalog_p.get("colors"))
+            if colors and _norm_text(out_color) not in colors:
+                errors.append(f"Product {pid}: color '{out_color}' not available")
+
+        # Price must match catalog SSOT (supports price_by_size when present).
+        expected = _expected_price(catalog_p, out_size or None)
+        try:
+            out_price = float(p.get("price", 0) or 0)
+        except Exception:
+            out_price = 0.0
+        if expected is not None and expected > 0:
+            # Use a tiny tolerance for numeric(10,2) -> float conversions.
+            if abs(out_price - expected) > 0.01:
+                errors.append(f"Product {pid}: price mismatch (expected={expected}, got={out_price})")
+
+        # Photo URL should be from catalog when available.
+        cat_photo = str(catalog_p.get("photo_url") or "").strip()
+        out_photo = str(p.get("photo_url") or p.get("image_url") or "").strip()
+        if cat_photo and out_photo and out_photo != cat_photo:
+            errors.append(f"Product {pid}: photo_url mismatch")
+
+    return errors
 
 
 def _validate_products(products: list[dict[str, Any]]) -> list[str]:

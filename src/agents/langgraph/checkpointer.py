@@ -290,11 +290,13 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         return SerializableMemorySaver()
 
     try:
-        # Import PostgresSaver and psycopg for connection management
-        from langgraph.checkpoint.postgres import PostgresSaver
+        # Import async PostgresSaver and psycopg for connection management
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from langgraph.checkpoint.postgres import PostgresSaver  # For sync setup only
+        from psycopg_pool import AsyncConnectionPool
         import psycopg
 
-        # First, setup tables with a separate autocommit connection
+        # First, setup tables with a separate autocommit connection (sync)
         # CREATE INDEX CONCURRENTLY requires autocommit mode
         setup_conn = psycopg.connect(database_url, autocommit=True)
         try:
@@ -309,24 +311,32 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         max_messages, max_chars, drop_base64 = get_checkpoint_compaction(settings)
 
-        # Create PostgresSaver instance using connection
-        # PostgresSaver.__init__ expects a connection object (conn: '_internal.Conn')
-        init_conn = psycopg.connect(database_url, autocommit=False)
-        base_checkpointer = PostgresSaver(init_conn)
+        # Create AsyncConnectionPool for async checkpointer
+        # AsyncPostgresSaver requires AsyncConnectionPool for production use
+        pool = AsyncConnectionPool(
+            conninfo=database_url,
+            min_size=2,
+            max_size=10,
+            open=True,  # Automatically open pool on creation
+        )
+        
+        # Create AsyncPostgresSaver instance using async pool
+        base_checkpointer = AsyncPostgresSaver(conn=pool)
         
         # Use composition instead of inheritance to avoid super() NotImplementedError issues
-        # Wrap PostgresSaver and delegate all method calls to it
+        # Wrap AsyncPostgresSaver and delegate all method calls to it
         class InstrumentedAsyncPostgresSaver:
-            """Wrapper around PostgresSaver with instrumentation and compaction."""
+            """Wrapper around AsyncPostgresSaver with instrumentation and compaction."""
             
-            def __init__(self, base: PostgresSaver):
+            def __init__(self, base: AsyncPostgresSaver, pool: AsyncConnectionPool):
                 self._base = base
+                self._pool = pool  # Store pool reference for lifecycle management
             
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 result = None
                 try:
-                    # Delegate directly to base PostgresSaver instance
+                    # Delegate directly to base AsyncPostgresSaver instance
                     result = await self._base.aget_tuple(*args, **kwargs)
                     return result
                 finally:
@@ -424,10 +434,10 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             def __getattr__(self, name: str) -> Any:
                 return getattr(self._base, name)
 
-        # Create instrumented wrapper around PostgresSaver
-        checkpointer = InstrumentedAsyncPostgresSaver(base_checkpointer)
+        # Create instrumented wrapper around AsyncPostgresSaver
+        checkpointer = InstrumentedAsyncPostgresSaver(base_checkpointer, pool)
 
-        logger.info("PostgresSaver checkpointer initialized successfully")
+        logger.info("AsyncPostgresSaver checkpointer initialized successfully")
         return checkpointer
 
     except ImportError as import_err:
@@ -529,6 +539,26 @@ def get_checkpointer(
     # Create checkpointer
     if checkpointer_type == CheckpointerType.POSTGRES:
         _checkpointer = get_postgres_checkpointer()
+        
+        # Fail-fast check: verify async methods exist (critical for LangGraph ainvoke)
+        if not hasattr(_checkpointer, "aget_tuple"):
+            logger.error(
+                "CRITICAL: Postgres checkpointer missing aget_tuple method! "
+                "LangGraph ainvoke() will fail with NotImplementedError. "
+                "Falling back to MemorySaver."
+            )
+            _checkpointer = SerializableMemorySaver()
+            checkpointer_type = CheckpointerType.MEMORY
+        elif not callable(getattr(_checkpointer, "aget_tuple", None)):
+            logger.error(
+                "CRITICAL: Postgres checkpointer.aget_tuple is not callable! "
+                "LangGraph ainvoke() will fail. Falling back to MemorySaver."
+            )
+            _checkpointer = SerializableMemorySaver()
+            checkpointer_type = CheckpointerType.MEMORY
+        else:
+            logger.debug("Postgres checkpointer verified: async methods available")
+            
     elif checkpointer_type == CheckpointerType.REDIS:
         _checkpointer = get_redis_checkpointer()
     else:
@@ -559,16 +589,43 @@ async def warmup_checkpointer_pool() -> bool:
     Returns:
         True if warmup succeeded, False otherwise (non-blocking)
     """
-    global _checkpointer_type
+    global _checkpointer, _checkpointer_type
     
     try:
         # Ensure checkpointer is initialized
-        get_checkpointer()
+        checkpointer = get_checkpointer()
         
-        # PostgresSaver manages its own connection internally
-        # No explicit warmup needed - connection is created during initialization
+        # For AsyncPostgresSaver, verify async methods exist and pool is open
         if _checkpointer_type == CheckpointerType.POSTGRES:
-            logger.info("PostgresSaver checkpointer initialized (connection managed internally)")
+            # Verify checkpointer has async methods (fail-fast check)
+            if not hasattr(checkpointer, "aget_tuple"):
+                logger.error(
+                    "CRITICAL: Postgres checkpointer missing aget_tuple method! "
+                    "This will cause NotImplementedError. Check checkpointer implementation."
+                )
+                return False
+            
+            aget_tuple_method = getattr(checkpointer, "aget_tuple", None)
+            if not callable(aget_tuple_method):
+                logger.error(
+                    "CRITICAL: Postgres checkpointer.aget_tuple is not callable! "
+                    "This will cause NotImplementedError. Check checkpointer implementation."
+                )
+                return False
+            
+            # If checkpointer has _pool attribute, ensure it's open
+            if hasattr(checkpointer, "_pool"):
+                pool = checkpointer._pool
+                if hasattr(pool, "open") and not getattr(pool, "_closed", True):
+                    # Pool is already open (opened during initialization with open=True)
+                    logger.info("AsyncPostgresSaver checkpointer pool is open and ready")
+                else:
+                    logger.warning("AsyncPostgresSaver pool may not be open, attempting to open...")
+                    if hasattr(pool, "open"):
+                        await pool.open(wait=True, timeout=10.0)
+                        logger.info("AsyncPostgresSaver checkpointer pool opened successfully")
+            
+            logger.info("AsyncPostgresSaver checkpointer initialized and verified (async methods available)")
             return True
         
         # For MemorySaver or other non-pool checkpointers, warmup is not needed

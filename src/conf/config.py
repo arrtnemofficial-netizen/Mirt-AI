@@ -14,15 +14,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Runtime configuration loaded from environment."""
 
-    OPENROUTER_BASE_URL: str = Field(
-        default="https://openrouter.ai/api/v1",
-        description="Base URL for OpenRouter-compatible endpoints.",
-    )
-    OPENROUTER_API_KEY: SecretStr = Field(
-        default=SecretStr(""), description="API key for OpenRouter/Grok 4.1 fast access."
-    )
     AI_MODEL: str = Field(
-        default="gpt-5.1", description="Identifier of the primary model used for reasoning."
+        default="gpt-5.1", description="Identifier of the primary model used for reasoning (OpenAI GPT-5.1 only)."
     )
     OPENAI_API_KEY: SecretStr = Field(
         default=SecretStr(""), description="API key for OpenAI GPT-5.1 and embeddings."
@@ -162,15 +155,11 @@ class Settings(BaseSettings):
     # =========================================================================
     LLM_PROVIDER: str = Field(
         default="openai",
-        description="LLM provider: openrouter, openai, google",
-    )
-    LLM_MODEL_GROK: str = Field(
-        default="x-ai/grok-beta",
-        description="Grok model identifier for OpenRouter",
+        description="LLM provider: openai only (OpenRouter removed)",
     )
     LLM_MODEL_GPT: str = Field(
         default="gpt-5.1",
-        description="OpenAI GPT model identifier",
+        description="OpenAI GPT model identifier (GPT-5.1 only)",
     )
     LLM_MODEL_GEMINI: str = Field(
         default="gemini-3-pro",
@@ -208,6 +197,18 @@ class Settings(BaseSettings):
         default=False,
         description="Enable detailed trace logging for debugging.",
     )
+
+    # =========================================================================
+    # OFFER DELIBERATION / CONFIDENCE GATING
+    # =========================================================================
+    USE_OFFER_DELIBERATION: bool = Field(
+        default=True,
+        description="Enable offer deliberation gating (low confidence / price mismatch).",
+    )
+    DELIBERATION_MIN_CONFIDENCE: float = Field(
+        default=0.8,
+        description="Minimum acceptable offer deliberation confidence (0.0-1.0). Below => fallback.",
+    )
     # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
     # - LangGraph v2 is now the only architecture
     # - PydanticAI handles tool planning automatically
@@ -220,13 +221,8 @@ class Settings(BaseSettings):
 
     @property
     def active_llm_model(self) -> str:
-        """Return the active LLM model based on provider."""
-        if self.LLM_PROVIDER == "openai":
-            return self.LLM_MODEL_GPT
-        elif self.LLM_PROVIDER == "google":
-            return self.LLM_MODEL_GEMINI
-        else:
-            return self.LLM_MODEL_GROK
+        """Return the active LLM model (OpenAI GPT-5.1 only)."""
+        return self.LLM_MODEL_GPT
 
     @property
     def followup_schedule_hours(self) -> list[int]:

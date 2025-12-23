@@ -552,9 +552,9 @@ async def run_all_tests() -> list[dict[str, Any]]:
     from src.conf.config import settings
     
     # Verify configuration
-    api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+    api_key = settings.OPENAI_API_KEY.get_secret_value()
     if not api_key:
-        console.print("[red]ERROR: OPENROUTER_API_KEY not configured[/red]")
+        console.print("[red]ERROR: OPENAI_API_KEY not configured[/red]")
         sys.exit(1)
     
     console.print(Panel(

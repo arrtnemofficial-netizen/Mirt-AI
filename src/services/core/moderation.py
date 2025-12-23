@@ -37,6 +37,61 @@ PASSPORT_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+_INJECTION_PATTERNS_RAW: list[str] = [
+    # Override / ignore instructions
+    "ignore all previous",
+    "ignore previous instructions",
+    "ignore earlier instructions",
+    "disregard previous",
+    "forget previous",
+    "forget everything",
+    "override instructions",
+    "bypass rules",
+    "break the rules",
+    "do anything now",
+    "jailbreak",
+    # Slavic variants (common)
+    "игнорируй предыдущие",
+    "игнорируй все предыдущие",
+    "забудь предыдущие",
+    "выйди из роли",
+    "ігноруй попередні",
+    "забудь попередні",
+    "вийди з ролі",
+    # Prompt / system disclosure
+    "system prompt",
+    "developer message",
+    "hidden instructions",
+    "reveal instructions",
+    "show me the prompt",
+    "print the prompt",
+    "prompt injection",
+    # Role / identity manipulation
+    "new role",
+    "act as",
+    "you are now",
+    "from now on",
+    "pretend to be",
+    # Structured role attempts (common in chat APIs)
+    "role system",
+    "role developer",
+    "role assistant",
+    "content system",
+    "begin system",
+    "end system",
+    # Tool / function call coercion
+    "call the tool",
+    "use tool",
+    "function call",
+    "execute code",
+]
+
+# Pre-normalize to catch obfuscation efficiently.
+try:
+    _INJECTION_PATTERNS_NORM = [normalize_text(p) for p in _INJECTION_PATTERNS_RAW if p]
+except Exception:
+    _INJECTION_PATTERNS_NORM = []
+
 
 @dataclass
 class ModerationResult:
@@ -137,17 +192,11 @@ def redact_pii(text: str) -> str:
 
 def detect_prompt_injection(text: str) -> bool:
     """Detect simple prompt injection patterns."""
-    lower_text = text.lower()
-    patterns = [
-        "ignore all previous",
-        "ignore earlier instructions",
-        "forget everything",
-        "new role",
-        "start by saying",
-        "system prompt",
-        "instruction manipulation",
-    ]
-    return any(pattern in lower_text for pattern in patterns)
+    # Use normalized text to catch obfuscation (unicode variants, leetspeak, punctuation).
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+    return any(pat in normalized for pat in _INJECTION_PATTERNS_NORM)
 
 
 def moderate_user_message(text: str) -> ModerationResult:

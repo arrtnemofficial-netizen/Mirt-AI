@@ -165,26 +165,15 @@ _memory_agent: Agent[MemoryDeps, MemoryDecision] | None = None
 
 
 def _get_memory_model() -> OpenAIChatModel:
-    """Get or create model for memory agent."""
+    """Get or create OpenAI GPT-5.1 model for memory agent."""
     global _memory_model
     if _memory_model is None:
-        if settings.LLM_PROVIDER == "openai":
-            api_key = settings.OPENAI_API_KEY.get_secret_value()
-            base_url = "https://api.openai.com/v1"
-            model_name = settings.LLM_MODEL_GPT
-        else:
-            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-            base_url = settings.OPENROUTER_BASE_URL
-            model_name = (
-                settings.LLM_MODEL_GROK
-                if settings.LLM_PROVIDER == "openrouter"
-                else settings.AI_MODEL
-            )
-
+        api_key = settings.OPENAI_API_KEY.get_secret_value()
         if not api_key:
-            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-            base_url = settings.OPENROUTER_BASE_URL
-            model_name = settings.AI_MODEL
+            raise RuntimeError("OPENAI_API_KEY is required. OpenRouter support has been removed.")
+        
+        base_url = "https://api.openai.com/v1"
+        model_name = settings.LLM_MODEL_GPT  # GPT-5.1 only
 
         client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         provider = OpenAIProvider(openai_client=client)

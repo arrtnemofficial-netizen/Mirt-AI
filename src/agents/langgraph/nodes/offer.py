@@ -34,6 +34,41 @@ if TYPE_CHECKING:
     from src.agents.pydantic.models import OfferResponse
 
 
+def _get_fallback_text(reason: str) -> str:
+    """Resolve offer fallbacks from prompt registry (SSOT)."""
+    from src.core.prompt_registry import get_snippet_by_header
+
+    reason_l = (reason or "").lower()
+    header = "OFFER_FALLBACK_CONFIDENCE"
+    if "price" in reason_l:
+        header = "OFFER_FALLBACK_PRICE"
+
+    bubbles = get_snippet_by_header(header)
+    if bubbles:
+        return "\n".join(bubbles)
+    # Extreme fallback
+    return "Секундочку, уточню деталі по каталогу 🤍"
+
+
+def _get_clarification_text(*, need_size: bool, need_color: bool) -> str:
+    """Ask only for missing details using SSOT snippets."""
+    from src.core.prompt_registry import get_snippet_by_header
+
+    if need_size and need_color:
+        header = "Уточніть зріст та колір"
+    elif need_size:
+        header = "Уточніть зріст"
+    elif need_color:
+        header = "Пуш: визначилися з кольором?"
+    else:
+        header = "OFFER_FALLBACK_CONFIDENCE"
+
+    bubbles = get_snippet_by_header(header)
+    if bubbles:
+        return "\n".join(bubbles)
+    return "Підкажіть, будь ласка, зріст дитини та який колір вам подобається? 🤍"
+
+
 def _merge_product_fields(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     """Merge fields from incoming product into existing product, preserving truth."""
     merged = dict(existing)
@@ -112,11 +147,59 @@ async def offer_node(
 
     # Get products to offer
     selected_products = state.get("selected_products", [])
+    validated_products = list(selected_products) if isinstance(selected_products, list) else []
+    use_fallback = False
+    fallback_reason = ""
+
+    # =========================================================================
+    # STEP 1: Pre-validation against DB (SSOT)
+    # - Ensure selected products still exist
+    # - Refresh canonical fields (name, price, photo_url)
+    # =========================================================================
+    try:
+        ids = []
+        for p in validated_products:
+            if isinstance(p, dict) and isinstance(p.get("id"), int) and p["id"] > 0:
+                ids.append(p["id"])
+        if ids:
+            catalog = CatalogService()
+            catalog_items = await catalog.get_products_by_ids(ids)
+            by_id = {int(it["id"]): it for it in (catalog_items or []) if isinstance(it, dict) and it.get("id")}
+
+            refreshed: list[dict[str, Any]] = []
+            for p in validated_products:
+                if not isinstance(p, dict):
+                    continue
+                pid = p.get("id")
+                if not isinstance(pid, int) or pid <= 0:
+                    continue
+                cat = by_id.get(pid)
+                if not cat:
+                    # Missing product in DB => don't proceed with an offer.
+                    use_fallback = True
+                    fallback_reason = "catalog_missing_product"
+                    continue
+                refreshed.append(
+                    _merge_product_fields(
+                        p,
+                        {
+                            "id": pid,
+                            "name": cat.get("name"),
+                            "price": cat.get("price"),
+                            "photo_url": cat.get("photo_url"),
+                        },
+                    )
+                )
+            validated_products = refreshed
+    except Exception:
+        # If pre-validation fails (e.g. DB unavailable), we still allow LLM to respond,
+        # but we will likely fall back later via validation / deliberation.
+        pass
 
     # Create deps with offer context
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_4_OFFER.value
-    deps.selected_products = selected_products
+    deps.selected_products = validated_products
 
     logger.info(
         "Offer node for session %s, products=%d",
@@ -152,7 +235,7 @@ async def offer_node(
         # Build assistant message from response
         assistant_content = "\n".join(m.content for m in response.messages)
 
-        if settings.USE_OFFER_DELIBERATION and response.deliberation:
+        if getattr(settings, "USE_OFFER_DELIBERATION", True) and response.deliberation:
             delib = response.deliberation
 
             # Log deliberation
@@ -180,14 +263,14 @@ async def offer_node(
                 track_metric("deliberation_price_mismatch", 1)
 
             # CHECK: Low confidence → use fallback
-            elif delib.confidence < settings.DELIBERATION_MIN_CONFIDENCE:
+            elif delib.confidence < float(getattr(settings, "DELIBERATION_MIN_CONFIDENCE", 0.8)):
                 use_fallback = True
                 fallback_reason = f"low_confidence_{delib.confidence:.2f}"
                 logger.warning(
                     "[SESSION %s] LOW CONFIDENCE %.2f < %.2f fallback",
                     session_id,
                     delib.confidence,
-                    settings.DELIBERATION_MIN_CONFIDENCE,
+                    float(getattr(settings, "DELIBERATION_MIN_CONFIDENCE", 0.8)),
                 )
                 track_metric("deliberation_low_confidence", 1)
 
@@ -203,7 +286,13 @@ async def offer_node(
         # =========================================================================
         if use_fallback:
             # Use safe fallback message instead of LLM response
-            fallback_text = _get_fallback_text(fallback_reason)
+            # For low-confidence, prefer a true clarification request.
+            if fallback_reason.startswith("low_confidence"):
+                need_size = any(not str((p or {}).get("size") or "").strip() for p in (validated_products or []))
+                need_color = any(not str((p or {}).get("color") or "").strip() for p in (validated_products or []))
+                fallback_text = _get_clarification_text(need_size=need_size, need_color=need_color)
+            else:
+                fallback_text = _get_fallback_text(fallback_reason)
 
             assistant_messages = [{"role": "assistant", "content": fallback_text}]
 
@@ -212,7 +301,7 @@ async def offer_node(
                 "current_state": State.STATE_3_SIZE_COLOR.value,  # Go back!
                 "messages": assistant_messages,
                 "selected_products": validated_products,  # Keep validated
-                "dialog_phase": "WAITING_FOR_SIZE",  # Re-ask
+                "dialog_phase": "WAITING_FOR_SIZE",  # Re-ask (safe default)
                 "metadata": {"fallback_reason": fallback_reason},
                 "step_number": state.get("step_number", 0) + 1,
                 "last_error": None,

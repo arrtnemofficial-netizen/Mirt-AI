@@ -79,7 +79,7 @@
    - Tool calling (search_catalog, check_stock)
 
 3. ✅ **Інтеграція з LLM:**
-   - OpenAI/OpenRouter
+   - OpenAI GPT-5.1 only (OpenRouter removed)
    - Model management
    - Provider abstraction
 

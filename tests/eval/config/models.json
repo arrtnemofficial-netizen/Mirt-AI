@@ -1,17 +1,17 @@
 {
   "models": [
     {
-      "id": "grok-4.1-fast",
+      "id": "gpt-5.1",
       "role": "assistant_under_test",
-      "provider": "xai",
+      "provider": "openai",
       "api": {
-        "type": "openrouter",
-        "base_url": "https://openrouter.ai/api/v1",
-        "model_name": "x-ai/grok-4.1-fast",
-        "api_key_env": "OPENROUTER_API_KEY"
+        "type": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "model_name": "gpt-5.1",
+        "api_key_env": "OPENAI_API_KEY"
       },
       "reasoning": {
-        "mode": "none",
+        "mode": "low",
         "max_tokens": 4096
       }
     },

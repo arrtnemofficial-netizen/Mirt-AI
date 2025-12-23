@@ -6,14 +6,63 @@ Handles product search and retrieval from real database.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from src.services.core.exceptions import CatalogUnavailableError
 from src.services.core.observability import log_tool_execution, track_metric
 from src.services.infra.supabase_client import get_supabase_client
+from src.conf.config import settings
 
 logger = logging.getLogger(__name__)
+
+CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
+def _safe_cache_key(prefix: str, parts: list[str]) -> str:
+    import hashlib
+
+    raw = "|".join([prefix, *parts]).encode("utf-8", errors="ignore")
+    return f"mirt:catalog:{prefix}:{hashlib.sha256(raw).hexdigest()[:24]}"
+
+
+def _get_redis_client():
+    """Best-effort Redis client for caching (fails open)."""
+    try:
+        import redis
+
+        redis_url = settings.REDIS_URL
+        if not redis_url:
+            return None
+        client = redis.from_url(redis_url, decode_responses=True)
+        client.ping()
+        return client
+    except Exception:
+        return None
+
+
+def _cache_get_json(key: str) -> Any | None:
+    r = _get_redis_client()
+    if not r:
+        return None
+    try:
+        raw = r.get(key)
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def _cache_set_json(key: str, value: Any, *, ttl_seconds: int = CACHE_TTL_SECONDS) -> None:
+    r = _get_redis_client()
+    if not r:
+        return
+    try:
+        r.setex(key, int(ttl_seconds), json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:
+        return
 
 
 class CatalogService:
@@ -41,6 +90,18 @@ class CatalogService:
             return []
 
         try:
+            cache_key = _safe_cache_key(
+                "search",
+                [
+                    str(query or "").strip().lower(),
+                    str(category or "").strip().lower(),
+                    str(int(limit)),
+                ],
+            )
+            cached = _cache_get_json(cache_key)
+            if isinstance(cached, list):
+                return cached
+
             # Start building query
             db_query = self.client.table("products").select("*")
             
@@ -56,7 +117,9 @@ class CatalogService:
                 
             # Execute
             response = db_query.limit(limit).execute()
-            return response.data or []
+            data = response.data or []
+            _cache_set_json(cache_key, data)
+            return data
 
         except Exception as e:
             logger.error("Catalog search failed: %s", e)
@@ -68,6 +131,11 @@ class CatalogService:
             return None
 
         try:
+            cache_key = _safe_cache_key("product", [str(int(product_id))])
+            cached = _cache_get_json(cache_key)
+            if isinstance(cached, dict) and cached.get("id"):
+                return cached
+
             response = (
                 self.client.table("products")
                 .select("*")
@@ -75,7 +143,10 @@ class CatalogService:
                 .single()
                 .execute()
             )
-            return response.data
+            data = response.data
+            if data:
+                _cache_set_json(cache_key, data)
+            return data
         except Exception as e:
             logger.error("Get product failed: %s", e)
             return None
@@ -86,13 +157,44 @@ class CatalogService:
             return []
 
         try:
+            ids = [int(i) for i in product_ids if isinstance(i, int) or str(i).isdigit()]
+            ids = [i for i in ids if i > 0]
+            if not ids:
+                return []
+
+            # Try per-item cache first
+            cached_items: list[dict[str, Any]] = []
+            missing: list[int] = []
+            for pid in ids:
+                cache_key = _safe_cache_key("product", [str(pid)])
+                cached = _cache_get_json(cache_key)
+                if isinstance(cached, dict) and cached.get("id"):
+                    cached_items.append(cached)
+                else:
+                    missing.append(pid)
+
+            if not missing:
+                # Preserve requested order
+                by_id = {int(it["id"]): it for it in cached_items if isinstance(it, dict) and it.get("id")}
+                return [by_id[i] for i in ids if i in by_id]
+
             response = (
                 self.client.table("products")
                 .select("*")
-                .in_("id", product_ids)
+                .in_("id", missing)
                 .execute()
             )
-            return response.data or []
+            fresh = response.data or []
+            for item in fresh:
+                try:
+                    pid = int(item.get("id"))
+                except Exception:
+                    continue
+                _cache_set_json(_safe_cache_key("product", [str(pid)]), item)
+
+            combined = cached_items + fresh
+            by_id = {int(it["id"]): it for it in combined if isinstance(it, dict) and it.get("id")}
+            return [by_id[i] for i in ids if i in by_id]
         except Exception as e:
             logger.error("Get products batch failed: %s", e)
             return []

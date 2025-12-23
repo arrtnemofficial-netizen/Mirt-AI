@@ -101,7 +101,7 @@ class TestCase(BaseModel):
 
 
 class ModelAPI(BaseModel):
-    type: Literal["openai", "google_ai", "openrouter"]
+    type: Literal["openai", "google_ai"]  # openrouter removed
     base_url: str
     model_name: str
     api_key_env: str

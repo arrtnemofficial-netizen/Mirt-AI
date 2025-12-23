@@ -76,26 +76,15 @@ _offer_agent: Agent[AgentDeps, OfferResponse] | None = None
 
 
 def _get_model() -> OpenAIModel:
-    """Get or create OpenAI model (lazy initialization)."""
+    """Get or create OpenAI GPT-5.1 model (lazy initialization)."""
     global _model
     if _model is None:
-        if settings.LLM_PROVIDER == "openai":
-            api_key = settings.OPENAI_API_KEY.get_secret_value()
-            base_url = "https://api.openai.com/v1"
-            model_name = settings.LLM_MODEL_GPT
-        else:
-            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-            base_url = settings.OPENROUTER_BASE_URL
-            model_name = settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
-
+        api_key = settings.OPENAI_API_KEY.get_secret_value()
         if not api_key:
-            # Fallback or error
-            logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
-            # Try OpenRouter as fallback if OpenAI missing
-            if settings.LLM_PROVIDER == "openai":
-                 api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-                 base_url = settings.OPENROUTER_BASE_URL
-                 model_name = settings.AI_MODEL
+            raise RuntimeError("OPENAI_API_KEY is required. OpenRouter support has been removed.")
+        
+        base_url = "https://api.openai.com/v1"
+        model_name = settings.LLM_MODEL_GPT  # GPT-5.1 only
 
         client = AsyncOpenAI(
             base_url=base_url,
@@ -493,6 +482,9 @@ async def run_main(
         Validated SupportResponse
     """
     import asyncio
+
+    # Optional tracing span (Logfire/OpenTelemetry). Keep None when not configured.
+    span = None
 
     # Check circuit breaker before attempting LLM call
     if not _llm_circuit_breaker.can_execute():
