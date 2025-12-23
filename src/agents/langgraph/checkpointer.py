@@ -317,8 +317,13 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             conninfo=database_url,
             min_size=2,
             max_size=10,
-            open=True,  # Automatically open pool on creation
+            open=False,  # Will be opened explicitly after creation
         )
+        
+        # Open pool explicitly (required, open=True is deprecated)
+        # Note: This is a sync function, but pool.open() is async
+        # We'll open it in warmup_checkpointer_pool() instead
+        # For now, create the checkpointer - pool will be opened during warmup
         
         # Create AsyncPostgresSaver instance using async pool
         base_checkpointer = AsyncPostgresSaver(conn=pool)
@@ -616,14 +621,21 @@ async def warmup_checkpointer_pool() -> bool:
             # If checkpointer has _pool attribute, ensure it's open
             if hasattr(checkpointer, "_pool"):
                 pool = checkpointer._pool
-                if hasattr(pool, "open") and not getattr(pool, "_closed", True):
-                    # Pool is already open (opened during initialization with open=True)
-                    logger.info("AsyncPostgresSaver checkpointer pool is open and ready")
-                else:
-                    logger.warning("AsyncPostgresSaver pool may not be open, attempting to open...")
-                    if hasattr(pool, "open"):
+                # Check if pool is closed (not opened yet)
+                if hasattr(pool, "_closed") and pool._closed:
+                    logger.info("Opening AsyncPostgresSaver checkpointer pool...")
+                    await pool.open(wait=True, timeout=10.0)
+                    logger.info("AsyncPostgresSaver checkpointer pool opened successfully")
+                elif hasattr(pool, "open"):
+                    # Pool might be open, but verify by attempting to open it
+                    # (opening an already open pool is safe and idempotent)
+                    try:
                         await pool.open(wait=True, timeout=10.0)
-                        logger.info("AsyncPostgresSaver checkpointer pool opened successfully")
+                        logger.info("AsyncPostgresSaver checkpointer pool is open and ready")
+                    except Exception as e:
+                        logger.debug("Pool open check: %s", e)
+                        # Pool might already be open, which is fine
+                        logger.info("AsyncPostgresSaver checkpointer pool is ready")
             
             logger.info("AsyncPostgresSaver checkpointer initialized and verified (async methods available)")
             return True

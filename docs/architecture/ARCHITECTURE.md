@@ -1,8 +1,8 @@
 ﻿# 🏗️ MIRT AI — Enterprise Architecture
 
-> **Version:** 5.0 (Implementation)  
+> **Version:** 5.1 (Production-Ready)  
 > **SSOT:** `src/core/` & `src/agents/langgraph/`  
-> **Updated:** 20 December 2025
+> **Updated:** 23 December 2025
 
 ---
 
@@ -123,9 +123,12 @@ Used for **Hot Data** and **Queues**.
 | Failure Mode | Mechanism | Implementation |
 |:-------------|:----------|:---------------|
 | **LLM Failure** | Retry/Fallback | `invoke_with_retry` (3 attempts, exp backoff) |
+| **Checkpointer Failure** | Fail-fast + Fallback | AsyncPostgresSaver validation, fallback to MemorySaver |
+| **Database Outage** | Graceful Degradation | Fallback responses, error escalation |
 | **Worker Crash** | Task Recovery | `task_reject_on_worker_lost=True`, `acks_late=True` |
 | **Rate Limits** | Backoff | `RateLimitError` handling in Celery |
 | **CRM Outage** | Async Queue | `crm` queue with independent retry |
+| **Redis Failure** | Degraded Mode | Catalog cache fallback to direct DB queries |
 
 ---
 

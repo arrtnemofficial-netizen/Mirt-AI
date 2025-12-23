@@ -44,7 +44,7 @@ logger = logging.getLogger("mirt.observability")
 # OPENTELEMETRY DISTRIBUTED TRACING
 # =============================================================================
 
-_tracer = None
+_opentelemetry_tracer = None
 _tracing_enabled = False
 
 
@@ -55,9 +55,9 @@ def setup_opentelemetry_tracing() -> bool:
     Returns:
         True if tracing is enabled, False otherwise.
     """
-    global _tracer, _tracing_enabled
+    global _opentelemetry_tracer, _tracing_enabled
 
-    if _tracing_enabled and _tracer is not None:
+    if _tracing_enabled and _opentelemetry_tracer is not None:
         return True
 
     try:
@@ -82,7 +82,7 @@ def setup_opentelemetry_tracing() -> bool:
 
         # Set global tracer provider
         trace.set_tracer_provider(provider)
-        _tracer = trace.get_tracer(__name__)
+        _opentelemetry_tracer = trace.get_tracer(__name__)
         _tracing_enabled = True
 
         logger.info("OpenTelemetry tracing enabled (console exporter)")
@@ -100,15 +100,15 @@ def setup_opentelemetry_tracing() -> bool:
 
 def get_tracer():
     """Get OpenTelemetry tracer (lazy initialization)."""
-    global _tracer
-    if _tracer is None:
+    global _opentelemetry_tracer
+    if _opentelemetry_tracer is None:
         setup_opentelemetry_tracing()
-    return _tracer
+    return _opentelemetry_tracer
 
 
 def is_tracing_enabled() -> bool:
     """Check if distributed tracing is enabled."""
-    return _tracing_enabled and _tracer is not None
+    return _tracing_enabled and _opentelemetry_tracer is not None
 
 
 # =============================================================================
@@ -487,7 +487,7 @@ class AsyncTracingService:
 
 
 # Global singleton
-_tracer = AsyncTracingService()
+_async_tracing_service = AsyncTracingService()
 
 
 async def log_trace(
@@ -498,6 +498,6 @@ async def log_trace(
     **kwargs: Any,
 ) -> None:
     """Public API for logging traces."""
-    await _tracer.log_trace(
+    await _async_tracing_service.log_trace(
         session_id=session_id, trace_id=trace_id, node_name=node_name, status=status, **kwargs
     )
