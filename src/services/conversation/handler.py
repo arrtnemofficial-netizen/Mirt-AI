@@ -362,14 +362,30 @@ class ConversationHandler:
                     self.runner = get_production_graph(force_rebuild=True)
                     logger.info("Graph reset and rebuilt successfully")
                 
+                # ROOT CAUSE FIX: DuplicatePreparedStatement is retryable
+                # This happens when psycopg pool connections conflict on prepared statements
+                # It's safe to retry - the prepared statement will be reused on next attempt
+                is_duplicate_prepared = (
+                    "DuplicatePreparedStatement" in error_info
+                    or "prepared statement" in error_info.lower() and "already exists" in error_info.lower()
+                )
+                
                 if attempt < self.max_retries:
+                    # For DuplicatePreparedStatement, add extra delay to let connection clear
+                    retry_delay = self.retry_delay * (attempt + 1)
+                    if is_duplicate_prepared:
+                        retry_delay += 0.5  # Extra 500ms for prepared statement cleanup
+                        logger.debug(
+                            "DuplicatePreparedStatement detected - adding extra delay for connection cleanup"
+                        )
+                    
                     logger.warning(
                         "Agent attempt %d failed for session %s: %s. Retrying...",
                         attempt + 1,
                         session_id,
                         error_info[:200],
                     )
-                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+                    await asyncio.sleep(retry_delay)
                 else:
                     logger.exception(
                         "Agent failed after %d attempts for session %s: %s",

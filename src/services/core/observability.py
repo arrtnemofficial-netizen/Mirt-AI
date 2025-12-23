@@ -377,7 +377,12 @@ class AsyncTracingService:
     - Graceful degradation if Supabase unavailable
     - Failure counter for monitoring
     - Optional disable via ENABLE_OBSERVABILITY env var
+    - Payload validation before insertion
     """
+
+    # Valid ENUM values for llm_traces table
+    VALID_STATUSES = {'SUCCESS', 'ERROR', 'BLOCKED', 'ESCALATED'}
+    VALID_ERROR_CATEGORIES = {'SCHEMA', 'BUSINESS', 'SAFETY', 'SYSTEM'}
 
     def __init__(self):
         self._enabled = bool(getattr(settings, "ENABLE_OBSERVABILITY", True))
@@ -392,6 +397,110 @@ class AsyncTracingService:
             return str(uuid.UUID(raw))
         except Exception:
             return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
+
+    def _validate_trace_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate trace payload against llm_traces schema.
+        
+        Validates:
+        - Required fields (session_id, node_name, trace_id)
+        - ENUM values (status, error_category)
+        - Data types (latency_ms, tokens_in, tokens_out, cost)
+        
+        Returns:
+            Validated payload dict
+        """
+        validated = payload.copy()
+        
+        # Validate required fields
+        if not validated.get('node_name'):
+            raise ValueError("node_name is required for llm_traces")
+        if not validated.get('session_id'):
+            raise ValueError("session_id is required for llm_traces")
+        if not validated.get('trace_id'):
+            raise ValueError("trace_id is required for llm_traces")
+        
+        # Validate status ENUM
+        status = validated.get('status', 'SUCCESS')
+        if status not in self.VALID_STATUSES:
+            logger.warning(
+                "[TRACING] Invalid status '%s', defaulting to 'SUCCESS'. Valid values: %s",
+                status,
+                self.VALID_STATUSES
+            )
+            validated['status'] = 'SUCCESS'
+        
+        # Validate error_category ENUM
+        error_category = validated.get('error_category')
+        if error_category is not None and error_category not in self.VALID_ERROR_CATEGORIES:
+            logger.warning(
+                "[TRACING] Invalid error_category '%s', removing. Valid values: %s",
+                error_category,
+                self.VALID_ERROR_CATEGORIES
+            )
+            validated['error_category'] = None
+        
+        # Validate numeric types
+        if 'latency_ms' in validated and validated['latency_ms'] is not None:
+            try:
+                validated['latency_ms'] = float(validated['latency_ms'])
+            except (ValueError, TypeError):
+                logger.warning("[TRACING] Invalid latency_ms type, removing")
+                validated['latency_ms'] = None
+        
+        if 'tokens_in' in validated and validated['tokens_in'] is not None:
+            try:
+                validated['tokens_in'] = int(validated['tokens_in'])
+            except (ValueError, TypeError):
+                logger.warning("[TRACING] Invalid tokens_in type, removing")
+                validated['tokens_in'] = None
+        
+        if 'tokens_out' in validated and validated['tokens_out'] is not None:
+            try:
+                validated['tokens_out'] = int(validated['tokens_out'])
+            except (ValueError, TypeError):
+                logger.warning("[TRACING] Invalid tokens_out type, removing")
+                validated['tokens_out'] = None
+        
+        if 'cost' in validated and validated['cost'] is not None:
+            try:
+                validated['cost'] = float(validated['cost'])
+            except (ValueError, TypeError):
+                logger.warning("[TRACING] Invalid cost type, removing")
+                validated['cost'] = None
+        
+        return validated
+
+    def _handle_trace_error(self, error: Exception, payload: dict[str, Any]) -> None:
+        """Handle errors when inserting trace records.
+        
+        Distinguishes between schema errors (PGRST204) and other errors.
+        Logs appropriate level based on error type.
+        """
+        error_msg = str(error).lower()
+        error_str = str(error)[:200]
+        
+        # Check for schema errors (missing column, wrong type, etc.)
+        is_schema_error = (
+            'pgrst204' in error_msg
+            or 'column' in error_msg
+            or 'could not find' in error_msg
+            or 'does not exist' in error_msg
+        )
+        
+        if is_schema_error:
+            # Schema errors are more critical - log as warning
+            logger.warning(
+                "[TRACING] Schema error inserting to llm_traces: %s. "
+                "Payload keys: %s. Check database schema matches code.",
+                error_str,
+                list(payload.keys())
+            )
+        else:
+            # Other errors (network, auth, etc.) - log as debug (non-critical)
+            logger.debug(
+                "[TRACING] Error inserting to llm_traces: %s",
+                error_str
+            )
 
     def get_failure_count(self) -> int:
         """Get current failure count for monitoring."""
@@ -435,6 +544,7 @@ class AsyncTracingService:
             if not client:
                 return
 
+            # Build payload according to llm_traces schema
             payload = {
                 "session_id": session_id,
                 "trace_id": self._normalize_trace_id(trace_id),
@@ -456,36 +566,18 @@ class AsyncTracingService:
                 "created_at": datetime.now(UTC).isoformat(),
             }
 
-            # Remove None values to let DB defaults work or avoid null issues
-            payload = {k: v for k, v in payload.items() if v is not None}
+            # Validate payload before insertion
+            validated_payload = self._validate_trace_payload(payload)
 
-            # SAFEGUARD: Try llm_traces first, but handle schema errors gracefully
+            # Remove None values to let DB defaults work or avoid null issues
+            clean_payload = {k: v for k, v in validated_payload.items() if v is not None}
+
+            # Insert into llm_traces (no fallback to llm_usage - different purposes)
             try:
-                await client.table("llm_traces").insert(payload).execute()
+                await client.table("llm_traces").insert(clean_payload).execute()
             except Exception as e:
-                error_msg = str(e).lower()
-                # Check if error is related to missing column (especially node_name)
-                is_schema_error = (
-                    "node_name" in error_msg
-                    or "column" in error_msg
-                    or "pgrst204" in error_msg
-                    or "could not find" in error_msg
-                )
-                
-                if is_schema_error:
-                    # Remove node_name and retry llm_traces
-                    fallback_payload = payload.copy()
-                    fallback_payload.pop("node_name", None)
-                    try:
-                        await client.table("llm_traces").insert(fallback_payload).execute()
-                    except Exception:
-                        # If still fails, try llm_usage without node_name
-                        await client.table("llm_usage").insert(fallback_payload).execute()
-                else:
-                    # Other error - try llm_usage with node_name removed
-                    fallback_payload = payload.copy()
-                    fallback_payload.pop("node_name", None)
-                    await client.table("llm_usage").insert(fallback_payload).execute()
+                # Handle error with appropriate logging level
+                self._handle_trace_error(e, clean_payload)
 
         except Exception as e:
             # SAFEGUARD_2: Graceful degradation - observability shouldn't crash the app
