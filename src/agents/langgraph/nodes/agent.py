@@ -66,10 +66,35 @@ _OFFER_CONFIRMATION_KEYWORDS = [
 _SIZE_PATTERNS = [
     r"розмір\s*(\d{2,3}[-–]\d{2,3})",  # "розмір 146-152"
     r"раджу\s*(\d{2,3}[-–]\d{2,3})",  # "раджу 146-152"
+    r"раджу\s+розмір\s+(\d{2,3})",  # "раджу розмір 98" (FIX: handles word between)
+    r"раджу\s+розмір\s+(\d{2,3}[-–]\d{2,3})",  # "раджу розмір 146-152"
     r"підійде\s*(\d{2,3}[-–]\d{2,3})",  # "підійде 122-128"
     r"(\d{2,3}[-–]\d{2,3})\s*см",  # "146-152 см"
-    r"розмір\s*(\d{2,3})",  # "розмір 140"
+    r"розмір\s*(\d{2,3})",  # "розмір 140" or "розмір 98"
+    r"раджу\s*(\d{2,3})\b",  # "раджу 98" (single number after "раджу")
 ]
+
+
+def _height_to_size(height_cm: int) -> str:
+    """
+    Convert height in cm to size label.
+    
+    Uses the same logic as get_size_and_price_for_height but returns only size.
+    """
+    if height_cm <= 92:
+        return "80-92"
+    elif height_cm <= 104:
+        return "98-104"
+    elif height_cm <= 116:
+        return "110-116"
+    elif height_cm <= 128:
+        return "122-128"
+    elif height_cm <= 140:
+        return "134-140"
+    elif height_cm <= 152:
+        return "146-152"
+    else:
+        return "158-164"
 
 
 def _extract_size_from_response(messages: list) -> str | None:
@@ -77,12 +102,14 @@ def _extract_size_from_response(messages: list) -> str | None:
     Extract size from LLM response messages.
 
     Fallback when LLM forgets to include size in products[].
-    Looks for patterns like "раджу 146-152" or "розмір 122-128".
+    Looks for patterns like "раджу 146-152", "раджу розмір 98", or "розмір 122-128".
     """
     import re
 
     for msg in messages:
         content = msg.content if hasattr(msg, "content") else str(msg)
+        if not content:
+            continue
 
         for pattern in _SIZE_PATTERNS:
             # Use re.IGNORECASE for proper Unicode handling
@@ -91,7 +118,11 @@ def _extract_size_from_response(messages: list) -> str | None:
                 size = match.group(1)
                 # Normalize dash
                 size = size.replace("–", "-")
-                logger.debug("Extracted size '%s' from: %s", size, content[:50])
+                logger.info(
+                    "🔧 Extracted size '%s' from LLM response: %s", 
+                    size, 
+                    content[:100]
+                )
                 return size
 
     return None
@@ -381,6 +412,35 @@ async def agent_node(
             else:
                 selected_products = new_products
                 logger.info("Agent found products: %s", [p.name for p in response.products])
+        else:
+            # Keep existing products if LLM didn't return new ones
+            selected_products = selected_products or []
+
+        # =====================================================================
+        # CRITICAL: Extract size from user_message if missing
+        # This prevents dialog loop when user says "98" but LLM doesn't
+        # include size in products[]
+        # =====================================================================
+        if selected_products and current_state == State.STATE_3_SIZE_COLOR.value:
+            first_product = selected_products[0]
+            if not first_product.get("size"):
+                user_text = user_message if isinstance(user_message, str) else str(user_message)
+                
+                # Try to extract height from user message (e.g., "98" -> height 98 cm)
+                from .utils import extract_height_from_text
+                
+                height_cm = extract_height_from_text(user_text)
+                if height_cm:
+                    # Convert height to size
+                    extracted_size = _height_to_size(height_cm)
+                    first_product["size"] = extracted_size
+                    logger.info(
+                        "🔧 [SESSION %s] Extracted size='%s' from user height=%d cm (message: '%s')",
+                        session_id,
+                        extracted_size,
+                        height_cm,
+                        user_text[:50],
+                    )
 
         # =====================================================================
         # FALLBACK: Extract size from LLM response if not in products
@@ -489,13 +549,29 @@ async def agent_node(
             latency_ms=latency_ms,
         )
 
-        logger.info(
-            "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s)",
-            session_id,
-            state.get("dialog_phase", "INIT"),
-            dialog_phase,
-            new_state_str,
-        )
+        # Детальное логирование для отладки циклов
+        if current_state == State.STATE_3_SIZE_COLOR.value:
+            first_product = selected_products[0] if selected_products else None
+            size_info = first_product.get("size") if first_product else None
+            color_info = first_product.get("color") if first_product else None
+            logger.info(
+                "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s, products=%d, size='%s', color='%s')",
+                session_id,
+                state.get("dialog_phase", "INIT"),
+                dialog_phase,
+                new_state_str,
+                len(selected_products),
+                size_info or "None",
+                color_info or "None",
+            )
+        else:
+            logger.info(
+                "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s)",
+                session_id,
+                state.get("dialog_phase", "INIT"),
+                dialog_phase,
+                new_state_str,
+            )
 
         if settings.DEBUG_TRACE_LOGS:
             preview_text = ""
@@ -577,10 +653,15 @@ def _determine_dialog_phase(
     # Перевіряємо чи є розмір і колір
     has_size = False
     has_color = False
+    size_value = None
+    color_value = None
+    
     if selected_products:
         first_product = selected_products[0]
-        has_size = bool(first_product.get("size"))
-        has_color = bool(first_product.get("color"))
+        size_value = first_product.get("size")
+        color_value = first_product.get("color")
+        has_size = bool(size_value)
+        has_color = bool(color_value)
 
         # FALLBACK: Color may be embedded in product name like "Сукня Анна (червона клітинка)"
         # If color field is empty but name contains color in parentheses, treat as has_color=True
@@ -606,8 +687,23 @@ def _determine_dialog_phase(
     if current_state == State.STATE_5_PAYMENT_DELIVERY.value and state:
         payment_sub_phase = get_payment_sub_phase(state)
 
+    # Детальное логирование для отладки циклов
+    session_id = state.get("session_id", "") if state else ""
+    if current_state == "STATE_3_SIZE_COLOR":
+        logger.info(
+            "🔍 [SESSION %s] Dialog phase check: state=%s, has_products=%s, has_size=%s (size='%s'), has_color=%s (color='%s'), intent=%s",
+            session_id,
+            current_state,
+            has_products,
+            has_size,
+            size_value or "None",
+            has_color,
+            color_value or "None",
+            intent,
+        )
+
     # Використовуємо повну логіку переходів
-    return determine_next_dialog_phase(
+    next_phase = determine_next_dialog_phase(
         current_state=current_state,
         intent=intent,
         has_products=has_products,
@@ -616,6 +712,16 @@ def _determine_dialog_phase(
         user_confirmed=user_confirmed,
         payment_sub_phase=payment_sub_phase,
     )
+    
+    if current_state == "STATE_3_SIZE_COLOR":
+        logger.info(
+            "🔍 [SESSION %s] Dialog phase transition: %s -> %s",
+            session_id,
+            current_state,
+            next_phase,
+        )
+    
+    return next_phase
 
 
 def _get_instructions_for_intent(intent: str, state: dict[str, Any]) -> str:

@@ -117,6 +117,7 @@ def extract_height_from_text(text: str) -> int | None:
     - "какая цена на рост 147" -> 147
     - "зріст 120" -> 120
     - "на 128 см" -> 128
+    - "98" -> 98 (двузначное число в диапазоне 80-99)
     - "ціна" -> None
     """
     import re
@@ -128,6 +129,7 @@ def extract_height_from_text(text: str) -> int | None:
         r"\bна\s*(\d{2,3})\s*(см)?\b",  # на 128, на 128 см
         r"\b(\d{2,3})\s*см\b",  # 120 см
         r"\b(\d{3})\b",  # просто 147 (тризначне)
+        r"^(\d{2})$",  # просто 98 (двузначное, только если это всё сообщение)
     ]
     for pattern in patterns:
         match = re.search(pattern, text.lower())
