@@ -126,6 +126,20 @@ class NotificationService:
         if ctx:
             lines.append("Останнє від клієнта:")
             lines.append(ctx)
+        
+        # Add image URL if available (for vision escalations)
+        image_url = str(details.get("image_url") or "").strip()
+        if image_url:
+            lines.append(f"Фото: {self._truncate(image_url, 200)}")
+        
+        # Add vision-specific details if available
+        vision_identified = str(details.get("vision_identified") or "").strip()
+        if vision_identified:
+            lines.append(f"Vision визначив: {self._truncate(vision_identified, 100)}")
+        
+        confidence = details.get("confidence")
+        if confidence is not None:
+            lines.append(f"Confidence: {confidence:.0f}%")
 
         message = "\n".join(lines).strip()
         return self._truncate(message, 3900)
@@ -156,7 +170,47 @@ class NotificationService:
             details=details,
         )
 
+        # If image_url is provided, send photo with caption
+        image_url = details.get("image_url") if details else None
+        if image_url:
+            return await self._send_telegram_photo(image_url, message)
+        
         return await self._send_telegram_message(message)
+
+    async def _send_telegram_photo(self, photo_url: str, caption: str) -> bool:
+        """Send photo with caption to Telegram."""
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
+        
+        # Truncate caption to Telegram limit (1024 chars)
+        caption_truncated = self._truncate(caption, 1024)
+        
+        payload = {
+            "chat_id": self.chat_id,
+            "photo": photo_url,
+            "caption": caption_truncated,
+        }
+        
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(url, json=payload) as response,
+            ):
+                if response.status == 200:
+                    logger.info("Manager notification with photo sent successfully")
+                    return True
+                
+                resp_text = await response.text()
+                logger.error(
+                    "Failed to send photo notification: %s %s",
+                    response.status,
+                    resp_text,
+                )
+                # Fallback to text-only message
+                return await self._send_telegram_message(caption_truncated)
+        except Exception as e:
+            logger.error("Photo notification error: %s", e)
+            # Fallback to text-only message
+            return await self._send_telegram_message(caption_truncated)
 
     async def _send_telegram_message(self, text: str) -> bool:
         """Send raw message to Telegram."""

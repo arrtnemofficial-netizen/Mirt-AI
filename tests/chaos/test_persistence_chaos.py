@@ -27,6 +27,7 @@ Run with: python -m pytest tests/chaos/test_persistence_chaos.py -v -s
 import asyncio
 import gc
 import logging
+import os
 import sys
 import time
 import uuid
@@ -42,6 +43,15 @@ sys.path.insert(0, str(root))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# SAFETY: Chaos tests require real infra + explicit opt-in
+# =============================================================================
+_RUN_CHAOS = os.getenv("RUN_CHAOS_TESTS", "").strip().lower() in {"1", "true", "yes", "on"}
+pytestmark = pytest.mark.skipif(
+    not _RUN_CHAOS,
+    reason="Chaos tests require explicit opt-in: set RUN_CHAOS_TESTS=1",
+)
 
 
 # =============================================================================

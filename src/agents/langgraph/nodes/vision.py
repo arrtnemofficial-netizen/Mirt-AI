@@ -671,6 +671,9 @@ async def vision_node(
         logger.error("Vision agent error: %s", err)
         return _build_vision_error_escalation(err)
 
+    # -------------------------------------------------------------------------
+    # Catalog enrichment (best-effort): only possible if Vision gave a candidate
+    # -------------------------------------------------------------------------
     catalog_row: dict[str, Any] | None = None
     if response.identified_product:
         try:
@@ -690,110 +693,124 @@ async def vision_node(
         except Exception:
             catalog_row = None
 
-        # =====================================================
-        # CRITICAL: UNKNOWN PRODUCT = HARD ESCALATION!
-        # =====================================================
-        # ESCALATE if ANY of these conditions:
-        # 1. Vision returned identified_product but NOT in our DB
-        # 2. Vision returned NO product (identified_product is None)
-        # 3. Low confidence (< 50%) regardless of alternatives
-        # In ALL cases: DO NOT guess, ESCALATE to manager!
-        # =====================================================
-        confidence = response.confidence or 0.0
+    # =====================================================
+    # DUAL-TRACK ESCALATION (SSOT)
+    # =====================================================
+    # ESCALATE if:
+    # 1) Vision "identified" product but it's NOT in our catalog (hallucination/competitor)
+    # 2) Vision couldn't identify anything AND confidence is low
+    #
+    # IMPORTANT: This must work even when identified_product is None.
+    # Otherwise UX regresses to "що саме на фото?" (which user explicitly rejected).
+    # =====================================================
+    confidence = response.confidence or 0.0
+    claimed_name = (
+        getattr(response.identified_product, "name", None) if response.identified_product else None
+    )
+    product_not_in_catalog = response.identified_product is not None and catalog_row is None
+    no_product_identified = response.identified_product is None or (
+        response.identified_product and (response.identified_product.name or "") in ("<not identified>", "<none>", "")
+    )
 
-        # Case 1: AI "identified" product but it's NOT in catalog (hallucination/competitor)
-        product_not_in_catalog = response.identified_product is not None and catalog_row is None
+    from src.conf.config import settings
 
-        # Case 2: AI couldn't identify anything (product is None or "<not identified>")
-        no_product_identified = response.identified_product is None or (
-            response.identified_product
-            and response.identified_product.name in ("<not identified>", "<none>", "")
+    low_confidence = confidence < settings.VISION_CONFIDENCE_THRESHOLD
+    should_escalate = product_not_in_catalog or (no_product_identified and low_confidence)
+
+    if should_escalate:
+        logger.warning(
+            "🚨 [SESSION %s] ESCALATION: Product not in catalog or low confidence! "
+            "claimed='%s' confidence=%.0f%% catalog_found=%s",
+            session_id,
+            claimed_name or "<none>",
+            confidence * 100,
+            catalog_row is not None,
         )
 
-        # Case 3: Low confidence - don't trust the result
-        # Use configurable threshold from settings
-        from src.conf.config import settings
-        confidence_threshold = settings.VISION_CONFIDENCE_THRESHOLD
-        low_confidence = confidence < confidence_threshold
+        # Do NOT show incomplete/foreign product to customer
+        response.identified_product = None
 
-        # ESCALATE if: not in catalog OR (no product AND low confidence)
-        should_escalate = product_not_in_catalog or (no_product_identified and low_confidence)
+        escalation_reason = "product_not_in_catalog" if product_not_in_catalog else "low_confidence"
+        if no_product_identified:
+            escalation_reason = "product_not_identified"
 
-        if should_escalate:
-            logger.warning(
-                "🚨 [SESSION %s] ESCALATION: Product not in catalog or low confidence! "
-                "claimed='%s' confidence=%.0f%% catalog_found=%s",
-                session_id,
-                response.identified_product.name if response.identified_product else "<none>",
-                (response.confidence or 0.0) * 100,
-                catalog_row is not None,
+        escalation_messages = [
+            text_msg("Вітаю 🎀"),
+            text_msg("Зараз уточню по цьому товару наявність 🙌🏻"),
+        ]
+        if user_message and len(user_message.strip()) > 10:
+            escalation_messages.append(
+                text_msg("Чи можете описати товар детальніше або надіслати фото з іншого ракурсу?")
             )
-            # Clear the fake product - don't show it to user!
-            response.identified_product = None
-            response.needs_clarification = False  # Don't ask clarification, escalate!
-            # Force escalation message - HUMAN STYLE (no AI mentions!)
-            escalation_messages = [
-                text_msg("Вітаю 🎀"),
-                text_msg("Секундочку, уточню інформацію по цьому товару 🙌🏻"),
-            ]
 
-            # Send Telegram notification to manager in background (fire-and-forget)
-            # This must NOT block the response to the customer!
-            async def _send_notification_background():
-                try:
-                    from src.services.notification_service import NotificationService
+        async def _send_notification_background():
+            try:
+                from src.services.notification_service import NotificationService
 
-                    notification = NotificationService()
-                    await notification.send_escalation_alert(
-                        session_id=session_id or "unknown",
-                        reason="Товар не знайдено в каталозі (можливо з іншого магазину)",
-                        user_context=user_message,
-                        details={
-                            "trace_id": trace_id,
-                            "dialog_phase": "ESCALATED",
-                            "current_state": State.STATE_0_INIT.value,
-                            "intent": "PHOTO_IDENT",
-                            "confidence": confidence * 100,
-                            "image_url": deps.image_url if deps else None,
-                        },
-                    )
-                    logger.info("📲 [SESSION %s] Telegram notification sent to manager", session_id)
-                except Exception as notif_err:
-                    logger.warning("Failed to send Telegram notification: %s", notif_err)
+                notification = NotificationService()
+                reason_parts = []
+                if product_not_in_catalog:
+                    reason_parts.append("Товар не знайдено в каталозі")
+                if no_product_identified:
+                    reason_parts.append("Товар не ідентифіковано")
+                if low_confidence:
+                    reason_parts.append(f"Низька впевненість ({confidence*100:.0f}%)")
+                reason = " / ".join(reason_parts) if reason_parts else "Товар не знайдено"
 
-            # Fire and forget - don't await, just schedule
-            task = asyncio.create_task(_send_notification_background())
-            _BG_TASKS.add(task)
-            task.add_done_callback(_BG_TASKS.discard)
-
-            # Return IMMEDIATELY to customer - don't wait for notification
-            return {
-                "current_state": State.STATE_0_INIT.value,
-                "messages": escalation_messages,
-                "selected_products": [],
-                "dialog_phase": "ESCALATED",
-                "has_image": False,
-                "escalation_level": "HARD",  # HARD escalation - manager MUST respond!
-                "metadata": {
-                    **state.get("metadata", {}),
-                    "vision_confidence": response.confidence,
-                    "needs_clarification": False,
-                    "has_image": False,
-                    "vision_greeted": True,
-                    "escalation_level": "HARD",
-                    "escalation_reason": "product_not_in_catalog",
-                },
-                "agent_response": {
-                    "messages": escalation_messages,
-                    "metadata": {
-                        "session_id": session_id,
+                await notification.send_escalation_alert(
+                    session_id=session_id or "unknown",
+                    reason=reason,
+                    user_context=user_message,
+                    details={
+                        "trace_id": trace_id,
+                        "dialog_phase": "ESCALATED",
                         "current_state": State.STATE_0_INIT.value,
                         "intent": "PHOTO_IDENT",
-                        "escalation_level": "HARD",
+                        "confidence": confidence * 100,
+                        "image_url": deps.image_url if deps else None,
+                        "vision_identified": claimed_name,
+                        "escalation_reason": escalation_reason,
                     },
+                )
+                logger.info(
+                    "📲 [SESSION %s] Telegram notification sent to manager (dual-track escalation)",
+                    session_id,
+                )
+            except Exception as notif_err:
+                logger.warning("Failed to send Telegram notification: %s", notif_err)
+
+        task = asyncio.create_task(_send_notification_background())
+        _BG_TASKS.add(task)
+        task.add_done_callback(_BG_TASKS.discard)
+
+        return {
+            "current_state": State.STATE_0_INIT.value,
+            "messages": escalation_messages,
+            "selected_products": [],
+            "dialog_phase": "ESCALATED",
+            "has_image": False,
+            # Soft UX, but manager is notified immediately (dual-track)
+            "escalation_level": "SOFT",
+            "metadata": {
+                **state.get("metadata", {}),
+                "vision_confidence": response.confidence,
+                "needs_clarification": False,
+                "has_image": False,
+                "vision_greeted": True,
+                "escalation_level": "SOFT",
+                "escalation_reason": escalation_reason,
+            },
+            "agent_response": {
+                "messages": escalation_messages,
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_0_INIT.value,
+                    "intent": "PHOTO_IDENT",
+                    "escalation_level": "SOFT",
                 },
-                "step_number": state.get("step_number", 0) + 1,
-            }
+            },
+            "step_number": state.get("step_number", 0) + 1,
+        }
 
         # CRITICAL: Enrichment is MANDATORY for production quality
         # If Vision returned a product, we MUST enrich it from DB to get real price/photo/data

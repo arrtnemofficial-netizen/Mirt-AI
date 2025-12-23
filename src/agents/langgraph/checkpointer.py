@@ -179,7 +179,11 @@ def _log_if_slow(
     logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs%s", op, thread_id, elapsed, extra)
 
 
+# Track if pool was already opened to avoid spam logs
+_pool_opened = False
+
 async def _open_pool_on_demand(pool: Any | None) -> None:
+    global _pool_opened
     if pool is None or not hasattr(pool, "open"):
         return
     try:
@@ -187,7 +191,10 @@ async def _open_pool_on_demand(pool: Any | None) -> None:
             await pool.open(wait=True)
         except TypeError:
             await pool.open()
-        logger.info("[CHECKPOINTER] pool opened on demand")
+        # Log only once per process to reduce noise
+        if not _pool_opened:
+            logger.debug("[CHECKPOINTER] pool opened on demand (first time)")
+            _pool_opened = True
     except Exception as exc:
         msg = str(exc).lower()
         if "already" in msg and "open" in msg:

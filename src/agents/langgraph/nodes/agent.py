@@ -62,10 +62,12 @@ _OFFER_CONFIRMATION_KEYWORDS = [
 # SIZE EXTRACTION HELPER (delegated to helpers module)
 # =============================================================================
 from .helpers.size_parsing import extract_size_from_response, height_to_size
+from .helpers.intent_instructions import get_instructions_for_intent
 
 # Backward compatibility aliases
 _height_to_size = height_to_size
 _extract_size_from_response = extract_size_from_response
+_get_instructions_for_intent = get_instructions_for_intent
 
 
 async def agent_node(
@@ -310,6 +312,11 @@ async def agent_node(
                     response.metadata.intent = "PAYMENT_DELIVERY"
 
         selected_products = state.get("selected_products", [])
+        
+        # CRITICAL: In STATE_5_PAYMENT_DELIVERY, prevent product duplication
+        # Only allow adding products if user explicitly requests it (add keywords)
+        is_payment_state = current_state == State.STATE_5_PAYMENT_DELIVERY.value
+        
         if response.products:
             new_products = [p.model_dump() for p in response.products]
             user_text = user_message if isinstance(user_message, str) else str(user_message)
@@ -326,32 +333,66 @@ async def agent_node(
                 "другу",
                 "+",
             )
-            should_append = bool(selected_products) and any(
-                k in user_text_lower for k in add_keywords
-            )
-
-            if should_append:
-                merged: list[dict[str, Any]] = []
-                seen: set[str] = set()
-                for item in [*selected_products, *new_products]:
-                    pid = item.get("id")
-                    name = str(item.get("name") or "").strip().lower()
-                    size = str(item.get("size") or "").strip().lower()
-                    color = str(item.get("color") or "").strip().lower()
-                    key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    merged.append(item)
-                selected_products = merged
-                logger.info(
-                    "Agent appended products to cart: now=%d (added=%d)",
-                    len(selected_products),
-                    len(new_products),
-                )
+            has_explicit_add_intent = any(k in user_text_lower for k in add_keywords)
+            
+            # In payment state, ONLY append if explicit add intent
+            # Otherwise, ignore new products (they're likely hallucination/side-effect)
+            if is_payment_state:
+                if has_explicit_add_intent and selected_products:
+                    # User explicitly wants to add more products
+                    merged: list[dict[str, Any]] = []
+                    seen: set[str] = set()
+                    for item in [*selected_products, *new_products]:
+                        pid = item.get("id")
+                        name = str(item.get("name") or "").strip().lower()
+                        size = str(item.get("size") or "").strip().lower()
+                        color = str(item.get("color") or "").strip().lower()
+                        key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(item)
+                    selected_products = merged
+                    logger.info(
+                        "Agent appended products in payment state: now=%d (added=%d)",
+                        len(selected_products),
+                        len(new_products),
+                    )
+                else:
+                    # In payment state without explicit add intent → ignore new products
+                    logger.info(
+                        "⚠️ [SESSION %s] Ignoring %d products from LLM in payment state (no explicit add intent)",
+                        session_id,
+                        len(new_products),
+                    )
+                    # Keep existing products unchanged
+                    selected_products = selected_products or []
             else:
-                selected_products = new_products
-                logger.info("Agent found products: %s", [p.name for p in response.products])
+                # Not in payment state - normal logic
+                should_append = bool(selected_products) and has_explicit_add_intent
+
+                if should_append:
+                    merged: list[dict[str, Any]] = []
+                    seen: set[str] = set()
+                    for item in [*selected_products, *new_products]:
+                        pid = item.get("id")
+                        name = str(item.get("name") or "").strip().lower()
+                        size = str(item.get("size") or "").strip().lower()
+                        color = str(item.get("color") or "").strip().lower()
+                        key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(item)
+                    selected_products = merged
+                    logger.info(
+                        "Agent appended products to cart: now=%d (added=%d)",
+                        len(selected_products),
+                        len(new_products),
+                    )
+                else:
+                    selected_products = new_products
+                    logger.info("Agent found products: %s", [p.name for p in response.products])
         else:
             # Keep existing products if LLM didn't return new ones
             selected_products = selected_products or []
@@ -686,47 +727,3 @@ def _determine_dialog_phase(
         )
     
     return next_phase
-
-
-def _get_instructions_for_intent(intent: str, state: dict[str, Any]) -> str:
-    """Get context-specific instructions based on detected intent."""
-
-    instructions = {
-        "GREETING_ONLY": (
-            "Привітай клієнта тепло, як MIRT_UA менеджер Софія. "
-            "Запитай чим можеш допомогти. "
-            "Не перевантажуй інформацією - будь лаконічною."
-        ),
-        "DISCOVERY_OR_QUESTION": (
-            "Клієнт шукає товар або має питання. "
-            "Знайди відповідні товари в EMBEDDED CATALOG. "
-            "Покажи варіанти з цінами та характеристиками. "
-            "Якщо потрібно - запитай уточнення (зріст, вік, колір)."
-        ),
-        "SIZE_HELP": (
-            "Клієнт питає про розмір. "
-            "Дай КОНКРЕТНУ відповідь з розмірної сітки. "
-            "Якщо знаєш зріст - підбери розмір. "
-            "Якщо є вибраний товар - переходь до пропозиції!"
-        ),
-        "COLOR_HELP": (
-            "Клієнт питає про колір. "
-            "Покажи доступні кольори для товару. "
-            "Якщо товар є в потрібному кольорі - підтверди. "
-            "Якщо немає - запропонуй альтернативи."
-        ),
-        "THANKYOU_SMALLTALK": (
-            "Клієнт подякував або веде світську бесіду. "
-            "Відповідай тепло, але коротко. "
-            "Запропонуй допомогу, якщо потрібно."
-        ),
-    }
-
-    # Add product context if available
-    products = state.get("selected_products", [])
-    if products:
-        product_names = ", ".join(p.get("name", "товар") for p in products[:3])
-        base = instructions.get(intent, instructions["DISCOVERY_OR_QUESTION"])
-        return f"{base}\n\nУ діалозі вже є товари: {product_names}."
-
-    return instructions.get(intent, instructions["DISCOVERY_OR_QUESTION"])

@@ -163,13 +163,34 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
     """
     Determine which sub-phase of payment we're in.
 
-    Based on what data we have:
+    Based on what data we have AND user message content:
     - No customer data → REQUEST_DATA
     - Has customer data, not confirmed → CONFIRM_DATA
     - Confirmed, no payment → SHOW_PAYMENT
+    - User says "оплатила/оплатив" → SHOW_PAYMENT (waiting for proof)
     - Has payment proof → THANK_YOU
     """
     metadata = state.get("metadata", {})
+    
+    # Check user message for payment confirmation keywords
+    messages = state.get("messages", [])
+    user_message = ""
+    for msg in reversed(messages):
+        if isinstance(msg, dict):
+            if msg.get("role") == "user":
+                user_message = msg.get("content", "")
+                break
+        elif hasattr(msg, "type") and getattr(msg, "type", "") == "human":
+            user_message = getattr(msg, "content", "")
+            break
+    
+    user_message_lower = user_message.lower() if user_message else ""
+    payment_confirmation_keywords = [
+        "оплатила", "оплатив", "переказала", "переказав",
+        "відправила скрін", "відправив скрін", "скрін", "квитанцію",
+        "доказ оплати", "оплачено", "переказано"
+    ]
+    user_says_paid = any(keyword in user_message_lower for keyword in payment_confirmation_keywords)
 
     # Check if we have customer data
     has_name = bool(metadata.get("customer_name"))
@@ -187,6 +208,9 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
 
     if payment_proof:
         return "THANK_YOU"
+    elif user_says_paid:
+        # User says they paid → we're waiting for proof (screenshot)
+        return "SHOW_PAYMENT"
     elif data_confirmed:
         return "SHOW_PAYMENT"
     elif has_customer_data:
@@ -271,12 +295,24 @@ def determine_next_dialog_phase(
 
     # STATE_5_PAYMENT_DELIVERY transitions
     if current_state == "STATE_5_PAYMENT_DELIVERY":
+        # CRITICAL: Map sub-phase to dialog_phase deterministically
+        # SHOW_PAYMENT means we showed payment details and are waiting for proof (screenshot)
+        # CONFIRM_DATA means we're confirming delivery data before showing payment
         phase_map = {
             "THANK_YOU": "UPSELL_OFFERED",
-            "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",
-            "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",
+            "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",  # Waiting for screenshot/proof
+            "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",  # Confirming data, then show payment
+            "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",  # Still collecting delivery data
         }
-        return phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
+        mapped_phase = phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
+        
+        # Additional check: if user says "оплатила" but sub-phase wasn't updated yet,
+        # force WAITING_FOR_PAYMENT_PROOF
+        # (This is a safety net - ideally get_payment_sub_phase should catch this)
+        if payment_sub_phase == "SHOW_PAYMENT":
+            return "WAITING_FOR_PAYMENT_PROOF"
+        
+        return mapped_phase
 
     # STATE_6_UPSELL transitions
     if current_state == "STATE_6_UPSELL":
