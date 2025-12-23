@@ -565,13 +565,13 @@ async def agent_node(
                 color_info or "None",
             )
         else:
-        logger.info(
-            "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s)",
-            session_id,
-            state.get("dialog_phase", "INIT"),
-            dialog_phase,
-            new_state_str,
-        )
+            logger.info(
+                "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s)",
+                session_id,
+                state.get("dialog_phase", "INIT"),
+                dialog_phase,
+                new_state_str,
+            )
 
         if settings.DEBUG_TRACE_LOGS:
             preview_text = ""

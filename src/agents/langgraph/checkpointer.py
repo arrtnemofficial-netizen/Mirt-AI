@@ -427,7 +427,8 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 kwargs=pool_kwargs,
             )
         except TypeError:
-        pool = AsyncConnectionPool(
+            # Backward-compat: some psycopg_pool versions don't support `open=`.
+            pool = AsyncConnectionPool(
                 conninfo=database_url,
                 min_size=pool_min_size,
                 max_size=pool_max_size,
@@ -463,7 +464,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                             and len(locals()["result"]) > 0
                         ):
                             payload = locals()["result"][0]
-                            else:
+                        else:
                             payload = locals().get("result")
                     except Exception:
                         payload = None
@@ -735,7 +736,7 @@ async def warmup_checkpointer_pool() -> bool:
     except Exception:
         timeout_s = 15.0
 
-        checkpointer = get_checkpointer()
+    checkpointer = get_checkpointer()
     pool = getattr(checkpointer, "pool", None)
     if pool is None:
         return False
@@ -754,9 +755,9 @@ async def warmup_checkpointer_pool() -> bool:
             "[CHECKPOINTER] pool warmup failed after %.2fs: %s",
             time.perf_counter() - _t0,
             e,
-                )
-                return False
-            
+        )
+        return False
+
     logger.info("[CHECKPOINTER] pool open triggered in %.2fs", time.perf_counter() - _t0)
 
     async def _preflight() -> None:
@@ -771,12 +772,12 @@ async def warmup_checkpointer_pool() -> bool:
             "[CHECKPOINTER] pool preflight failed after %.2fs: %s",
             time.perf_counter() - _t1,
             e,
-                )
-                return False
-            
+        )
+        return False
+
     logger.info("[CHECKPOINTER] pool preflight ok in %.2fs", time.perf_counter() - _t1)
-            return True
-        
+    return True
+
 
 def is_persistent() -> bool:
     """Check if the current checkpointer is persistent (survives restarts)."""
