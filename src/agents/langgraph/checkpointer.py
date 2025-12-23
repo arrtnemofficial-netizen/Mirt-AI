@@ -244,22 +244,53 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     """
     Create PostgreSQL checkpointer for production.
 
-    Requires:
+    Requires (in priority order):
+    - DATABASE_URL_POOLER (recommended for production with PgBouncer)
     - DATABASE_URL or POSTGRES_URL environment variable
+    - Auto-build from SUPABASE_API_KEY (development only, disabled in production/staging)
     - langgraph-checkpoint-postgres package
+
+    Environment detection:
+    - Production/staging: Requires explicit DATABASE_URL or DATABASE_URL_POOLER
+    - Development: Allows auto-build from SUPABASE_API_KEY as fallback
 
     The checkpointer will:
     - Create tables automatically on first use
     - Store full state at every step
     - Enable time travel and forking
+    - Use prepare_threshold=None to disable prepared statements (PgBouncer compatible)
+    - Open pool on-demand (lazy initialization)
     """
     # Try to get database URL from environment
-    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+    # Priority: DATABASE_URL_POOLER > DATABASE_URL > POSTGRES_URL
+    database_url = (
+        os.getenv("DATABASE_URL_POOLER") 
+        or os.getenv("DATABASE_URL") 
+        or os.getenv("POSTGRES_URL")
+    )
 
     # Import settings at function start to ensure it's always available
     from src.conf.config import settings
     
+    # Determine environment
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    is_production = env in ("production", "prod", "staging")
+    
     if not database_url:
+        if is_production:
+            # In production/staging, require explicit DATABASE_URL
+            logger.error(
+                "CRITICAL: DATABASE_URL or DATABASE_URL_POOLER is required in %s environment! "
+                "Auto-building from SUPABASE_API_KEY is disabled for production safety. "
+                "Set DATABASE_URL or DATABASE_URL_POOLER explicitly.",
+                env
+            )
+            raise ValueError(
+                f"DATABASE_URL or DATABASE_URL_POOLER must be set explicitly in {env} environment. "
+                "Auto-build from SUPABASE_API_KEY is disabled for production safety."
+            )
+        
+        # Only allow auto-build in development/local environments
         # Try to build from Supabase settings
         if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_API_KEY"):
             # Supabase connection string format
@@ -279,8 +310,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     logger.info(f"DEBUG: Extracted project_ref: {project_ref}")
                     # Build postgres connection string
                     # Default Supabase postgres port is 5432, password from service_role key
+                    # NOTE: This uses direct connection, not pooler (for dev only)
                     database_url = f"postgresql://postgres:{settings.SUPABASE_API_KEY.get_secret_value()}@db.{project_ref}.supabase.co:5432/postgres"
-                    logger.info(f"DEBUG: Built DATABASE_URL: postgresql://postgres:***@db.{project_ref}.supabase.co:5432/postgres")
+                    logger.warning(
+                        "Auto-built DATABASE_URL from SUPABASE_API_KEY (dev mode only). "
+                        "For production, set DATABASE_URL_POOLER explicitly (recommended) or DATABASE_URL."
+                    )
 
     if not database_url:
         logger.warning(
@@ -296,12 +331,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         from psycopg_pool import AsyncConnectionPool
         import psycopg
 
-        # First, setup tables with a separate autocommit connection (sync)
-        # CREATE INDEX CONCURRENTLY requires autocommit mode
-        setup_conn = psycopg.connect(database_url, autocommit=True)
+        # Setup tables first using sync connection with prepare_threshold=None
+        # None completely disables prepared statements (vs 0 which means "after 0 uses")
+        setup_conn = psycopg.connect(database_url, autocommit=True, prepare_threshold=None)
         try:
-            setup_checkpointer = PostgresSaver(setup_conn)
-            setup_checkpointer.setup()
+            temp_checkpointer = PostgresSaver(setup_conn)
+            temp_checkpointer.setup()
         finally:
             setup_conn.close()
 
@@ -311,44 +346,71 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         max_messages, max_chars, drop_base64 = get_checkpoint_compaction(settings)
 
-        # Create AsyncConnectionPool for async checkpointer
-        # AsyncPostgresSaver requires AsyncConnectionPool for production use
-        # ROOT CAUSE FIX: Disable prepared statements to prevent DuplicatePreparedStatement errors
-        # Prepared statements cause conflicts when multiple connections in pool try to create
-        # statements with same name. For checkpointing, prepared statements don't provide significant
-        # performance benefit, so disabling them eliminates the conflict.
-        # 
-        # IMPORTANT: prepare_threshold must be passed via kwargs to AsyncConnectionPool
-        # This parameter is passed to psycopg.AsyncConnection constructor for each connection in pool
-        # prepare_threshold=0 disables automatic prepared statement creation
-        # 
-        # ADDITIONAL SAFEGUARD: configure callback executes DEALLOCATE ALL on each connection
-        # This ensures no prepared statements persist when connection is reused from pool
-        async def configure_connection(conn):
-            """Configure connection to prevent prepared statement conflicts.
-            
-            This callback runs on each connection when it's acquired from the pool.
-            DEALLOCATE ALL removes any existing prepared statements, preventing conflicts.
-            """
+        # Create async pool with prepare_threshold=None
+        # CRITICAL for Supabase PgBouncer which doesn't support prepared statements
+        # None = never use prepared statements (0 still creates them after 0 uses)
+        #
+        # Also configure for Supabase connection limits:
+        # - max_idle=30: Close idle connections before Supabase does (avoids SSL errors)
+        # - check: Verify connection is alive before use
+
+        async def check_connection(conn):
+            """Check if connection is still alive before returning from pool."""
             try:
-                await conn.execute("DEALLOCATE ALL")
-            except Exception as e:
-                # Log but don't fail - connection might not have any prepared statements
-                logger.debug("[CHECKPOINTER] DEALLOCATE ALL warning: %s", type(e).__name__)
-        
-        pool = AsyncConnectionPool(
-            conninfo=database_url,  # Original URL without modifications
-            min_size=2,
-            max_size=10,
-            open=False,  # Will be opened explicitly after creation
-            kwargs={"prepare_threshold": 0},  # Disable prepared statements to prevent conflicts
-            configure=configure_connection,  # Additional safeguard: clean prepared statements on reuse
-        )
-        
-        # Open pool explicitly (required, open=True is deprecated)
-        # Note: This is a sync function, but pool.open() is async
-        # We'll open it in warmup_checkpointer_pool() instead
-        # For now, create the checkpointer - pool will be opened during warmup
+                await conn.execute("SELECT 1")
+            except Exception:
+                raise  # Connection is dead, pool will discard it
+
+        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 1)
+        pool_max_size = _setting_int(settings, "CHECKPOINTER_POOL_MAX_SIZE", 5)
+        pool_timeout_s = _setting_float(settings, "CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
+        pool_max_idle_s = _setting_float(settings, "CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
+        connect_timeout_s = _setting_float(settings, "CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 10.0)
+
+        statement_timeout_ms = _setting_int(settings, "CHECKPOINTER_STATEMENT_TIMEOUT_MS", 8000)
+        lock_timeout_ms = _setting_int(settings, "CHECKPOINTER_LOCK_TIMEOUT_MS", 2000)
+
+        pool_min_size = max(pool_min_size, 0)
+        pool_max_size = max(pool_max_size, 1)
+        pool_min_size = min(pool_min_size, pool_max_size)
+
+        options = None
+        if statement_timeout_ms > 0 or lock_timeout_ms > 0:
+            parts: list[str] = []
+            if statement_timeout_ms > 0:
+                parts.append(f"-c statement_timeout={statement_timeout_ms}")
+            if lock_timeout_ms > 0:
+                parts.append(f"-c lock_timeout={lock_timeout_ms}")
+            options = " ".join(parts) if parts else None
+
+        pool_kwargs: dict[str, Any] = {
+            "prepare_threshold": None,  # CRITICAL: Completely disable prepared statements
+            "connect_timeout": connect_timeout_s,
+        }
+        if options:
+            pool_kwargs["options"] = options
+
+        try:
+            pool = AsyncConnectionPool(
+                conninfo=database_url,
+                min_size=pool_min_size,
+                max_size=pool_max_size,
+                max_idle=pool_max_idle_s,
+                check=check_connection,  # Verify connection health before use
+                timeout=pool_timeout_s,
+                open=False,
+                kwargs=pool_kwargs,
+            )
+        except TypeError:
+            pool = AsyncConnectionPool(
+                conninfo=database_url,
+                min_size=pool_min_size,
+                max_size=pool_max_size,
+                max_idle=pool_max_idle_s,
+                check=check_connection,  # Verify connection health before use
+                timeout=pool_timeout_s,
+                kwargs=pool_kwargs,
+            )
         
         # Create AsyncPostgresSaver instance using async pool
         base_checkpointer = AsyncPostgresSaver(conn=pool)
@@ -362,10 +424,15 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 self._base = base
                 self._pool = pool  # Store pool reference for lifecycle management
             
+            async def _ensure_pool_open(self) -> None:
+                """Ensure pool is open before use (on-demand opening)."""
+                await _open_pool_on_demand(self._pool)
+            
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 result = None
                 try:
+                    await self._ensure_pool_open()
                     # Delegate directly to base AsyncPostgresSaver instance
                     result = await self._base.aget_tuple(*args, **kwargs)
                     return result
@@ -401,6 +468,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             async def aput(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    await self._ensure_pool_open()
                     if len(args) > 1:
                         payload = _compact_payload(
                             args[1],
@@ -420,6 +488,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             async def aput_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    await self._ensure_pool_open()
                     if len(args) > 1:
                         payload = _compact_payload(
                             args[1],
