@@ -366,28 +366,28 @@ async def agent_node(
                 # Not in payment state - normal logic
                 should_append = bool(selected_products) and has_explicit_add_intent
 
-                if should_append:
-                    merged: list[dict[str, Any]] = []
-                    seen: set[str] = set()
-                    for item in [*selected_products, *new_products]:
-                        pid = item.get("id")
-                        name = str(item.get("name") or "").strip().lower()
-                        size = str(item.get("size") or "").strip().lower()
-                        color = str(item.get("color") or "").strip().lower()
-                        key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        merged.append(item)
-                    selected_products = merged
-                    logger.info(
-                        "Agent appended products to cart: now=%d (added=%d)",
-                        len(selected_products),
-                        len(new_products),
-                    )
-                else:
-                    selected_products = new_products
-                    logger.info("Agent found products: %s", [p.name for p in response.products])
+            if should_append:
+                merged: list[dict[str, Any]] = []
+                seen: set[str] = set()
+                for item in [*selected_products, *new_products]:
+                    pid = item.get("id")
+                    name = str(item.get("name") or "").strip().lower()
+                    size = str(item.get("size") or "").strip().lower()
+                    color = str(item.get("color") or "").strip().lower()
+                    key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(item)
+                selected_products = merged
+                logger.info(
+                    "Agent appended products to cart: now=%d (added=%d)",
+                    len(selected_products),
+                    len(new_products),
+                )
+            else:
+                selected_products = new_products
+                logger.info("Agent found products: %s", [p.name for p in response.products])
         else:
             # Keep existing products if LLM didn't return new ones
             selected_products = selected_products or []
@@ -466,7 +466,7 @@ async def agent_node(
                     "state": current_state,
                     "reasons": ",".join(fallback_reasons),
                 },
-            )
+                )
 
         latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -565,13 +565,13 @@ async def agent_node(
                 color_info or "None",
             )
         else:
-            logger.info(
-                "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s)",
-                session_id,
-                state.get("dialog_phase", "INIT"),
-                dialog_phase,
-                new_state_str,
-            )
+        logger.info(
+            "🔄 [SESSION %s] Dialog phase: %s → %s (state: %s)",
+            session_id,
+            state.get("dialog_phase", "INIT"),
+            dialog_phase,
+            new_state_str,
+        )
 
         if settings.DEBUG_TRACE_LOGS:
             preview_text = ""
@@ -712,7 +712,7 @@ def _determine_dialog_phase(
         user_confirmed=user_confirmed,
         payment_sub_phase=payment_sub_phase,
     )
-    
+
     if current_state == "STATE_3_SIZE_COLOR":
         logger.info(
             "🔍 [SESSION %s] Dialog phase transition: %s -> %s",

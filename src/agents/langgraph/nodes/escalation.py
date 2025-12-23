@@ -91,27 +91,44 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     # =========================================================================
     # NOTIFY MANAGER
     # =========================================================================
-    try:
-        from src.services.notification_service import NotificationService
+    # SAFETY: Check if escalation was already sent by vision_node
+    # Vision node sends escalation for low confidence/product not found scenarios
+    metadata = state.get("metadata", {})
+    escalation_reason = metadata.get("escalation_reason")
+    if (
+        metadata.get("escalation_level") == "L1"
+        and escalation_reason
+        and escalation_reason in ("low_confidence", "product_not_identified", "product_not_in_catalog")
+    ):
+        # Vision node already sent escalation, skip duplicate notification
+        logger.info(
+            "[SESSION %s] Escalation already sent by vision_node (reason=%s), skipping duplicate notification",
+            session_id,
+            escalation_reason,
+        )
+    else:
+        # Only send notification if vision_node didn't already send it
+        try:
+            from src.services.notification_service import NotificationService
 
-        notifier = NotificationService()
+            notifier = NotificationService()
 
-        # Get last user message for context
-        messages = state.get("messages", [])
-        user_context = None
-        if messages:
-            # Try to find last user message
-            for m in reversed(messages):
-                if isinstance(m, dict) and m.get("role") == "user":
-                    user_context = m.get("content")
-                    break
-                elif hasattr(m, "type") and m.type == "human":
-                    user_context = m.content
-                    break
+            # Get last user message for context
+            messages = state.get("messages", [])
+            user_context = None
+            if messages:
+                # Try to find last user message
+                for m in reversed(messages):
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        user_context = m.get("content")
+                        break
+                    elif hasattr(m, "type") and m.type == "human":
+                        user_context = m.content
+                        break
 
-        await notifier.send_escalation_alert(session_id, reason, user_context)
-    except Exception as e:
-        logger.error("Failed to send manager notification: %s", e)
+            await notifier.send_escalation_alert(session_id, reason, user_context)
+        except Exception as e:
+            logger.error("Failed to send manager notification: %s", e)
 
     # =========================================================================
     # SITNIKS: Set status to "AI Увага" and assign to human manager

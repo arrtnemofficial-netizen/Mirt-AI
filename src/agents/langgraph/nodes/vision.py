@@ -772,7 +772,7 @@ async def vision_node(
         # STANDARD ESCALATION MESSAGE: Only greeting + "will check availability"
         # Do NOT ask for more details - manager will handle it
         escalation_messages = [
-            text_msg("Вітаю 🎀"),
+            text_msg("Вітаю 🎀 З вами MIRT_UA, менеджер Софія."),
             text_msg("Зараз уточню по цьому товару наявність 🙌🏻"),
         ]
         # REMOVED: Don't ask for more details/clarification - this is escalation, manager will handle
@@ -784,51 +784,82 @@ async def vision_node(
                 "🚨 [SESSION %s] Escalation already in progress, skipping duplicate",
                 session_id,
             )
-        else:
-            _ACTIVE_ESCALATIONS.add(session_key)
+            # Return early without creating task
+            return {
+                "current_state": State.STATE_0_INIT.value,
+                "messages": escalation_messages,
+                "selected_products": [],
+                "dialog_phase": "ESCALATED",
+                "has_image": False,
+                "escalation_level": "L1",
+                "metadata": {
+                    **state.get("metadata", {}),
+                    "vision_confidence": response.confidence,
+                    "needs_clarification": False,
+                    "has_image": False,
+                    "vision_greeted": True,
+                    "escalation_level": "L1",
+                    "escalation_reason": escalation_reason,
+                    "escalation_mode": "SOFT",
+                },
+                "agent_response": {
+                    "messages": escalation_messages,
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": State.STATE_0_INIT.value,
+                        "intent": "PHOTO_IDENT",
+                        "escalation_level": "L1",
+                        "notes": "escalation_mode=SOFT",
+                    },
+                },
+                "step_number": state.get("step_number", 0) + 1,
+            }
 
-            async def _send_notification_background():
-                try:
-                    from src.services.notification_service import NotificationService
+        # Add to active escalations BEFORE creating task to prevent race condition
+        _ACTIVE_ESCALATIONS.add(session_key)
 
-                    notification = NotificationService()
-                    reason_parts = []
-                    if product_not_in_catalog:
-                        reason_parts.append("Товар не знайдено в каталозі")
-                    if no_product_identified:
-                        reason_parts.append("Товар не ідентифіковано")
-                    if low_confidence:
-                        reason_parts.append(f"Низька впевненість ({confidence*100:.0f}%)")
-                    reason = " / ".join(reason_parts) if reason_parts else "Товар не знайдено"
+        async def _send_notification_background():
+            try:
+                from src.services.notification_service import NotificationService
 
-                    await notification.send_escalation_alert(
-                        session_id=session_id or "unknown",
-                        reason=reason,
-                        user_context=user_message,
-                        details={
-                            "trace_id": trace_id,
-                            "dialog_phase": "ESCALATED",
-                            "current_state": State.STATE_0_INIT.value,
-                            "intent": "PHOTO_IDENT",
-                            "confidence": confidence * 100,
-                            "image_url": deps.image_url if deps else None,
-                            "vision_identified": claimed_name,
-                            "escalation_reason": escalation_reason,
-                        },
-                    )
-                    logger.info(
-                        "📲 [SESSION %s] Telegram notification sent to manager (dual-track escalation)",
-                        session_id,
-                    )
-                except Exception as notif_err:
-                    logger.warning("Failed to send Telegram notification: %s", notif_err)
-                finally:
-                    # Remove from active escalations after completion
-                    _ACTIVE_ESCALATIONS.discard(session_key)
+                notification = NotificationService()
+                reason_parts = []
+                if product_not_in_catalog:
+                    reason_parts.append("Товар не знайдено в каталозі")
+                if no_product_identified:
+                    reason_parts.append("Товар не ідентифіковано")
+                if low_confidence:
+                    reason_parts.append(f"Низька впевненість ({confidence*100:.0f}%)")
+                reason = " / ".join(reason_parts) if reason_parts else "Товар не знайдено"
 
-            task = asyncio.create_task(_send_notification_background())
-            _BG_TASKS.add(task)
-            task.add_done_callback(_BG_TASKS.discard)
+                await notification.send_escalation_alert(
+                    session_id=session_id or "unknown",
+                    reason=reason,
+                    user_context=user_message,
+                    details={
+                        "trace_id": trace_id,
+                        "dialog_phase": "ESCALATED",
+                        "current_state": State.STATE_0_INIT.value,
+                        "intent": "PHOTO_IDENT",
+                        "confidence": confidence * 100,
+                        "image_url": deps.image_url if deps else None,
+                        "vision_identified": claimed_name,
+                        "escalation_reason": escalation_reason,
+                    },
+                )
+                logger.info(
+                    "📲 [SESSION %s] Telegram notification sent to manager (dual-track escalation)",
+                    session_id,
+                )
+            except Exception as notif_err:
+                logger.warning("Failed to send Telegram notification: %s", notif_err)
+            finally:
+                # Remove from active escalations after completion
+                _ACTIVE_ESCALATIONS.discard(session_key)
+
+        task = asyncio.create_task(_send_notification_background())
+        _BG_TASKS.add(task)
+        task.add_done_callback(_BG_TASKS.discard)
 
         return {
             "current_state": State.STATE_0_INIT.value,
