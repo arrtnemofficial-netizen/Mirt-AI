@@ -43,12 +43,22 @@
 
 **Реализация:**
 ```python
+# IMPORTANT: prepare_threshold must be set via conninfo string, not kwargs
+# psycopg reads prepare_threshold from connection string parameters
+import urllib.parse
+parsed = urllib.parse.urlparse(database_url)
+query_params = urllib.parse.parse_qs(parsed.query)
+query_params["prepare_threshold"] = ["0"]  # Disable prepared statements
+new_query = urllib.parse.urlencode(query_params, doseq=True)
+database_url_with_prepare = urllib.parse.urlunparse(
+    (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
+)
+
 pool = AsyncConnectionPool(
-    conninfo=database_url,
+    conninfo=database_url_with_prepare,  # Use modified URL with prepare_threshold=0
     min_size=2,
     max_size=10,
     open=False,
-    kwargs={"prepare_threshold": 0},  # Disable prepared statements
 )
 ```
 
@@ -62,7 +72,8 @@ pool = AsyncConnectionPool(
 ## Изменения
 
 ### 1. `src/agents/langgraph/checkpointer.py`
-- Добавлен `kwargs={"prepare_threshold": 0}` в `AsyncConnectionPool`
+- Модифицирован `database_url` для добавления `prepare_threshold=0` в query string
+- Параметр передается через conninfo строку (не через kwargs), так как psycopg читает его из URL
 - Добавлены комментарии объясняющие решение
 
 ### 2. `src/services/conversation/handler.py`

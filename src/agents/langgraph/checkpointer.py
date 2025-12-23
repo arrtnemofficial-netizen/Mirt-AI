@@ -317,13 +317,24 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         # Prepared statements cause conflicts when multiple connections in pool try to create
         # statements with same name. For checkpointing, prepared statements don't provide significant
         # performance benefit, so disabling them eliminates the conflict.
-        # prepare_threshold=0 disables prepared statements (use regular queries instead)
+        # 
+        # IMPORTANT: prepare_threshold must be set via conninfo string, not kwargs
+        # psycopg reads prepare_threshold from connection string parameters
+        # Format: "postgresql://...?prepare_threshold=0"
+        import urllib.parse
+        parsed = urllib.parse.urlparse(database_url)
+        query_params = urllib.parse.parse_qs(parsed.query)
+        query_params["prepare_threshold"] = ["0"]  # Disable prepared statements
+        new_query = urllib.parse.urlencode(query_params, doseq=True)
+        database_url_with_prepare = urllib.parse.urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
+        )
+        
         pool = AsyncConnectionPool(
-            conninfo=database_url,
+            conninfo=database_url_with_prepare,  # Use modified URL with prepare_threshold=0
             min_size=2,
             max_size=10,
             open=False,  # Will be opened explicitly after creation
-            kwargs={"prepare_threshold": 0},  # Disable prepared statements to prevent conflicts
         )
         
         # Open pool explicitly (required, open=True is deprecated)
