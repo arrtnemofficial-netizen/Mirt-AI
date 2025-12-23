@@ -613,13 +613,17 @@ class ConversationHandler:
             # Notify manager for ANY escalation-like outcome.
             # This covers cases where the graph finishes with goto="end" (e.g. payment proof)
             # and therefore does not pass through escalation_node.
+            # BUT: Skip if notification was already sent by vision_node or escalation_node
             try:
+                # Check if notification was already sent (e.g. by vision_node)
+                notification_already_sent = bool(result_state.get("manager_notification_sent", False))
+                
                 is_escalation = bool(
                     agent_response.escalation
                     or (agent_response.metadata.escalation_level not in (None, "", "NONE"))
                     or bool(result_state.get("should_escalate"))
                 )
-                if is_escalation:
+                if is_escalation and not notification_already_sent:
                     from src.services.notification_service import NotificationService
 
                     reason = ""

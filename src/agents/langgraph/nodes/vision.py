@@ -869,6 +869,7 @@ async def vision_node(
             "has_image": False,
             # Soft UX, but manager is notified immediately (dual-track)
             "escalation_level": "L1",  # SOFT escalation → L1 (contract-compliant)
+            "manager_notification_sent": True,  # Flag to prevent duplicate notifications
             "metadata": {
                 **state.get("metadata", {}),
                 "vision_confidence": response.confidence,

@@ -739,7 +739,20 @@ async def warmup_checkpointer_pool() -> bool:
     checkpointer = get_checkpointer()
     pool = getattr(checkpointer, "pool", None)
     if pool is None:
+        logger.debug("[CHECKPOINTER] warmup skipped: no pool (memory checkpointer?)")
         return False
+
+    # Check if pool is already open
+    if hasattr(pool, "_pool") and pool._pool is not None:
+        try:
+            # Try to get a connection to verify pool is working
+            async with pool.connection() as conn:
+                await conn.execute("SELECT 1")
+            logger.debug("[CHECKPOINTER] warmup skipped: pool already open and working")
+            return True
+        except Exception:
+            # Pool exists but not working, continue with warmup
+            pass
 
     _t0 = time.perf_counter()
     try:
@@ -750,6 +763,19 @@ async def warmup_checkpointer_pool() -> bool:
         except TypeError:
             # Older psycopg_pool versions may not support wait=...
             await asyncio.wait_for(pool.open(), timeout=timeout_s)
+        except Exception as open_err:
+            # Check if pool is already open (some versions raise error on double-open)
+            err_msg = str(open_err).lower()
+            if "already" in err_msg and "open" in err_msg:
+                logger.debug("[CHECKPOINTER] pool already open, continuing with preflight")
+            else:
+                raise
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[CHECKPOINTER] pool warmup timed out after %.2fs (pool may open lazily)",
+            time.perf_counter() - _t0,
+        )
+        return False
     except Exception as e:
         logger.warning(
             "[CHECKPOINTER] pool warmup failed after %.2fs: %s",
@@ -767,6 +793,12 @@ async def warmup_checkpointer_pool() -> bool:
     _t1 = time.perf_counter()
     try:
         await asyncio.wait_for(_preflight(), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[CHECKPOINTER] pool preflight timed out after %.2fs",
+            time.perf_counter() - _t1,
+        )
+        return False
     except Exception as e:
         logger.warning(
             "[CHECKPOINTER] pool preflight failed after %.2fs: %s",

@@ -93,9 +93,18 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     # =========================================================================
     # SAFETY: Check if escalation was already sent by vision_node
     # Vision node sends escalation for low confidence/product not found scenarios
+    notification_sent = False
     metadata = state.get("metadata", {})
     escalation_reason = metadata.get("escalation_reason")
-    if (
+    
+    # Check if notification was already sent (e.g. by vision_node)
+    if state.get("manager_notification_sent", False):
+        logger.info(
+            "[SESSION %s] Manager notification already sent (flag set), skipping duplicate",
+            session_id,
+        )
+        notification_sent = True  # Already sent, mark as sent
+    elif (
         metadata.get("escalation_level") == "L1"
         and escalation_reason
         and escalation_reason in ("low_confidence", "product_not_identified", "product_not_in_catalog")
@@ -106,6 +115,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
             session_id,
             escalation_reason,
         )
+        notification_sent = True  # Already sent by vision_node
     else:
         # Only send notification if vision_node didn't already send it
         try:
@@ -127,8 +137,10 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
                         break
 
             await notifier.send_escalation_alert(session_id, reason, user_context)
+            notification_sent = True
         except Exception as e:
             logger.error("Failed to send manager notification: %s", e)
+            notification_sent = False
 
     # =========================================================================
     # SITNIKS: Set status to "AI Увага" and assign to human manager
@@ -160,5 +172,6 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
         "dialog_phase": "COMPLETED",
         "should_escalate": True,
         "escalation_reason": reason,
+        "manager_notification_sent": notification_sent,  # Flag to prevent duplicate notifications
         "step_number": state.get("step_number", 0) + 1,
     }
