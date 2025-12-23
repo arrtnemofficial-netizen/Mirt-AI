@@ -299,11 +299,13 @@ class Settings(BaseSettings):
         description="Reasoning effort for reasoning models (none, low, medium, high). Medium recommended for vision.",
     )
     VISION_CONFIDENCE_THRESHOLD: float = Field(
-        default=0.5,
+        default=0.75,
         ge=0.0,
         le=1.0,
         description=(
             "Minimum confidence threshold for vision identification. "
+            "If confidence < threshold and product not identified, escalate to manager. "
+            "Default 0.75 (75%) ensures quality - lower values may cause false positives."
             "If confidence < threshold, vision will request clarification or escalate. "
             "Default 0.5 (50%) means half-confident results require user confirmation."
         ),

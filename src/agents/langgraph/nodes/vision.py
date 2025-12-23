@@ -716,8 +716,26 @@ async def vision_node(
 
     from src.conf.config import settings
 
+    # CRITICAL: Use stricter threshold for escalation
+    # If product not identified AND confidence is below threshold → escalate immediately
+    # Don't rely on needs_clarification - user already sent photo, clarification won't help
     low_confidence = confidence < settings.VISION_CONFIDENCE_THRESHOLD
+    
+    # Escalate if:
+    # 1. Product identified but NOT in catalog (hallucination/competitor)
+    # 2. Product NOT identified AND confidence is low (even if needs_clarification=True)
+    #    Reason: User already sent photo, asking for clarification again is poor UX
     should_escalate = product_not_in_catalog or (no_product_identified and low_confidence)
+    
+    # SAFETY: If confidence is VERY low (< 0.5), always escalate regardless of needs_clarification
+    # This prevents infinite clarification loops
+    if no_product_identified and confidence < 0.5:
+        should_escalate = True
+        logger.info(
+            "🚨 [SESSION %s] Force escalation: very low confidence (%.0f%%) even with needs_clarification",
+            session_id,
+            confidence * 100,
+        )
 
     if should_escalate:
         logger.warning(
@@ -1026,8 +1044,19 @@ async def vision_node(
             next_phase = "WAITING_FOR_SIZE"
             next_state = State.STATE_3_SIZE_COLOR.value
     elif response.needs_clarification:
-        next_phase = "VISION_DONE"
-        next_state = State.STATE_2_VISION.value
+        # SAFETY: If confidence is low, escalate even if needs_clarification=True
+        # User already sent photo - asking again is poor UX
+        if confidence < settings.VISION_CONFIDENCE_THRESHOLD:
+            next_phase = "ESCALATED"
+            next_state = State.STATE_0_INIT.value
+            logger.info(
+                "🚨 [SESSION %s] Escalating despite needs_clarification: low confidence (%.0f%%)",
+                session_id,
+                confidence * 100,
+            )
+        else:
+            next_phase = "VISION_DONE"
+            next_state = State.STATE_2_VISION.value
     else:
         # Unknown product - escalate to manager!
         next_phase = "ESCALATED"
@@ -1035,9 +1064,10 @@ async def vision_node(
 
     # Determine escalation level
     escalation_level = "NONE"
-    if not selected_products and not response.needs_clarification:
-        # Product not identified and not asking for clarification = escalate
-        escalation_level = "L1"  # SOFT escalation → L1 (contract-compliant)
+    if not selected_products:
+        # Product not identified → escalate (even if needs_clarification, if confidence is low)
+        if next_phase == "ESCALATED" or (not response.needs_clarification) or (confidence < settings.VISION_CONFIDENCE_THRESHOLD):
+            escalation_level = "L1"  # SOFT escalation → L1 (contract-compliant)
 
     return {
         "current_state": next_state,
