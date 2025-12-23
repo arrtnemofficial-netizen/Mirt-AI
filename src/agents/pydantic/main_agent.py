@@ -192,7 +192,11 @@ async def _add_state_instructions(ctx: RunContext[AgentDeps]) -> str:
 
 @lru_cache(maxsize=1)
 def _load_size_mapping() -> tuple[list[dict[str, object]], dict[int, str]]:
-    """Load size mapping from SSOT YAML with a safe fallback."""
+    """Load size mapping from SSOT YAML.
+    
+    FAIL-FAST: Raises RuntimeError if SSOT file is missing or invalid.
+    This ensures we never use stale hardcoded fallback data.
+    """
     path = (
         Path(__file__).parent.parent.parent.parent
         / "data"
@@ -201,33 +205,50 @@ def _load_size_mapping() -> tuple[list[dict[str, object]], dict[int, str]]:
         / "size_guide.yaml"
     )
 
+    if not path.exists():
+        raise RuntimeError(
+            f"CRITICAL: SSOT file missing: {path}. "
+            "Size mapping is required for agent operation. "
+            "Ensure data/prompts/system/size_guide.yaml exists in deployment."
+        )
+
     try:
         import yaml
 
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"CRITICAL: Invalid YAML structure in {path}. "
+                "Expected dict with 'size_mapping' and 'border_sizes' keys."
+            )
+
         size_mapping = data.get("size_mapping", [])
         border_sizes = data.get("border_sizes", {})
-        if isinstance(size_mapping, list) and isinstance(border_sizes, dict):
-            return size_mapping, border_sizes
-    except Exception as e:
-        logger.warning("Failed to load size_guide.yaml: %s", e)
+        
+        if not isinstance(size_mapping, list) or not size_mapping:
+            raise RuntimeError(
+                f"CRITICAL: Invalid 'size_mapping' in {path}. "
+                "Expected non-empty list of size range dictionaries."
+            )
+        
+        if not isinstance(border_sizes, dict):
+            raise RuntimeError(
+                f"CRITICAL: Invalid 'border_sizes' in {path}. "
+                "Expected dict mapping height (int) to size string."
+            )
 
-    fallback_mapping = [
-        {"min": 80, "max": 92, "sizes": ["80-92", "80", "86", "92"]},
-        {"min": 93, "max": 99, "sizes": ["98", "98-104"]},
-        {"min": 100, "max": 105, "sizes": ["104", "98-104", "110-116"]},
-        {"min": 106, "max": 112, "sizes": ["110", "110-116"]},
-        {"min": 113, "max": 118, "sizes": ["116", "110-116", "122-128"]},
-        {"min": 119, "max": 125, "sizes": ["122", "122-128"]},
-        {"min": 126, "max": 133, "sizes": ["128", "122-128", "134-140"]},
-        {"min": 134, "max": 141, "sizes": ["134", "134-140"]},
-        {"min": 142, "max": 147, "sizes": ["140", "146-152"]},
-        {"min": 148, "max": 153, "sizes": ["146", "146-152"]},
-        {"min": 154, "max": 160, "sizes": ["152", "158-164"]},
-        {"min": 161, "max": 168, "sizes": ["158", "164", "158-164"]},
-    ]
-    fallback_border = {120: "122-128", 131: "134-140", 143: "146-152", 155: "158-164"}
-    return fallback_mapping, fallback_border
+        return size_mapping, border_sizes
+        
+    except yaml.YAMLError as e:
+        raise RuntimeError(
+            f"CRITICAL: Failed to parse YAML in {path}: {e}. "
+            "Check file syntax and encoding (must be UTF-8)."
+        ) from e
+    except Exception as e:
+        raise RuntimeError(
+            f"CRITICAL: Failed to load size mapping from {path}: {e}. "
+            "This is a required SSOT file for agent operation."
+        ) from e
 
 
 

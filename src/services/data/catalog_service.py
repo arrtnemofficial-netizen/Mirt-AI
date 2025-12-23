@@ -28,7 +28,11 @@ def _safe_cache_key(prefix: str, parts: list[str]) -> str:
 
 
 def _get_redis_client():
-    """Best-effort Redis client for caching (fails open)."""
+    """Best-effort Redis client for caching (fails open).
+    
+    Returns None if Redis is unavailable (expected in dev environments).
+    All errors are logged for observability.
+    """
     try:
         import redis
 
@@ -38,11 +42,19 @@ def _get_redis_client():
         client = redis.from_url(redis_url, decode_responses=True)
         client.ping()
         return client
-    except Exception:
+    except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
+        logger.debug("[CATALOG:CACHE] Redis unavailable (expected in dev): %s", type(e).__name__)
+        return None
+    except Exception as e:
+        logger.warning("[CATALOG:CACHE] Unexpected error connecting to Redis: %s", type(e).__name__)
         return None
 
 
 def _cache_get_json(key: str) -> Any | None:
+    """Get JSON value from cache (returns None if cache unavailable or key not found).
+    
+    All errors are logged for observability.
+    """
     r = _get_redis_client()
     if not r:
         return None
@@ -51,18 +63,33 @@ def _cache_get_json(key: str) -> Any | None:
         if not raw:
             return None
         return json.loads(raw)
-    except Exception:
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning("[CATALOG:CACHE] Failed to decode cached JSON for key '%s': %s", key, type(e).__name__)
+        return None
+    except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
+        logger.debug("[CATALOG:CACHE] Redis error getting key '%s': %s", key, type(e).__name__)
+        return None
+    except Exception as e:
+        logger.warning("[CATALOG:CACHE] Unexpected error getting cached key '%s': %s", key, type(e).__name__)
         return None
 
 
 def _cache_set_json(key: str, value: Any, *, ttl_seconds: int = CACHE_TTL_SECONDS) -> None:
+    """Set JSON value in cache (silently fails if cache unavailable - non-critical).
+    
+    All errors are logged for observability.
+    """
     r = _get_redis_client()
     if not r:
         return
     try:
         r.setex(key, int(ttl_seconds), json.dumps(value, ensure_ascii=False, default=str))
-    except Exception:
-        return
+    except (TypeError, ValueError) as e:
+        logger.warning("[CATALOG:CACHE] Failed to serialize value for key '%s': %s", key, type(e).__name__)
+    except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
+        logger.debug("[CATALOG:CACHE] Redis error setting key '%s': %s", key, type(e).__name__)
+    except Exception as e:
+        logger.warning("[CATALOG:CACHE] Unexpected error setting cached key '%s': %s", key, type(e).__name__)
 
 
 class CatalogService:
@@ -82,8 +109,8 @@ class CatalogService:
         """
         Search products in catalog.
         
-        TODO: Implement vector search when embeddings are ready.
-        For now, uses simple text search on name/description.
+        Uses simple text search on name/description.
+        Note: Vector search was considered but not implemented as we use embedded catalog (products stored in DB with full metadata).
         """
         if not self.client:
             logger.warning("Supabase client not available, returning empty search")
@@ -188,7 +215,8 @@ class CatalogService:
             for item in fresh:
                 try:
                     pid = int(item.get("id"))
-                except Exception:
+                except (ValueError, TypeError) as e:
+                    logger.warning("[CATALOG] Invalid product ID in batch response: %s (type: %s)", item.get("id"), type(item.get("id")).__name__)
                     continue
                 _cache_set_json(_safe_cache_key("product", [str(pid)]), item)
 

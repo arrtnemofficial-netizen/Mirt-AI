@@ -191,7 +191,11 @@ class Settings(BaseSettings):
     )
     ENABLE_LEGACY_STATE_ALIASES: bool = Field(
         default=True,
-        description="Allow legacy state aliases in normalize_state (temporary).",
+        description=(
+            "Allow legacy state aliases in normalize_state for backward compatibility. "
+            "Legacy aliases map old state names (e.g., 'STATE0_INIT') to new enum values. "
+            "See docs/quality/FEATURE_FLAGS_POLICY.md for migration plan."
+        ),
     )
     DEBUG_TRACE_LOGS: bool = Field(
         default=False,
@@ -252,6 +256,77 @@ def get_settings() -> Settings:
     return Settings()  # type: ignore[arg-type]
 
 
+def validate_ssot_files() -> None:
+    """Validate that all required SSOT (Single Source of Truth) files exist and are valid.
+    
+    FAIL-FAST: Raises RuntimeError if any critical SSOT file is missing or invalid.
+    This ensures we never use stale hardcoded fallback data.
+    
+    Raises:
+        RuntimeError: If any required SSOT file is missing or invalid.
+    """
+    import logging
+    from pathlib import Path
+
+    logger = logging.getLogger(__name__)
+    
+    # Base path for data files
+    base_path = Path(__file__).parent.parent.parent / "data"
+    
+    # Required SSOT files (critical for agent operation)
+    required_files = {
+        "size_guide.yaml": base_path / "prompts" / "system" / "size_guide.yaml",
+    }
+    
+    errors: list[str] = []
+    
+    for file_name, file_path in required_files.items():
+        if not file_path.exists():
+            errors.append(
+                f"CRITICAL: SSOT file missing: {file_path}. "
+                f"This file is required for agent operation. "
+                f"Ensure data/prompts/system/{file_name} exists in deployment."
+            )
+            continue
+        
+        # Validate size_guide.yaml structure
+        if file_name == "size_guide.yaml":
+            try:
+                import yaml
+                data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    errors.append(
+                        f"CRITICAL: Invalid YAML structure in {file_path}. "
+                        "Expected dict with 'size_mapping' and 'border_sizes' keys."
+                    )
+                elif not isinstance(data.get("size_mapping"), list) or not data.get("size_mapping"):
+                    errors.append(
+                        f"CRITICAL: Invalid 'size_mapping' in {file_path}. "
+                        "Expected non-empty list of size range dictionaries."
+                    )
+                elif not isinstance(data.get("border_sizes"), dict):
+                    errors.append(
+                        f"CRITICAL: Invalid 'border_sizes' in {file_path}. "
+                        "Expected dict mapping height (int) to size string."
+                    )
+            except yaml.YAMLError as e:
+                errors.append(
+                    f"CRITICAL: Failed to parse YAML in {file_path}: {e}. "
+                    "Check file syntax and encoding (must be UTF-8)."
+                )
+            except Exception as e:
+                errors.append(
+                    f"CRITICAL: Failed to validate {file_path}: {e}."
+                )
+    
+    if errors:
+        error_msg = "SSOT file validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+    
+    logger.info("SSOT files validation passed")
+
+
 def validate_required_settings(settings_instance: Settings | None = None) -> None:
     """Validate that all required environment variables are set.
 
@@ -308,6 +383,9 @@ def validate_required_settings(settings_instance: Settings | None = None) -> Non
         error_msg = "Critical configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
         logger.error(error_msg)
         raise RuntimeError(error_msg)
+    
+    # Validate SSOT files (fail-fast for critical data files)
+    validate_ssot_files()
 
 
 settings = get_settings()

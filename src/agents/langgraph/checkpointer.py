@@ -353,7 +353,17 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                                 payload = result[0]
                             else:
                                 payload = result
-                    except Exception:
+                    except (TypeError, AttributeError) as e:
+                        logger.warning(
+                            "[CHECKPOINTER] Failed to extract payload from aget_tuple result: %s",
+                            type(e).__name__
+                        )
+                        payload = None
+                    except Exception as e:
+                        logger.warning(
+                            "[CHECKPOINTER] Unexpected error extracting payload from aget_tuple: %s",
+                            type(e).__name__
+                        )
                         payload = None
                     _log_if_slow(
                         "aget_tuple",

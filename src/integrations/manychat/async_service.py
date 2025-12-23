@@ -569,7 +569,8 @@ class ManyChatAsyncService:
         For now, users will type responses manually (which works fine).
         """
         # DISABLED: ManyChat sendContent rejects quick_replies with type='text'
-        # TODO: Investigate proper format for Instagram quick replies via API
+        # Instagram quick replies format is not supported by current ManyChat API.
+        # If needed in future, investigate ManyChat API documentation for Instagram-specific format.
         return []
 
 
