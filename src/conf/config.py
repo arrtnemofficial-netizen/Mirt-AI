@@ -296,6 +296,16 @@ class Settings(BaseSettings):
         default="medium",
         description="Reasoning effort for reasoning models (none, low, medium, high). Medium recommended for vision.",
     )
+    VISION_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum confidence threshold for vision identification. "
+            "If confidence < threshold, vision will request clarification or escalate. "
+            "Default 0.5 (50%) means half-confident results require user confirmation."
+        ),
+    )
     LLM_TEMPERATURE: float = Field(
         default=0.3,
         description="LLM temperature (0.0-1.0)",

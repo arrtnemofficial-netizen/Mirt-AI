@@ -252,13 +252,59 @@ def get_state_snapshot(state: ConversationState) -> dict[str, Any]:
 
 
 # =============================================================================
+# VALID DIALOG PHASES (Single Source of Truth)
+# =============================================================================
+
+VALID_DIALOG_PHASES: frozenset[str] = frozenset({
+    "INIT",
+    "DISCOVERY",
+    "VISION_DONE",
+    "WAITING_FOR_SIZE",
+    "WAITING_FOR_COLOR",
+    "SIZE_COLOR_DONE",
+    "OFFER_MADE",
+    "WAITING_FOR_DELIVERY_DATA",
+    "WAITING_FOR_PAYMENT_METHOD",
+    "WAITING_FOR_PAYMENT_PROOF",
+    "UPSELL_OFFERED",
+    "COMPLETED",
+    "COMPLAINT",
+    "OUT_OF_DOMAIN",
+    "ESCALATED",  # Used by vision/escalation nodes
+    "CRM_ERROR_HANDLING",  # Used by payment node
+})
+
+# Map: FSM state -> allowed dialog_phases
+# This ensures current_state and dialog_phase are consistent
+STATE_TO_ALLOWED_PHASES: dict[State, frozenset[str]] = {
+    State.STATE_0_INIT: frozenset({"INIT", "DISCOVERY", "VISION_DONE", "WAITING_FOR_SIZE", "WAITING_FOR_DELIVERY_DATA", "COMPLAINT", "COMPLETED", "OUT_OF_DOMAIN"}),
+    State.STATE_1_DISCOVERY: frozenset({"DISCOVERY", "WAITING_FOR_SIZE", "SIZE_COLOR_DONE", "WAITING_FOR_DELIVERY_DATA", "COMPLAINT", "COMPLETED", "OUT_OF_DOMAIN"}),
+    State.STATE_2_VISION: frozenset({"VISION_DONE", "DISCOVERY", "WAITING_FOR_SIZE", "OUT_OF_DOMAIN"}),
+    State.STATE_3_SIZE_COLOR: frozenset({"WAITING_FOR_SIZE", "WAITING_FOR_COLOR", "SIZE_COLOR_DONE"}),
+    State.STATE_4_OFFER: frozenset({"OFFER_MADE", "WAITING_FOR_DELIVERY_DATA"}),
+    State.STATE_5_PAYMENT_DELIVERY: frozenset({"WAITING_FOR_DELIVERY_DATA", "WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_PAYMENT_PROOF", "UPSELL_OFFERED", "CRM_ERROR_HANDLING"}),
+    State.STATE_6_UPSELL: frozenset({"UPSELL_OFFERED", "COMPLETED"}),
+    State.STATE_7_END: frozenset({"COMPLETED"}),
+    State.STATE_8_COMPLAINT: frozenset({"COMPLAINT", "COMPLETED", "ESCALATED"}),
+    State.STATE_9_OOD: frozenset({"OUT_OF_DOMAIN", "COMPLETED"}),
+}
+
+
+# =============================================================================
 # STATE VALIDATORS
 # =============================================================================
 
 
 def validate_state(state: ConversationState) -> list[str]:
     """
-    Validate state consistency.
+    Validate state consistency with runtime guardrails.
+    
+    Checks:
+    - FSM state validity
+    - Dialog phase validity
+    - Consistency between current_state and dialog_phase
+    - Retry count limits
+    
     Returns list of errors (empty = valid).
     """
     errors = []
@@ -272,13 +318,30 @@ def validate_state(state: ConversationState) -> list[str]:
 
     if not state.get("current_state"):
         errors.append("Missing current_state")
+        return errors  # Can't validate further without current_state
 
     # Check FSM state is valid
-    current = state.get("current_state", "")
+    current_state_str = state.get("current_state", "")
     try:
-        State(current)
+        current_state = State(current_state_str)
     except ValueError:
-        errors.append(f"Invalid FSM state: {current}")
+        errors.append(f"Invalid FSM state: {current_state_str}")
+        return errors  # Can't validate phase consistency without valid state
+
+    # Check dialog_phase is valid
+    dialog_phase = state.get("dialog_phase", "")
+    if dialog_phase and dialog_phase not in VALID_DIALOG_PHASES:
+        errors.append(f"Invalid dialog_phase: {dialog_phase} (not in VALID_DIALOG_PHASES)")
+
+    # Check consistency: dialog_phase must be allowed for current_state
+    if dialog_phase and current_state in STATE_TO_ALLOWED_PHASES:
+        allowed_phases = STATE_TO_ALLOWED_PHASES[current_state]
+        if dialog_phase not in allowed_phases:
+            errors.append(
+                f"Inconsistent state/phase: current_state={current_state_str}, "
+                f"dialog_phase={dialog_phase} (not allowed for this state). "
+                f"Allowed phases: {sorted(allowed_phases)}"
+            )
 
     # Check retry count
     retry_count = state.get("retry_count", 0)
@@ -287,3 +350,76 @@ def validate_state(state: ConversationState) -> list[str]:
         errors.append(f"Retry count ({retry_count}) exceeds max ({max_retries})")
 
     return errors
+
+
+def detect_state_loop(
+    state: ConversationState,
+    previous_phases: list[str] | None = None,
+    loop_threshold: int = 3,
+) -> bool:
+    """
+    Detect if dialog_phase is stuck in a loop.
+    
+    Args:
+        state: Current conversation state
+        previous_phases: History of recent dialog_phases (from metadata or external tracking)
+        loop_threshold: Number of identical phases in a row to consider a loop
+        
+    Returns:
+        True if loop detected, False otherwise
+    """
+    current_phase = state.get("dialog_phase", "")
+    if not current_phase:
+        return False
+    
+    # Try to get phase history from metadata
+    metadata = state.get("metadata", {})
+    phase_history = previous_phases or metadata.get("dialog_phase_history", [])
+    
+    # Check if current phase repeats N times
+    if len(phase_history) >= loop_threshold - 1:
+        recent_phases = phase_history[-(loop_threshold - 1):] + [current_phase]
+        if len(set(recent_phases)) == 1:
+            return True
+    
+    return False
+
+
+def validate_state_transition(
+    from_state: State,
+    to_state: State,
+    intent: str | None = None,
+) -> tuple[bool, str | None]:
+    """
+    Validate if a state transition is legal according to TRANSITIONS table.
+    
+    Args:
+        from_state: Current FSM state
+        to_state: Proposed next FSM state
+        intent: Detected intent (optional, for better validation)
+        
+    Returns:
+        (is_valid, error_message)
+    """
+    from src.core.state_machine import TRANSITIONS, Intent
+    
+    # Check if transition exists in TRANSITIONS table
+    for transition in TRANSITIONS:
+        if transition.from_state == from_state and transition.to_state == to_state:
+            # If intent provided, check if it matches
+            if intent:
+                try:
+                    intent_enum = Intent(intent)
+                    if intent_enum in transition.when_intents:
+                        return True, None
+                except ValueError:
+                    pass
+            else:
+                # Transition exists, but intent check skipped
+                return True, None
+    
+    # Transition not found
+    return False, (
+        f"Illegal transition: {from_state.value} → {to_state.value}. "
+        f"Check TRANSITIONS table in state_machine.py"
+    )

@@ -12,7 +12,10 @@ State-Specific Prompts for Turn-Based State Machine.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -81,8 +84,25 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
                     )
                 except Exception:
                     pass
-                if settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
-                    raise FileNotFoundError(f"Missing markdown prompt for state.{key}")
+                # In production, missing prompt is a critical error
+                import os
+                env = os.getenv("ENVIRONMENT", "development").lower()
+                is_production = env in ("production", "prod", "staging")
+                
+                if is_production or settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
+                    raise FileNotFoundError(
+                        f"Missing markdown prompt for state.{key}. "
+                        f"This is required in {env} environment. "
+                        f"Create data/prompts/states/{key}.md"
+                    )
+                
+                # Development fallback with warning
+                logger.warning(
+                    "Using fallback prompt for payment sub-phase state.%s (dev mode only). "
+                    "Create data/prompts/states/%s.md for production.",
+                    key,
+                    key,
+                )
                 return STATE_PROMPTS.get(key, "")
 
     # PRIORITY 1: Try PromptRegistry (data/prompts/states/*.md)
@@ -93,18 +113,37 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
         pass
 
     # PRIORITY 2: Fallback to hardcoded STATE_PROMPTS
+    # In production/staging, this fallback is disabled for safety
+    import os
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    is_production = env in ("production", "prod", "staging")
+    
+    # In production, missing prompt is a critical error
+    if is_production or settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
+        raise FileNotFoundError(
+            f"Missing markdown prompt for state.{state_name}. "
+            f"This is required in {env} environment. "
+            f"Create data/prompts/states/{state_name}.md"
+        )
+    
+    # Development fallback with warning
     try:
         from src.services.observability import track_metric
 
         track_metric(
             "state_prompt_fallback_used",
             1,
-            {"state": state_name, "reason": "missing_md"},
+            {"state": state_name, "reason": "missing_md", "environment": env},
         )
     except Exception:
         pass
-    if settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
-        raise FileNotFoundError(f"Missing markdown prompt for state.{state_name}")
+    
+    logger.warning(
+        "Using fallback prompt for state.%s (dev mode only). "
+        "Create data/prompts/states/%s.md for production.",
+        state_name,
+        state_name,
+    )
     return STATE_PROMPTS.get(state_name, "")
 
 

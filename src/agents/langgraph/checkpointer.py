@@ -263,62 +263,74 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     """
     Create PostgreSQL checkpointer for production.
 
-    Requires:
+    Requires (in priority order):
+    - DATABASE_URL_POOLER (recommended for production with PgBouncer)
     - DATABASE_URL or POSTGRES_URL environment variable
+    - Auto-build from SUPABASE_API_KEY (development only, disabled in production/staging)
     - langgraph-checkpoint-postgres package
+
+    Environment detection:
+    - Production/staging: Requires explicit DATABASE_URL or DATABASE_URL_POOLER
+    - Development: Allows auto-build from SUPABASE_API_KEY as fallback
 
     The checkpointer will:
     - Create tables automatically on first use
     - Store full state at every step
     - Enable time travel and forking
+    - Use prepare_threshold=None to disable prepared statements (PgBouncer compatible)
+    - Open pool on-demand (lazy initialization)
     """
-    settings = None
     # Try to get database URL from environment
+    # Priority: DATABASE_URL_POOLER > DATABASE_URL > POSTGRES_URL
     database_url = (
-        os.getenv("DATABASE_URL_POOLER") or os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+        os.getenv("DATABASE_URL_POOLER") 
+        or os.getenv("DATABASE_URL") 
+        or os.getenv("POSTGRES_URL")
     )
 
+    # Import settings at function start to ensure it's always available
+    from src.conf.config import settings
+    
+    # Determine environment
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    is_production = env in ("production", "prod", "staging")
+    
     if not database_url:
-        try:
-            from src.conf.config import settings as app_settings
-
-            settings = app_settings
-            if getattr(settings, "DATABASE_URL", ""):
-                database_url = settings.DATABASE_URL
-        except Exception:
-            logger.debug("Unable to load settings for DATABASE_URL fallback", exc_info=True)
-
-    if not database_url:
+        if is_production:
+            # In production/staging, require explicit DATABASE_URL
+            logger.error(
+                "CRITICAL: DATABASE_URL or DATABASE_URL_POOLER is required in %s environment! "
+                "Auto-building from SUPABASE_API_KEY is disabled for production safety. "
+                "Set DATABASE_URL or DATABASE_URL_POOLER explicitly.",
+                env
+            )
+            raise ValueError(
+                f"DATABASE_URL or DATABASE_URL_POOLER must be set explicitly in {env} environment. "
+                "Auto-build from SUPABASE_API_KEY is disabled for production safety."
+            )
+        
+        # Only allow auto-build in development/local environments
         # Try to build from Supabase settings
-        if settings is None:
-            from src.conf.config import settings as app_settings
-
-            settings = app_settings
-
         if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_API_KEY"):
             # Supabase connection string format
             supabase_url = str(settings.SUPABASE_URL)
-            logger.info(f"DEBUG: Supabase URL found: {supabase_url[:20]}...")
-            logger.info(
-                f"DEBUG: Supabase API key present: {bool(settings.SUPABASE_API_KEY.get_secret_value())}"
-            )
+            logger.debug("Auto-building DATABASE_URL from SUPABASE_API_KEY (dev mode only)")
 
             if "supabase" in supabase_url:
                 # Extract project ref from URL
                 # https://xxx.supabase.co -> xxx
                 import re
-
                 match = re.search(r"https://([^.]+)\.supabase", supabase_url)
-                logger.info(f"DEBUG: Regex match result: {match}")
 
                 if match:
                     project_ref = match.group(1)
-                    logger.info(f"DEBUG: Extracted project_ref: {project_ref}")
                     # Build postgres connection string
                     # Default Supabase postgres port is 5432, password from service_role key
+                    # NOTE: This uses direct connection, not pooler (for dev only)
                     database_url = f"postgresql://postgres:{settings.SUPABASE_API_KEY.get_secret_value()}@db.{project_ref}.supabase.co:5432/postgres"
-                    logger.info(
-                        f"DEBUG: Built DATABASE_URL: postgresql://postgres:***@db.{project_ref}.supabase.co:5432/postgres"
+                    logger.warning(
+                        "Auto-built DATABASE_URL from SUPABASE_API_KEY (dev mode only). "
+                        "For production, set DATABASE_URL_POOLER explicitly (recommended) or DATABASE_URL."
                     )
 
     if not database_url:

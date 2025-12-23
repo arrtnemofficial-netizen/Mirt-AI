@@ -59,73 +59,13 @@ _OFFER_CONFIRMATION_KEYWORDS = [
 
 
 # =============================================================================
-# SIZE EXTRACTION HELPER
+# SIZE EXTRACTION HELPER (delegated to helpers module)
 # =============================================================================
+from .helpers.size_parsing import extract_size_from_response, height_to_size
 
-# Common Ukrainian size patterns
-_SIZE_PATTERNS = [
-    r"розмір\s*(\d{2,3}[-–]\d{2,3})",  # "розмір 146-152"
-    r"раджу\s*(\d{2,3}[-–]\d{2,3})",  # "раджу 146-152"
-    r"раджу\s+розмір\s+(\d{2,3})",  # "раджу розмір 98" (FIX: handles word between)
-    r"раджу\s+розмір\s+(\d{2,3}[-–]\d{2,3})",  # "раджу розмір 146-152"
-    r"підійде\s*(\d{2,3}[-–]\d{2,3})",  # "підійде 122-128"
-    r"(\d{2,3}[-–]\d{2,3})\s*см",  # "146-152 см"
-    r"розмір\s*(\d{2,3})",  # "розмір 140" or "розмір 98"
-    r"раджу\s*(\d{2,3})\b",  # "раджу 98" (single number after "раджу")
-]
-
-
-def _height_to_size(height_cm: int) -> str:
-    """
-    Convert height in cm to size label.
-    
-    Uses the same logic as get_size_and_price_for_height but returns only size.
-    """
-    if height_cm <= 92:
-        return "80-92"
-    elif height_cm <= 104:
-        return "98-104"
-    elif height_cm <= 116:
-        return "110-116"
-    elif height_cm <= 128:
-        return "122-128"
-    elif height_cm <= 140:
-        return "134-140"
-    elif height_cm <= 152:
-        return "146-152"
-    else:
-        return "158-164"
-
-
-def _extract_size_from_response(messages: list) -> str | None:
-    """
-    Extract size from LLM response messages.
-
-    Fallback when LLM forgets to include size in products[].
-    Looks for patterns like "раджу 146-152", "раджу розмір 98", or "розмір 122-128".
-    """
-    import re
-
-    for msg in messages:
-        content = msg.content if hasattr(msg, "content") else str(msg)
-        if not content:
-            continue
-
-        for pattern in _SIZE_PATTERNS:
-            # Use re.IGNORECASE for proper Unicode handling
-            match = re.search(pattern, content, re.IGNORECASE)
-            if match:
-                size = match.group(1)
-                # Normalize dash
-                size = size.replace("–", "-")
-                logger.info(
-                    "🔧 Extracted size '%s' from LLM response: %s", 
-                    size, 
-                    content[:100]
-                )
-                return size
-
-    return None
+# Backward compatibility aliases
+_height_to_size = height_to_size
+_extract_size_from_response = extract_size_from_response
 
 
 async def agent_node(
@@ -421,6 +361,9 @@ async def agent_node(
         # This prevents dialog loop when user says "98" but LLM doesn't
         # include size in products[]
         # =====================================================================
+        fallback_used = False
+        fallback_reasons = []
+        
         if selected_products and current_state == State.STATE_3_SIZE_COLOR.value:
             first_product = selected_products[0]
             if not first_product.get("size"):
@@ -432,8 +375,10 @@ async def agent_node(
                 height_cm = extract_height_from_text(user_text)
                 if height_cm:
                     # Convert height to size
-                    extracted_size = _height_to_size(height_cm)
+                    extracted_size = height_to_size(height_cm)
                     first_product["size"] = extracted_size
+                    fallback_used = True
+                    fallback_reasons.append("size_from_user_height")
                     logger.info(
                         "🔧 [SESSION %s] Extracted size='%s' from user height=%d cm (message: '%s')",
                         session_id,
@@ -446,27 +391,46 @@ async def agent_node(
         # FALLBACK: Extract size from LLM response if not in products
         # This prevents dead loop when LLM says "раджу 146-152" but forgets
         # to include size in products[]
+        # NOTE: This is a SAFETY NET, not the primary path!
+        # Primary path: LLM should return structured products[] with size
         # =====================================================================
         if selected_products and current_state == State.STATE_3_SIZE_COLOR.value:
             first_product = selected_products[0]
             if not first_product.get("size"):
                 # Try to extract size from response messages
-                extracted_size = _extract_size_from_response(response.messages)
+                extracted_size = extract_size_from_response(response.messages)
                 if extracted_size:
                     first_product["size"] = extracted_size
-                    logger.info(
-                        "🔧 [SESSION %s] Fallback: extracted size='%s' from LLM response",
+                    fallback_used = True
+                    fallback_reasons.append("size_from_llm_response")
+                    logger.warning(
+                        "⚠️ [SESSION %s] FALLBACK USED: extracted size='%s' from LLM response text. "
+                        "LLM should return size in products[] field, not in message text.",
                         session_id,
                         extracted_size,
                     )
             # Also check if color is known from vision but missing
             if not first_product.get("color") and state.get("identified_color"):
                 first_product["color"] = state.get("identified_color")
+                fallback_used = True
+                fallback_reasons.append("color_from_vision_state")
                 logger.info(
                     "🔧 [SESSION %s] Fallback: copied color='%s' from vision",
                     session_id,
                     first_product["color"],
                 )
+        
+        # Track fallback usage as metric (for monitoring LLM quality degradation)
+        if fallback_used:
+            track_metric(
+                "llm_fallback_parsing_used",
+                1,
+                {
+                    "session_id": session_id,
+                    "state": current_state,
+                    "reasons": ",".join(fallback_reasons),
+                },
+            )
 
         latency_ms = (time.perf_counter() - start_time) * 1000
 

@@ -22,6 +22,7 @@ import json
 import logging
 from typing import Any
 
+from src.agents.langgraph.state import detect_state_loop, validate_state
 from src.core.product_adapter import ProductAdapter
 from src.services.observability import log_trace, log_validation_result, track_metric
 
@@ -54,6 +55,32 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     trace_id = state.get("trace_id", "")
     errors: list[str] = []
 
+    # RUNTIME GUARDRAILS: Validate state consistency and detect loops
+    state_errors = validate_state(state)
+    if state_errors:
+        errors.extend([f"State validation: {e}" for e in state_errors])
+        logger.warning(
+            "State validation failed for session %s: %s",
+            session_id,
+            state_errors,
+        )
+        track_metric("state_validation_failed", 1, {"session_id": session_id})
+
+    # Loop detection
+    metadata = state.get("metadata", {})
+    phase_history = metadata.get("dialog_phase_history", [])
+    if detect_state_loop(state, previous_phases=phase_history, loop_threshold=3):
+        loop_error = (
+            f"Dialog loop detected: dialog_phase '{state.get('dialog_phase')}' "
+            f"repeated 3+ times. Escalating to prevent infinite loop."
+        )
+        errors.append(loop_error)
+        logger.error("LOOP DETECTED for session %s: %s", session_id, loop_error)
+        track_metric("dialog_loop_detected", 1, {"session_id": session_id, "phase": state.get("dialog_phase")})
+        # Update metadata to track loop
+        metadata["loop_detected"] = True
+        metadata["loop_phase"] = state.get("dialog_phase")
+
     # Get latest assistant response
     messages = state.get("messages", [])
     assistant_response = _get_latest_assistant_response(messages)
@@ -81,9 +108,14 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     if session_id and output_session and output_session != session_id:
         errors.append(f"Session ID mismatch: expected {session_id}, got {output_session}")
 
-    # 3. Validate response structure
+    # 3. Validate response structure (strict schema validation)
     structure_errors = _validate_response_structure(assistant_response)
     errors.extend(structure_errors)
+    
+    # 4. STRICT SCHEMA VALIDATION: Try to parse as Pydantic SupportResponse
+    # This ensures LLM output matches the exact contract
+    schema_errors = _validate_pydantic_schema(assistant_response)
+    errors.extend(schema_errors)
 
     # Log validation result
     passed = len(errors) == 0
@@ -133,11 +165,18 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         )
         track_metric("validation_passed", 1, {"session_id": session_id})
 
+    # Update metadata with loop detection info if needed
+    output_metadata = state.get("metadata", {}).copy()
+    if detect_state_loop(state, previous_phases=phase_history, loop_threshold=3):
+        output_metadata["loop_detected"] = True
+        output_metadata["loop_phase"] = state.get("dialog_phase")
+    
     return {
         "validation_errors": errors,
         "retry_count": retry_count,
         "last_error": errors[0] if errors else None,
         "step_number": state.get("step_number", 0) + 1,
+        "metadata": output_metadata,
     }
 
 
@@ -264,6 +303,35 @@ def _validate_language_ukrainian(response: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _validate_pydantic_schema(response: dict[str, Any]) -> list[str]:
+    """
+    Strict schema validation using Pydantic models.
+    
+    This ensures LLM output matches the exact SupportResponse contract.
+    Returns list of validation errors (empty if valid).
+    """
+    errors = []
+    
+    try:
+        from src.agents.pydantic.models import SupportResponse
+        
+        # Try to parse response as SupportResponse
+        # This will catch type mismatches, missing required fields, etc.
+        try:
+            parsed = SupportResponse(**response)
+            # If parsing succeeded, schema is valid
+            # Additional checks can be added here if needed
+        except Exception as e:
+            # Pydantic validation error - schema mismatch
+            errors.append(f"Schema validation failed: {str(e)}")
+            logger.warning("Pydantic schema validation failed: %s", e)
+    except ImportError:
+        # SupportResponse not available - skip strict validation
+        logger.debug("SupportResponse not available, skipping strict schema validation")
+    
+    return errors
+
+
 def _validate_response_structure(response: dict[str, Any]) -> list[str]:
     """Validate response has required structure."""
     errors = []
@@ -271,6 +339,11 @@ def _validate_response_structure(response: dict[str, Any]) -> list[str]:
     # Must have event
     if "event" not in response:
         errors.append("Missing 'event' field in response")
+    else:
+        # Validate event is one of allowed values
+        valid_events = {"simple_answer", "clarifying_question", "multi_option", "escalation", "end_smalltalk"}
+        if response["event"] not in valid_events:
+            errors.append(f"Invalid 'event' value: {response['event']}. Must be one of {valid_events}")
 
     # Must have messages array
     if "messages" not in response:

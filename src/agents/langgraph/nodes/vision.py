@@ -348,7 +348,10 @@ def _extract_products(
 
     # Only show alternatives if NOT confident enough
     # High confidence = we know what it is, no need to confuse user with options
-    if response.alternative_products and confidence < 0.85:
+    # Use configurable threshold (default 0.85 = 85%)
+    from src.conf.config import settings
+    alternatives_threshold = getattr(settings, "VISION_ALTERNATIVES_THRESHOLD", 0.85)
+    if response.alternative_products and confidence < alternatives_threshold:
         products.extend([p.model_dump() for p in response.alternative_products])
         logger.info(
             "Vision alternatives: %d (showing because confidence < 85%%)",
@@ -708,7 +711,10 @@ async def vision_node(
         )
 
         # Case 3: Low confidence - don't trust the result
-        low_confidence = confidence < 0.5
+        # Use configurable threshold from settings
+        from src.conf.config import settings
+        confidence_threshold = settings.VISION_CONFIDENCE_THRESHOLD
+        low_confidence = confidence < confidence_threshold
 
         # ESCALATE if: not in catalog OR (no product AND low confidence)
         should_escalate = product_not_in_catalog or (no_product_identified and low_confidence)
@@ -789,12 +795,10 @@ async def vision_node(
                 "step_number": state.get("step_number", 0) + 1,
             }
 
-        # Enrich product from DB if Vision returned partial data (missing id/photo/price)
-        if response.identified_product and (
-            response.identified_product.price == 0
-            or not response.identified_product.photo_url
-            or not response.identified_product.id
-        ):
+        # CRITICAL: Enrichment is MANDATORY for production quality
+        # If Vision returned a product, we MUST enrich it from DB to get real price/photo/data
+        # If enrichment fails → don't show incomplete product, go to clarification/discovery
+        if response.identified_product:
             vision_color_raw = response.identified_product.color
             vision_color = vision_color_raw
             try:
@@ -805,11 +809,15 @@ async def vision_node(
                     response.identified_product.color = ""
             except Exception:
                 vision_color = vision_color_raw
+            
+            # Attempt enrichment
             enriched = await _enrich_product_from_db(
                 response.identified_product.name,
                 color=vision_color,
             )
+            
             if enriched:
+                # Enrichment succeeded - update product with DB data
                 if response.identified_product.price == 0:
                     response.identified_product.price = enriched.get("price", 0)
                 if not response.identified_product.photo_url:
@@ -825,10 +833,33 @@ async def vision_node(
                         catalog_row["_color_options"] = enriched.get("_color_options")
                     if "_ambiguous_color" in enriched:
                         catalog_row["_ambiguous_color"] = enriched.get("_ambiguous_color")
-
-                # НЕ генеруємо reply з ціною тут!
-                # Ціна залежить від розміру, тому питаємо розмір спочатку.
-                # _build_vision_messages() створює правильну відповідь.
+            else:
+                # Enrichment FAILED - product not found in DB
+                # This is a critical quality issue: don't show incomplete/hallucinated product
+                logger.warning(
+                    "🚨 [SESSION %s] Enrichment FAILED for '%s' - product not in catalog. "
+                    "Forcing clarification/discovery instead of showing incomplete product.",
+                    session_id,
+                    response.identified_product.name,
+                )
+                track_metric(
+                    "vision_enrichment_failed",
+                    1,
+                    {
+                        "session_id": session_id,
+                        "product_name": response.identified_product.name,
+                        "confidence": confidence * 100,
+                    },
+                )
+                # Clear the product and request clarification
+                response.identified_product = None
+                response.needs_clarification = True
+                if not response.clarification_question:
+                    response.clarification_question = (
+                        "Чи можете описати товар детальніше або надіслати фото з іншого ракурсу?"
+                    )
+                # Don't escalate here - let the clarification flow handle it
+                # This allows user to provide better input
 
     # Log response with clear visibility
     product_name = (
