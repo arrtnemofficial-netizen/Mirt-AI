@@ -348,6 +348,20 @@ class ConversationHandler:
             except Exception as e:
                 last_error = e
                 error_info = f"{type(e).__name__}: {e!s}" if str(e) else type(e).__name__
+                
+                # SAFEGUARD: Auto-reset graph if sitniks_status AttributeError detected
+                # This happens when graph was cached before code fix
+                if isinstance(e, AttributeError) and "update_sitniks_status" in str(e):
+                    logger.error(
+                        "Detected sitniks_status AttributeError - graph may be cached with old code. "
+                        "Resetting graph and retrying..."
+                    )
+                    from src.agents.langgraph.graph import reset_graph, get_production_graph
+                    reset_graph()
+                    # Rebuild graph with force_rebuild
+                    self.runner = get_production_graph(force_rebuild=True)
+                    logger.info("Graph reset and rebuilt successfully")
+                
                 if attempt < self.max_retries:
                     logger.warning(
                         "Agent attempt %d failed for session %s: %s. Retrying...",

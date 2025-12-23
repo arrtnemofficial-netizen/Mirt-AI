@@ -459,14 +459,33 @@ class AsyncTracingService:
             # Remove None values to let DB defaults work or avoid null issues
             payload = {k: v for k, v in payload.items() if v is not None}
 
+            # SAFEGUARD: Try llm_traces first, but handle schema errors gracefully
             try:
                 await client.table("llm_traces").insert(payload).execute()
-            except Exception:
-                # Fallback to llm_usage table (may not have node_name column)
-                # Remove node_name if it doesn't exist in schema
-                fallback_payload = payload.copy()
-                fallback_payload.pop("node_name", None)  # Remove node_name for llm_usage table
-                await client.table("llm_usage").insert(fallback_payload).execute()
+            except Exception as e:
+                error_msg = str(e).lower()
+                # Check if error is related to missing column (especially node_name)
+                is_schema_error = (
+                    "node_name" in error_msg
+                    or "column" in error_msg
+                    or "pgrst204" in error_msg
+                    or "could not find" in error_msg
+                )
+                
+                if is_schema_error:
+                    # Remove node_name and retry llm_traces
+                    fallback_payload = payload.copy()
+                    fallback_payload.pop("node_name", None)
+                    try:
+                        await client.table("llm_traces").insert(fallback_payload).execute()
+                    except Exception:
+                        # If still fails, try llm_usage without node_name
+                        await client.table("llm_usage").insert(fallback_payload).execute()
+                else:
+                    # Other error - try llm_usage with node_name removed
+                    fallback_payload = payload.copy()
+                    fallback_payload.pop("node_name", None)
+                    await client.table("llm_usage").insert(fallback_payload).execute()
 
         except Exception as e:
             # SAFEGUARD_2: Graceful degradation - observability shouldn't crash the app

@@ -87,6 +87,13 @@ def build_production_graph(
     """
     logger.info("Building production graph...")
 
+    # SAFEGUARD: Verify sitniks_status is callable (not an object with method)
+    if not callable(sitniks_status):
+        raise ValueError(
+            f"sitniks_status must be callable, got: {type(sitniks_status).__name__}. "
+            "Check imports in src/agents/langgraph/nodes/__init__.py"
+        )
+
     # Create node wrappers that inject the runner
     async def _moderation(state: dict[str, Any]) -> dict[str, Any]:
         return await moderation_node(state)
@@ -101,6 +108,14 @@ def build_production_graph(
         return await agent_node(state, runner)
 
     async def _sitniks_status(state: dict[str, Any]) -> dict[str, Any]:
+        # SAFEGUARD: Double-check at runtime (defense in depth)
+        if not callable(sitniks_status):
+            logger.error(
+                "sitniks_status is not callable at runtime! Type: %s, Value: %s",
+                type(sitniks_status).__name__,
+                sitniks_status,
+            )
+            return {"step_number": state.get("step_number", 0) + 1}
         return await sitniks_status(state)
 
     async def _offer(state: dict[str, Any]) -> dict[str, Any]:
@@ -235,6 +250,7 @@ _production_graph: CompiledGraph | None = None
 def get_production_graph(
     runner: RunnerFunc | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
+    force_rebuild: bool = False,
 ) -> CompiledGraph:
     """
     Get or create the production graph singleton.
@@ -242,11 +258,16 @@ def get_production_graph(
     Args:
         runner: LLM runner (uses default if None)
         checkpointer: Persistence backend (auto-detect if None)
+        force_rebuild: Force rebuild of graph even if cached (useful after code changes)
 
     Returns:
         Compiled production graph
     """
     global _production_graph
+
+    if force_rebuild:
+        logger.info("Force rebuilding production graph (force_rebuild=True)")
+        _production_graph = None
 
     if _production_graph is None:
         if runner is None:
