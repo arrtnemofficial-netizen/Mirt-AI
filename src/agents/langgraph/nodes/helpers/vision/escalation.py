@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.state_machine import State
 
+from ...utils import text_msg
+
 if TYPE_CHECKING:
     from src.agents.pydantic.models import VisionResponse
 
@@ -123,8 +125,6 @@ def build_escalation_state_update(
     Returns:
         State update dict with escalation info
     """
-    from .utils import text_msg
-
     if create_task_fn is None:
         create_task_fn = asyncio.create_task
 
