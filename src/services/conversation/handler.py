@@ -236,11 +236,20 @@ class ConversationHandler:
                         details["products"] = []
 
                     notifier = NotificationService()
+                    # Format details into user_context for notification
+                    context_parts = [text] if text else []
+                    if details.get("trace_id"):
+                        context_parts.append(f"Trace ID: {details['trace_id']}")
+                    if details.get("current_state"):
+                        context_parts.append(f"State: {details['current_state']}")
+                    if details.get("intent"):
+                        context_parts.append(f"Intent: {details['intent']}")
+                    user_context_full = "\n".join(context_parts) if context_parts else None
+                    
                     await notifier.send_escalation_alert(
                         session_id=session_id,
                         reason=reason,
-                        user_context=text,
-                        details=details,
+                        user_context=user_context_full,
                     )
             except Exception as notify_exc:
                 logger.warning(
