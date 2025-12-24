@@ -167,6 +167,13 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down MIRT AI Webhooks server")
+    
+    # Gracefully close checkpointer pool
+    try:
+        from src.agents.langgraph.checkpointer import shutdown_checkpointer_pool
+        await shutdown_checkpointer_pool()
+    except Exception as e:
+        logger.warning("Failed to shutdown checkpointer pool: %s", e)
 
 
 app = FastAPI(

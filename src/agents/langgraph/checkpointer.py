@@ -190,25 +190,33 @@ def _log_if_slow(
 
 # Track if pool was already opened to avoid spam logs
 _pool_opened = False
+_pool_open_lock = asyncio.Lock()  # Prevent race conditions
 
 async def _open_pool_on_demand(pool: Any | None) -> None:
+    """Open pool on-demand with thread-safe check."""
     global _pool_opened
     if pool is None or not hasattr(pool, "open"):
         return
-    try:
+    
+    # Use lock to prevent race conditions in async context
+    async with _pool_open_lock:
+        if _pool_opened:
+            return  # Already opened
+        
         try:
-            await pool.open(wait=True)
-        except TypeError:
-            await pool.open()
-        # Log only once per process to reduce noise
-        if not _pool_opened:
+            try:
+                await pool.open(wait=True)
+            except TypeError:
+                await pool.open()
+            # Log only once per process to reduce noise
             logger.debug("[CHECKPOINTER] pool opened on demand (first time)")
             _pool_opened = True
-    except Exception as exc:
-        msg = str(exc).lower()
-        if "already" in msg and "open" in msg:
-            return
-        logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "already" in msg and "open" in msg:
+                _pool_opened = True  # Mark as opened even if error says already open
+                return
+            logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
 
 
 class SerializableMemorySaver(MemorySaver):
@@ -380,8 +388,13 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         # - check: Verify connection is alive before use
 
         async def check_connection(conn):
-            """Check if connection is still alive before returning from pool."""
+            """Check if connection is still alive before returning from pool.
+            
+            This runs on every connection acquisition. For better performance,
+            consider using a lighter check or caching the result.
+            """
             try:
+                # Use a lightweight query - PostgreSQL optimizes SELECT 1
                 await conn.execute("SELECT 1")
             except Exception:
                 raise  # Connection is dead, pool will discard it
@@ -550,6 +563,10 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                         "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
                     )
             
+        # Store pool reference for graceful shutdown
+        global _pool_instance
+        _pool_instance = pool
+        
         checkpointer = InstrumentedAsyncPostgresSaver(pool)
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
@@ -814,3 +831,31 @@ async def warmup_checkpointer_pool() -> bool:
 def is_persistent() -> bool:
     """Check if the current checkpointer is persistent (survives restarts)."""
     return _checkpointer_type in (CheckpointerType.POSTGRES, CheckpointerType.REDIS)
+
+
+async def shutdown_checkpointer_pool() -> None:
+    """Gracefully close checkpointer pool on application shutdown.
+    
+    This should be called during application shutdown to properly close
+    database connections and avoid connection leaks.
+    """
+    global _pool_instance
+    if _pool_instance is None:
+        return
+    
+    pool = _pool_instance
+    _pool_instance = None
+    
+    try:
+        if hasattr(pool, "close"):
+            # Give active connections time to finish (max 5 seconds)
+            await asyncio.wait_for(pool.close(), timeout=5.0)
+            logger.info("[CHECKPOINTER] Pool closed gracefully")
+        elif hasattr(pool, "wait"):
+            # Some pool implementations use wait() instead
+            await asyncio.wait_for(pool.wait(), timeout=5.0)
+            logger.info("[CHECKPOINTER] Pool closed gracefully")
+    except asyncio.TimeoutError:
+        logger.warning("[CHECKPOINTER] Pool close timed out, forcing shutdown")
+    except Exception as e:
+        logger.warning("[CHECKPOINTER] Error closing pool: %s", e)
