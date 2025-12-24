@@ -133,7 +133,8 @@ async def _add_order_context(ctx: RunContext[AgentDeps]) -> str:
 
 async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
     """Inject canonical payment requisites to avoid hallucinations."""
-    return "\n--- РЕКВІЗИТИ ДЛЯ ОПЛАТИ (SSOT) ---\n" + format_requisites_multiline()
+    # НЕ показуй технічні заголовки клієнту - просто реквізити
+    return format_requisites_multiline()
 
 
 async def _add_payment_subphase_prompt(ctx: RunContext[AgentDeps]) -> str:

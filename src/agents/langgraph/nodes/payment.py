@@ -177,17 +177,13 @@ async def _prepare_payment_and_interrupt(
             deps=deps,
             message_history=None,
         )
-        response_text = response.reply_to_user
+        # LLM-FIRST: Використовуємо reply_to_user з PaymentResponse
+        # PaymentResponse не має messages (тільки reply_to_user), тому використовуємо його
+        response_text = response.reply_to_user or ""
     except Exception as e:
         logger.error("Payment LLM call failed: %s", e)
-        # Fallback response
-        response_text = (
-            "Чудово! Для оформлення замовлення надішліть:\n"
-            "📝 ПІБ\n"
-            "📱 Телефон\n"
-            "🏙️ Місто та відділення Нової Пошти\n\n"
-            f"Сума до сплати: {total_price} грн"
-        )
+        # Мінімальний fallback - LLM має завжди працювати, fallback тільки для критичних помилок
+        response_text = "Для оформлення замовлення надішліть ПІБ, телефон та адресу Нової Пошти 🤍"
 
     latency_ms = (time.perf_counter() - start_time) * 1000
     track_metric("payment_prepare_latency_ms", latency_ms)
@@ -238,13 +234,18 @@ async def _prepare_payment_and_interrupt(
             "[SESSION %s] HITL disabled - waiting for delivery data (ПІБ, адреса, НП)",
             session_id,
         )
+        # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
+        # Розбиваємо по подвійних переносах рядків (\n\n) для багатобаблових відповідей
+        response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
+        assistant_messages = [{"role": "assistant", "content": part} for part in response_parts] if response_parts else [{"role": "assistant", "content": response_text}]
+        
         cmd = Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                "messages": [{"role": "assistant", "content": response_text}],
+                "messages": assistant_messages,
                 "agent_response": {
                     "event": "simple_answer",
-                    "messages": [{"type": "text", "content": response_text}],
+                    "messages": [{"type": "text", "content": part} for part in response_parts] if response_parts else [{"type": "text", "content": response_text}],
                     "metadata": {
                         "session_id": session_id,
                         "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -278,13 +279,17 @@ async def _prepare_payment_and_interrupt(
     #
     # DIALOG PHASE: WAITING_FOR_PAYMENT_PROOF
     # - Показали реквізити, чекаємо скрін оплати
+    # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
+    response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
+    assistant_messages = [{"role": "assistant", "content": part} for part in response_parts] if response_parts else [{"role": "assistant", "content": response_text}]
+    
     cmd = Command(
         update={
             "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-            "messages": [{"role": "assistant", "content": response_text}],
+            "messages": assistant_messages,
             "agent_response": {
                 "event": "simple_answer",
-                "messages": [{"type": "text", "content": response_text}],
+                "messages": [{"type": "text", "content": part} for part in response_parts] if response_parts else [{"type": "text", "content": response_text}],
                 "metadata": {
                     "session_id": session_id,
                     "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -334,21 +339,6 @@ async def _handle_delivery_data(
         state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
     )
 
-    user_text_for_proof = user_message if isinstance(user_message, str) else str(user_message)
-    user_text_lower_for_proof = user_text_for_proof.lower()
-    
-    # Use SSOT rules module instead of duplicated keywords
-    from src.agents.langgraph.rules.payment_proof import detect_payment_proof
-    
-    has_payment_url = ("http://" in user_text_lower_for_proof) or (
-        "https://" in user_text_lower_for_proof
-    )
-    has_payment_proof_pre = detect_payment_proof(
-        user_text_lower_for_proof,
-        has_image=has_image_now,
-        has_url=has_payment_url,
-    )
-
     logger.info(
         "[SESSION %s] Processing delivery data: '%s'",
         session_id,
@@ -359,16 +349,14 @@ async def _handle_delivery_data(
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
     deps.selected_products = products
+    
+    # LLM-FIRST: Дозволяємо LLM самому визначати sub-phase через промпти
+    # Не форсуємо THANK_YOU через detect_payment_proof - LLM сам визначить через контекст
     try:
         from src.agents.langgraph.state_prompts import get_payment_sub_phase
-
         deps.payment_sub_phase = get_payment_sub_phase(state)
-        # If we already detect payment proof in this message, force THANK_YOU prompt
-        # so the LLM uses STATE_5_PAYMENT_DELIVERY_THANKS (md) as SSOT.
-        if has_payment_proof_pre and deps.payment_sub_phase != "THANK_YOU":
-            deps.payment_sub_phase = "THANK_YOU"
     except Exception:
-        deps.payment_sub_phase = deps.payment_sub_phase
+        deps.payment_sub_phase = None
 
     try:
         # Use payment agent to process delivery data
@@ -377,7 +365,10 @@ async def _handle_delivery_data(
             deps=deps,
             message_history=None,
         )
-        response_text = response.reply_to_user
+        # LLM-FIRST: Використовуємо reply_to_user з PaymentResponse
+        # PaymentResponse не має messages (тільки reply_to_user), тому використовуємо його
+        # Legacy код який перезаписував response_text видалено - дозволяємо LLM генерувати відповіді
+        response_text = response.reply_to_user or ""
 
         metadata_update = state.get("metadata", {}).copy()
         if deps.customer_name:
@@ -395,55 +386,15 @@ async def _handle_delivery_data(
             getattr(response, "awaiting_payment_confirmation", False)
         )
 
-        user_text = user_message if isinstance(user_message, str) else str(user_message)
-        user_text_lower = user_text.lower()
-
-        existing_delivery_data = bool(
-            metadata_update.get("customer_name")
-            and metadata_update.get("customer_phone")
-            and metadata_update.get("customer_city")
-            and metadata_update.get("customer_nova_poshta")
-        )
-
-        has_delivery_data = bool(
-            existing_delivery_data
-            or (
-                deps.customer_name
-                and deps.customer_phone
-                and deps.customer_city
-                and deps.customer_nova_poshta
-            )
-        )
-
-        has_payment_proof = has_payment_proof_pre
-
-        confirmation_only_keywords = (
-            "да",
-            "так",
-            "ок",
-            "okay",
-            "согласен",
-            "згоден",
-            "беру",
-        )
-
-        if user_text_lower.strip() in confirmation_only_keywords and not has_payment_proof:
-            missing = []
-            if not metadata_update.get("customer_name"):
-                missing.append("📝 ПІБ")
-            if not metadata_update.get("customer_phone"):
-                missing.append("📱 Телефон")
-            if not metadata_update.get("customer_city"):
-                missing.append("🏙️ Місто")
-            if not metadata_update.get("customer_nova_poshta"):
-                missing.append("📍 Відділення Нової пошти")
-
-            if missing:
-                response_text = "Будь ласка, надішліть:\n" + "\n".join(missing)
-            else:
-                response_text = "Надішліть, будь ласка, скрін квитанції після оплати 🤍"
-
-        if has_delivery_data and has_payment_proof:
+        # LLM-FIRST: Використовуємо тільки поля з PaymentResponse для бізнес-логіки
+        # LLM сам визначає через промпти:
+        # - order_ready: чи готове замовлення (всі дані + payment proof)
+        # - missing_fields: які дані ще потрібні
+        # - awaiting_payment_confirmation: чи чекаємо скрін оплати
+        # - payment_details_sent: чи надіслано реквізити
+        
+        # Переходимо до STATE_7_END тільки якщо LLM визначив що order_ready=True
+        if response.order_ready:
             trace_id = state.get("trace_id", "")
             log_agent_step(
                 session_id=session_id,
@@ -453,9 +404,7 @@ async def _handle_delivery_data(
                 extra={
                     "trace_id": trace_id,
                     "payment_proof_received": True,
-                    "payment_proof_via": "image"
-                    if has_image_now
-                    else ("url" if has_payment_url else "text"),
+                    "payment_proof_via": "image" if has_image_now else "text",
                 },
             )
             cmd = Command(
@@ -508,13 +457,17 @@ async def _handle_delivery_data(
                 )
             return cmd
 
+        # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
+        response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
+        assistant_messages = [{"role": "assistant", "content": part} for part in response_parts] if response_parts else [{"role": "assistant", "content": response_text}]
+        
         cmd = Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                "messages": [{"role": "assistant", "content": response_text}],
+                "messages": assistant_messages,
                 "agent_response": {
                     "event": "simple_answer",
-                    "messages": [{"type": "text", "content": response_text}],
+                    "messages": [{"type": "text", "content": part} for part in response_parts] if response_parts else [{"type": "text", "content": response_text}],
                     "metadata": {
                         "session_id": session_id,
                         "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -546,14 +499,14 @@ async def _handle_delivery_data(
                 error_type=type(e).__name__,
                 message=str(e) or type(e).__name__,
             )
-        # Fallback - ask for data again
+        # Мінімальний fallback - LLM має завжди працювати
         return Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
                 "messages": [
                     {
                         "role": "assistant",
-                        "content": "Будь ласка, надішліть:\n📝 ПІБ\n📱 Телефон\n🏙️ Місто та відділення НП",
+                        "content": "Надішліть, будь ласка, ПІБ, телефон та адресу Нової Пошти 🤍",
                     }
                 ],
                 "agent_response": {
@@ -561,7 +514,7 @@ async def _handle_delivery_data(
                     "messages": [
                         {
                             "type": "text",
-                            "content": "Будь ласка, надішліть:\n📝 ПІБ\n📱 Телефон\n🏙️ Місто та відділення НП",
+                            "content": "Надішліть, будь ласка, ПІБ, телефон та адресу Нової Пошти 🤍",
                         }
                     ],
                     "metadata": {

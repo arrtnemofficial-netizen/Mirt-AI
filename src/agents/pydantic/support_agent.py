@@ -123,7 +123,8 @@ async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:
 
 async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
     """Inject canonical payment requisites to avoid LLM hallucinations."""
-    return "\n--- РЕКВІЗИТИ ДЛЯ ОПЛАТИ (SSOT) ---\n" + format_requisites_multiline()
+    # НЕ показуй технічні заголовки клієнту - просто реквізити
+    return format_requisites_multiline()
 
 
 # =============================================================================
