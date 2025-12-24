@@ -407,6 +407,59 @@ async def _handle_delivery_data(
                     "payment_proof_via": "image" if has_image_now else "text",
                 },
             )
+            
+            # CRITICAL: Зберігаємо замовлення в CRM (працює і без HITL!)
+            approval_data = {
+                "total_price": sum(p.get("price", 0) for p in products),
+                "products": [p.get("name", "Товар") for p in products],
+            }
+            crm_order_result = await _persist_order_and_queue_crm(
+                state=state,
+                session_id=session_id,
+                approval_data=approval_data,
+            )
+            
+            # Якщо CRM створення не вдалося - залишаємося в STATE_5 для повторної спроби
+            if crm_order_result and crm_order_result.get("status") in ["failed", "error"]:
+                logger.error(
+                    "[SESSION %s] CRM order creation failed, staying in STATE_5",
+                    session_id,
+                )
+                # Не переходимо до STATE_7_END якщо CRM не вдалося
+                # LLM може спробувати ще раз
+                cmd = Command(
+                    update={
+                        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "content": "Вибачте, сталася помилка при оформленні замовлення. Спробуйте, будь ласка, ще раз 🤍",
+                            }
+                        ],
+                        "agent_response": {
+                            "event": "simple_answer",
+                            "messages": [
+                                {
+                                    "type": "text",
+                                    "content": "Вибачте, сталася помилка при оформленні замовлення. Спробуйте, будь ласка, ще раз 🤍",
+                                }
+                            ],
+                            "metadata": {
+                                "session_id": session_id,
+                                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                                "intent": "PAYMENT_DELIVERY",
+                                "escalation_level": "NONE",
+                            },
+                        },
+                        "metadata": metadata_update,
+                        "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                        "step_number": state.get("step_number", 0) + 1,
+                    },
+                    goto="end",
+                )
+                return cmd
+            
+            # CRM створено успішно - переходимо до STATE_7_END
             cmd = Command(
                 update={
                     "current_state": State.STATE_7_END.value,
@@ -439,6 +492,8 @@ async def _handle_delivery_data(
                         **metadata_update,
                         "payment_proof_received": True,
                         "payment_confirmed": True,
+                        "crm_order_result": crm_order_result,
+                        "crm_external_id": crm_order_result.get("external_id") if crm_order_result else None,
                     },
                     "dialog_phase": "COMPLETED",
                     "should_escalate": True,
