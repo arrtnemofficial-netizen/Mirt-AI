@@ -12,7 +12,7 @@ Dual-track escalation:
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 from src.core.state_machine import State
@@ -100,7 +100,7 @@ def build_escalation_state_update(
     escalation_reason: str,
     confidence: float,
     claimed_name: str | None,
-    create_task_fn: Callable[[asyncio.coroutine], asyncio.Task] | None = None,
+    create_task_fn: Callable[[Coroutine[Any, Any, None]], asyncio.Task] | None = None,
     active_escalations: set[str] | None = None,
     bg_tasks: set[asyncio.Task] | None = None,
 ) -> dict[str, Any]:
