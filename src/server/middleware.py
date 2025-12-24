@@ -277,8 +277,8 @@ class RedisRateLimiter:
 
         except Exception as e:
             logger.error("Redis rate limit check failed: %s", e)
-            # Fail open: allow request if Redis check fails
-            return True, None, None
+            # Fail-closed: return 503 if Redis unavailable
+            return False, "Rate limiting service unavailable. Please try again later.", 60
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

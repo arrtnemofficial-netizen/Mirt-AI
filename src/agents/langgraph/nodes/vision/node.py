@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.agents.pydantic.deps import create_deps_from_state
-from src.agents.pydantic.vision_agent import run_vision
 from src.core.state_machine import State
 from src.services.core.observability import log_agent_step, log_trace, track_metric
 from src.services.domain.vision.vision_ledger import (
@@ -53,6 +52,30 @@ LEDGER_FINAL_STATUSES = {
     LEDGER_STATUS_ESCALATED,
     LEDGER_STATUS_BLOCKED,
 }
+
+async def run_vision(*args: Any, **kwargs: Any) -> Any:
+    """
+    Patch-friendly wrapper for the vision agent call.
+
+    - Some tests patch `src.agents.langgraph.nodes.vision.run_vision` (package-level)
+    - Others patch `src.agents.langgraph.nodes.vision.node.run_vision` (module-level)
+
+    This wrapper ensures both patch targets work while still routing to the
+    canonical implementation.
+    """
+    from src.agents.langgraph.nodes import vision as vision_pkg
+
+    return await vision_pkg.run_vision(*args, **kwargs)
+
+def _wrap_state_messages(agent_response_payload: dict[str, Any]) -> list[dict[str, str]]:
+    """
+    ConversationState.messages must be LangGraph-style: [{role, content}, ...].
+
+    Vision builder produces multi-bubble payloads (text/image dicts). We keep those
+    in `agent_response.messages`, but store a single assistant message containing
+    the structured payload as string (same pattern as agent_node).
+    """
+    return [{"role": "assistant", "content": str(agent_response_payload)}]
 
 
 def _get_vision_labels() -> dict[str, Any]:
@@ -206,23 +229,25 @@ async def vision_node(
         )
         if ledger_record.get("metadata"):
             duplicate_metadata["ledger_snapshot"] = ledger_record["metadata"]
+        agent_response_payload = {
+            "event": "vision_duplicate",
+            "messages": duplicate_messages,
+            "metadata": {
+                "session_id": session_id,
+                "current_state": State.STATE_2_VISION.value,
+                "intent": "PHOTO_IDENT",
+                "vision_duplicate_detected": True,
+                "vision_result_id": ledger_record.get("vision_result_id"),
+            },
+        }
         return {
             "current_state": State.STATE_2_VISION.value,
-            "messages": duplicate_messages,
+            "messages": _wrap_state_messages(agent_response_payload),
             "selected_products": state.get("selected_products", []),
             "dialog_phase": "VISION_DONE",
             "has_image": True,
             "metadata": duplicate_metadata,
-            "agent_response": {
-                "messages": duplicate_messages,
-                "metadata": {
-                    "session_id": session_id,
-                    "current_state": State.STATE_2_VISION.value,
-                    "intent": "PHOTO_IDENT",
-                    "vision_duplicate_detected": True,
-                    "vision_result_id": ledger_record.get("vision_result_id"),
-                },
-            },
+            "agent_response": agent_response_payload,
             "step_number": state.get("step_number", 0) + 1,
         }
 
@@ -283,6 +308,9 @@ async def vision_node(
             extra_metadata={"stage": "vision_error_escalation"},
         )
         update = build_vision_error_escalation(error_msg, state.get("step_number", 0))
+        # Ensure state messages are in {role, content} format for ConversationState contract.
+        if isinstance(update.get("agent_response"), dict):
+            update["messages"] = _wrap_state_messages(update["agent_response"])
         # Add session_id to metadata which might be missing in pure builder
         update["agent_response"]["metadata"]["session_id"] = session_id
         if final_record and final_record.get("vision_result_id"):
@@ -377,8 +405,8 @@ async def vision_node(
     )
 
     try:
-        # Call vision agent
-        response = await run_vision(message=user_message, deps=deps)
+        # Call vision agent (goes through wrapper for test patching)
+        response = await run_vision(message=user_message, deps=deps, message_history=None)
     except Exception as e:
         err = str(e)
         logger.error("Vision agent error: %s", err)
@@ -460,7 +488,18 @@ async def vision_node(
             ]
             return {
                 "current_state": State.STATE_2_VISION.value,
-                "messages": retry_messages,
+                "messages": _wrap_state_messages(
+                    {
+                        "event": "vision_retry",
+                        "messages": retry_messages,
+                        "metadata": {
+                            "session_id": session_id,
+                            "current_state": State.STATE_2_VISION.value,
+                            "intent": "PHOTO_IDENT",
+                            "vision_result_id": vision_result_id,
+                        },
+                    }
+                ),
                 "selected_products": [],
                 "dialog_phase": "VISION_RETRY",
                 "has_image": True,
@@ -474,6 +513,7 @@ async def vision_node(
                     "vision_quality_retry": True,
                 },
                 "agent_response": {
+                    "event": "vision_retry",
                     "messages": retry_messages,
                     "metadata": {
                         "session_id": session_id,
@@ -543,9 +583,20 @@ async def vision_node(
             task.add_done_callback(_BG_TASKS.discard)
 
             # Return IMMEDIATELY to customer - don't wait for notification
+            agent_response_payload = {
+                "event": "vision_escalation",
+                "messages": escalation_messages,
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_7_END.value,
+                    "intent": "PHOTO_IDENT",
+                    "escalation_level": "HARD",
+                    "vision_result_id": vision_result_id,
+                },
+            }
             return {
                 "current_state": State.STATE_7_END.value,
-                "messages": escalation_messages,
+                "messages": _wrap_state_messages(agent_response_payload),
                 "selected_products": [],
                 "dialog_phase": "COMPLETED",
                 "has_image": False,
@@ -560,16 +611,7 @@ async def vision_node(
                     "escalation_level": "HARD",
                     "escalation_reason": "product_not_in_catalog",
                 },
-                "agent_response": {
-                    "messages": escalation_messages,
-                    "metadata": {
-                        "session_id": session_id,
-                        "current_state": State.STATE_7_END.value,
-                        "intent": "PHOTO_IDENT",
-                        "escalation_level": "HARD",
-                        "vision_result_id": vision_result_id,
-                    },
-                },
+                "agent_response": agent_response_payload,
                 "step_number": state.get("step_number", 0) + 1,
             }
 
@@ -618,9 +660,19 @@ async def vision_node(
     if final_record and final_record.get("vision_result_id"):
         vision_result_id = final_record["vision_result_id"]
 
+    agent_response_payload = {
+        "event": "vision_response",
+        "messages": response_messages,
+        "metadata": {
+            "session_id": session_id,
+            "current_state": State.STATE_2_VISION.value,
+            "intent": "PHOTO_IDENT",
+            "vision_result_id": vision_result_id,
+        },
+    }
     return {
         "current_state": State.STATE_2_VISION.value,
-        "messages": response_messages,
+        "messages": _wrap_state_messages(agent_response_payload),
         "selected_products": selected_products,
         "dialog_phase": "VISION_DONE",
         "has_image": True,
@@ -634,14 +686,6 @@ async def vision_node(
             "vision_result_id": vision_result_id,
             "vision_hash_processed": vision_hash,
         },
-        "agent_response": {
-            "messages": response_messages,
-            "metadata": {
-                "session_id": session_id,
-                "current_state": State.STATE_2_VISION.value,
-                "intent": "PHOTO_IDENT",
-                "vision_result_id": vision_result_id,
-            },
-        },
+        "agent_response": agent_response_payload,
         "step_number": state.get("step_number", 0) + 1,
     }

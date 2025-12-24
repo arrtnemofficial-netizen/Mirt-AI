@@ -127,8 +127,10 @@ def extract_color_from_name(raw_name: str) -> str | None:
 
     # Simple check for unique canonical colors from patterns
     unique_colors = {c for _, c in patterns}
+    # Prefer longer/more specific colors first (e.g. "темно синій" before "синій")
+    colors_sorted = sorted(unique_colors, key=lambda c: len(c), reverse=True)
 
-    for color in unique_colors:
+    for color in colors_sorted:
         if color in raw_lower:
             return color
 

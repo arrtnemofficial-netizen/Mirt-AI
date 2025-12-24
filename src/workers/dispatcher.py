@@ -18,6 +18,16 @@ from typing import Any
 from src.conf.config import settings
 from src.workers.idempotency import webhook_task_id
 
+from src.integrations.crm.snitkix import get_snitkix_client
+from src.services.infra.supabase_client import get_supabase_client
+from src.workers.sync_utils import run_sync
+
+try:
+    # Exported for tests (they patch src.workers.dispatcher.sync_order_status)
+    from src.workers.tasks.crm import sync_order_status
+except Exception:  # pragma: no cover
+    sync_order_status = None  # type: ignore[assignment]
+
 
 logger = logging.getLogger(__name__)
 
@@ -143,17 +153,13 @@ def dispatch_crm_order_status(
         Task result or async task info
     """
     if settings.CELERY_ENABLED:
-        from src.workers.tasks.crm import sync_order_status
-
-        task = sync_order_status.delay(order_id, session_id, new_status)
+        if sync_order_status is None:
+            raise RuntimeError("CRM task sync_order_status is not available")
+        task = sync_order_status.delay(order_id, session_id, new_status)  # type: ignore[union-attr]
         logger.info("[DISPATCH] Queued CRM order status sync task %s", task.id)
         return {"queued": True, "task_id": task.id}
     else:
         # Sync execution
-        from src.integrations.crm.snitkix import get_snitkix_client
-        from src.services.infra.supabase_client import get_supabase_client
-        from src.workers.sync_utils import run_sync
-
         if not settings.snitkix_enabled:
             return {"queued": False, "status": "crm_not_configured"}
 

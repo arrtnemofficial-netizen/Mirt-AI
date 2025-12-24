@@ -60,11 +60,12 @@ def next_followup_due_at(
     return last + timedelta(hours=schedule[sent])
 
 
+# Export for testing
+from src.core.prompt_registry import get_snippet_by_header
+
 def build_followup_message(
     session_id: str, index: int, now: datetime | None = None
 ) -> StoredMessage:
-    from src.core.prompt_registry import get_snippet_by_header
-
     created_at = now or datetime.now(UTC)
     
     # Use specific snippets for 4h (index 1) and 23h (index 2) followups

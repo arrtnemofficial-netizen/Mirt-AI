@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 
 # PydanticAI imports
 from src.agents.pydantic.deps import create_deps_from_state
-from src.agents.pydantic.main_agent import run_main
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.prompt_registry import load_yaml_from_registry
@@ -140,6 +139,93 @@ async def agent_node(
         except Exception:
             pass
 
+    # =========================================================================
+    # AUTO COLOR GALLERY (Universal - works at ANY state)
+    # =========================================================================
+    # Detect if user wants to see all color options with photos
+    try:
+        from src.agents.langgraph.rules.color_request import (
+            detect_color_show_request,
+            get_product_name_for_color_show,
+        )
+        from src.agents.langgraph.nodes.helpers.vision.product_colors import (
+            get_product_colors,
+        )
+        
+        if detect_color_show_request(user_message):
+            product_name = get_product_name_for_color_show(state)
+            
+            if product_name:
+                # Get all colors for this product
+                all_colors = get_product_colors(product_name)
+                
+                if all_colors and len(all_colors) > 0:
+                    # Build response with text + all color photos
+                    messages_list: list[dict[str, str]] = []
+                    
+                    # First bubble: simple text
+                    messages_list.append({
+                        "type": "text",
+                        "content": "У нас є кілька кольорів:"
+                    })
+                    
+                    # Add all color photos
+                    # Format: {"type": "image", "content": "url"} to match Message model
+                    # Note: ManyChat doesn't support captions, but we store URL only in content
+                    for color_info in all_colors:
+                        color_name = color_info.get("color", "")
+                        photo_url = color_info.get("photo_url", "")
+                        
+                        if photo_url:
+                            # Store only URL in content (Message model format)
+                            # Caption can be added via newline separator for other platforms if needed
+                            messages_list.append({
+                                "type": "image",
+                                "content": photo_url,  # URL only (ManyChat doesn't support captions)
+                            })
+                    
+                    # Build agent response payload
+                    agent_response_payload = {
+                        "event": "simple_answer",
+                        "messages": messages_list,
+                        "products": state.get("selected_products", []) or [],
+                        "metadata": {
+                            "session_id": session_id,
+                            "current_state": current_state,
+                            "intent": "COLOR_GALLERY",
+                            "escalation_level": "NONE",
+                        },
+                    }
+                    
+                    logger.info(
+                        "[COLOR_GALLERY] Auto-sending %d color photos for product '%s'",
+                        len(all_colors),
+                        product_name
+                    )
+                    
+                    metadata_update = state.get("metadata", {}).copy()
+                    metadata_update.update({
+                        "current_state": current_state,
+                        "intent": "COLOR_GALLERY",
+                    })
+                    
+                    return {
+                        "current_state": current_state,
+                        "detected_intent": "COLOR_GALLERY",
+                        "dialog_phase": state.get("dialog_phase", "ACTIVE"),
+                        "messages": [{"role": "assistant", "content": str(agent_response_payload)}],
+                        "metadata": metadata_update,
+                        "selected_products": state.get("selected_products", []) or [],
+                        "should_escalate": False,
+                        "escalation_reason": None,
+                        "step_number": state.get("step_number", 0) + 1,
+                        "agent_response": agent_response_payload,
+                    }
+    except Exception as e:
+        # If color gallery logic fails, continue with normal flow
+        logger.debug("Color gallery check failed (non-critical): %s", e)
+        pass
+
     if settings.DEBUG_TRACE_LOGS:
         debug_log.node_entry(
             session_id=session_id,
@@ -175,7 +261,11 @@ async def agent_node(
 
     try:
         # LLM CALL
-        response: SupportResponse = await run_main(
+        # NOTE: We deliberately call `run_support` via the package-level symbol
+        # so tests can patch `src.agents.langgraph.nodes.agent.run_support`.
+        from src.agents.langgraph.nodes import agent as agent_pkg
+
+        response: SupportResponse = await agent_pkg.run_support(
             message=user_message,
             deps=deps,
             message_history=None,

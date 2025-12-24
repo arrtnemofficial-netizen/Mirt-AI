@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -100,6 +100,25 @@ class Settings(BaseSettings):
         default=True,
         description="Enable checkpoint payload compaction (disable for debugging).",
     )
+
+    # Loop guard thresholds (conversation safety)
+    LOOP_GUARD_WARNING_THRESHOLD: int = Field(
+        default=5, gt=0, description="Warn when user/agent loop count reaches this threshold."
+    )
+    LOOP_GUARD_SOFT_RESET: int = Field(
+        default=10, gt=0, description="Soft reset when loop count reaches this threshold."
+    )
+    LOOP_GUARD_ESCALATION: int = Field(
+        default=20, gt=0, description="Escalate when loop count reaches this threshold."
+    )
+
+    @model_validator(mode="after")
+    def _validate_loop_guard_thresholds(self) -> "Settings":
+        if self.LOOP_GUARD_WARNING_THRESHOLD >= self.LOOP_GUARD_SOFT_RESET:
+            raise ValueError("LOOP_GUARD_WARNING_THRESHOLD must be < LOOP_GUARD_SOFT_RESET")
+        if self.LOOP_GUARD_SOFT_RESET > self.LOOP_GUARD_ESCALATION:
+            raise ValueError("LOOP_GUARD_SOFT_RESET must be <= LOOP_GUARD_ESCALATION")
+        return self
 
     # Snitkix CRM integration
     SNITKIX_API_URL: str = Field(default="", description="Snitkix CRM API base URL.")
@@ -329,6 +348,9 @@ def validate_ssot_files() -> None:
 
 def validate_required_settings(settings_instance: Settings | None = None) -> None:
     """Validate that all required environment variables are set.
+
+    This is a legacy validation function. For comprehensive validation with
+    format checks and structured errors, use preflight_validation module.
 
     Raises RuntimeError if critical settings are missing.
 

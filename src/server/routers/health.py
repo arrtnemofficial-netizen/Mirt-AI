@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse, Response
 
 from src.conf.config import settings
 
@@ -247,6 +248,49 @@ async def health_graph() -> dict[str, Any]:
             "status": "error",
             "error": str(e)[:200],
         }
+
+
+@router.get("/health/ready")
+async def readiness() -> Response:
+    """Readiness probe for Kubernetes/deployment systems.
+    
+    Checks only critical components:
+    - Checkpointer (PostgreSQL)
+    - LangGraph graph
+    - LLM provider availability
+    
+    Returns:
+        HTTP 200 if all critical components are ready
+        HTTP 503 if any critical component is not ready
+    """
+    try:
+        from src.server.startup_validation import validate_critical_components
+        
+        checks = await validate_critical_components()
+        
+        if checks["all_ready"]:
+            return JSONResponse(
+                {"status": "ready", "checks": checks["checks"]},
+                status_code=200
+            )
+        else:
+            return JSONResponse(
+                {
+                    "status": "not_ready",
+                    "failures": checks["failures"],
+                    "checks": checks["checks"],
+                },
+                status_code=503
+            )
+    except Exception as e:
+        logger.exception("Readiness check failed: %s", e)
+        return JSONResponse(
+            {
+                "status": "not_ready",
+                "error": str(e)[:200],
+            },
+            status_code=503
+        )
 
 
 @router.get("/health/agents")

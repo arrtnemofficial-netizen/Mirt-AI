@@ -16,6 +16,8 @@ from src.workers.tasks.crm import (
 )
 from src.workers.tasks.followups import (
     check_all_sessions_for_followups,
+    handle_24h_followup_escalation,
+    schedule_followup,
     send_followup,
 )
 from src.workers.tasks.health import ping, worker_health_check
@@ -40,6 +42,8 @@ __all__ = [
     # Followups
     "send_followup",
     "check_all_sessions_for_followups",
+    "schedule_followup",
+    "handle_24h_followup_escalation",
     # CRM
     "create_crm_order",
     "sync_order_status",

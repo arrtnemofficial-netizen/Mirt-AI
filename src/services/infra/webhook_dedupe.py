@@ -76,14 +76,24 @@ class WebhookDedupeStore:
             return False
 
         except Exception as e:
+            error_str = str(e).lower()
+            
             # Check if it's a duplicate (unique constraint violation)
-            if "duplicate key" in str(e).lower() or "already exists" in str(e).lower():
+            if "duplicate key" in error_str or "already exists" in error_str:
                 logger.info("Webhook dedupe: duplicate %s", dedupe_key)
                 return True
 
-            # Other error - log but allow processing
-            logger.error("Webhook dedupe error: %s", e)
-            return False
+            # CRITICAL: Fail-safe при помилці БД
+            # Якщо не впевнені що це не дублікат, краще вважати дублікатом
+            # Це запобігає подвійній обробці webhook при помилках БД
+            logger.error(
+                "Webhook dedupe error (fail-safe: treating as duplicate): %s",
+                e,
+                exc_info=True,
+            )
+            # Fail-safe: вважати дублікатом при невизначеності
+            # Це безпечніше ніж дозволити подвійну обробку
+            return True
 
     def cleanup_expired(self) -> int:
         """Remove expired entries. Returns count of cleaned rows."""

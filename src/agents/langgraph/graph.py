@@ -116,7 +116,8 @@ def build_production_graph(
                 sitniks_status,
             )
             return {"step_number": state.get("step_number", 0) + 1}
-        return await sitniks_status(state)
+        # update_sitniks_status is synchronous, returns dict directly
+        return sitniks_status(state)
 
     async def _offer(state: dict[str, Any]) -> dict[str, Any]:
         return await offer_node(state, runner)

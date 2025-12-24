@@ -576,8 +576,24 @@ class AsyncTracingService:
             try:
                 await client.table("llm_traces").insert(clean_payload).execute()
             except Exception as e:
-                # Handle error with appropriate logging level
+                # SAFEGUARD_3: Increment failure counter on insert errors too
+                self._failure_count += 1
+                # Handle error with appropriate logging level/details
                 self._handle_trace_error(e, clean_payload)
+
+                # Tests and ops expect a consistent "Failed to log trace" message.
+                if self._failure_count <= 3:
+                    logger.warning(
+                        "[TRACING] Failed to log trace (failure_count=%d): %s",
+                        self._failure_count,
+                        str(e)[:200],
+                    )
+                else:
+                    logger.debug(
+                        "[TRACING] Failed to log trace (failure_count=%d): %s",
+                        self._failure_count,
+                        str(e)[:200],
+                    )
 
         except Exception as e:
             # SAFEGUARD_2: Graceful degradation - observability shouldn't crash the app

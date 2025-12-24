@@ -37,25 +37,58 @@ TAG_ORDER_PAID = "order_paid"
 
 def build_manychat_messages(agent_response, *, include_product_images: bool = True) -> list[dict[str, Any]]:
     """Build ManyChat message list from AgentResponse."""
-    text_chunks = render_agent_response_text(agent_response)
-    messages: list[dict[str, Any]] = [{"type": "text", "text": chunk} for chunk in text_chunks if chunk and chunk.strip()]
-
-    # Ensure at least one message exists (fallback if empty)
+    messages: list[dict[str, Any]] = []
+    
+    # Process messages from agent_response (including image messages)
+    for msg in agent_response.messages:
+        if msg.type == "text":
+            if msg.content and msg.content.strip():
+                messages.append({"type": "text", "text": msg.content})
+        elif msg.type == "image":
+            # Extract URL from content
+            # Format: "url" or "url\ncaption" (newline separator for platforms that support captions)
+            content = msg.content.strip()
+            # Split by newline to separate URL and caption (if present)
+            parts = content.split("\n", 1)
+            url = parts[0].strip()
+            caption = parts[1].strip() if len(parts) > 1 else ""
+            
+            if url:
+                # ManyChat doesn't support captions, but we include it for completeness
+                messages.append({
+                    "type": "image",
+                    "url": url,
+                    "caption": caption if caption else "",
+                })
+    
+    # Fallback: if no messages, use text renderer
     if not messages:
-        from src.core.human_responses import get_human_response
-        fallback_text = get_human_response("error")
-        messages = [{"type": "text", "text": fallback_text}]
+        text_chunks = render_agent_response_text(agent_response)
+        messages = [{"type": "text", "text": chunk} for chunk in text_chunks if chunk and chunk.strip()]
+        
+        # Ensure at least one message exists (fallback if empty)
+        if not messages:
+            from src.core.human_responses import get_human_response
+            fallback_text = get_human_response("error")
+            messages = [{"type": "text", "text": fallback_text}]
 
+    # Add product images if enabled (only if not already in messages)
     if include_product_images:
         for product in agent_response.products:
             if product.photo_url:
-                messages.append(
-                    {
-                        "type": "image",
-                        "url": product.photo_url,
-                        "caption": f"{product.name} - {product.price} грн",
-                    }
+                # Check if this product image is already in messages
+                product_url_already_included = any(
+                    m.get("type") == "image" and m.get("url") == product.photo_url
+                    for m in messages
                 )
+                if not product_url_already_included:
+                    messages.append(
+                        {
+                            "type": "image",
+                            "url": product.photo_url,
+                            "caption": f"{product.name} - {product.price} грн",
+                        }
+                    )
 
     return messages
 

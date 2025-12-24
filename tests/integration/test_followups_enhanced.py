@@ -93,7 +93,7 @@ class TestNightMode:
     """Tests for night mode (23:00-07:00 UTC)."""
 
     @patch("src.workers.tasks.followups.run_followups")
-    @patch("src.workers.tasks.followups.get_snippet_by_header")
+    @patch("src.core.prompt_registry.get_snippet_by_header")
     @patch("src.workers.tasks.followups._send_telegram_followup")
     @patch("src.workers.tasks.followups.datetime")
     def test_send_followup_night_mode(
@@ -160,8 +160,8 @@ class Test24hEscalation:
     """Tests for 24h escalation after 23h followup."""
 
     @patch("src.workers.tasks.followups.get_supabase_client")
-    @patch("src.workers.tasks.followups.get_manychat_client")
-    @patch("src.workers.tasks.followups.get_sitniks_chat_service")
+    @patch("src.integrations.manychat.api_client.get_manychat_client")
+    @patch("src.integrations.crm.sitniks_chat_service.get_sitniks_chat_service")
     def test_handle_24h_escalation(
         self, mock_sitniks, mock_manychat, mock_supabase
     ):

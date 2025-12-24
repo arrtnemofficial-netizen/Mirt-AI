@@ -16,8 +16,14 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Backward-compatibility import for tests that patch
+# `src.agents.langgraph.nodes.sitniks_status.get_sitniks_chat_service`.
+from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 
-async def update_sitniks_status(state: dict[str, Any]) -> dict[str, Any]:
+from src.workers.sync_utils import run_sync
+
+
+def update_sitniks_status(state: dict[str, Any]) -> dict[str, Any]:
     """Update Sitniks CRM status based on conversation stage.
 
     This node:
@@ -32,9 +38,6 @@ async def update_sitniks_status(state: dict[str, Any]) -> dict[str, Any]:
         State update (usually empty, just passes through)
     """
     try:
-        from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
-        from src.workers.sync_utils import run_sync
-
         # Get stage from state
         metadata = state.get("metadata", {})
         stage = metadata.get("stage") or state.get("stage")

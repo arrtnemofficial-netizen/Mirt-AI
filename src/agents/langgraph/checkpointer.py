@@ -64,6 +64,18 @@ def _compact_payload(
         return checkpoint
 
     cv = checkpoint["channel_values"]
+
+    def _strip_base64(obj: Any) -> Any:
+        """Recursively replace base64/data URLs with a stable placeholder."""
+        if isinstance(obj, str):
+            if drop_base64 and ("data:image" in obj or "base64" in obj):
+                return "<base64_stripped>"
+            return obj
+        if isinstance(obj, dict):
+            return {k: _strip_base64(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_strip_base64(v) for v in obj]
+        return obj
     
     # SAFEGUARD_1: Whitelist critical fields - preserve them
     CRITICAL_FIELDS = {
@@ -107,7 +119,7 @@ def _compact_payload(
         if isinstance(content, str):
             # 2. Drop base64
             if drop_base64 and ("base64" in content or "data:image" in content):
-                content = "[IMAGE DATA REMOVED]"
+                content = "<base64_stripped>"
             
             # 3. Truncate chars
             if len(content) > max_chars:
@@ -121,6 +133,11 @@ def _compact_payload(
         compacted.append(msg)
     
     cv["messages"] = compacted
+
+    # 4. Strip base64/data URLs from the rest of channel_values (e.g. image_url)
+    # This keeps checkpoints small and makes tests deterministic.
+    cv = _strip_base64(cv)
+    checkpoint["channel_values"] = cv
     
     # SAFEGUARD_1: Restore critical fields (they should never be compacted)
     for field, value in critical_data.items():
@@ -233,6 +250,7 @@ class CheckpointerType(str, Enum):
 
 _checkpointer: BaseCheckpointSaver | None = None
 _checkpointer_type: CheckpointerType | None = None
+_pool_instance: Any = None  # Store pool reference for graceful shutdown
 
 
 # =============================================================================
@@ -418,6 +436,10 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 timeout=pool_timeout_s,
                 kwargs=pool_kwargs,
             )
+        
+        # Store pool reference for graceful shutdown
+        global _pool_instance
+        _pool_instance = pool
         
         # Create AsyncPostgresSaver instance using async pool
         base_checkpointer = AsyncPostgresSaver(conn=pool)
@@ -758,3 +780,96 @@ async def warmup_checkpointer_pool() -> bool:
     except Exception as e:
         logger.warning("Checkpointer warmup failed: %s", e)
         return False
+
+
+async def get_pool_health() -> dict[str, Any] | None:
+    """Get connection pool health status.
+    
+    Returns:
+        dict with pool health metrics:
+        {
+            "available": int,  # Available connections
+            "max": int,  # Maximum pool size
+            "utilization_percent": float,  # Utilization percentage
+            "is_exhausted": bool,  # True if >80% utilized
+        }
+        None if pool is not available or not initialized
+    """
+    global _pool_instance
+    if _pool_instance is None:
+        return None
+    
+    pool = _pool_instance
+    
+    try:
+        # Try to get pool stats
+        # psycopg_pool.AsyncConnectionPool has different attributes depending on version
+        available = None
+        max_size = None
+        
+        # Try common attributes
+        if hasattr(pool, "get_stats"):
+            stats = pool.get_stats()
+            available = stats.get("pool_available", None)
+            max_size = stats.get("pool_max", None)
+        elif hasattr(pool, "_pool"):
+            # Internal pool object
+            internal_pool = pool._pool
+            if hasattr(internal_pool, "get_stats"):
+                stats = internal_pool.get_stats()
+                available = stats.get("pool_available", None)
+                max_size = stats.get("pool_max", None)
+        
+        # Fallback: try to infer from pool attributes
+        if available is None or max_size is None:
+            if hasattr(pool, "min_size") and hasattr(pool, "max_size"):
+                max_size = pool.max_size
+                # Estimate available (this is approximate)
+                # In practice, we'd need to check pool internals
+                available = max_size  # Conservative estimate
+        
+        if available is not None and max_size is not None:
+            utilization_percent = ((max_size - available) / max_size) * 100 if max_size > 0 else 0.0
+            is_exhausted = utilization_percent > 80.0
+            
+            return {
+                "available": available,
+                "max": max_size,
+                "utilization_percent": round(utilization_percent, 2),
+                "is_exhausted": is_exhausted,
+            }
+        
+        return None
+        
+    except Exception as e:
+        logger.debug("[CHECKPOINTER] Failed to get pool health: %s", e)
+        return None
+
+
+async def shutdown_checkpointer_pool() -> None:
+    """Gracefully close checkpointer pool on application shutdown.
+    
+    This should be called during application shutdown to properly close
+    database connections and avoid connection leaks.
+    """
+    global _pool_instance
+    if _pool_instance is None:
+        return
+    
+    pool = _pool_instance
+    _pool_instance = None
+    
+    try:
+        import asyncio
+        if hasattr(pool, "close"):
+            # Give active connections time to finish (max 5 seconds)
+            await asyncio.wait_for(pool.close(), timeout=5.0)
+            logger.info("[CHECKPOINTER] Pool closed gracefully")
+        elif hasattr(pool, "wait"):
+            # Some pool implementations use wait() instead
+            await asyncio.wait_for(pool.wait(), timeout=5.0)
+            logger.info("[CHECKPOINTER] Pool closed gracefully")
+    except asyncio.TimeoutError:
+        logger.warning("[CHECKPOINTER] Pool close timed out, forcing shutdown")
+    except Exception as e:
+        logger.warning("[CHECKPOINTER] Error closing pool: %s", e)

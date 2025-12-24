@@ -81,7 +81,11 @@ class CircuitBreaker:
             log_with_root_cause(
                 logger,
                 "warning",
-                f"[CIRCUIT:{self.name}] Failed in HALF_OPEN, state=OPEN",
+                (
+                    f"[CIRCUIT:{self.name}] Failed in HALF_OPEN, state=OPEN "
+                    f"error_type={error_type} error_message={error_message} "
+                    f"failure_count={self.failure_count} last_failure_time={self.last_failure_time:.2f}"
+                ),
                 error=error,
                 root_cause="CIRCUIT_BREAKER_HALF_OPEN_FAILURE",
                 circuit_name=self.name,
@@ -95,7 +99,11 @@ class CircuitBreaker:
             log_with_root_cause(
                 logger,
                 "warning",
-                f"[CIRCUIT:{self.name}] OPEN after {self.failure_count} failures",
+                (
+                    f"[CIRCUIT:{self.name}] OPEN after {self.failure_count} failures "
+                    f"error_type={error_type} error_message={error_message} "
+                    f"failure_count={self.failure_count} last_failure_time={self.last_failure_time:.2f}"
+                ),
                 error=error,
                 root_cause="CIRCUIT_BREAKER_OPENED",
                 circuit_name=self.name,

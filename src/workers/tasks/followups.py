@@ -79,7 +79,7 @@ def send_followup(
 
         # Use night message if in night mode
         if is_night_mode:
-            from src.core.prompt_registry import get_snippet_by_header
+            from src.core.prompt_registry import get_snippet_by_header  # noqa: PLC0415
             
             night_content = "".join(get_snippet_by_header("FOLLOWUP_NIGHT")) or "Спеціаліст зв'яжеться з вами вранці 🤍"
             followup.content = night_content
@@ -362,7 +362,7 @@ def handle_24h_followup_escalation(
                     )
 
         # 2. Set Sitniks status to "AI Увага" and assign manager
-        from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+        from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service  # noqa: PLC0415
         from src.workers.sync_utils import run_sync
 
         sitniks_service = get_sitniks_chat_service()

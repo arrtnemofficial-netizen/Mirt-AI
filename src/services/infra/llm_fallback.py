@@ -242,6 +242,91 @@ class LLMFallbackService:
             ],
             "any_available": any(p.circuit.can_execute() for p in self.providers),
         }
+    
+    async def preflight_check(self, timeout: float = 2.0) -> dict[str, Any]:
+        """Pre-flight check: lightweight API call to verify quota and connectivity.
+        
+        Attempts a lightweight API call (models.list) to detect quota issues
+        BEFORE processing requests. Also checks circuit breaker states.
+        
+        Args:
+            timeout: Maximum time to wait for API response
+        
+        Returns:
+            dict with preflight check results:
+            {
+                "status": "ok" | "warning" | "error",
+                "quota_check": "ok" | "failed" | "unknown",
+                "circuit_states": dict[str, str],  # provider -> state
+                "warnings": list[str],
+            }
+        """
+        warnings: list[str] = []
+        circuit_states: dict[str, str] = {}
+        
+        # Check circuit breaker states
+        for provider in self.providers:
+            state = provider.circuit.state.value
+            circuit_states[provider.name] = state
+            if state == "open":
+                warnings.append(f"Circuit breaker OPEN for {provider.name}")
+        
+        # If all circuits are open, that's a problem
+        if all(p.circuit.state.value == "open" for p in self.providers):
+            return {
+                "status": "error",
+                "quota_check": "unknown",
+                "circuit_states": circuit_states,
+                "warnings": warnings + ["All circuit breakers are OPEN"],
+            }
+        
+        # Try lightweight API call to check quota (only for available providers)
+        available_provider = self.get_available_provider()
+        if not available_provider:
+            return {
+                "status": "error",
+                "quota_check": "unknown",
+                "circuit_states": circuit_states,
+                "warnings": warnings + ["No available providers"],
+            }
+        
+        try:
+            client = self._get_client(available_provider)
+            # Lightweight call: list models (doesn't consume quota)
+            import asyncio
+            await asyncio.wait_for(
+                client.models.list(),
+                timeout=timeout
+            )
+            quota_check = "ok"
+        except RateLimitError as e:
+            # 429 error - quota exceeded or rate limited
+            quota_check = "failed"
+            warnings.append(f"Quota/rate limit detected for {available_provider.name}: {str(e)[:100]}")
+        except APITimeoutError:
+            quota_check = "unknown"
+            warnings.append(f"API timeout during preflight check for {available_provider.name}")
+        except APIError as e:
+            # Check if it's a quota error
+            error_str = str(e).lower()
+            if "quota" in error_str or "429" in error_str or "insufficient_quota" in error_str:
+                quota_check = "failed"
+                warnings.append(f"Quota exceeded for {available_provider.name}")
+            else:
+                quota_check = "unknown"
+                warnings.append(f"API error during preflight check: {str(e)[:100]}")
+        except Exception as e:
+            quota_check = "unknown"
+            warnings.append(f"Unexpected error during preflight check: {str(e)[:100]}")
+        
+        status = "error" if quota_check == "failed" else ("warning" if warnings else "ok")
+        
+        return {
+            "status": status,
+            "quota_check": quota_check,
+            "circuit_states": circuit_states,
+            "warnings": warnings,
+        }
 
 
 # =============================================================================

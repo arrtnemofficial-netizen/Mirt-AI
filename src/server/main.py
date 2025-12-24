@@ -66,7 +66,20 @@ def _init_sentry():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
-    # Validate required settings first
+    # ==========================================================================
+    # PRE-FLIGHT VALIDATION: Check configuration format BEFORE any connections
+    # ==========================================================================
+    try:
+        from src.server.preflight_validation import validate_and_raise_on_errors
+        
+        logger.info("Running pre-flight configuration validation...")
+        await validate_and_raise_on_errors()
+        logger.info("Pre-flight configuration validation passed")
+    except Exception as e:
+        logger.critical("Pre-flight configuration validation failed: %s", e)
+        raise
+    
+    # Validate required settings (legacy, but keep for backward compatibility)
     try:
         validate_required_settings()
     except RuntimeError as e:
@@ -120,6 +133,57 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to warm up LangGraph: %s (will initialize on first request)", e)
 
+    # ==========================================================================
+    # CRITICAL COMPONENTS VALIDATION (Fail-Fast)
+    # ==========================================================================
+    try:
+        from src.core.errors import ServiceError
+        from src.server.startup_validation import validate_critical_components
+        
+        logger.info("Validating critical components...")
+        critical_checks = await validate_critical_components()
+        
+        if not critical_checks["all_ready"]:
+            failures = critical_checks["failures"]
+            errors = critical_checks.get("errors", [])
+            
+            # Log structured errors with recommendations
+            for error in errors:
+                logger.critical(
+                    "[VALIDATION] %s [%s]: %s",
+                    error.get("component", "unknown"),
+                    error.get("error_code", "UNKNOWN"),
+                    error.get("message", "Unknown error")
+                )
+                logger.critical(
+                    "[VALIDATION] Recommendations:\n%s",
+                    "\n".join(f"  - {r}" for r in error.get("recommendations", []))
+                )
+            
+            error_msg = f"Startup validation failed. Critical components not ready: {', '.join(failures)}"
+            logger.critical(error_msg)
+            logger.critical("Validation details: %s", critical_checks["checks"])
+            raise RuntimeError(error_msg)
+        
+        logger.info("All critical components validated successfully")
+    except ServiceError as e:
+        # Structured error from validation - log and re-raise
+        logger.critical(
+            "[VALIDATION] %s [%s]: %s",
+            e.component, e.error_code, e.message
+        )
+        logger.critical(
+            "[VALIDATION] Recommendations:\n%s",
+            "\n".join(f"  - {r}" for r in e.recommendations)
+        )
+        raise RuntimeError(f"Startup validation failed: {e.message}") from e
+    except RuntimeError:
+        # Re-raise RuntimeError from validation (fail-fast)
+        raise
+    except Exception as e:
+        logger.critical("Startup validation error: %s", e)
+        raise RuntimeError(f"Startup validation failed: {str(e)}") from e
+
     # Telegram webhook: \u0440\u0435\u0454\u0441\u0442\u0440\u0443\u0454\u043c\u043e, \u044f\u043a\u0449\u043e \u0454 token \u0456 \u043f\u0443\u0431\u043b\u0456\u0447\u043d\u0430 \u0430\u0434\u0440\u0435\u0441\u0430
     base_url = settings.PUBLIC_BASE_URL.rstrip("/")
     token = settings.TELEGRAM_BOT_TOKEN.get_secret_value()
@@ -133,10 +197,36 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("Failed to register Telegram webhook: %s", e)
 
+    # ==========================================================================
+    # RUNTIME HEALTH MONITORING
+    # ==========================================================================
+    try:
+        from src.server.health_monitor import start_health_monitoring
+        
+        # Start health monitoring in background (runs during app lifetime)
+        await start_health_monitoring(check_interval=60.0)
+        logger.info("Runtime health monitoring started")
+    except Exception as e:
+        logger.warning("Failed to start health monitoring: %s", e)
+
     yield
 
     # Shutdown
     logger.info("Shutting down MIRT AI Webhooks server")
+    
+    # Stop health monitoring
+    try:
+        from src.server.health_monitor import stop_health_monitoring
+        await stop_health_monitoring()
+    except Exception as e:
+        logger.warning("Failed to stop health monitoring: %s", e)
+    
+    # Gracefully close checkpointer pool
+    try:
+        from src.agents.langgraph.checkpointer import shutdown_checkpointer_pool
+        await shutdown_checkpointer_pool()
+    except Exception as e:
+        logger.warning("Failed to shutdown checkpointer pool: %s", e)
 
 
 # =============================================================================
