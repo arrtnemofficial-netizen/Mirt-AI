@@ -174,58 +174,88 @@ def check_all_sessions_for_summarization(self) -> dict:
         )
 
         # Step 1.5: Check for users with humanNeeded-wd tag that need summarization (3+ days after escalation)
+        from src.core.constants import DBTable
         from src.integrations.manychat.api_client import get_manychat_client
         
         manychat_client = get_manychat_client()
         escalation_users = []
         
         if manychat_client.is_configured:
-            # Get users with humanNeeded-wd tag from ManyChat
-            # We'll check sessions with last_interaction_at 3+ days ago
+            # Get users with last_interaction_at 3+ days ago from users table
+            # For ManyChat, session_id = subscriber_id
             cutoff_date = (datetime.now(UTC) - timedelta(days=3)).isoformat()
             
-            escalation_sessions = (
-                client.table("agent_sessions")
-                .select("session_id, user_id, last_interaction_at, manychat_subscriber_id")
-                .lt("last_interaction_at", cutoff_date)
-                .not_.is_("manychat_subscriber_id", "null")
-                .execute()
-            )
-            
-            if escalation_sessions.data:
-                # Check which subscribers have humanNeeded-wd tag
-                async def _check_tag(subscriber_id: str) -> bool:
-                    try:
-                        subscriber = await manychat_client.get_subscriber_info(subscriber_id)
-                        if subscriber:
-                            tags = subscriber.get("tags", [])
-                            # Tags can be list of strings or list of dicts
-                            if tags:
-                                tag_names = [
-                                    tag if isinstance(tag, str) else tag.get("name", "")
-                                    for tag in tags
-                                ]
-                                return "humanNeeded-wd" in tag_names
-                        return False
-                    except Exception:
-                        return False
+            try:
+                # Get inactive users from users table
+                inactive_users = (
+                    client.table(DBTable.USERS)
+                    .select("user_id, last_interaction_at")
+                    .lt("last_interaction_at", cutoff_date)
+                    .not_.is_("user_id", "null")
+                    .execute()
+                )
                 
-                for session in escalation_sessions.data:
-                    subscriber_id = session.get("manychat_subscriber_id")
-                    if subscriber_id:
-                        has_tag = run_sync(_check_tag(subscriber_id))
-                        if has_tag:
-                            escalation_users.append({
-                                "user_id": session.get("user_id"),
-                                "session_id": session.get("session_id"),
-                                "manychat_subscriber_id": subscriber_id,
-                            })
-                
-                if escalation_users:
-                    logger.info(
-                        "[WORKER:SUMMARIZATION] Found %d users with humanNeeded-wd tag needing summarization",
-                        len(escalation_users),
-                    )
+                if inactive_users.data:
+                    # Get their session_ids from messages table
+                    user_ids = [u.get("user_id") for u in inactive_users.data if u.get("user_id")]
+                    
+                    if user_ids:
+                        # Get sessions for these users
+                        # Get latest session per user (order by created_at DESC, then group by user_id)
+                        sessions_response = (
+                            client.table(settings.SUPABASE_MESSAGES_TABLE)
+                            .select("session_id, user_id, created_at")
+                            .in_("user_id", user_ids)
+                            .order("created_at", desc=True)
+                            .execute()
+                        )
+                        
+                        # Group by user_id to get latest session
+                        user_sessions: dict[str, str] = {}
+                        for row in sessions_response.data or []:
+                            uid = row.get("user_id")
+                            sid = row.get("session_id")
+                            if uid and sid and uid not in user_sessions:
+                                user_sessions[uid] = sid
+                        
+                        # Check which subscribers have humanNeeded-wd tag
+                        async def _check_tag(subscriber_id: str) -> bool:
+                            try:
+                                subscriber = await manychat_client.get_subscriber_info(subscriber_id)
+                                if subscriber:
+                                    tags = subscriber.get("tags", [])
+                                    # Tags can be list of strings or list of dicts
+                                    if tags:
+                                        tag_names = [
+                                            tag if isinstance(tag, str) else tag.get("name", "")
+                                            for tag in tags
+                                        ]
+                                        return "humanNeeded-wd" in tag_names
+                                return False
+                            except Exception:
+                                return False
+                        
+                        # For ManyChat, session_id = subscriber_id
+                        for user_id, session_id in user_sessions.items():
+                            # Check if this session_id (subscriber_id) has humanNeeded-wd tag
+                            has_tag = run_sync(_check_tag(session_id))
+                            if has_tag:
+                                escalation_users.append({
+                                    "user_id": user_id,
+                                    "session_id": session_id,
+                                    "manychat_subscriber_id": session_id,  # session_id = subscriber_id for ManyChat
+                                })
+                        
+                        if escalation_users:
+                            logger.info(
+                                "[WORKER:SUMMARIZATION] Found %d users with humanNeeded-wd tag needing summarization",
+                                len(escalation_users),
+                            )
+            except Exception as e:
+                logger.warning(
+                    "[WORKER:SUMMARIZATION] Failed to check escalation users: %s",
+                    e,
+                )
 
         # Step 2: Get all users with 'needs_summary' tag
         users_to_summarize = get_users_needing_summary()
@@ -285,7 +315,7 @@ def check_all_sessions_for_summarization(self) -> dict:
 )
 def summarize_user_history(
     self,
-    user_id: int,
+    user_id: int | str,
 ) -> dict:
     """Summarize all conversation history for a user.
 

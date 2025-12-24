@@ -79,9 +79,10 @@ def send_followup(
 
         # Use night message if in night mode
         if is_night_mode:
-            from src.core.prompt_registry import get_snippet_by_header
+            from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
             
-            night_content = "".join(get_snippet_by_header("FOLLOWUP_NIGHT")) or "Спеціаліст зв'яжеться з вами вранці 🤍"
+            night_bubbles = get_snippet_by_header("FOLLOWUP_NIGHT")
+            night_content = "".join(night_bubbles) if night_bubbles else "Спеціаліст зв'яжеться з вами вранці 🤍"
             followup.content = night_content
             logger.info(
                 "[WORKER:FOLLOWUP] Using night mode message for session %s (hour=%d)",
@@ -316,21 +317,26 @@ def handle_24h_followup_escalation(
     )
 
     try:
-        # Get user_id from session
+        # Get user_id from messages table (session_id is stored there)
         client = get_supabase_client()
         if not client:
             logger.warning("[WORKER:FOLLOWUP] Supabase not configured, skipping escalation")
             return {"status": "skipped", "reason": "no_supabase"}
 
-        # Get user_id from session
-        session_response = (
-            client.table("agent_sessions")
+        # Get user_id from messages table
+        from src.conf.config import settings
+        
+        messages_response = (
+            client.table(settings.SUPABASE_MESSAGES_TABLE)
             .select("user_id")
             .eq("session_id", session_id)
-            .single()
+            .not_.is_("user_id", "null")
+            .limit(1)
             .execute()
         )
-        user_id = session_response.data.get("user_id") if session_response.data else None
+        user_id = None
+        if messages_response.data:
+            user_id = messages_response.data[0].get("user_id")
 
         if not user_id:
             logger.warning(
