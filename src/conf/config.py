@@ -92,8 +92,9 @@ class Settings(BaseSettings):
     MANYCHAT_USE_CELERY: bool = Field(
         default=False,
         description=(
-            "If True and CELERY_ENABLED is also True, ManyChat incoming messages are processed via Celery tasks. "
-            "If False, ManyChat uses FastAPI BackgroundTasks even when Celery is enabled (recommended when Celery is only for summarize/followups)."
+            "DEPRECATED: Celery is no longer used for ManyChat message processing. "
+            "ManyChat always uses FastAPI BackgroundTasks. "
+            "Celery is only used for followups and summarization tasks."
         ),
     )
 

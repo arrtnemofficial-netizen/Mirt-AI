@@ -263,36 +263,10 @@ async def memory_maintenance() -> dict[str, any]:
 
 
 # =============================================================================
-# CELERY TASKS (if Celery is available)
+# NOTE: Celery tasks removed
 # =============================================================================
-
-try:
-    from celery import shared_task
-
-    @shared_task(name="memory.apply_time_decay")
-    def celery_apply_time_decay():
-        """Celery task for time decay."""
-        return asyncio.run(apply_time_decay())
-
-    @shared_task(name="memory.cleanup_expired")
-    def celery_cleanup_expired():
-        """Celery task for cleanup."""
-        return asyncio.run(cleanup_expired())
-
-    @shared_task(name="memory.generate_summaries")
-    def celery_generate_summaries(days: int = 7):
-        """Celery task for summary generation."""
-        return asyncio.run(generate_summaries_for_active_users(days))
-
-    @shared_task(name="memory.maintenance")
-    def celery_memory_maintenance():
-        """Celery task for full maintenance."""
-        return asyncio.run(memory_maintenance())
-
-    logger.info("Celery memory tasks registered")
-
-except ImportError:
-    logger.debug("Celery not available, skipping task registration")
+# Celery is now only used for followups and summarization.
+# Memory maintenance tasks should be run via CLI or scheduled scripts, not Celery.
 
 
 # =============================================================================

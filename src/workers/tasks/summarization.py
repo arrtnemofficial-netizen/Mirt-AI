@@ -2,14 +2,14 @@
 
 These tasks handle:
 - Summarizing old conversations after SUMMARY_RETENTION_DAYS
-- Saving summaries to users table
-- Pruning old messages from messages table
+- Saving summaries to mirt_users table
+- Pruning old messages from mirt_messages
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from celery import shared_task
 
@@ -83,21 +83,38 @@ def summarize_session(
                 len(summary),
             )
 
-            # Remove ManyChat tag after successful summarization
+            # Remove ManyChat tags after successful summarization
             tag_removed = False
+            human_needed_removed = False
             if manychat_subscriber_id:
-                try:
-                    tag_removed = run_sync(_remove_manychat_tag(manychat_subscriber_id))
-                    if tag_removed:
-                        logger.info(
-                            "[WORKER:SUMMARIZATION] Removed ai_responded tag for subscriber %s",
-                            manychat_subscriber_id,
+                from src.integrations.manychat.api_client import get_manychat_client
+                
+                manychat_client = get_manychat_client()
+                if manychat_client.is_configured:
+                    try:
+                        # Remove ai_responded tag
+                        tag_removed = run_sync(_remove_manychat_tag(manychat_subscriber_id))
+                        if tag_removed:
+                            logger.info(
+                                "[WORKER:SUMMARIZATION] Removed ai_responded tag for subscriber %s",
+                                manychat_subscriber_id,
+                            )
+                        
+                        # Remove humanNeeded-wd tag if present
+                        async def _remove_human_tag():
+                            return await manychat_client.remove_tag(manychat_subscriber_id, "humanNeeded-wd")
+                        
+                        human_needed_removed = run_sync(_remove_human_tag())
+                        if human_needed_removed:
+                            logger.info(
+                                "[WORKER:SUMMARIZATION] Removed humanNeeded-wd tag for subscriber %s",
+                                manychat_subscriber_id,
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "[WORKER:SUMMARIZATION] Failed to remove ManyChat tags: %s",
+                            e,
                         )
-                except Exception as e:
-                    logger.warning(
-                        "[WORKER:SUMMARIZATION] Failed to remove ManyChat tag: %s",
-                        e,
-                    )
 
             return {
                 "status": "summarized",
@@ -156,8 +173,67 @@ def check_all_sessions_for_summarization(self) -> dict:
             len(marked_users),
         )
 
+        # Step 1.5: Check for users with humanNeeded-wd tag that need summarization (3+ days after escalation)
+        from src.integrations.manychat.api_client import get_manychat_client
+        
+        manychat_client = get_manychat_client()
+        escalation_users = []
+        
+        if manychat_client.is_configured:
+            # Get users with humanNeeded-wd tag from ManyChat
+            # We'll check sessions with last_interaction_at 3+ days ago
+            cutoff_date = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+            
+            escalation_sessions = (
+                client.table("agent_sessions")
+                .select("session_id, user_id, last_interaction_at, manychat_subscriber_id")
+                .lt("last_interaction_at", cutoff_date)
+                .not_.is_("manychat_subscriber_id", "null")
+                .execute()
+            )
+            
+            if escalation_sessions.data:
+                # Check which subscribers have humanNeeded-wd tag
+                async def _check_tag(subscriber_id: str) -> bool:
+                    try:
+                        subscriber = await manychat_client.get_subscriber_info(subscriber_id)
+                        if subscriber:
+                            tags = subscriber.get("tags", [])
+                            # Tags can be list of strings or list of dicts
+                            if tags:
+                                tag_names = [
+                                    tag if isinstance(tag, str) else tag.get("name", "")
+                                    for tag in tags
+                                ]
+                                return "humanNeeded-wd" in tag_names
+                        return False
+                    except Exception:
+                        return False
+                
+                for session in escalation_sessions.data:
+                    subscriber_id = session.get("manychat_subscriber_id")
+                    if subscriber_id:
+                        has_tag = run_sync(_check_tag(subscriber_id))
+                        if has_tag:
+                            escalation_users.append({
+                                "user_id": session.get("user_id"),
+                                "session_id": session.get("session_id"),
+                                "manychat_subscriber_id": subscriber_id,
+                            })
+                
+                if escalation_users:
+                    logger.info(
+                        "[WORKER:SUMMARIZATION] Found %d users with humanNeeded-wd tag needing summarization",
+                        len(escalation_users),
+                    )
+
         # Step 2: Get all users with 'needs_summary' tag
         users_to_summarize = get_users_needing_summary()
+        
+        # Add escalation users to the list
+        for esc_user in escalation_users:
+            if esc_user["user_id"] not in [u.get("user_id") for u in users_to_summarize]:
+                users_to_summarize.append(esc_user)
 
         if not users_to_summarize:
             return {"status": "ok", "queued": 0, "marked": len(marked_users)}
@@ -165,9 +241,21 @@ def check_all_sessions_for_summarization(self) -> dict:
         queued = 0
         for user in users_to_summarize:
             user_id = user.get("user_id")
+            session_id = user.get("session_id")
+            manychat_subscriber_id = user.get("manychat_subscriber_id")
+            
             if user_id:
                 # Queue summarization task for this user's session
-                summarize_user_history.delay(user_id)
+                if session_id:
+                    # Use session-specific summarization if we have session_id
+                    summarize_session.delay(
+                        session_id=session_id,
+                        user_id=user_id,
+                        manychat_subscriber_id=manychat_subscriber_id,
+                    )
+                else:
+                    # Fallback to user history summarization
+                    summarize_user_history.delay(user_id)
                 queued += 1
 
         logger.info(

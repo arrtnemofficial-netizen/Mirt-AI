@@ -18,7 +18,6 @@ from typing import Any
 
 from src.conf.config import settings
 from src.services.supabase_client import get_supabase_client
-from src.workers.tasks.crm import create_crm_order, sync_order_status
 
 
 logger = logging.getLogger(__name__)
@@ -90,31 +89,77 @@ class CRMService:
                 order_data=order_data,
             )
 
-            # Trigger CRM order creation via Celery
-            task_result = create_crm_order.delay(
-                {
+            # Create order directly in CRM (no Celery)
+            from src.integrations.crm.snitkix import get_snitkix_client
+            from src.services.order_model import CustomerInfo, Order, OrderItem
+
+            customer_data = order_data.get("customer", {})
+            customer = CustomerInfo(
+                full_name=customer_data.get("full_name"),
+                phone=customer_data.get("phone"),
+                city=customer_data.get("city"),
+                nova_poshta_branch=customer_data.get("nova_poshta_branch"),
+                telegram_id=customer_data.get("telegram_id"),
+                manychat_id=customer_data.get("manychat_id"),
+            )
+
+            items = []
+            for item_data in order_data.get("items", []):
+                items.append(
+                    OrderItem(
+                        product_id=item_data.get("product_id", 0),
+                        product_name=item_data.get("product_name", ""),
+                        size=item_data.get("size", ""),
+                        color=item_data.get("color", ""),
+                        price=item_data.get("price", 0.0),
+                    )
+                )
+
+            order = Order(
+                external_id=external_id,
+                customer=customer,
+                items=items,
+                source=order_data.get("source", "unknown"),
+                source_id=order_data.get("source_id", ""),
+            )
+
+            crm = get_snitkix_client()
+            response = await crm.create_order(order)
+
+            if response.success:
+                # Update order mapping with CRM order ID
+                await self._update_order_mapping(
+                    external_id=external_id,
+                    crm_order_id=response.order_id,
+                    status="created",
+                )
+                logger.info(
+                    "[CRM:SERVICE] Order created successfully external_id=%s crm_order_id=%s",
+                    external_id,
+                    response.order_id,
+                )
+                return {
+                    "status": "created",
                     "external_id": external_id,
-                    **order_data,
+                    "crm_order_id": response.order_id,
+                    "session_id": session_id,
                 }
-            )
-
-            # Update to queued status with task_id
-            await self._update_order_status(
-                external_id=external_id, status="queued", task_id=task_result.id, error_message=None
-            )
-
-            logger.info(
-                "[CRM:SERVICE] Order creation task queued external_id=%s task_id=%s",
-                external_id,
-                task_result.id,
-            )
-
-            return {
-                "status": "queued",
-                "external_id": external_id,
-                "task_id": task_result.id,
-                "session_id": session_id,
-            }
+            else:
+                # Update stored order with error status
+                await self._update_order_status(
+                    external_id=external_id, status="failed", error_message=response.error
+                )
+                logger.error(
+                    "[CRM:SERVICE] Order creation failed external_id=%s error=%s",
+                    external_id,
+                    response.error,
+                )
+                return {
+                    "status": "failed",
+                    "external_id": external_id,
+                    "error": response.error,
+                    "session_id": session_id,
+                }
 
         except Exception as e:
             logger.exception(
@@ -139,7 +184,7 @@ class CRMService:
     ) -> bool:
         """Update stored order with CRM order ID and status.
 
-        Called by Celery task after successful CRM creation.
+        Called after successful CRM creation.
         """
         try:
             await self._update_order_mapping(
@@ -194,8 +239,8 @@ class CRMService:
             # Update status in database
             await self._update_order_status(order_record["external_id"], new_status, metadata)
 
-            # Trigger session sync to notify user
-            sync_order_status.delay(
+            # Sync order status to session (no Celery)
+            await self._sync_order_status(
                 crm_order_id,
                 order_record["session_id"],
                 new_status,
@@ -372,6 +417,59 @@ class CRMService:
             return response.data
         except Exception:
             return None
+
+    async def _sync_order_status(
+        self,
+        order_id: str,
+        session_id: str,
+        new_status: str | None = None,
+    ) -> None:
+        """Sync order status from CRM back to session.
+
+        Updates session state in Supabase with order status.
+        This replaces the Celery task sync_order_status.
+
+        Args:
+            order_id: CRM order ID
+            session_id: Session ID to update
+            new_status: New order status (if known from webhook)
+        """
+        try:
+            # If status not provided, fetch from CRM
+            if not new_status:
+                from src.integrations.crm.snitkix import get_snitkix_client
+
+                crm = get_snitkix_client()
+                order_status = await crm.get_order_status(order_id)
+                new_status = order_status.status if order_status else None
+
+            if not new_status:
+                logger.warning(
+                    "[CRM:SERVICE] Could not fetch status for order %s", order_id
+                )
+                return
+
+            # Update session state in Supabase
+            if self.supabase:
+                self.supabase.table("agent_sessions").update(
+                    {
+                        "order_status": new_status,
+                        "order_id": order_id,
+                    }
+                ).eq("session_id", session_id).execute()
+
+                logger.info(
+                    "[CRM:SERVICE] Updated session %s with order status: %s",
+                    session_id,
+                    new_status,
+                )
+
+        except Exception as e:
+            logger.exception(
+                "[CRM:SERVICE] Error syncing order status %s: %s",
+                order_id,
+                e,
+            )
 
 
 # Global service instance

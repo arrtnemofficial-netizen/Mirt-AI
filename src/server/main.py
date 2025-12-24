@@ -614,54 +614,31 @@ async def manychat_webhook(
                     )
 
             # -----------------------------------------------------------------
-            # DURABLE PROCESSING (Celery or BackgroundTasks fallback)
+            # BACKGROUND PROCESSING (FastAPI BackgroundTasks)
             # -----------------------------------------------------------------
-            if settings.CELERY_ENABLED and getattr(settings, "MANYCHAT_USE_CELERY", False):
-                # Use durable Celery task
-                from src.workers.tasks.manychat import process_manychat_message
+            # Note: Celery is only used for followups and summarization.
+            # ManyChat message processing uses BackgroundTasks for simplicity.
+            store = get_session_store()
+            service = get_manychat_async_service(store)
 
-                task = process_manychat_message.delay(
-                    user_id=user_id,
-                    text=text or "",
-                    image_url=image_url,
-                    channel=channel,
-                    subscriber_data=subscriber,
-                    trace_id=trace_id,
-                )
+            background_tasks.add_task(
+                service.process_message_async,
+                user_id=user_id,
+                text=text or "",
+                image_url=image_url,
+                channel=channel,
+                subscriber_data=subscriber,  # Pass subscriber data for username
+                trace_id=trace_id,
+            )
 
-                log_event(
-                    logger,
-                    event="manychat_task_scheduled",
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    channel=channel,
-                    task_id=task.id,
-                )
-
-                return {"status": "accepted"}
-            else:
-                # Fallback to BackgroundTasks (not durable)
-                store = get_session_store()
-                service = get_manychat_async_service(store)
-
-                background_tasks.add_task(
-                    service.process_message_async,
-                    user_id=user_id,
-                    text=text or "",
-                    image_url=image_url,
-                    channel=channel,
-                    subscriber_data=subscriber,  # Pass subscriber data for username
-                    trace_id=trace_id,
-                )
-
-                log_event(
-                    logger,
-                    event="manychat_task_scheduled",
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    channel=channel,
-                    status="background_tasks",
-                )
+            log_event(
+                logger,
+                event="manychat_task_scheduled",
+                trace_id=trace_id,
+                user_id=user_id,
+                channel=channel,
+                status="background_tasks",
+            )
 
             log_event(
                 logger,

@@ -114,6 +114,35 @@ class TestCriticalImports:
         assert settings is not None
         assert BANK_REQUISITES is not None
 
+    def test_workers_tasks_importable(self):
+        """Celery tasks should only export followups and summarization."""
+        from src.workers.tasks import (
+            check_all_sessions_for_followups,
+            check_all_sessions_for_summarization,
+            send_followup,
+            summarize_session,
+            summarize_user_history,
+        )
+
+        # Verify these exist
+        assert callable(send_followup)
+        assert callable(summarize_session)
+        assert callable(summarize_user_history)
+        assert callable(check_all_sessions_for_followups)
+        assert callable(check_all_sessions_for_summarization)
+
+        # Verify __all__ only contains followups and summarization
+        from src.workers.tasks import __all__
+
+        assert "send_followup" in __all__
+        assert "summarize_session" in __all__
+        # CRM, health, messages, llm_usage should NOT be in __all__
+        assert "create_crm_order" not in __all__
+        assert "sync_order_status" not in __all__
+        assert "ping" not in __all__
+        assert "process_message" not in __all__
+        assert "record_usage" not in __all__
+
 
 @pytest.mark.smoke
 @pytest.mark.critical

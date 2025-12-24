@@ -35,13 +35,13 @@ class TestCeleryConfig:
         assert celery_app.main == "mirt_workers"
 
     def test_task_routes_configured(self):
-        """Task routes should be configured for all queues."""
+        """Task routes should be configured for followups and summarization only."""
         from src.workers.celery_app import celery_app
 
         routes = celery_app.conf.task_routes
         assert "src.workers.tasks.summarization.*" in routes
         assert "src.workers.tasks.followups.*" in routes
-        assert "src.workers.tasks.crm.*" in routes
+        # CRM tasks are no longer in Celery
 
     def test_eager_mode_enabled(self):
         """Eager mode should be enabled for testing."""
@@ -50,34 +50,7 @@ class TestCeleryConfig:
         assert celery_app.conf.task_always_eager is True
 
 
-class TestHealthTasks:
-    """Test health check tasks."""
-
-    def test_ping_task(self):
-        """Ping task should return pong."""
-        from src.workers.tasks.health import ping
-
-        result = ping()
-
-        assert result["pong"] is True
-        assert "timestamp" in result
-
-    def test_health_check_task(self):
-        """Health check should return status."""
-        from src.workers.tasks.health import worker_health_check
-
-        # Mock Supabase
-        with patch("src.services.supabase_client.get_supabase_client") as mock:
-            mock_client = MagicMock()
-            mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(
-                data=[]
-            )
-            mock.return_value = mock_client
-
-            result = worker_health_check()
-
-            assert result["status"] in ("healthy", "degraded")
-            assert "checks" in result
+# Health tasks removed from Celery - they are no longer used
 
 
 class TestSummarizationTasks:
@@ -174,39 +147,7 @@ class TestFollowupTasks:
             assert result["status"] in ("sent", "created", "skipped")
 
 
-class TestCRMTasks:
-    """Test CRM tasks."""
-
-    def test_crm_not_configured(self):
-        """CRM task should skip if not configured."""
-        from src.workers.tasks.crm import create_crm_order
-
-        with patch("src.workers.tasks.crm.settings") as mock_settings:
-            mock_settings.snitkix_enabled = False
-
-            result = create_crm_order(
-                {
-                    "external_id": "test123",
-                    "customer": {"full_name": "Test"},
-                    "items": [{"product_name": "Test"}],
-                }
-            )
-
-            assert result["status"] == "skipped"
-            assert result["reason"] == "crm_not_configured"
-
-    def test_crm_missing_customer(self):
-        """CRM task should fail on missing customer."""
-        from src.workers.exceptions import PermanentError
-        from src.workers.tasks.crm import create_crm_order
-
-        with patch("src.workers.tasks.crm.settings") as mock_settings:
-            mock_settings.snitkix_enabled = True
-
-            with pytest.raises(PermanentError) as exc:
-                create_crm_order({"external_id": "test123"})
-
-            assert "Missing customer data" in str(exc.value)
+# CRM tasks removed from Celery - they now run synchronously in CRMService
 
 
 class TestExceptions:
@@ -285,102 +226,10 @@ class TestSyncUtils:
         assert result == 20
 
 
-class TestLLMUsageTasks:
-    """Test LLM usage tracking tasks."""
-
-    def test_calculate_cost(self):
-        """Should calculate cost correctly."""
-        from src.workers.tasks.llm_usage import calculate_cost
-
-        # GPT-4o-mini: $0.15 per 1M input, $0.60 per 1M output
-        cost = calculate_cost("gpt-4o-mini", 1000, 500)
-
-        # Expected: (1000/1M * 0.15) + (500/1M * 0.60) = 0.00015 + 0.0003 = 0.00045
-        assert cost > 0
-        assert float(cost) < 0.001  # Should be tiny for small usage
-
-    def test_calculate_cost_unknown_model(self):
-        """Should use default pricing for unknown models."""
-        from src.workers.tasks.llm_usage import calculate_cost
-
-        cost = calculate_cost("unknown-model", 1000, 500)
-        assert cost > 0  # Should still calculate something
-
-    def test_record_usage_no_supabase(self):
-        """Should skip if Supabase not configured."""
-        from src.workers.tasks.llm_usage import record_usage
-
-        with patch("src.workers.tasks.llm_usage.get_supabase_client") as mock:
-            mock.return_value = None
-
-            result = record_usage(
-                user_id=123,
-                model="gpt-4o-mini",
-                tokens_input=100,
-                tokens_output=50,
-            )
-
-            assert result["status"] == "skipped"
-
-    def test_record_usage_with_supabase(self):
-        """Should record usage to database."""
-        from src.workers.tasks.llm_usage import record_usage
-
-        with patch("src.workers.tasks.llm_usage.get_supabase_client") as mock:
-            mock_client = MagicMock()
-            mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(
-                data=[{"id": 1}]
-            )
-            mock.return_value = mock_client
-
-            result = record_usage(
-                user_id=123,
-                model="gpt-4o-mini",
-                tokens_input=100,
-                tokens_output=50,
-            )
-
-            assert result["status"] == "recorded"
-            assert result["id"] == 1
-            assert "cost_usd" in result
-
-    def test_aggregate_daily_usage_no_supabase(self):
-        """Should skip if Supabase not configured."""
-        from src.workers.tasks.llm_usage import aggregate_daily_usage
-
-        with patch("src.workers.tasks.llm_usage.get_supabase_client") as mock:
-            mock.return_value = None
-
-            result = aggregate_daily_usage()
-
-            assert result["status"] == "skipped"
+# LLM usage tasks removed from Celery - they are no longer used
 
 
-class TestCRMSyncTasks:
-    """Test CRM sync tasks."""
-
-    def test_sync_order_status_not_configured(self):
-        """Should skip if CRM not configured."""
-        from src.workers.tasks.crm import sync_order_status
-
-        with patch("src.workers.tasks.crm.settings") as mock_settings:
-            mock_settings.snitkix_enabled = False
-
-            result = sync_order_status("order123", "session456")
-
-            assert result["status"] == "skipped"
-            assert result["reason"] == "crm_not_configured"
-
-    def test_check_pending_orders_not_configured(self):
-        """Should skip if CRM not configured."""
-        from src.workers.tasks.crm import check_pending_orders
-
-        with patch("src.workers.tasks.crm.settings") as mock_settings:
-            mock_settings.snitkix_enabled = False
-
-            result = check_pending_orders()
-
-            assert result["status"] == "skipped"
+# CRM sync tasks removed from Celery - they now run synchronously in CRMService
 
 
 class TestSummarizationWithSupabaseFunction:

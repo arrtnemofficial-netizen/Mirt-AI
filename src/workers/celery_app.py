@@ -79,11 +79,8 @@ celery_app = Celery(
     include=[
         "src.workers.tasks.summarization",
         "src.workers.tasks.followups",
-        "src.workers.tasks.crm",
-        "src.workers.tasks.health",
-        "src.workers.tasks.manychat",
-        "src.workers.tasks.messages",  # THE MAIN TASK!
-        "src.workers.tasks.llm_usage",  # Token usage tracking
+        # NOTE: CRM, health, manychat, messages, llm_usage tasks are no longer in Celery.
+        # They run synchronously or via BackgroundTasks.
     ],
 )
 
@@ -176,13 +173,7 @@ def setup_celery_logging(**kwargs):
 celery_app.conf.task_routes = {
     "src.workers.tasks.summarization.*": {"queue": "summarization"},
     "src.workers.tasks.followups.*": {"queue": "followups"},
-    "src.workers.tasks.crm.*": {"queue": "crm"},
-    "src.workers.tasks.manychat.*": {"queue": "llm"},
-    "src.workers.tasks.messages.process_message": {"queue": "llm"},
-    "src.workers.tasks.messages.process_and_respond": {"queue": "llm"},
-    "src.workers.tasks.messages.send_response": {"queue": "webhooks"},
-    "src.workers.tasks.health.*": {"queue": "default"},
-    "src.workers.tasks.llm_usage.*": {"queue": "default"},
+    # NOTE: CRM, health, manychat, messages, llm_usage tasks are no longer in Celery.
 }
 
 # =============================================================================
@@ -190,12 +181,6 @@ celery_app.conf.task_routes = {
 # =============================================================================
 
 celery_app.conf.beat_schedule = {
-    # Health check every 5 minutes
-    "health-check-5min": {
-        "task": "src.workers.tasks.health.worker_health_check",
-        "schedule": 300.0,  # 5 minutes
-        "options": {"queue": "default"},
-    },
     # Check for follow-ups every 15 minutes
     "followups-check-15min": {
         "task": "src.workers.tasks.followups.check_all_sessions_for_followups",
@@ -208,18 +193,8 @@ celery_app.conf.beat_schedule = {
         "schedule": 3600.0,  # 1 hour
         "options": {"queue": "summarization"},
     },
-    # Check pending orders every 30 minutes
-    "crm-orders-check-30min": {
-        "task": "src.workers.tasks.crm.check_pending_orders",
-        "schedule": 1800.0,  # 30 minutes
-        "options": {"queue": "crm"},
-    },
-    # Aggregate LLM usage daily at midnight
-    "llm-usage-daily": {
-        "task": "src.workers.tasks.llm_usage.aggregate_daily_usage",
-        "schedule": 86400.0,  # 24 hours
-        "options": {"queue": "default"},
-    },
+    # NOTE: Health, CRM, and LLM usage tasks are no longer scheduled via Celery Beat.
+    # They should be handled via external cron or other scheduling mechanisms if needed.
 }
 
 # =============================================================================

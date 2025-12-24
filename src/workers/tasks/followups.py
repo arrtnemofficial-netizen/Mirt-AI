@@ -53,11 +53,17 @@ def send_followup(
     )
 
     try:
+        now = datetime.now(UTC)
+        current_hour = now.hour
+        
+        # Night mode: 23:00-07:00 UTC
+        is_night_mode = current_hour >= 23 or current_hour < 7
+        
         message_store = create_message_store()
         followup = run_followups(
             session_id=session_id,
             message_store=message_store,
-            now=datetime.now(UTC),
+            now=now,
         )
 
         if not followup:
@@ -71,6 +77,18 @@ def send_followup(
                 "reason": "not_due",
             }
 
+        # Use night message if in night mode
+        if is_night_mode:
+            from src.core.prompt_registry import get_snippet_by_header
+            
+            night_content = "".join(get_snippet_by_header("FOLLOWUP_NIGHT")) or "Спеціаліст зв'яжеться з вами вранці 🤍"
+            followup.content = night_content
+            logger.info(
+                "[WORKER:FOLLOWUP] Using night mode message for session %s (hour=%d)",
+                session_id,
+                current_hour,
+            )
+
         # Send via appropriate channel
         if channel == "telegram" and chat_id:
             _send_telegram_followup(chat_id, followup.content)
@@ -82,6 +100,30 @@ def send_followup(
             session_id,
             followup.content[:50],
         )
+
+        # If this is the 23h followup (index 2), schedule escalation after 1 hour
+        followup_index = None
+        for tag in followup.tags:
+            if tag.startswith("followup-sent-"):
+                try:
+                    followup_index = int(tag.split("-")[-1])
+                    break
+                except (ValueError, IndexError):
+                    pass
+
+        if followup_index == 2:  # 23h followup
+            logger.info(
+                "[WORKER:FOLLOWUP] Scheduling 24h escalation for session %s (1 hour delay)",
+                session_id,
+            )
+            handle_24h_followup_escalation.apply_async(
+                kwargs={
+                    "session_id": session_id,
+                    "channel": channel,
+                    "chat_id": chat_id,
+                },
+                countdown=3600,  # 1 hour in seconds
+            )
 
         return {
             "status": "sent",
@@ -238,9 +280,128 @@ def _send_telegram_followup(chat_id: str, text: str) -> None:
     run_sync(_send())
 
 
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_kwargs={"max_retries": 3},
+    name="src.workers.tasks.followups.handle_24h_followup_escalation",
+)
+def handle_24h_followup_escalation(
+    self,
+    session_id: str,
+    channel: str = "telegram",
+    chat_id: str | None = None,
+) -> dict:
+    """Handle escalation after 24h (23h followup + 1h wait).
+
+    This task:
+    1. Adds humanNeeded-wd tag via ManyChat (if channel is manychat)
+    2. Sets Sitniks status to "AI Увага"
+    3. Assigns to human manager
+
+    Args:
+        session_id: Session ID
+        channel: Delivery channel
+        chat_id: Chat/subscriber ID
+
+    Returns:
+        dict with escalation result
+    """
+    logger.info(
+        "[WORKER:FOLLOWUP] Handling 24h escalation for session=%s channel=%s",
+        session_id,
+        channel,
+    )
+
+    try:
+        # Get user_id from session
+        client = get_supabase_client()
+        if not client:
+            logger.warning("[WORKER:FOLLOWUP] Supabase not configured, skipping escalation")
+            return {"status": "skipped", "reason": "no_supabase"}
+
+        # Get user_id from session
+        session_response = (
+            client.table("agent_sessions")
+            .select("user_id")
+            .eq("session_id", session_id)
+            .single()
+            .execute()
+        )
+        user_id = session_response.data.get("user_id") if session_response.data else None
+
+        if not user_id:
+            logger.warning(
+                "[WORKER:FOLLOWUP] No user_id found for session %s, skipping escalation",
+                session_id,
+            )
+            return {"status": "skipped", "reason": "no_user_id"}
+
+        # 1. Add humanNeeded-wd tag via ManyChat if channel is manychat
+        if channel == "manychat" and chat_id:
+            from src.integrations.manychat.api_client import get_manychat_client
+            from src.workers.sync_utils import run_sync
+
+            manychat_client = get_manychat_client()
+            if manychat_client.is_configured:
+                async def _add_tag():
+                    return await manychat_client.add_tag(chat_id, "humanNeeded-wd")
+
+                try:
+                    run_sync(_add_tag())
+                    logger.info(
+                        "[WORKER:FOLLOWUP] Added humanNeeded-wd tag to ManyChat subscriber %s",
+                        chat_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[WORKER:FOLLOWUP] Failed to add ManyChat tag: %s",
+                        e,
+                    )
+
+        # 2. Set Sitniks status to "AI Увага" and assign manager
+        from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+        from src.workers.sync_utils import run_sync
+
+        sitniks_service = get_sitniks_chat_service()
+        if sitniks_service.enabled:
+            async def _escalate():
+                return await sitniks_service.handle_escalation(str(user_id))
+
+            try:
+                escalation_result = run_sync(_escalate())
+                logger.info(
+                    "[WORKER:FOLLOWUP] Escalation result for user %s: %s",
+                    user_id,
+                    escalation_result,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[WORKER:FOLLOWUP] Failed to escalate in Sitniks: %s",
+                    e,
+                )
+
+        return {
+            "status": "escalated",
+            "session_id": session_id,
+            "user_id": user_id,
+            "channel": channel,
+        }
+
+    except Exception as e:
+        logger.exception(
+            "[WORKER:FOLLOWUP] Error handling 24h escalation for session %s: %s",
+            session_id,
+            e,
+        )
+        raise
+
+
 def _send_manychat_followup(subscriber_id: str, text: str) -> None:
     """Send follow-up message via ManyChat API.
-
+    
     Uses the existing ManyChatClient to send messages.
     """
     from src.integrations.manychat.api_client import get_manychat_client
