@@ -46,6 +46,161 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _handle_color_show_request(
+    user_message: str,
+    state: dict[str, Any],
+    current_state: str,
+) -> dict[str, Any] | None:
+    """
+    Handle color show request (universal for any state).
+    
+    Returns state update if handled, None otherwise.
+    """
+    try:
+        from src.agents.langgraph.rules.color_request import (
+            detect_color_show_request,
+            get_current_color_for_exclusion,
+            get_product_name_for_color_show,
+        )
+        
+        # Перевіряємо чи це запит на показ кольорів або "показати решту"
+        is_color_request = detect_color_show_request(user_message)
+        is_show_more = (
+            user_message.lower().strip() in ["показати решту", "покажи решту", "так", "да", "ок"]
+            and state.get("metadata", {}).get("color_gallery_offset") is not None
+        )
+        
+        if not (is_color_request or is_show_more):
+            return None
+        
+        product_name = get_product_name_for_color_show(state)
+        if not product_name:
+            return None
+        
+        from src.agents.langgraph.nodes.helpers.vision.product_colors import (
+            get_color_photos_for_upsell,
+        )
+        
+        exclude_color = get_current_color_for_exclusion(state)
+        
+        # Якщо це "показати решту" - беремо offset з metadata
+        if is_show_more:
+            metadata = state.get("metadata", {})
+            offset = metadata.get("color_gallery_offset", 0)
+            # Оновлюємо product_name та exclude_color з metadata якщо є
+            if metadata.get("color_gallery_product"):
+                product_name = metadata.get("color_gallery_product")
+            if metadata.get("color_gallery_exclude"):
+                exclude_color = metadata.get("color_gallery_exclude")
+        else:
+            offset = 0
+        
+        color_photos, has_more = get_color_photos_for_upsell(
+            product_name=product_name,
+            exclude_color=exclude_color,
+            max_photos=4,
+            offset=offset,
+        )
+        
+        if not color_photos:
+            return None
+        
+        session_id = state.get(
+            "session_id", state.get("metadata", {}).get("session_id", "")
+        )
+        trace_id = state.get("trace_id", "")
+        
+        # Формуємо messages: ТІЛЬКИ фото, без зайвого тексту перед ними
+        messages = []
+        
+        # Додаємо фото (до 4) - БЕЗ тексту перед ними
+        for color_photo in color_photos:
+            photo_url = color_photo.get("photo_url")
+            if photo_url:
+                messages.append({"type": "image", "content": photo_url})
+        
+        # Якщо є ще кольори - додаємо текст "Показати решту?" ПІСЛЯ фото
+        metadata_update = state.get("metadata", {}).copy()
+        if has_more:
+            messages.append({
+                "type": "text",
+                "content": "Показати решту кольорів?",
+            })
+            # Зберігаємо курсор для пагінації
+            metadata_update["color_gallery_offset"] = offset + len(color_photos)
+            metadata_update["color_gallery_product"] = product_name
+            if exclude_color:
+                metadata_update["color_gallery_exclude"] = exclude_color
+        else:
+            # Очищаємо курсор якщо більше немає кольорів
+            metadata_update.pop("color_gallery_offset", None)
+            metadata_update.pop("color_gallery_product", None)
+            metadata_update.pop("color_gallery_exclude", None)
+        
+        agent_response_payload = {
+            "event": "simple_answer",
+            "messages": messages,
+            "products": state.get("selected_products", []) or [],
+            "metadata": {
+                "session_id": session_id,
+                "current_state": current_state,
+                "intent": "COLOR_HELP",
+                "escalation_level": "NONE",
+            },
+        }
+        
+        metadata_update["current_state"] = current_state
+        metadata_update["intent"] = "COLOR_HELP"
+        
+        assistant_messages = []
+        for msg in messages:
+            if msg["type"] == "text":
+                assistant_messages.append({
+                    "role": "assistant",
+                    "content": msg["content"],
+                })
+            elif msg["type"] == "image":
+                assistant_messages.append({
+                    "role": "assistant",
+                    "type": "image",
+                    "content": msg["content"],
+                })
+        
+        with suppress(Exception):
+            log_agent_step(
+                session_id=session_id,
+                state=current_state,
+                intent="COLOR_HELP",
+                event="color_gallery_shown",
+                latency_ms=0.0,
+                extra={
+                    "trace_id": trace_id,
+                    "product_name": product_name,
+                    "colors_shown": len(color_photos),
+                    "has_more": has_more,
+                    "offset": offset,
+                },
+            )
+        
+        return {
+            "current_state": current_state,
+            "detected_intent": "COLOR_HELP",
+            "dialog_phase": state.get("dialog_phase", "WAITING_FOR_COLOR"),
+            "messages": assistant_messages,
+            "metadata": metadata_update,
+            "selected_products": state.get("selected_products", []) or [],
+            "should_escalate": False,
+            "escalation_reason": None,
+            "step_number": state.get("step_number", 0) + 1,
+            "last_error": None,
+            "agent_response": agent_response_payload,
+        }
+    except Exception as e:
+        logger.debug("Color show request handler error: %s", e, exc_info=True)
+        # Return None to continue normal LLM processing if handler fails
+        return None
+
+
 # Centralized keyword lists for confirmations (used for STATE_4 → STATE_5 safety net)
 _CONFIRMATION_BASE = INTENT_PATTERNS.get("CONFIRMATION", [])
 
@@ -104,6 +259,20 @@ async def agent_node(
             "step_number": state.get("step_number", 0) + 1,
         }
 
+    # =====================================================================
+    # UNIVERSAL COLOR SHOW REQUEST HANDLER (any state)
+    # =====================================================================
+    # Якщо клієнт просить показати кольори (в будь-якому стані) - показуємо фото
+    # з products_master.yaml з капом 4 фото + "Показати решту?" якщо більше
+    # Підтримує пагінацію: якщо клієнт каже "показати решту" - показуємо наступні 4
+    # =====================================================================
+    color_handler_result = _handle_color_show_request(user_message, state, current_state)
+    if color_handler_result is not None:
+        return color_handler_result
+    
+    # =====================================================================
+    # STATE_3_SIZE_COLOR: Specific color validation (existing logic)
+    # =====================================================================
     if current_state == State.STATE_3_SIZE_COLOR.value:
         try:
             available_colors = state.get("metadata", {}).get("available_colors")

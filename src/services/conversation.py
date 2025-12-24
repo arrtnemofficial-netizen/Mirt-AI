@@ -63,12 +63,18 @@ def parse_llm_output(
         # Parse JSON content from LangGraph nodes
         parsed = json.loads(content)
 
-        # Extract messages array
+        # Extract messages array (support both text and image types)
         messages_data = parsed.get("messages", [])
         messages = []
         for msg in messages_data:
-            content_value = msg.get("content") or msg.get("text")
-            if msg.get("type") == "text" and content_value:
+            msg_type = msg.get("type", "text")
+            content_value = msg.get("content") or msg.get("text") or msg.get("url", "")
+            
+            if msg_type == "image" and content_value:
+                # Image message: content should be URL
+                messages.append(Message(type="image", content=content_value))
+            elif msg_type == "text" and content_value:
+                # Text message
                 messages.append(Message(type="text", content=content_value))
 
         # Extract products array

@@ -124,36 +124,67 @@ def build_vision_messages(
 
         messages.append(text_msg(message_text))
 
-        # Try to get beautiful snippet from snippets.md for this product
-        # Universal: works for Сукня Анна, Костюм Лагуна, or ANY product you add to snippets.md
-        snippet_bubbles = get_product_snippet(product_name)
-        if snippet_bubbles:
-            # Use snippet instead of generic description
-            for bubble in snippet_bubbles[:3]:  # Max 3 bubbles for presentation
-                messages.append(text_msg(bubble))
-        elif catalog_product:
-            description = str(catalog_product.get("description") or "").strip()
-            if description:
-                description = " ".join(description.split())
-                first_line = description.split("\n", 1)[0].strip()
-                snippet_src = first_line or description
-
-                sentences: list[str] = []
-                buf = snippet_src
-                for sep in (".", "!", "?"):
-                    if sep in buf:
-                        parts = [p.strip() for p in buf.split(sep) if p.strip()]
-                        if parts:
-                            sentences = parts
-                            break
-
-                if sentences:
-                    snippet = ". ".join(sentences[:2]).strip() + "."
-                else:
-                    snippet = snippet_src[:180].rstrip()
-
-                if snippet:
-                    messages.append(text_msg(snippet))
+        # Try to get beautiful presentation text using presentation builder
+        # Priority: snippets.md → YAML (visual) → Supabase description (formatted nicely)
+        from .presentation_builder import build_presentation_text
+        
+        # Try to load YAML product data if available
+        yaml_product = None
+        try:
+            from .product_colors import _load_products_master
+            master = _load_products_master()
+            products_yaml = master.get("products", {})
+            product_name_norm = " ".join(product_name.strip().split()).lower()
+            for product_key, product_data in products_yaml.items():
+                if isinstance(product_data, dict):
+                    product_name_in_yaml = product_data.get("name", "").strip().lower()
+                    if product_name_norm == product_name_in_yaml:
+                        yaml_product = product_data
+                        break
+        except Exception:
+            pass  # YAML loading failed, continue without it
+        
+        presentation_text = build_presentation_text(
+            product_name=product_name,
+            product_color=product.color,
+            catalog_product=catalog_product,
+            yaml_product=yaml_product,
+        )
+        
+        if presentation_text:
+            messages.append(text_msg(presentation_text))
+        else:
+            # Fallback: try snippets.md directly (legacy path)
+            snippet_bubbles = get_product_snippet(product_name)
+            if snippet_bubbles:
+                # Use snippet instead of generic description
+                for bubble in snippet_bubbles[:3]:  # Max 3 bubbles for presentation
+                    messages.append(text_msg(bubble))
+            elif catalog_product:
+                # Last resort: use description as-is (but formatted)
+                description = str(catalog_product.get("description") or "").strip()
+                if description:
+                    # Avoid "Тканина: ..." as raw line
+                    if description.lower().startswith("тканина:"):
+                        fabric_part = description[len("Тканина:"):].strip()
+                        if fabric_part:
+                            messages.append(text_msg(f"Тканина {fabric_part.lower()}"))
+                    else:
+                        # Use first 1-2 sentences
+                        sentences: list[str] = []
+                        for sep in (".", "!", "?"):
+                            if sep in description:
+                                parts = [p.strip() for p in description.split(sep) if p.strip()]
+                                if parts:
+                                    sentences = parts[:2]
+                                    break
+                        if sentences:
+                            snippet = ". ".join(sentences).strip() + "."
+                            messages.append(text_msg(snippet))
+                        else:
+                            snippet = description[:180].rstrip()
+                            if snippet:
+                                messages.append(text_msg(snippet))
 
         # Photo bubble should come before the question bubble (ManyChat/IG UX).
         if product.photo_url and (not needs_color_confirmation):

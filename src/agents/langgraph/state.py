@@ -117,6 +117,8 @@ class ConversationState(TypedDict, total=False):
     should_escalate: bool
     escalation_reason: str | None
     escalation_level: str | None  # NONE, L1, L2, L3 (contract-compliant)
+    # Prevent duplicate manager notifications (e.g., vision dual-track escalation)
+    manager_notification_sent: bool
 
     # Tool execution
     tool_plan_result: dict[str, Any] | None

@@ -117,7 +117,8 @@
   "event": "simple_answer" | "clarifying_question" | "multi_option" | "escalation",
   "reasoning": "Internal thought process...",
   "messages": [
-    { "type": "text", "content": "Текст повідомлення тут" }
+    { "type": "text", "content": "Текст повідомлення тут" },
+    { "type": "image", "content": "https://example.com/photo.jpg" }
   ],
   "products": [
     // Тільки якщо показуєш картку товару ВПЕРШЕ!
@@ -143,6 +144,13 @@
   }
 }
 ```
+
+## ПРАВИЛА ДЛЯ IMAGE MESSAGES:
+- **type: "image"** - для відправки фото (URL має бути валідним)
+- **type: "text"** - для текстових повідомлень
+- Можеш комбінувати: спочатку текст, потім фото, потім знову текст
+- **Для кольорів**: Якщо клієнт просить показати кольори, можеш використати image messages з photo_url з products_master.yaml
+- **Кап**: Максимум 4 фото за раз, якщо більше - додай текст "Показати решту?"
 
 **Поле `deliberation`:**
 - ОБОВ'ЯЗКОВЕ для STATE_4_OFFER

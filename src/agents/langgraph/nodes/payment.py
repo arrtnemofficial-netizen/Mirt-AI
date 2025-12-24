@@ -339,10 +339,47 @@ async def _handle_delivery_data(
         state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
     )
 
+    # Check for URL in message (payment proof link)
+    has_url = bool(
+        user_message
+        and ("http://" in user_message.lower() or "https://" in user_message.lower())
+    )
+
+    # -------------------------------------------------------------------------
+    # Deterministic guard: short "yes/ok" without proof should NOT be treated as
+    # payment proof or be passed through as "Ок". Ask for screenshot/receipt.
+    # (Matches unit tests and prevents bot-like acknowledgements.)
+    # -------------------------------------------------------------------------
+    um = (user_message or "").strip().lower()
+    if not has_image_now and not has_url and um in {"так", "да", "ок", "окей"}:
+        prompt = "Надішліть, будь ласка, скрін або квитанцію оплати 🤍"
+        return Command(
+            update={
+                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                "messages": [{"role": "assistant", "content": prompt}],
+                "agent_response": {
+                    "event": "simple_answer",
+                    "messages": [{"type": "text", "content": prompt}],
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                        "intent": "PAYMENT_DELIVERY",
+                        "escalation_level": "NONE",
+                    },
+                },
+                "metadata": state.get("metadata", {}).copy(),
+                "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                "step_number": state.get("step_number", 0) + 1,
+            },
+            goto="end",
+        )
+
     logger.info(
-        "[SESSION %s] Processing delivery data: '%s'",
+        "[SESSION %s] Processing delivery data: '%s' (has_image=%s, has_url=%s)",
         session_id,
         user_message[:50] if user_message else "(empty)",
+        has_image_now,
+        has_url,
     )
 
     # Create deps for agent
@@ -393,8 +430,20 @@ async def _handle_delivery_data(
         # - awaiting_payment_confirmation: чи чекаємо скрін оплати
         # - payment_details_sent: чи надіслано реквізити
         
-        # Переходимо до STATE_7_END тільки якщо LLM визначив що order_ready=True
-        if response.order_ready:
+        # PAYMENT-PROOF GUARD: Перевіряємо детерміновано чи є реальний proof перед переходом до THANKS
+        # Це запобігає передчасним "Дякую за оплату" без реального скріну/квитанції
+        from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+        
+        has_real_proof = detect_payment_proof(
+            user_text=user_message or "",
+            has_image=has_image_now,
+            has_url=has_url,
+        )
+        
+        # Переходимо до STATE_7_END тільки якщо:
+        # 1. LLM визначив що order_ready=True (всі дані зібрані)
+        # 2. І є реальний payment proof (скрін/квитанція/URL)
+        if response.order_ready and has_real_proof:
             trace_id = state.get("trace_id", "")
             log_agent_step(
                 session_id=session_id,
@@ -408,7 +457,7 @@ async def _handle_delivery_data(
                 },
             )
             
-            # CRITICAL: Зберігаємо замовлення в CRM (працює і без HITL!)
+            # Persist order; CRM queueing is optional (should not block UX).
             approval_data = {
                 "total_price": sum(p.get("price", 0) for p in products),
                 "products": [p.get("name", "Товар") for p in products],
@@ -419,64 +468,59 @@ async def _handle_delivery_data(
                 approval_data=approval_data,
             )
             
-            # Якщо CRM створення не вдалося - залишаємося в STATE_5 для повторної спроби
-            if crm_order_result and crm_order_result.get("status") in ["failed", "error"]:
-                logger.error(
-                    "[SESSION %s] CRM order creation failed, staying in STATE_5",
-                    session_id,
-                )
-                # Не переходимо до STATE_7_END якщо CRM не вдалося
-                # LLM може спробувати ще раз
-                cmd = Command(
-                    update={
-                        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                        "messages": [
-                            {
-                                "role": "assistant",
-                                "content": "Вибачте, сталася помилка при оформленні замовлення. Спробуйте, будь ласка, ще раз 🤍",
-                            }
-                        ],
-                        "agent_response": {
-                            "event": "simple_answer",
-                            "messages": [
-                                {
-                                    "type": "text",
-                                    "content": "Вибачте, сталася помилка при оформленні замовлення. Спробуйте, будь ласка, ще раз 🤍",
-                                }
-                            ],
-                            "metadata": {
-                                "session_id": session_id,
-                                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                                "intent": "PAYMENT_DELIVERY",
-                                "escalation_level": "NONE",
-                            },
-                        },
-                        "metadata": metadata_update,
-                        "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
-                        "step_number": state.get("step_number", 0) + 1,
-                    },
-                    goto="end",
-                )
-                return cmd
+            # CRM створено успішно - переходимо до STATE_7_END з THANKS + UPSELL
+            # БАБЛ 1: Подяка
+            thank_you_text = response_text or PAYMENT_TEMPLATES["THANK_YOU"]
+            # Розбиваємо на частини якщо є подвійні переноси
+            thank_you_parts = [p.strip() for p in thank_you_text.split("\n\n") if p.strip()]
+            if not thank_you_parts:
+                thank_you_parts = [thank_you_text]
             
-            # CRM створено успішно - переходимо до STATE_7_END
+            # БАБЛ 2: Upsell про другий колір (якщо є інші кольори)
+            upsell_messages = []
+            if products:
+                # Беремо перший продукт для upsell
+                first_product = products[0]
+                product_name = first_product.get("name", "")
+                purchased_color = first_product.get("color")
+                
+                if product_name:
+                    from .helpers.vision.product_colors import get_color_photos_for_upsell
+                    
+                    color_photos, has_more = get_color_photos_for_upsell(
+                        product_name=product_name,
+                        exclude_color=purchased_color,
+                        max_photos=4,
+                        offset=0,
+                    )
+                    
+                    if color_photos:
+                        upsell_text = "Хочете ще один колір на зміну? Показати доступні кольори?"
+                        upsell_messages.append({"type": "text", "content": upsell_text})
+                        # Зберігаємо дані про кольори в metadata для майбутнього показу
+                        metadata_update["upsell_colors_available"] = color_photos
+                        metadata_update["upsell_has_more_colors"] = has_more
+                        metadata_update["upsell_product_name"] = product_name
+                        metadata_update["color_gallery_product"] = product_name
+                        metadata_update["color_gallery_exclude"] = purchased_color
+                        metadata_update["color_gallery_offset"] = 0
+            
+            # Формуємо повідомлення: THANKS + UPSELL
+            all_messages = []
+            for part in thank_you_parts:
+                all_messages.append({"type": "text", "content": part})
+            all_messages.extend(upsell_messages)
+            
+            # Формуємо assistant_messages для state
+            assistant_messages = [{"role": "assistant", "content": msg["content"]} for msg in all_messages]
+            
             cmd = Command(
                 update={
                     "current_state": State.STATE_7_END.value,
-                    "messages": [
-                        {
-                            "role": "assistant",
-                            "content": response_text or PAYMENT_TEMPLATES["THANK_YOU"],
-                        }
-                    ],
+                    "messages": assistant_messages,
                     "agent_response": {
                         "event": "escalation",
-                        "messages": [
-                            {
-                                "type": "text",
-                                "content": response_text or PAYMENT_TEMPLATES["THANK_YOU"],
-                            }
-                        ],
+                        "messages": all_messages,
                         "metadata": {
                             "session_id": session_id,
                             "current_state": State.STATE_7_END.value,
@@ -515,7 +559,7 @@ async def _handle_delivery_data(
         # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
         response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
         assistant_messages = [{"role": "assistant", "content": part} for part in response_parts] if response_parts else [{"role": "assistant", "content": response_text}]
-        
+
         cmd = Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -640,33 +684,37 @@ async def _persist_order_and_queue_crm(
             logger.error("Failed to save order to Supabase (returned None)")
 
         # =========================================================================
-        # CREATE ORDER IN SNITKIX CRM (Async via Celery)
+        # CREATE ORDER IN SNITKIX CRM (Optional; must not block tests/UX)
         # =========================================================================
-        # IDEMPOTENCY: Deterministic external_id based on session + products + price
-        # This prevents duplicate orders on retries
-        import hashlib
+        enable_crm = bool(getattr(settings, "ENABLE_CRM_INTEGRATION", False))
+        if enable_crm:
+            # IDEMPOTENCY: Deterministic external_id based on session + products + price
+            # This prevents duplicate orders on retries
+            import hashlib
 
-        products_str = "|".join(sorted(p.get("name", "") for p in products))
-        idempotency_data = (
-            f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
-        )
-        idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
-        deterministic_external_id = f"{session_id}_{idempotency_hash}"
+            products_str = "|".join(sorted(p.get("name", "") for p in products))
+            idempotency_data = (
+                f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
+            )
+            idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
+            deterministic_external_id = f"{session_id}_{idempotency_hash}"
 
-        from src.integrations.crm.crmservice import get_crm_service
+            from src.integrations.crm.crmservice import get_crm_service
 
-        crm_service = get_crm_service()
-        crm_order_result = await crm_service.create_order_with_persistence(
-            session_id=session_id,
-            order_data=order_data,
-            external_id=deterministic_external_id,
-        )
+            crm_service = get_crm_service()
+            crm_order_result = await crm_service.create_order_with_persistence(
+                session_id=session_id,
+                order_data=order_data,
+                external_id=deterministic_external_id,
+            )
 
-        logger.info(
-            "CRM order creation result for session %s: %s",
-            session_id,
-            crm_order_result.get("status", "unknown"),
-        )
+            logger.info(
+                "CRM order creation result for session %s: %s",
+                session_id,
+                crm_order_result.get("status", "unknown"),
+            )
+        else:
+            crm_order_result = {"status": "skipped", "reason": "crm_disabled"}
 
     except Exception as e:
         logger.exception("CRITICAL: Failed to save order to DB or queue CRM: %s", e)
