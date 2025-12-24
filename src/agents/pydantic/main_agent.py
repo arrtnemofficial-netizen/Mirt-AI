@@ -513,6 +513,7 @@ async def run_main(
             "Circuit breaker OPEN for main agent (session %s). Escalating.",
             deps.session_id,
         )
+        # Escalation always means dialog completion, so set STATE_7_END to match COMPLETED phase
         return SupportResponse(
             event="escalation",
             messages=[
@@ -525,7 +526,7 @@ async def run_main(
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
-                current_state=deps.current_state or "STATE_0_INIT",
+                current_state="STATE_7_END",  # Escalation = COMPLETED phase = STATE_7_END
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L2",
             ),
@@ -565,6 +566,7 @@ async def run_main(
             span.set_attribute("error_type", "TimeoutError")
         timeout_error = TimeoutError("Support agent timeout")
         _llm_circuit_breaker.record_failure(timeout_error)
+        # Escalation always means dialog completion, so set STATE_7_END to match COMPLETED phase
         return SupportResponse(
             event="escalation",
             messages=[
@@ -577,7 +579,7 @@ async def run_main(
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
-                current_state=deps.current_state or "STATE_0_INIT",
+                current_state="STATE_7_END",  # Escalation = COMPLETED phase = STATE_7_END
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L1",
             ),
@@ -587,6 +589,7 @@ async def run_main(
     except CircuitBreakerOpenError:
         # Re-raise circuit breaker errors (shouldn't happen here, but handle gracefully)
         logger.error("Circuit breaker error for session %s", deps.session_id)
+        # Escalation always means dialog completion, so set STATE_7_END to match COMPLETED phase
         return SupportResponse(
             event="escalation",
             messages=[
@@ -599,7 +602,7 @@ async def run_main(
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
-                current_state=deps.current_state or "STATE_0_INIT",
+                current_state="STATE_7_END",  # Escalation = COMPLETED phase = STATE_7_END
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L2",
             ),
@@ -607,12 +610,44 @@ async def run_main(
         )
 
     except Exception as e:
+        error_str = str(e).lower()
+        error_msg = str(e)
+        
+        # Special handling for quota exceeded (429)
+        if "429" in error_msg or "quota" in error_str or "insufficient_quota" in error_str:
+            logger.error("Support agent quota exceeded for session %s: %s", deps.session_id, error_msg[:200])
+            if span:
+                span.set_attribute("error", True)
+                span.set_attribute("error_type", "QuotaExceeded")
+                span.set_attribute("error_message", error_msg[:200])
+            _llm_circuit_breaker.record_failure(e)
+            # Escalation always means dialog completion, so set STATE_7_END to match COMPLETED phase
+            return SupportResponse(
+                event="escalation",
+                messages=[
+                    MessageItem(
+                        content=_get_error_text(
+                            "overload",
+                            "System temporarily unavailable. A manager will follow up.",
+                        )
+                    )
+                ],
+                metadata=ResponseMetadata(
+                    session_id=deps.session_id or "",
+                    current_state="STATE_7_END",  # Escalation = COMPLETED phase = STATE_7_END
+                    intent="UNKNOWN_OR_EMPTY",
+                    escalation_level="L2",
+                ),
+                escalation=EscalationInfo(reason="QUOTA_EXCEEDED"),
+            )
+        
         logger.exception("Support agent error: %s", e)
         if span:
             span.set_attribute("error", True)
             span.set_attribute("error_type", type(e).__name__)
             span.set_attribute("error_message", str(e)[:200])
         _llm_circuit_breaker.record_failure(e)
+        # Escalation always means dialog completion, so set STATE_7_END to match COMPLETED phase
         return SupportResponse(
             event="escalation",
             messages=[
@@ -625,7 +660,7 @@ async def run_main(
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
-                current_state=deps.current_state or "STATE_0_INIT",
+                current_state="STATE_7_END",  # Escalation = COMPLETED phase = STATE_7_END
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L2",
             ),
@@ -656,6 +691,7 @@ async def run_offer(
             "Circuit breaker OPEN for offer agent (session %s). Escalating.",
             deps.session_id,
         )
+        # Escalation always means dialog completion, so set STATE_7_END to match COMPLETED phase
         return OfferResponse(
             event="escalation",
             messages=[
@@ -668,7 +704,7 @@ async def run_offer(
             ],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
-                current_state=deps.current_state or "STATE_0_INIT",
+                current_state="STATE_7_END",  # Escalation = COMPLETED phase = STATE_7_END
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L2",
             ),
@@ -692,12 +728,13 @@ async def run_offer(
     except Exception as e:
         logger.exception("Offer agent error: %s", e)
         _offer_circuit_breaker.record_failure(e)
+        # Escalation always means dialog completion, so set STATE_7_END to match COMPLETED phase
         return OfferResponse(
             event="escalation",
             messages=[MessageItem(content=_get_error_response())],
             metadata=ResponseMetadata(
                 session_id=deps.session_id or "",
-                current_state=deps.current_state or "STATE_0_INIT",
+                current_state="STATE_7_END",  # Escalation = COMPLETED phase = STATE_7_END
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L2",
             ),

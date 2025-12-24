@@ -163,28 +163,46 @@ class NotificationService:
         return await self._send_telegram_message(message)
 
     async def _send_telegram_message(self, text: str) -> bool:
-        """Send raw message to Telegram."""
+        """Send raw message to Telegram with Markdown fallback."""
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-        }
+        
+        # Try Markdown first, fallback to plain text if parsing fails
+        for parse_mode in ["Markdown", None]:
+            payload = {
+                "chat_id": self.chat_id,
+                "text": text,
+            }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as response:
-                    if response.status == 200:
-                        logger.info("Manager notification sent successfully")
-                        return True
-                    else:
-                        logger.error(
-                            "Failed to send notification: %s %s",
-                            response.status,
-                            await response.text(),
-                        )
-                        return False
-        except Exception as e:
-            logger.error("Notification error: %s", e)
-            return False
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload) as response:
+                        if response.status == 200:
+                            if parse_mode == "Markdown":
+                                logger.info("Manager notification sent successfully (Markdown)")
+                            else:
+                                logger.info("Manager notification sent successfully (plain text)")
+                            return True
+                        else:
+                            resp_text = await response.text()
+                            # If Markdown parsing failed, retry without parse_mode
+                            if parse_mode == "Markdown" and "parse entities" in resp_text.lower():
+                                logger.warning("Markdown parsing failed, retrying without parse_mode")
+                                continue
+                            logger.error(
+                                "Failed to send notification: %s %s",
+                                response.status,
+                                resp_text[:200],
+                            )
+                            return False
+            except Exception as e:
+                # If Markdown failed and we haven't tried plain text yet, retry
+                if parse_mode == "Markdown":
+                    logger.warning("Markdown send failed, retrying without parse_mode: %s", e)
+                    continue
+                logger.error("Notification error: %s", e)
+                return False
+        
+        return False
 

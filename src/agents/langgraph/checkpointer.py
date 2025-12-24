@@ -355,17 +355,24 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         # - check: Verify connection is alive before use
 
         async def check_connection(conn):
-            """Check if connection is still alive before returning from pool."""
+            """Check if connection is still alive before returning from pool.
+            
+            Optimized: Lightweight health check. Connection pool tracks last_used internally.
+            """
             try:
+                # Use a lightweight query - PostgreSQL optimizes SELECT 1
                 await conn.execute("SELECT 1")
             except Exception:
                 raise  # Connection is dead, pool will discard it
 
-        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 1)
+        # Optimized pool settings for better performance
+        # Increased min_size to reduce connection acquisition time (warm pool)
+        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 2)  # Was 1, now 2 for faster access
         pool_max_size = _setting_int(settings, "CHECKPOINTER_POOL_MAX_SIZE", 5)
         pool_timeout_s = _setting_float(settings, "CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
         pool_max_idle_s = _setting_float(settings, "CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
-        connect_timeout_s = _setting_float(settings, "CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 10.0)
+        # Reduced connect_timeout for faster failure detection
+        connect_timeout_s = _setting_float(settings, "CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 5.0)  # Was 10.0, now 5.0
 
         statement_timeout_ms = _setting_int(settings, "CHECKPOINTER_STATEMENT_TIMEOUT_MS", 8000)
         lock_timeout_ms = _setting_int(settings, "CHECKPOINTER_LOCK_TIMEOUT_MS", 2000)
