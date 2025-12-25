@@ -52,17 +52,28 @@ def format_requisites_multiline() -> str:
     )
 
 
-def format_requisites_with_receipt_request() -> list[str]:
+def format_requisites_with_receipt_request(price: int | None = None) -> list[str]:
     """
     Return requisites formatted as separate message bubbles for ManyChat/IG.
+    
+    Format (4 bubbles):
+    1. Отримувач: ФОП Кутний, IBAN, ІПН/ЄДРПОУ
+    2. Призначення платежу: ОПЛАТА ЗА ТОВАР і ваше ПІБ ❣️
+    3. До оплати - ЦЕНА грн
+    4. І все, і жди скріншоту
+    
+    Args:
+        price: Price in UAH (optional, will be shown in bubble 3)
     
     Returns:
         List of message texts (one per bubble)
     """
+    price_text = f"{price} грн" if price else "сума з каталогу"
     return [
-        format_requisites_multiline(),
-        BANK_REQUISITES.iban,
-        "Надішліть, будь ласка, квитанцію після оплати, щоб ми одразу сформували замовлення для вас 🙂",
+        f"Отримувач: {BANK_REQUISITES.fop_name}\nIBAN: {BANK_REQUISITES.iban}\nІПН/ЄДРПОУ: {BANK_REQUISITES.tax_id}",
+        f"Призначення платежу: {BANK_REQUISITES.payment_purpose}",
+        f"До оплати - {price_text}",
+        "І все, і жди скріншоту",
     ]
 
 

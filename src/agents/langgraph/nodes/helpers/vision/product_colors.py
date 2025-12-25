@@ -24,13 +24,29 @@ def _load_products_master() -> dict[str, Any]:
     if _PRODUCTS_MASTER_CACHE is not None:
         return _PRODUCTS_MASTER_CACHE
 
-    yaml_path = Path(__file__).parent.parent.parent.parent.parent / "data" / "vision" / "products_master.yaml"
+    # Get project root using same approach as product_matcher.py
+    # From: src/agents/langgraph/nodes/helpers/vision/product_colors.py
+    # To root: 6 levels up (agents -> langgraph -> nodes -> helpers -> vision -> product_colors.py)
+    # Same pattern as product_matcher.py: Path(__file__).parent.parent.parent from src/services/
+    # For this file: 6 levels up from src/agents/langgraph/nodes/helpers/vision/
+    project_root = Path(__file__).parent.parent.parent.parent.parent.parent
+    yaml_path = project_root / "data" / "vision" / "products_master.yaml"
+    
+    # Fallback for Docker/production: try /app/data/vision/ (Docker WORKDIR is /app)
+    if not yaml_path.exists():
+        yaml_path_docker = Path("/app/data/vision/products_master.yaml")
+        if yaml_path_docker.exists():
+            yaml_path = yaml_path_docker
+        else:
+            # Last fallback: try relative to current working directory
+            yaml_path = Path("data/vision/products_master.yaml")
+    
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
             _PRODUCTS_MASTER_CACHE = yaml.safe_load(f) or {}
-        logger.info("Loaded products_master.yaml: %d products", len(_PRODUCTS_MASTER_CACHE.get("products", {})))
+        logger.info("Loaded products_master.yaml from %s: %d products", yaml_path, len(_PRODUCTS_MASTER_CACHE.get("products", {})))
     except Exception as e:
-        logger.error("Failed to load products_master.yaml: %s", e)
+        logger.error("Failed to load products_master.yaml from %s: %s", yaml_path, e)
         _PRODUCTS_MASTER_CACHE = {}
 
     return _PRODUCTS_MASTER_CACHE
