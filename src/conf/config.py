@@ -179,7 +179,23 @@ class Settings(BaseSettings):
     )
     DATABASE_URL: str = Field(
         default="",
-        description="Primary Postgres connection string for LangGraph checkpointer (falls back to SUPABASE_* when empty).",
+        description="Primary Postgres connection string for LangGraph checkpointer and direct DB access (falls back to SUPABASE_* when empty).",
+    )
+    POSTGRES_URL: str = Field(
+        default="",
+        description="Alternative PostgreSQL connection string (used if DATABASE_URL is empty).",
+    )
+    POSTGRES_POOL_MIN_SIZE: int = Field(
+        default=1,
+        description="Minimum size for PostgreSQL connection pool.",
+    )
+    POSTGRES_POOL_MAX_SIZE: int = Field(
+        default=10,
+        description="Maximum size for PostgreSQL connection pool.",
+    )
+    POSTGRES_POOL_MAX_IDLE: int = Field(
+        default=30,
+        description="Maximum idle time (seconds) for PostgreSQL pool connections.",
     )
     SUPABASE_TABLE: str = Field(
         default="agent_sessions", description="Table name storing chat session state JSON."

@@ -153,7 +153,20 @@ class SupabaseMessageStore:
 
 
 def create_message_store() -> MessageStore:
+    """Factory to create message store (PostgreSQL preferred, fallback to Supabase)."""
+    # Try PostgreSQL first
+    try:
+        from src.services.postgres_message_store import create_postgres_message_store
+        postgres_store = create_postgres_message_store()
+        if postgres_store:
+            return postgres_store
+    except Exception as e:
+        logger.warning("PostgreSQL message store not available: %s", e)
+    
+    # Fallback to Supabase
     client = get_supabase_client()
     if client:
         return SupabaseMessageStore(client)
+    
+    # Final fallback to in-memory
     return InMemoryMessageStore()

@@ -586,11 +586,21 @@ async def manychat_webhook(
 
             if message_id:
                 from src.services.supabase_client import get_supabase_client
+                from src.conf.config import settings
 
-                db = get_supabase_client()
-                if db:
-                    dedupe_store = WebhookDedupeStore(db, ttl_hours=24)
+                # Try PostgreSQL first, fallback to Supabase
+                use_postgres = bool(settings.DATABASE_URL or getattr(settings, "POSTGRES_URL", ""))
+                
+                if use_postgres:
+                    dedupe_store = WebhookDedupeStore(db=None, ttl_hours=24, use_postgres=True)
+                else:
+                    db = get_supabase_client()
+                    if db:
+                        dedupe_store = WebhookDedupeStore(db=db, ttl_hours=24, use_postgres=False)
+                    else:
+                        dedupe_store = None
 
+                if dedupe_store:
                     # Check for duplicates using DB store
                     is_duplicate = dedupe_store.check_and_mark(
                         user_id=user_id,

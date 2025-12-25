@@ -6,35 +6,73 @@
 -- ВАЖЛИВО: Цей скрипт є IDEMPOTENT - його можна запускати багато разів
 -- ============================================================================
 
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Enable required extensions (with error handling)
+DO $$ 
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS vector;
+    RAISE NOTICE '✅ vector extension enabled';
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE '⚠️  vector extension not available (pgvector not installed). Tables with VECTOR columns will be created but embeddings will not work.';
+END $$;
+
 -- pg_cron is optional, skip if not available
 DO $$ 
 BEGIN
     CREATE EXTENSION IF NOT EXISTS pg_cron;
+    RAISE NOTICE '✅ pg_cron extension enabled';
 EXCEPTION
     WHEN OTHERS THEN
-        RAISE NOTICE 'pg_cron extension not available, skipping...';
+        RAISE NOTICE '⚠️  pg_cron extension not available, skipping...';
 END $$;
 
 -- ============================================================================
 -- 1. PRODUCTS TABLE
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS products (
-    id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    name TEXT NOT NULL,
-    description TEXT,
-    category TEXT NOT NULL,
-    subcategory TEXT,
-    price NUMERIC(10, 2) NOT NULL,
-    sizes TEXT[] NOT NULL DEFAULT '{}',
-    colors TEXT[] NOT NULL DEFAULT '{}',
-    photo_url TEXT,
-    sku TEXT UNIQUE,
-    embedding VECTOR(1536),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- Check if vector extension is available
+DO $$ 
+DECLARE
+    has_vector BOOLEAN := FALSE;
+BEGIN
+    SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector') INTO has_vector;
+    
+    IF has_vector THEN
+        -- Create with VECTOR column
+        EXECUTE 'CREATE TABLE IF NOT EXISTS products (
+            id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+            name TEXT NOT NULL,
+            description TEXT,
+            category TEXT NOT NULL,
+            subcategory TEXT,
+            price NUMERIC(10, 2) NOT NULL,
+            sizes TEXT[] NOT NULL DEFAULT ''{}'',
+            colors TEXT[] NOT NULL DEFAULT ''{}'',
+            photo_url TEXT,
+            sku TEXT UNIQUE,
+            embedding VECTOR(1536),
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )';
+    ELSE
+        -- Create without VECTOR column
+        EXECUTE 'CREATE TABLE IF NOT EXISTS products (
+            id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+            name TEXT NOT NULL,
+            description TEXT,
+            category TEXT NOT NULL,
+            subcategory TEXT,
+            price NUMERIC(10, 2) NOT NULL,
+            sizes TEXT[] NOT NULL DEFAULT ''{}'',
+            colors TEXT[] NOT NULL DEFAULT ''{}'',
+            photo_url TEXT,
+            sku TEXT UNIQUE,
+            embedding BYTEA,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )';
+        RAISE NOTICE '⚠️  products.embedding created as BYTEA (vector extension not available)';
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_products_price ON products(price);
@@ -173,27 +211,62 @@ END $$;
 -- ============================================================================
 -- 7. MIRT MEMORIES TABLE (Fluid Memory)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS mirt_memories (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id TEXT NOT NULL,
-    session_id TEXT,
-    content TEXT NOT NULL,
-    fact_type TEXT NOT NULL,
-    category TEXT NOT NULL,
-    importance FLOAT NOT NULL DEFAULT 0.5,
-    surprise FLOAT NOT NULL DEFAULT 0.5,
-    confidence FLOAT NOT NULL DEFAULT 0.8,
-    ttl_days INT,
-    decay_rate FLOAT DEFAULT 0.01,
-    embedding VECTOR(1536),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    last_accessed_at TIMESTAMPTZ DEFAULT NOW(),
-    expires_at TIMESTAMPTZ,
-    version INT DEFAULT 1,
-    superseded_by UUID,
-    is_active BOOLEAN DEFAULT TRUE
-);
+-- Check if vector extension is available
+DO $$ 
+DECLARE
+    has_vector BOOLEAN := FALSE;
+BEGIN
+    SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector') INTO has_vector;
+    
+    IF has_vector THEN
+        -- Create with VECTOR column
+        EXECUTE 'CREATE TABLE IF NOT EXISTS mirt_memories (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id TEXT NOT NULL,
+            session_id TEXT,
+            content TEXT NOT NULL,
+            fact_type TEXT NOT NULL,
+            category TEXT NOT NULL,
+            importance FLOAT NOT NULL DEFAULT 0.5,
+            surprise FLOAT NOT NULL DEFAULT 0.5,
+            confidence FLOAT NOT NULL DEFAULT 0.8,
+            ttl_days INT,
+            decay_rate FLOAT DEFAULT 0.01,
+            embedding VECTOR(1536),
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            last_accessed_at TIMESTAMPTZ DEFAULT NOW(),
+            expires_at TIMESTAMPTZ,
+            version INT DEFAULT 1,
+            superseded_by UUID,
+            is_active BOOLEAN DEFAULT TRUE
+        )';
+    ELSE
+        -- Create without VECTOR column
+        EXECUTE 'CREATE TABLE IF NOT EXISTS mirt_memories (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id TEXT NOT NULL,
+            session_id TEXT,
+            content TEXT NOT NULL,
+            fact_type TEXT NOT NULL,
+            category TEXT NOT NULL,
+            importance FLOAT NOT NULL DEFAULT 0.5,
+            surprise FLOAT NOT NULL DEFAULT 0.5,
+            confidence FLOAT NOT NULL DEFAULT 0.8,
+            ttl_days INT,
+            decay_rate FLOAT DEFAULT 0.01,
+            embedding BYTEA,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            last_accessed_at TIMESTAMPTZ DEFAULT NOW(),
+            expires_at TIMESTAMPTZ,
+            version INT DEFAULT 1,
+            superseded_by UUID,
+            is_active BOOLEAN DEFAULT TRUE
+        )';
+        RAISE NOTICE '⚠️  mirt_memories.embedding created as BYTEA (vector extension not available)';
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_mirt_memories_user_id ON mirt_memories(user_id);
 CREATE INDEX IF NOT EXISTS idx_mirt_memories_user_active ON mirt_memories(user_id, is_active) WHERE is_active = TRUE;
