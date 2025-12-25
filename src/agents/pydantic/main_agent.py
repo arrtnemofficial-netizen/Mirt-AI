@@ -5,6 +5,7 @@ Support/Sales Agent - PydanticAI main agent.
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -86,12 +87,19 @@ def _get_model() -> OpenAIModel:
         base_url = "https://api.openai.com/v1"
         model_name = settings.LLM_MODEL_GPT  # GPT-5.1 only
         
-        # Log model configuration for debugging
+        # DIAGNOSTIC: Log full configuration for debugging quota issues
+        api_key_preview = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
         logger.info(
-            "[MODEL_INIT] Initializing GPT model: name=%s base_url=%s api_key_present=%s",
+            "[MODEL_INIT] Initializing GPT model: name=%s base_url=%s api_key_preview=%s ai_model_env=%s",
             model_name,
             base_url,
-            bool(api_key),
+            api_key_preview,
+            os.getenv("AI_MODEL", "NOT_SET"),
+        )
+        logger.info(
+            "[MODEL_INIT] Config values: LLM_MODEL_GPT=%s AI_MODEL=%s",
+            settings.LLM_MODEL_GPT,
+            settings.AI_MODEL,
         )
 
         client = AsyncOpenAI(
