@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.services.infra.debouncer import BufferedMessage, MessageDebouncer
+
+logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -49,10 +52,38 @@ async def process_manychat_pipeline(
         return None
 
     final_text = aggregated_msg.text
-    final_metadata = aggregated_msg.extra_metadata
+    final_metadata = dict(aggregated_msg.extra_metadata) if aggregated_msg.extra_metadata else {}
+    
+    # CRITICAL: Extract image_url from aggregated_msg and add to final_metadata
+    # This ensures image_url is preserved through debouncing
     has_image_final = bool(getattr(aggregated_msg, "has_image", False))
-    if not has_image_final and isinstance(final_metadata, dict):
-        has_image_final = bool(final_metadata.get("has_image"))
+    image_url_final = getattr(aggregated_msg, "image_url", None)
+    
+    # Update final_metadata with image info from aggregated_msg
+    if image_url_final:
+        final_metadata["image_url"] = image_url_final
+        final_metadata["has_image"] = True
+        has_image_final = True
+        logger.debug(
+            "[PIPELINE] Image URL extracted from aggregated_msg: url=%s (user_id=%s)",
+            image_url_final[:50] if image_url_final else None,
+            user_id,
+        )
+    elif has_image_final:
+        # If has_image is True but image_url is None, check metadata
+        if isinstance(final_metadata, dict) and final_metadata.get("image_url"):
+            has_image_final = True
+            image_url_final = final_metadata.get("image_url")
+        else:
+            # Fallback: check if has_image is in metadata
+            has_image_final = bool(final_metadata.get("has_image", False))
+    
+    logger.debug(
+        "[PIPELINE] Final metadata for handler: has_image=%s image_url=%s (user_id=%s)",
+        has_image_final,
+        "present" if image_url_final else "none",
+        user_id,
+    )
 
     if on_debounced:
         on_debounced(aggregated_msg, has_image_final, final_text, final_metadata)

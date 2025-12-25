@@ -524,7 +524,7 @@ class RedisDebouncer:
 
             logger.info(
                 f"[REDIS_DEBOUNCER] {session_id}: Aggregated {len(messages)} messages. "
-                f"Final Text: '{combined_text[:50]}...'"
+                f"Final Text: '{combined_text[:50]}...' has_image={has_image} image_url={'present' if last_image_url else 'none'}"
             )
 
             # Track metrics
