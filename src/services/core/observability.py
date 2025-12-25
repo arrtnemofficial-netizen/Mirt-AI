@@ -669,8 +669,9 @@ class AsyncTracingService:
             clean_payload = {k: v for k, v in validated_payload.items() if v is not None}
 
             # Insert into llm_traces (no fallback to llm_usage - different purposes)
+            # NOTE: Supabase client.execute() is synchronous, not async
             try:
-                await client.table("llm_traces").insert(clean_payload).execute()
+                client.table("llm_traces").insert(clean_payload).execute()
             except Exception as e:
                 # SAFEGUARD_3: Increment failure counter on insert errors too
                 self._failure_count += 1
