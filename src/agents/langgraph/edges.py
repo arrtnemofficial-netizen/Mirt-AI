@@ -208,7 +208,8 @@ def route_after_moderation(state: dict[str, Any]) -> ModerationRoute:
     - Allowed -> intent detection
     """
     if state.get("should_escalate"):
-        logger.info("Routing to escalation: moderation blocked")
+        reason = state.get("escalation_reason", "unknown")
+        logger.info("Routing to escalation: %s", reason)
         return "escalation"
     return "intent"
 
