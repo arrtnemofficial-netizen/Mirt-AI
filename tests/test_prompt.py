@@ -18,9 +18,9 @@ def combined_prompt_content() -> str:
         SystemKeys.BASE_IDENTITY,
         SystemKeys.MAIN_AGENT,
         DomainKeys.MAIN_MAIN,  # main.md contains escalation rules
+        DomainKeys.PAYMENT_MAIN,  # payment/main.md contains payment logic
         SystemKeys.INTENTS,
         SystemKeys.FALLBACKS,
-        "system.payment",
     ]
     content = ""
     for key_raw in components:
@@ -29,9 +29,7 @@ def combined_prompt_content() -> str:
             content += f"\n\n# --- {key} ---\n\n"
             content += registry.get(key).content
         except Exception:
-            # Payment might be missing in some branches, allow it
-            if key != "system.payment":
-                pytest.fail(f"Failed to load prompt component {key}")
+            pytest.fail(f"Failed to load prompt component {key}")
     return content
 
 

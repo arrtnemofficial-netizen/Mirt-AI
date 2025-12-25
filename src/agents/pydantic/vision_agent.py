@@ -30,9 +30,6 @@ from .models import VisionResponse
 
 logger = logging.getLogger(__name__)
 
-# Vision guide path
-VISION_GUIDE_PATH = Path(__file__).parent.parent.parent.parent / "data" / "vision_guide.json"
-
 # Private CDN hosts that require image download to bypass access restrictions.
 _PRIVATE_CDN_HOSTS: tuple[str, ...] = ("scontent", "fbcdn", "cdninstagram")
 

@@ -270,6 +270,13 @@ class VisionResponse(BaseModel):
         description="Clarification question",
     )
 
+    vision_quality_check: dict[str, Any] | None = Field(
+        default=None,
+        description="Quality control check before escalation (for STATE_2_VISION). "
+        "Required when confidence < 0.85 or escalation needed. "
+        "Fields: confidence, escalation_reason, what_is_visible, what_is_missing, possible_confusion",
+    )
+
 
 # =============================================================================
 # PAYMENT AGENT RESPONSE
@@ -294,6 +301,13 @@ class PaymentResponse(BaseModel):
     missing_fields: list[str] = Field(
         default_factory=list,
         description="Missing fields: name, phone, city, nova_poshta",
+    )
+
+    payment_quality_check: dict[str, Any] | None = Field(
+        default=None,
+        description="Quality control check before payment step transition (for STATE_5_PAYMENT_DELIVERY). "
+        "Required before showing requisites. "
+        "Fields: all_fields_collected, missing_fields, data_quality, normalization_applied, validation_errors, ready_for_payment",
     )
 
     # Order status

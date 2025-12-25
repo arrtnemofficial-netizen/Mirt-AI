@@ -197,6 +197,30 @@ async def _handle_delivery_data(
     try:
         response = await run_payment(user_message, deps)
         
+        # ⚠️ QUALITY CONTROL: Check payment_quality_check before showing requisites
+        if response.payment_quality_check:
+            qc = response.payment_quality_check
+            ready_for_payment = qc.get("ready_for_payment", False)
+            validation_errors = qc.get("validation_errors", [])
+            missing_fields = qc.get("missing_fields", [])
+            
+            # If quality check says NOT ready, don't proceed to requisites
+            if not ready_for_payment:
+                if validation_errors:
+                    logger.warning(
+                        "[SESSION %s] Payment quality check failed: %s",
+                        session_id,
+                        validation_errors,
+                    )
+                    # Ask for clarification instead of showing requisites
+                    if missing_fields:
+                        response.reply_to_user = (
+                            f"Потрібно уточнити: {', '.join(missing_fields)}.\n\n"
+                            + response.reply_to_user
+                        )
+                # Store quality check in metadata for observability
+                metadata["payment_quality_check"] = qc
+        
         # Validation & Normalization
         if deps.customer_phone:
             valid = validate_phone_number(deps.customer_phone)

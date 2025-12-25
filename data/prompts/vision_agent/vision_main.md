@@ -106,3 +106,32 @@
 ❌ Плутати Лагуна/Мрія (різна блискавка!)
 ❌ Повертати null в identified_product якщо впізнав товар
 ❌ Ігнорувати confused_with правила
+
+## ⚠️ QUALITY CONTROL (ОБОВ'ЯЗКОВО перед ескалацією!)
+
+Якщо confidence < 0.85 або модель не впізнана, ОБОВ'ЯЗКОВО заповни `vision_quality_check`:
+
+```json
+{
+  "vision_quality_check": {
+    "confidence": 0.6,
+    "identified_product": null,  // або {"name": "...", "color": "..."} якщо є кандидат
+    "escalation_reason": "zipper_not_visible" | "texture_ambiguous" | "color_ambiguous" | "low_confidence" | "private_cdn_failed",
+    "what_is_visible": "Короткий опис того, що видно на фото (колір, форма, категорія)",
+    "what_is_missing": "Що саме не видно/незрозуміло (блискавка, капюшон, деталі)",
+    "possible_confusion": ["Модель1", "Модель2"]  // Які моделі можна сплутати
+  }
+}
+```
+
+**Коли ескалювати:**
+- confidence < 0.5 → ОБОВ'ЯЗКОВО ескалація з заповненим `vision_quality_check`
+- confidence 0.5-0.85 → можна запитати уточнення, але якщо не впевнений → ескалація
+- confidence >= 0.85 → продовжуй до STATE_3_SIZE_COLOR
+
+**Причини ескалації (escalation_reason):**
+- `zipper_not_visible` - не видно блискавку (критично для Лагуна vs Мрія)
+- `texture_ambiguous` - не можу визначити текстуру (плюш vs екошкіра vs бавовна)
+- `color_ambiguous` - колір незрозумілий (помаранчевий vs жовтий, молочний vs жовтий)
+- `low_confidence` - загальна низька впевненість без конкретної причини
+- `private_cdn_failed` - не вдалося завантажити фото з приватного CDN

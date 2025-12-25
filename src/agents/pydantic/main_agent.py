@@ -96,10 +96,17 @@ def _get_model() -> OpenAIModel:
 
 
 def _get_base_prompt() -> str:
-    """Get system prompt (lazy load)."""
+    """Get system prompt (lazy load).
+    
+    Architecture:
+    - base_identity: CORE rules (immutable, universal)
+    - system.main: DOMAIN CONTEXT (who you are, mission, tone, style)
+    - main.main: DOMAIN LOGIC (how to work with products, format, business rules)
+    """
     base_identity = registry.get("system.base_identity").content
-    domain_prompt = registry.get("main.main").content
-    return f"{base_identity}\n\n{domain_prompt}"
+    domain_context = registry.get("system.main").content
+    domain_logic = registry.get("main.main").content
+    return f"{base_identity}\n\n{domain_context}\n\n{domain_logic}"
 
 
 async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:

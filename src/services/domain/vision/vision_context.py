@@ -297,7 +297,7 @@ class VisionContextService:
 
     def _load_vision_guide_from_json(self) -> str:
         """Fallback JSON loader."""
-        guide_path = self._get_data_path() / "vision_guide.json"
+        guide_path = self._get_data_path() / "vision_guide.json"  # data/vision/generated/vision_guide.json
         try:
             with open(guide_path, encoding="utf-8") as f:
                 guide = json.load(f)
@@ -326,7 +326,7 @@ class VisionContextService:
         if cached is not None:
             return cached
 
-        guide_path = self._get_data_path() / "vision_guide.json"
+        guide_path = self._get_data_path() / "vision_guide.json"  # data/vision/generated/vision_guide.json
         
         try:
             with open(guide_path, encoding="utf-8") as f:

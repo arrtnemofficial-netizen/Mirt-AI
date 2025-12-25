@@ -532,11 +532,25 @@ async def vision_node(
                 return _handle_missing_artifacts(missing_artifacts)
 
         if should_escalate:
+            # Extract structured escalation reason from vision_quality_check if available
+            escalation_reason = "low_confidence"
+            escalation_context = {}
+            if response.vision_quality_check:
+                escalation_reason = response.vision_quality_check.get("escalation_reason", "low_confidence")
+                escalation_context = {
+                    "what_is_visible": response.vision_quality_check.get("what_is_visible"),
+                    "what_is_missing": response.vision_quality_check.get("what_is_missing"),
+                    "possible_confusion": response.vision_quality_check.get("possible_confusion", []),
+                }
+            elif product_not_in_catalog:
+                escalation_reason = "product_not_in_catalog"
+            elif no_product_identified:
+                escalation_reason = "low_confidence"
+            
             logger.warning(
-                "[SESSION %s] ESCALATION: Product not in catalog or low confidence. "
-                "claimed='%s' confidence=%.0f%% catalog_found=%s",
+                "[SESSION %s] ESCALATION: reason=%s confidence=%.0f%% catalog_found=%s",
                 session_id,
-                response.identified_product.name if response.identified_product else "<none>",
+                escalation_reason,
                 (response.confidence or 0.0) * 100,
                 catalog_row is not None,
             )
@@ -556,22 +570,26 @@ async def vision_node(
                     from src.services.infra.notification_service import NotificationService
 
                     notification = NotificationService()
-                    reason = templates.get(
+                    reason_text = templates.get(
                         "escalation_reason_not_in_catalog",
-                        "Product not found in catalog.",
+                        f"Vision escalation: {escalation_reason}",
                     )
+                    details = {
+                        "trace_id": trace_id,
+                        "dialog_phase": "COMPLETED",
+                        "current_state": State.STATE_7_END.value,
+                        "intent": "PHOTO_IDENT",
+                        "confidence": confidence * 100,
+                        "image_url": deps.image_url if deps else None,
+                        "escalation_reason": escalation_reason,
+                    }
+                    if escalation_context:
+                        details.update(escalation_context)
                     await notification.send_escalation_alert(
                         session_id=session_id or "unknown",
-                        reason=reason,
+                        reason=reason_text,
                         user_context=_normalize_text(user_message),
-                        details={
-                            "trace_id": trace_id,
-                            "dialog_phase": "COMPLETED",
-                            "current_state": State.STATE_7_END.value,
-                            "intent": "PHOTO_IDENT",
-                            "confidence": confidence * 100,
-                            "image_url": deps.image_url if deps else None,
-                        },
+                        details=details,
                     )
                     logger.info("📲 [SESSION %s] Telegram notification sent to manager", session_id)
                 except Exception as notif_err:
@@ -609,7 +627,8 @@ async def vision_node(
                     "vision_greeted": True,
                     "vision_no_match_count": no_match_count,
                     "escalation_level": "HARD",
-                    "escalation_reason": "product_not_in_catalog",
+                    "escalation_reason": escalation_reason,
+                    "vision_quality_check": response.vision_quality_check,
                 },
                 "agent_response": agent_response_payload,
                 "step_number": state.get("step_number", 0) + 1,
