@@ -267,6 +267,13 @@ class RedisDebouncer:
 
     def _serialize_message(self, message: BufferedMessage) -> str:
         """Serialize BufferedMessage to JSON string."""
+        # #region agent log
+        try:
+            import json as _json
+            with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(_json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"debouncer.py:270","message":"Serializing message to Redis","data":{"has_image":message.has_image,"image_url":message.image_url[:50] if message.image_url else None},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
         return json.dumps({
             "text": message.text,
             "has_image": message.has_image,
@@ -277,12 +284,20 @@ class RedisDebouncer:
     def _deserialize_message(self, data: str) -> BufferedMessage:
         """Deserialize JSON string to BufferedMessage."""
         obj = json.loads(data)
-        return BufferedMessage(
+        result = BufferedMessage(
             text=obj.get("text", ""),
             has_image=obj.get("has_image", False),
             image_url=obj.get("image_url"),
             extra_metadata=obj.get("extra_metadata", {}),
         )
+        # #region agent log
+        try:
+            import json as _json
+            with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(_json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"debouncer.py:285","message":"Deserialized message from Redis","data":{"has_image":result.has_image,"image_url":result.image_url[:50] if result.image_url else None,"obj_has_image":obj.get("has_image"),"obj_image_url":obj.get("image_url")[:50] if obj.get("image_url") else None},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
+        return result
 
     def _use_fallback(self):
         """Check if we should use fallback debouncer."""

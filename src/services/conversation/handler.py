@@ -160,7 +160,13 @@ class ConversationHandler:
                 # Check for image in extra_metadata (either has_image flag or image_url presence)
                 image_url_from_metadata = extra_metadata.get("image_url")
                 has_image_flag = extra_metadata.get("has_image", False)
-                
+                # #region agent log
+                try:
+                    import json
+                    with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"handler.py:162","message":"Handler received extra_metadata","data":{"session_id":session_id,"image_url_from_metadata":image_url_from_metadata[:50] if image_url_from_metadata else None,"has_image_flag":has_image_flag},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                except: pass
+                # #endregion
                 # If image_url is present, treat it as has_image=True (even if flag is not set)
                 if image_url_from_metadata or has_image_flag:
                     from src.services.infra.media_utils import normalize_image_url
@@ -175,6 +181,13 @@ class ConversationHandler:
                             session_id,
                             normalized[:50] if normalized else None,
                         )
+                        # #region agent log
+                        try:
+                            import json
+                            with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"handler.py:172","message":"Handler set has_image=True in state","data":{"session_id":session_id,"image_url":normalized[:50] if normalized else None,"state_has_image":state.get("has_image")},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                        except: pass
+                        # #endregion
 
             # Trace ID
             trace_id = None

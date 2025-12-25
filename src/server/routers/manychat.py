@@ -143,6 +143,13 @@ async def manychat_webhook(
                                 url[:80],
                                 safe_preview(text, 30),
                             )
+                            # #region agent log
+                            try:
+                                import json
+                                with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"manychat.py:136","message":"Webhook extracted image_url from text","data":{"user_id":user_id,"image_url":url[:80] if url else None,"text_preview":text[:50]},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                            except: pass
+                            # #endregion
                             break
                     if not image_url:
                         logger.warning(
@@ -159,6 +166,13 @@ async def manychat_webhook(
                     image_url[:50] if image_url else None,
                     len(message.get("attachments", [])) if isinstance(message, dict) else 0,
                 )
+                # #region agent log
+                try:
+                    import json
+                    with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"manychat.py:145","message":"Webhook final extracted values","data":{"user_id":user_id,"image_url":image_url[:50] if image_url else None,"text_preview":text[:50],"has_image":bool(image_url)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                except: pass
+                # #endregion
 
                 channel = payload.get("type") or "instagram"
 

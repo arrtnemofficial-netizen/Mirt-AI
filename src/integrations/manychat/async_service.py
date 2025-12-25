@@ -187,6 +187,13 @@ class ManyChatAsyncService:
             image_url[:50] if image_url else None,
             safe_preview(text, 50),
         )
+        # #region agent log
+        try:
+            import json
+            with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"async_service.py:186","message":"Async service received image_url","data":{"user_id":user_id,"image_url_raw":image_url_raw[:50] if image_url_raw else None,"image_url_normalized":image_url[:50] if image_url else None},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
         
         self._log_process_start(
             trace_id=trace_id,

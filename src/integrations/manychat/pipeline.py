@@ -53,6 +53,13 @@ async def process_manychat_pipeline(
         image_url=image_url,
         extra_metadata=extra_metadata or {},
     )
+    # #region agent log
+    try:
+        import json
+        with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"pipeline.py:55","message":"Created BufferedMessage","data":{"user_id":user_id,"has_image":bool(image_url),"image_url":image_url[:50] if image_url else None},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+    except: pass
+    # #endregion
 
     aggregated_msg = await debouncer.wait_for_debounce(user_id, buffered_msg)
     if aggregated_msg is None:
@@ -67,6 +74,13 @@ async def process_manychat_pipeline(
     # This ensures image_url is preserved through debouncing
     has_image_final = bool(getattr(aggregated_msg, "has_image", False))
     image_url_final = getattr(aggregated_msg, "image_url", None)
+    # #region agent log
+    try:
+        import json
+        with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"pipeline.py:69","message":"After debounce - extracted from aggregated_msg","data":{"user_id":user_id,"has_image":has_image_final,"image_url":image_url_final[:50] if image_url_final else None},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+    except: pass
+    # #endregion
     
     # Update final_metadata with image info from aggregated_msg
     if image_url_final:
@@ -78,6 +92,13 @@ async def process_manychat_pipeline(
             image_url_final[:50] if image_url_final else None,
             user_id,
         )
+        # #region agent log
+        try:
+            import json
+            with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"pipeline.py:75","message":"Added image_url to final_metadata","data":{"user_id":user_id,"image_url":image_url_final[:50] if image_url_final else None,"final_metadata_has_image":final_metadata.get("has_image")},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
     elif has_image_final:
         # If has_image is True but image_url is None, check metadata
         if isinstance(final_metadata, dict) and final_metadata.get("image_url"):
