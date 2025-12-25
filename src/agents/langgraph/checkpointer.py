@@ -21,17 +21,74 @@ import os
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from langchain_core.messages import BaseMessage
-from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.messages import BaseMessage  # type: ignore[reportMissingImports]
+from langgraph.checkpoint.memory import MemorySaver  # type: ignore[reportMissingImports]
 
 
 if TYPE_CHECKING:
-    from langgraph.checkpoint.base import BaseCheckpointSaver
+    from langgraph.checkpoint.base import BaseCheckpointSaver  # type: ignore[reportMissingImports]
 
 import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_base_message(msg: BaseMessage) -> dict[str, Any]:
+    """Convert BaseMessage to dict format for JSON serialization."""
+    role_map = {"ai": "assistant", "human": "user", "system": "system"}
+    role = role_map.get(msg.type, "assistant")
+    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+    return {
+        "role": role,
+        "content": content,
+        "type": msg.type,
+        "additional_kwargs": getattr(msg, "additional_kwargs", {}),
+        "response_metadata": getattr(msg, "response_metadata", {}),
+    }
+
+
+def _serialize_for_json(value: Any) -> Any:
+    """Recursively serialize values, converting BaseMessage objects to dicts."""
+    if isinstance(value, BaseMessage):
+        return _serialize_base_message(value)
+    elif isinstance(value, dict):
+        return {k: _serialize_for_json(v) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [_serialize_for_json(item) for item in value]
+    else:
+        return value
+
+
+def _serialize_checkpoint_messages(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    """Serialize BaseMessage objects in checkpoint before storage."""
+    if not isinstance(checkpoint, dict):
+        return checkpoint
+    
+    if "channel_values" in checkpoint:
+        cv = checkpoint.get("channel_values", {})
+    else:
+        cv = checkpoint
+    if not isinstance(cv, dict) or "messages" not in cv or not isinstance(cv["messages"], list):
+        return checkpoint
+    
+    # Convert BaseMessage objects to dicts
+    serialized_messages = []
+    for msg in cv["messages"]:
+        if isinstance(msg, BaseMessage):
+            serialized_messages.append(_serialize_base_message(msg))
+        elif isinstance(msg, dict):
+            serialized_messages.append(msg)
+        else:
+            try:
+                serialized_messages.append(dict(msg) if hasattr(msg, "__dict__") else {"role": "assistant", "content": str(msg)})
+            except Exception:
+                serialized_messages.append({"role": "assistant", "content": str(msg)})
+    
+    cv["messages"] = serialized_messages
+    if "channel_values" in checkpoint:
+        return {**checkpoint, "channel_values": cv}
+    return cv
 
 
 def _compact_payload(
@@ -71,7 +128,7 @@ def _compact_payload(
         """Recursively replace base64/data URLs with a stable placeholder."""
         if isinstance(obj, str):
             if drop_base64 and ("data:image" in obj or "base64" in obj):
-                return "<base64_stripped>"
+                return "[IMAGE DATA REMOVED]"
             return obj
         if isinstance(obj, dict):
             return {k: _strip_base64(v) for k, v in obj.items()}
@@ -96,11 +153,11 @@ def _compact_payload(
     
     # SAFEGUARD_2: Log size before compaction
     try:
-        import orjson
-        json_dumps = lambda obj: orjson.dumps(obj).decode("utf-8")
+        import orjson  # type: ignore[reportMissingImports]
+        json_dumps = lambda obj: orjson.dumps(_serialize_for_json(obj)).decode("utf-8")
     except ImportError:
         import json
-        json_dumps = lambda obj: json.dumps(obj, default=str)
+        json_dumps = lambda obj: json.dumps(_serialize_for_json(obj), default=str)
     
     payload_before = json_dumps(checkpoint)
     payload_size_before = len(payload_before)
@@ -143,7 +200,7 @@ def _compact_payload(
             if isinstance(content, str):
                 # 2. Drop base64
                 if drop_base64 and ("base64" in content or "data:image" in content):
-                    content = "<base64_stripped>"
+                    content = "[IMAGE DATA REMOVED]"
                 
                 # 3. Truncate chars
                 if len(content) > max_chars:
@@ -261,13 +318,10 @@ def _log_if_slow(
 
 async def _open_pool_on_demand(pool: Any) -> None:
     """Ensure AsyncConnectionPool is open before use."""
-    if pool is None:
-        return
-    if hasattr(pool, "open") and not getattr(pool, "_opened", False):
-        open_result = pool.open()
-        # pool.open() may return a coroutine or None
-        if open_result is not None:
-            await open_result
+    if pool and hasattr(pool, "open") and not getattr(pool, "_opened", False):
+        result = pool.open()
+        if result is not None:
+            await result
 
 
 def _setting_int(settings: Any, key: str, default: int) -> int:
@@ -287,20 +341,7 @@ class SerializableMemorySaver(MemorySaver):
 
     def _serialize_value(self, value: Any) -> Any:
         """Recursively serialize values, converting Message objects to dicts."""
-        if isinstance(value, BaseMessage):
-            # Convert LangChain Message to dict format
-            return {
-                "type": value.type,
-                "content": value.content,
-                "additional_kwargs": getattr(value, "additional_kwargs", {}),
-                "response_metadata": getattr(value, "response_metadata", {}),
-            }
-        elif isinstance(value, dict):
-            return {k: self._serialize_value(v) for k, v in value.items()}
-        elif isinstance(value, list):
-            return [self._serialize_value(item) for item in value]
-        else:
-            return value
+        return _serialize_for_json(value)
 
     def put(self, config: dict[str, Any], checkpoint: dict[str, Any], metadata: dict[str, Any], new_versions: dict[str, str]) -> dict[str, Any]:
         """Override put to serialize Message objects before storage."""
@@ -310,9 +351,123 @@ class SerializableMemorySaver(MemorySaver):
             serialized_metadata = self._serialize_value(metadata)
             return super().put(config, serialized_checkpoint, serialized_metadata, new_versions)
         except Exception as e:
-            logger.error(f"SerializableMemorySaver put failed: {e}")
+            logger.error("SerializableMemorySaver put failed: %s", e)
             # Fallback to original method
             return super().put(config, checkpoint, metadata, new_versions)
+
+
+class InstrumentedAsyncPostgresSaver:
+    """Wrapper around AsyncPostgresSaver with instrumentation and compaction.
+    
+    This class adds:
+    - Message serialization (BaseMessage -> dict)
+    - Payload compaction (reduce DB size)
+    - Performance logging (slow operation detection)
+    - On-demand pool opening (lazy initialization)
+    """
+    
+    def __init__(
+        self,
+        base: Any,  # AsyncPostgresSaver
+        pool: Any,  # AsyncConnectionPool
+        slow_threshold_s: float,
+        max_messages: int,
+        max_chars: int,
+        drop_base64: bool,
+    ):
+        self._base = base
+        self._pool = pool
+        self._slow_threshold_s = slow_threshold_s
+        self._max_messages = max_messages
+        self._max_chars = max_chars
+        self._drop_base64 = drop_base64
+    
+    async def _ensure_pool_open(self) -> None:
+        """Ensure pool is open before use (on-demand opening)."""
+        await _open_pool_on_demand(self._pool)
+    
+    def _process_payload(self, payload: Any) -> Any:
+        """Serialize and compact payload before storage."""
+        if payload is None:
+            return None
+        serialized = _serialize_checkpoint_messages(payload)
+        return _compact_payload(
+            serialized,
+            max_messages=self._max_messages,
+            max_chars=self._max_chars,
+            drop_base64=self._drop_base64,
+        )
+    
+    async def aget_tuple(self, *args: Any, **kwargs: Any):
+        _t0 = time.perf_counter()
+        result = None
+        try:
+            await self._ensure_pool_open()
+            result = await self._base.aget_tuple(*args, **kwargs)
+            return result
+        finally:
+            config = args[0] if args else None
+            payload = None
+            try:
+                if result is not None:
+                    payload = result[0] if isinstance(result, tuple) and len(result) > 0 else result
+            except Exception:
+                payload = None
+            _log_if_slow("aget_tuple", _t0, config, payload=payload, slow_threshold_s=self._slow_threshold_s)
+    
+    async def aput(self, *args: Any, **kwargs: Any):
+        _t0 = time.perf_counter()
+        try:
+            await self._ensure_pool_open()
+            if len(args) > 1:
+                payload = self._process_payload(args[1])
+                args = (args[0], payload, *args[2:])
+            return await self._base.aput(*args, **kwargs)
+        finally:
+            config = args[0] if args else None
+            payload = args[1] if len(args) > 1 else None
+            _log_if_slow("aput", _t0, config, payload=payload, slow_threshold_s=self._slow_threshold_s)
+    
+    async def aput_writes(self, *args: Any, **kwargs: Any):
+        _t0 = time.perf_counter()
+        try:
+            await self._ensure_pool_open()
+            if len(args) > 1:
+                payload = self._process_payload(args[1])
+                args = (args[0], payload, *args[2:])
+            return await self._base.aput_writes(*args, **kwargs)
+        finally:
+            config = args[0] if args else None
+            payload = args[1] if len(args) > 1 else None
+            _log_if_slow("aput_writes", _t0, config, payload=payload, slow_threshold_s=self._slow_threshold_s)
+    
+    def get_tuple(self, *args: Any, **kwargs: Any):
+        _t0 = time.perf_counter()
+        try:
+            return self._base.get_tuple(*args, **kwargs)
+        finally:
+            config = args[0] if args else None
+            _log_if_slow("get_tuple", _t0, config, payload=None, slow_threshold_s=self._slow_threshold_s)
+    
+    def put(self, *args: Any, **kwargs: Any):
+        _t0 = time.perf_counter()
+        try:
+            return self._base.put(*args, **kwargs)
+        finally:
+            config = args[0] if args else None
+            _log_if_slow("put", _t0, config, payload=None, slow_threshold_s=self._slow_threshold_s)
+    
+    def put_writes(self, *args: Any, **kwargs: Any):
+        _t0 = time.perf_counter()
+        try:
+            return self._base.put_writes(*args, **kwargs)
+        finally:
+            config = args[0] if args else None
+            _log_if_slow("put_writes", _t0, config, payload=None, slow_threshold_s=self._slow_threshold_s)
+    
+    def __getattr__(self, name: str) -> Any:
+        """Delegate any other methods/properties to base."""
+        return getattr(self._base, name)
 
 
 class CheckpointerType(str, Enum):
@@ -391,19 +546,19 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         if hasattr(settings, "SUPABASE_URL") and hasattr(settings, "SUPABASE_API_KEY"):
             # Supabase connection string format
             supabase_url = str(settings.SUPABASE_URL)
-            logger.info(f"DEBUG: Supabase URL found: {supabase_url[:20]}...")
-            logger.info(f"DEBUG: Supabase API key present: {bool(settings.SUPABASE_API_KEY.get_secret_value())}")
+            logger.debug("Supabase URL found: %s...", supabase_url[:20])
+            logger.debug("Supabase API key present: %s", bool(settings.SUPABASE_API_KEY.get_secret_value()))
 
             if "supabase" in supabase_url:
                 # Extract project ref from URL
                 # https://xxx.supabase.co -> xxx
                 import re
                 match = re.search(r"https://([^.]+)\.supabase", supabase_url)
-                logger.info(f"DEBUG: Regex match result: {match}")
+                logger.debug("Regex match result: %s", match)
 
                 if match:
                     project_ref = match.group(1)
-                    logger.info(f"DEBUG: Extracted project_ref: {project_ref}")
+                    logger.debug("Extracted project_ref: %s", project_ref)
                     # Build postgres connection string
                     # Default Supabase postgres port is 5432, password from service_role key
                     # NOTE: This uses direct connection, not pooler (for dev only)
@@ -422,10 +577,10 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
     try:
         # Import async PostgresSaver and psycopg for connection management
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        from langgraph.checkpoint.postgres import PostgresSaver  # For sync setup only
-        from psycopg_pool import AsyncConnectionPool
-        import psycopg
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore[reportMissingImports]
+        from langgraph.checkpoint.postgres import PostgresSaver  # type: ignore[reportMissingImports]  # For sync setup only
+        from psycopg_pool import AsyncConnectionPool  # type: ignore[reportMissingImports]
+        import psycopg  # type: ignore[reportMissingImports]
 
         # Setup tables first using sync connection with prepare_threshold=None
         # None completely disables prepared statements (vs 0 which means "after 0 uses")
@@ -522,136 +677,15 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         # Create AsyncPostgresSaver instance using async pool
         base_checkpointer = AsyncPostgresSaver(conn=pool)
         
-        # Use composition instead of inheritance to avoid super() NotImplementedError issues
-        # Wrap AsyncPostgresSaver and delegate all method calls to it
-        class InstrumentedAsyncPostgresSaver:
-            """Wrapper around AsyncPostgresSaver with instrumentation and compaction."""
-            
-            def __init__(self, base: AsyncPostgresSaver, pool: AsyncConnectionPool):
-                self._base = base
-                self._pool = pool  # Store pool reference for lifecycle management
-            
-            async def _ensure_pool_open(self) -> None:
-                """Ensure pool is open before use (on-demand opening)."""
-                await _open_pool_on_demand(self._pool)
-            
-            async def aget_tuple(self, *args: Any, **kwargs: Any):
-                _t0 = time.perf_counter()
-                result = None
-                try:
-                    await self._ensure_pool_open()
-                    # Delegate directly to base AsyncPostgresSaver instance
-                    result = await self._base.aget_tuple(*args, **kwargs)
-                    return result
-                finally:
-                    config = args[0] if args else None
-                    payload = None
-                    try:
-                        if result is not None:
-                            if isinstance(result, tuple) and len(result) > 0:
-                                payload = result[0]
-                            else:
-                                payload = result
-                    except (TypeError, AttributeError) as e:
-                        logger.warning(
-                            "[CHECKPOINTER] Failed to extract payload from aget_tuple result: %s",
-                            type(e).__name__
-                        )
-                        payload = None
-                    except Exception as e:
-                        logger.warning(
-                            "[CHECKPOINTER] Unexpected error extracting payload from aget_tuple: %s",
-                            type(e).__name__
-                        )
-                        payload = None
-                    _log_if_slow(
-                        "aget_tuple",
-                        _t0,
-                        config,
-                        payload=payload,
-                        slow_threshold_s=slow_threshold_s,
-                    )
-
-            async def aput(self, *args: Any, **kwargs: Any):
-                _t0 = time.perf_counter()
-                try:
-                    await self._ensure_pool_open()
-                    if len(args) > 1:
-                        payload = _compact_payload(
-                            args[1],
-                            max_messages=max_messages,
-                            max_chars=max_chars,
-                            drop_base64=drop_base64,
-                        )
-                        args = (args[0], payload, *args[2:])
-                    return await self._base.aput(*args, **kwargs)
-                finally:
-                    config = args[0] if args else None
-                    payload = args[1] if len(args) > 1 else None
-                    _log_if_slow(
-                        "aput", _t0, config, payload=payload, slow_threshold_s=slow_threshold_s
-                    )
-
-            async def aput_writes(self, *args: Any, **kwargs: Any):
-                _t0 = time.perf_counter()
-                try:
-                    await self._ensure_pool_open()
-                    if len(args) > 1:
-                        payload = _compact_payload(
-                            args[1],
-                            max_messages=max_messages,
-                            max_chars=max_chars,
-                            drop_base64=drop_base64,
-                        )
-                        args = (args[0], payload, *args[2:])
-                    return await self._base.aput_writes(*args, **kwargs)
-                finally:
-                    config = args[0] if args else None
-                    payload = args[1] if len(args) > 1 else None
-                    _log_if_slow(
-                        "aput_writes",
-                        _t0,
-                        config,
-                        payload=payload,
-                        slow_threshold_s=slow_threshold_s,
-                    )
-
-            def get_tuple(self, *args: Any, **kwargs: Any):
-                _t0 = time.perf_counter()
-                try:
-                    return self._base.get_tuple(*args, **kwargs)
-                finally:
-                    config = args[0] if args else None
-                    _log_if_slow(
-                        "get_tuple", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
-                    )
-
-            def put(self, *args: Any, **kwargs: Any):
-                _t0 = time.perf_counter()
-                try:
-                    return self._base.put(*args, **kwargs)
-                finally:
-                    config = args[0] if args else None
-                    _log_if_slow(
-                        "put", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
-                    )
-
-            def put_writes(self, *args: Any, **kwargs: Any):
-                _t0 = time.perf_counter()
-                try:
-                    return self._base.put_writes(*args, **kwargs)
-                finally:
-                    config = args[0] if args else None
-                    _log_if_slow(
-                        "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
-                    )
-            
-            # Delegate any other methods/properties to base
-            def __getattr__(self, name: str) -> Any:
-                return getattr(self._base, name)
-
-        # Create instrumented wrapper around AsyncPostgresSaver
-        checkpointer = InstrumentedAsyncPostgresSaver(base_checkpointer, pool)
+        # Wrap with instrumentation and compaction
+        checkpointer = InstrumentedAsyncPostgresSaver(
+            base=base_checkpointer,
+            pool=pool,
+            slow_threshold_s=slow_threshold_s,
+            max_messages=max_messages,
+            max_chars=max_chars,
+            drop_base64=drop_base64,
+        )
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
         return checkpointer
@@ -799,62 +833,28 @@ def is_persistent() -> bool:
 
 
 async def warmup_checkpointer_pool() -> bool:
-    """
-    Warm up the checkpointer connection to avoid first-request delay.
-    
-    Returns:
-        True if warmup succeeded, False otherwise (non-blocking)
-    """
-    global _checkpointer, _checkpointer_type
+    """Warm up checkpointer connection to avoid first-request delay."""
+    global _checkpointer_type
     
     try:
-        # Ensure checkpointer is initialized
         checkpointer = get_checkpointer()
-        
-        # For AsyncPostgresSaver, verify async methods exist and pool is open
-        if _checkpointer_type == CheckpointerType.POSTGRES:
-            # Verify checkpointer has async methods (fail-fast check)
-            if not hasattr(checkpointer, "aget_tuple"):
-                logger.error(
-                    "CRITICAL: Postgres checkpointer missing aget_tuple method! "
-                    "This will cause NotImplementedError. Check checkpointer implementation."
-                )
-                return False
-            
-            aget_tuple_method = getattr(checkpointer, "aget_tuple", None)
-            if not callable(aget_tuple_method):
-                logger.error(
-                    "CRITICAL: Postgres checkpointer.aget_tuple is not callable! "
-                    "This will cause NotImplementedError. Check checkpointer implementation."
-                )
-                return False
-            
-            # If checkpointer has _pool attribute, ensure it's open
-            if hasattr(checkpointer, "_pool"):
-                pool = checkpointer._pool
-                # Check if pool is closed (not opened yet)
-                if hasattr(pool, "_closed") and pool._closed:
-                    logger.info("Opening AsyncPostgresSaver checkpointer pool...")
-                    await pool.open(wait=True, timeout=10.0)
-                    logger.info("AsyncPostgresSaver checkpointer pool opened successfully")
-                elif hasattr(pool, "open"):
-                    # Pool might be open, but verify by attempting to open it
-                    # (opening an already open pool is safe and idempotent)
-                    try:
-                        await pool.open(wait=True, timeout=10.0)
-                        logger.info("AsyncPostgresSaver checkpointer pool is open and ready")
-                    except Exception as e:
-                        logger.debug("Pool open check: %s", e)
-                        # Pool might already be open, which is fine
-                        logger.info("AsyncPostgresSaver checkpointer pool is ready")
-            
-            logger.info("AsyncPostgresSaver checkpointer initialized and verified (async methods available)")
+        if _checkpointer_type != CheckpointerType.POSTGRES:
             return True
         
-        # For MemorySaver or other non-pool checkpointers, warmup is not needed
-        logger.debug("Checkpointer warmup not needed (using %s)", _checkpointer_type)
-        return True
+        if not hasattr(checkpointer, "aget_tuple") or not callable(getattr(checkpointer, "aget_tuple")):
+            logger.error("CRITICAL: Postgres checkpointer missing aget_tuple method!")
+            return False
         
+        pool = getattr(checkpointer, "_pool", None)
+        if pool and hasattr(pool, "open"):
+            try:
+                await pool.open(wait=True, timeout=10.0)
+                logger.info("AsyncPostgresSaver checkpointer pool opened successfully")
+            except Exception as e:
+                logger.debug("Pool open check: %s", e)
+        
+        logger.info("AsyncPostgresSaver checkpointer initialized and verified")
+        return True
     except Exception as e:
         logger.warning("Checkpointer warmup failed: %s", e)
         return False
