@@ -5,10 +5,13 @@ Reads environment variables for API access and runtime tuning.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -178,8 +181,19 @@ class Settings(BaseSettings):
     )
     LLM_MODEL_GPT: str = Field(
         default="gpt-5.1",
-        description="OpenAI GPT model identifier (GPT-5.1 ONLY - no other models supported)",
+        description="OpenAI GPT model identifier (GPT-5.1 ONLY - no other models supported). Falls back to AI_MODEL if not set.",
     )
+    
+    @model_validator(mode="after")
+    def _sync_llm_model_from_ai_model(self) -> "Settings":
+        """Sync LLM_MODEL_GPT from AI_MODEL if AI_MODEL is explicitly set via env var."""
+        # Check if AI_MODEL was set via environment (not just default)
+        # If AI_MODEL env var is set, use it for LLM_MODEL_GPT
+        import os
+        if "AI_MODEL" in os.environ:
+            self.LLM_MODEL_GPT = self.AI_MODEL
+            logger.info("[CONFIG] LLM_MODEL_GPT synced from AI_MODEL env var: %s", self.LLM_MODEL_GPT)
+        return self
     LLM_REASONING_EFFORT: str = Field(
         default="low",
         description="Reasoning effort for GPT-5.1 (none, low, medium, high).",

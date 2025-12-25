@@ -85,6 +85,14 @@ def _get_model() -> OpenAIModel:
         
         base_url = "https://api.openai.com/v1"
         model_name = settings.LLM_MODEL_GPT  # GPT-5.1 only
+        
+        # Log model configuration for debugging
+        logger.info(
+            "[MODEL_INIT] Initializing GPT model: name=%s base_url=%s api_key_present=%s",
+            model_name,
+            base_url,
+            bool(api_key),
+        )
 
         client = AsyncOpenAI(
             base_url=base_url,
@@ -92,6 +100,7 @@ def _get_model() -> OpenAIModel:
         )
         provider = OpenAIProvider(openai_client=client)
         _model = OpenAIModel(model_name, provider=provider)
+        logger.info("[MODEL_INIT] Model initialized successfully: %s", model_name)
     return _model
 
 
