@@ -36,25 +36,39 @@ async def moderation_node(state: dict[str, Any]) -> dict[str, Any]:
     # Get latest user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
     user_content = extract_user_message(state.get("messages", []))
+    
+    # Check if this is a NEW message (new turn) vs continuation
+    # If user sent new content, clear old escalation flag from previous turn
+    has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+    is_new_message = has_image or bool(user_content)
+    
+    updates: dict[str, Any] = {
+        "step_number": state.get("step_number", 0) + 1,
+    }
+    
+    # Clear escalation flag for new messages to allow normal processing
+    if is_new_message and state.get("should_escalate"):
+        logger.debug(
+            "Clearing should_escalate flag for new message (has_image=%s, has_text=%s)",
+            has_image,
+            bool(user_content),
+        )
+        updates["should_escalate"] = False
+        updates["escalation_reason"] = None
 
     # No message to moderate
     if not user_content:
-        return {
-            "moderation_result": {"allowed": True, "flags": [], "reason": None},
-            "step_number": state.get("step_number", 0) + 1,
-        }
+        updates["moderation_result"] = {"allowed": True, "flags": [], "reason": None}
+        return updates
 
     # Run moderation
     result = moderate_user_message(user_content)
 
-    updates: dict[str, Any] = {
-        "moderation_result": {
-            "allowed": result.allowed,
-            "flags": result.flags,
-            "redacted_text": result.redacted_text,
-            "reason": result.reason,
-        },
-        "step_number": state.get("step_number", 0) + 1,
+    updates["moderation_result"] = {
+        "allowed": result.allowed,
+        "flags": result.flags,
+        "redacted_text": result.redacted_text,
+        "reason": result.reason,
     }
 
     # Block if not allowed

@@ -249,6 +249,105 @@ def get_state_snapshot(state: ConversationState) -> dict[str, Any]:
 # =============================================================================
 
 
+def validate_state_structure(state: Any) -> tuple[bool, list[str]]:
+    """
+    Validate state structure (types and required fields).
+    
+    This function checks the structural integrity of a conversation state
+    without modifying it. Used for defensive validation when loading state
+    from database or external sources.
+    
+    Args:
+        state: State object to validate (can be dict, ConversationState, or None)
+    
+    Returns:
+        Tuple of (is_valid: bool, errors: list[str])
+        - is_valid: True if structure is valid, False otherwise
+        - errors: List of validation error messages (empty if valid)
+    
+    Note:
+        This function does NOT modify the state. It only validates structure.
+        For logical consistency checks, use validate_state() instead.
+    """
+    errors: list[str] = []
+    
+    # Check if state is a dict-like object
+    if state is None:
+        return False, ["State is None"]
+    
+    if not isinstance(state, dict):
+        return False, [f"State must be a dict, got {type(state).__name__}"]
+    
+    # Required fields check
+    required_fields = {
+        "session_id": str,
+        "messages": list,
+        "metadata": dict,
+        "current_state": str,
+    }
+    
+    for field_name, expected_type in required_fields.items():
+        if field_name not in state:
+            errors.append(f"Missing required field: {field_name}")
+            continue
+        
+        field_value = state[field_name]
+        
+        # Check type (allow None for optional fields, but log if unexpected)
+        if field_value is None:
+            if field_name in ("session_id", "current_state"):
+                errors.append(f"Required field {field_name} cannot be None")
+            continue
+        
+        if not isinstance(field_value, expected_type):
+            actual_type = type(field_value).__name__
+            errors.append(
+                f"Field {field_name} has wrong type: expected {expected_type.__name__}, got {actual_type}"
+            )
+    
+    # Additional type checks for optional but important fields
+    optional_typed_fields = {
+        "selected_products": list,
+        "offered_products": list,
+        "validation_errors": list,
+        "tool_errors": list,
+        "memory_facts": list,
+        "should_escalate": bool,
+        "has_image": bool,
+        "retry_count": int,
+        "max_retries": int,
+        "step_number": int,
+    }
+    
+    for field_name, expected_type in optional_typed_fields.items():
+        if field_name in state:
+            field_value = state[field_name]
+            if field_value is not None and not isinstance(field_value, expected_type):
+                actual_type = type(field_value).__name__
+                errors.append(
+                    f"Field {field_name} has wrong type: expected {expected_type.__name__} or None, got {actual_type}"
+                )
+    
+    # Validate messages structure (should be list of dicts)
+    if "messages" in state and isinstance(state["messages"], list):
+        for idx, msg in enumerate(state["messages"]):
+            if not isinstance(msg, dict):
+                errors.append(f"Message at index {idx} is not a dict, got {type(msg).__name__}")
+            elif "role" not in msg and "content" not in msg:
+                # Allow other formats but warn if completely invalid
+                if not any(key in msg for key in ("role", "type", "content", "text")):
+                    errors.append(f"Message at index {idx} has no recognizable message fields")
+    
+    # Validate metadata structure
+    if "metadata" in state and isinstance(state["metadata"], dict):
+        # Metadata should be a dict, but we don't enforce specific keys
+        # (it's flexible for different use cases)
+        pass
+    
+    is_valid = len(errors) == 0
+    return is_valid, errors
+
+
 def validate_state(state: ConversationState) -> list[str]:
     """
     Validate state consistency.
@@ -283,6 +382,7 @@ __all__ = [
     "create_initial_state",
     "get_state_snapshot",
     "validate_state",
+    "validate_state_structure",
     "replace_value",
     "merge_dict",
     "append_list",

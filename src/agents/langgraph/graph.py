@@ -201,11 +201,11 @@ def build_production_graph(
     # SIMPLE EDGES
     # =========================================================================
 
-    # Vision -> offer (photo found product)
+    # Vision -> offer/escalation/agent/validation (based on result)
     graph.add_conditional_edges(
         "vision",
         route_after_vision,
-        {"offer": "offer", "agent": "agent", "validation": "validation"},
+        {"offer": "offer", "agent": "agent", "validation": "validation", "escalation": "escalation"},
     )
 
     # Offer -> validation (check before sending)

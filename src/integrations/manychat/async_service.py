@@ -25,7 +25,7 @@ from src.core.logging import log_event, safe_preview
 from src.core.rate_limiter import check_rate_limit
 from src.services.client_data_parser import parse_client_data
 from src.services.conversation import create_conversation_handler
-from src.services.infra.debouncer import MessageDebouncer
+from src.services.infra.debouncer import create_debouncer
 from src.services.infra.media_utils import normalize_image_url
 from src.services.infra.message_store import MessageStore, create_message_store
 
@@ -89,8 +89,8 @@ class ManyChatAsyncService:
             message_store=self.message_store,
             runner=self.runner,
         )
-        # Debouncer: aggregate rapid messages
-        self.debouncer = MessageDebouncer(
+        # Debouncer: aggregate rapid messages (uses Redis if available for multi-instance)
+        self.debouncer = create_debouncer(
             delay=float(getattr(settings, "MANYCHAT_DEBOUNCE_SECONDS", 1.0))
         )
 

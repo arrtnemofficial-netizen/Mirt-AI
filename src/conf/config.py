@@ -103,6 +103,10 @@ class Settings(BaseSettings):
         default=True,
         description="Enable checkpoint payload compaction (disable for debugging).",
     )
+    CHECKPOINTER_MAX_PAYLOAD_SIZE_BYTES: int = Field(
+        default=512 * 1024,  # 512KB default
+        description="Maximum payload size in bytes before logging warning (does not block write).",
+    )
 
     # Loop guard thresholds (conversation safety)
     LOOP_GUARD_WARNING_THRESHOLD: int = Field(

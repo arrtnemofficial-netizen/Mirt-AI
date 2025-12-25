@@ -111,6 +111,31 @@ class ConversationHandler:
                     offered_products=[],
                     step_number=0,
                 )
+            
+            # Validate state structure (defensive check for corrupted states)
+            from src.core.conversation_state import validate_state_structure
+            
+            is_valid, validation_errors = validate_state_structure(state)
+            if not is_valid:
+                # Log validation errors but continue with state as-is (fallback)
+                # This allows recovery from corrupted states without breaking the session
+                logger.warning(
+                    "[SESSION %s] State structure validation failed (%d errors). "
+                    "Continuing with state as-is. Errors: %s",
+                    session_id,
+                    len(validation_errors),
+                    "; ".join(validation_errors[:5]),  # Limit to first 5 errors
+                )
+                # Track metric for monitoring
+                try:
+                    from src.services.core.observability import track_metric
+                    track_metric("state_validation_failed", 1, {
+                        "session_id": session_id,
+                        "error_count": len(validation_errors),
+                    })
+                except Exception:
+                    pass  # Don't fail if metrics unavailable
+            
             if "messages" not in state:
                 state["messages"] = []
             if "metadata" not in state:

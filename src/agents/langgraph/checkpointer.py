@@ -391,12 +391,73 @@ class InstrumentedAsyncPostgresSaver:
         if payload is None:
             return None
         serialized = _serialize_checkpoint_messages(payload)
-        return _compact_payload(
+        compacted = _compact_payload(
             serialized,
             max_messages=self._max_messages,
             max_chars=self._max_chars,
             drop_base64=self._drop_base64,
         )
+        
+        # Hard limit check: log warning if payload is too large (but don't block write)
+        try:
+            from src.conf.config import get_settings
+            import orjson  # type: ignore[reportMissingImports]
+            
+            settings = get_settings()
+            max_size_bytes = getattr(settings, "CHECKPOINTER_MAX_PAYLOAD_SIZE_BYTES", 512 * 1024)
+            
+            # Calculate payload size after compaction
+            payload_json = orjson.dumps(_serialize_for_json(compacted)).decode("utf-8")
+            payload_size = len(payload_json)
+            
+            if payload_size > max_size_bytes:
+                session_id = "unknown"
+                # Try to extract session_id from compacted payload
+                if isinstance(compacted, dict) and "channel_values" in compacted:
+                    cv = compacted["channel_values"]
+                    if isinstance(cv, dict) and "metadata" in cv:
+                        metadata = cv["metadata"]
+                        if isinstance(metadata, dict):
+                            session_id = metadata.get("session_id", "unknown")
+                # Fallback: try original payload
+                if session_id == "unknown" and isinstance(payload, dict):
+                    if "configurable" in payload and isinstance(payload["configurable"], dict):
+                        session_id = payload["configurable"].get("thread_id", "unknown")
+                
+                logger.warning(
+                    "[CHECKPOINTER] Payload size (%d bytes) exceeds limit (%d bytes) for session %s. "
+                    "Writing anyway (not blocked). Consider reviewing compaction settings.",
+                    payload_size,
+                    max_size_bytes,
+                    session_id,
+                )
+                
+                # Track metric for monitoring
+                try:
+                    from src.services.core.observability import track_metric
+                    track_metric("checkpointer_payload_too_large", 1, {
+                        "session_id": session_id,
+                        "payload_size": payload_size,
+                        "max_size": max_size_bytes,
+                    })
+                except Exception:
+                    pass  # Don't fail if metrics unavailable
+                
+                # Set escalation reason in metadata if available
+                if isinstance(compacted, dict) and "channel_values" in compacted:
+                    cv = compacted["channel_values"]
+                    if isinstance(cv, dict) and "metadata" in cv:
+                        metadata = cv["metadata"]
+                        if isinstance(metadata, dict):
+                            metadata["escalation_reason"] = (
+                                metadata.get("escalation_reason") or 
+                                f"Payload size {payload_size} bytes exceeds limit {max_size_bytes} bytes"
+                            )
+        except Exception as e:
+            # Don't fail if limit check fails - just log and continue
+            logger.debug("[CHECKPOINTER] Failed to check payload size limit: %s", e)
+        
+        return compacted
     
     async def aget_tuple(self, *args: Any, **kwargs: Any):
         _t0 = time.perf_counter()

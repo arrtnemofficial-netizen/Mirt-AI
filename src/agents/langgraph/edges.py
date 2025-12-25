@@ -206,6 +206,9 @@ def route_after_moderation(state: dict[str, Any]) -> ModerationRoute:
 
     - Blocked -> escalation
     - Allowed -> intent detection
+    
+    NOTE: should_escalate from previous turn is cleared in moderation_node
+    for new messages (new photo or new text) to allow normal processing.
     """
     if state.get("should_escalate"):
         reason = state.get("escalation_reason", "unknown")
@@ -319,8 +322,14 @@ def route_after_offer(state: dict[str, Any]) -> OfferRoute:
     return "validation"
 
 
-def route_after_vision(state: dict[str, Any]) -> Literal["offer", "agent", "validation"]:
+def route_after_vision(state: dict[str, Any]) -> Literal["offer", "agent", "validation", "escalation"]:
     """Route after vision processing."""
+    # CRITICAL: Check escalation first (vision node sets should_escalate when product not found)
+    if state.get("should_escalate"):
+        reason = state.get("escalation_reason", "Vision escalation")
+        logger.info("Routing to escalation after vision: %s", reason)
+        return "escalation"
+    
     if state.get("selected_products"):
         return "offer"
     if state.get("last_error"):

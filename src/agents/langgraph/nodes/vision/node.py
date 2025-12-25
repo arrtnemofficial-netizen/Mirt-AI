@@ -619,6 +619,8 @@ async def vision_node(
                 "dialog_phase": "COMPLETED",
                 "has_image": False,
                 "escalation_level": "HARD",  # HARD escalation - manager MUST respond!
+                "should_escalate": True,  # CRITICAL: Set flag for route_after_vision
+                "escalation_reason": escalation_reason,  # CRITICAL: Set reason for escalation_node
                 "metadata": {
                     **state.get("metadata", {}),
                     "vision_confidence": response.confidence,
