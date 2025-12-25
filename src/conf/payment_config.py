@@ -27,22 +27,43 @@ class BankRequisites:
 
 
 BANK_REQUISITES = BankRequisites(
-    fop_name="ФОП Кутний Михайло Михайлович",
-    iban="UA653220010000026003340139893",
-    tax_id="3278315599",
-    payment_purpose="ОПЛАТА ЗА ТОВАР",
+    fop_name="ФОП Кутна Наталія Романівна",
+    iban="UA883220010000026000310028841",
+    tax_id="3305504020",
+    payment_purpose="ОПЛАТА ЗА ТОВАР і ваше ПІБ❣️",
 )
 
 
 def format_requisites_multiline() -> str:
-    """Return human-friendly multiline requisites block for chat messages."""
-
+    """
+    Return human-friendly multiline requisites block for chat messages.
+    
+    Format matches the required template:
+    - First bubble: FOP name, IBAN, tax ID, payment purpose
+    - Second bubble: IBAN only (for easy copy)
+    - Third bubble: Request for payment receipt
+    """
     return (
-        f"{BANK_REQUISITES.fop_name}\n"
+        f"Отримувач: {BANK_REQUISITES.fop_name}\n"
         f"IBAN: {BANK_REQUISITES.iban}\n"
         f"ІПН/ЄДРПОУ: {BANK_REQUISITES.tax_id}\n"
-        f"Призначення платежу: {BANK_REQUISITES.payment_purpose}"
+        f"Призначення платежу\n"
+        f"{BANK_REQUISITES.payment_purpose}"
     )
+
+
+def format_requisites_with_receipt_request() -> list[str]:
+    """
+    Return requisites formatted as separate message bubbles for ManyChat/IG.
+    
+    Returns:
+        List of message texts (one per bubble)
+    """
+    return [
+        format_requisites_multiline(),
+        BANK_REQUISITES.iban,
+        "Надішліть, будь ласка, квитанцію після оплати, щоб ми одразу сформували замовлення для вас 🙂",
+    ]
 
 
 def format_requisites_short() -> str:

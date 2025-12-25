@@ -24,7 +24,7 @@ from enum import Enum
 class State(str, Enum):
     """
     Agent conversation states.
-    Names match system_prompt_full.yaml exactly.
+    Names match state files in data/prompts/states/ exactly.
     """
 
     STATE_0_INIT = "STATE_0_INIT"
@@ -100,7 +100,7 @@ STATE_DISPLAY_NAMES: dict[State, str] = {
 class Intent(str, Enum):
     """
     User intent classification labels.
-    Matches INTENT_LABELS in system_prompt_full.yaml.
+    Matches INTENT_LABELS defined in state machine.
     """
 
     GREETING_ONLY = "GREETING_ONLY"
@@ -174,7 +174,7 @@ class Transition:
     condition: str | None = None  # Human-readable condition description
 
 
-# FSM Transition Table - extracted from system_prompt_full.yaml
+# FSM Transition Table - defined in state machine logic
 TRANSITIONS: list[Transition] = [
     # From STATE_0_INIT
     Transition(

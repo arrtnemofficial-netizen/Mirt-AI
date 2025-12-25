@@ -1,15 +1,18 @@
 """
 Full Catalog Sync Script.
 =========================
-Parses the YAML catalog and inserts ALL products into Supabase.
-Each color variant becomes a SEPARATE row with its own SKU, photo, and description.
+LEGACY SCRIPT - Catalog is now managed directly in Supabase.
+This script is deprecated. Use Supabase admin panel or direct DB operations.
+
+If you need to sync catalog, use Supabase admin interface or create new script
+that reads from your current catalog source.
 """
 
 import asyncio
 import logging
 from pathlib import Path
 
-import yaml
+# import yaml  # No longer needed
 
 from src.services.supabase_client import get_supabase_client
 
@@ -17,17 +20,28 @@ from src.services.supabase_client import get_supabase_client
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CATALOG_PATH = Path(__file__).parent.parent / "data" / "system_prompt_full.yaml"
+# LEGACY: Catalog was previously in system_prompt_full.yaml
+# CATALOG_PATH = Path(__file__).parent.parent / "data" / "system_prompt_full.yaml"
 
 
 def parse_catalog() -> list[dict]:
-    """Parse the YAML catalog and extract all products with color variants."""
-    products = []
-
-    with open(CATALOG_PATH, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-
-    catalog = data.get("catalog", {})
+    """
+    LEGACY: Parse catalog from YAML.
+    
+    This function is deprecated. Catalog is now managed in Supabase.
+    If you need to sync, implement new logic based on your current catalog source.
+    """
+    raise NotImplementedError(
+        "Catalog sync from YAML is deprecated. "
+        "Catalog is now managed directly in Supabase. "
+        "Use Supabase admin panel or create new sync script."
+    )
+    
+    # OLD CODE (commented out):
+    # products = []
+    # with open(CATALOG_PATH, encoding="utf-8") as f:
+    #     data = yaml.safe_load(f)
+    # catalog = data.get("catalog", {})
 
     # Iterate through all categories (category_001, category_002, etc.)
     for cat_key, category in catalog.items():

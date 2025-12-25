@@ -13,6 +13,7 @@ from src.services.catalog_service import CatalogService
 from ...utils import (
     extract_height_from_text,
     get_size_and_price_for_height,
+    get_size_recommendation_text,
     image_msg,
     text_msg,
 )
@@ -151,40 +152,10 @@ def build_vision_messages(
             yaml_product=yaml_product,
         )
         
+        # Show description bubble ONLY if snippet exists
+        # If no snippet, skip description bubble entirely
         if presentation_text:
             messages.append(text_msg(presentation_text))
-        else:
-            # Fallback: try snippets.md directly (legacy path)
-            snippet_bubbles = get_product_snippet(product_name)
-            if snippet_bubbles:
-                # Use snippet instead of generic description
-                for bubble in snippet_bubbles[:3]:  # Max 3 bubbles for presentation
-                    messages.append(text_msg(bubble))
-            elif catalog_product:
-                # Last resort: use description as-is (but formatted)
-                description = str(catalog_product.get("description") or "").strip()
-                if description:
-                    # Avoid "Тканина: ..." as raw line
-                    if description.lower().startswith("тканина:"):
-                        fabric_part = description[len("Тканина:"):].strip()
-                        if fabric_part:
-                            messages.append(text_msg(f"Тканина {fabric_part.lower()}"))
-                    else:
-                        # Use first 1-2 sentences
-                        sentences: list[str] = []
-                        for sep in (".", "!", "?"):
-                            if sep in description:
-                                parts = [p.strip() for p in description.split(sep) if p.strip()]
-                                if parts:
-                                    sentences = parts[:2]
-                                    break
-                        if sentences:
-                            snippet = ". ".join(sentences).strip() + "."
-                            messages.append(text_msg(snippet))
-                        else:
-                            snippet = description[:180].rstrip()
-                            if snippet:
-                                messages.append(text_msg(snippet))
 
         # Photo bubble should come before the question bubble (ManyChat/IG UX).
         if product.photo_url and (not needs_color_confirmation):
@@ -205,7 +176,9 @@ def build_vision_messages(
             if catalog_product:
                 with suppress(Exception):
                     price = int(CatalogService.get_price_for_size(catalog_product, size_label))
-            messages.append(text_msg(f"На {height} см підійде розмір {size_label}"))
+            # Використовуємо новий формат рекомендації з максимальним зростом
+            recommendation_text = get_size_recommendation_text(size_label)
+            messages.append(text_msg(recommendation_text))
             messages.append(text_msg(f"Ціна {price} грн"))
             messages.append(text_msg("Оформлюємо? 🌸"))
         else:

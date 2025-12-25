@@ -135,14 +135,14 @@
     "critical_check": "НЕМАЄ капюшона? Так = Каприз. Є = Ритм"
   },
   {
-    "id": "kostum_kapriz_коричневий",
+    "id": "kostum_kapriz_шоколадний",
     "product_id": 11100944,
     "image_url": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/d76999/c51309-1758534535069.jpeg",
     "expected_product": "Костюм Каприз",
-    "expected_color": "коричневий",
+    "expected_color": "шоколадний",
     "sku": "11101074-BROWN",
     "expected_price": 1885,
-    "description": "Костюм Каприз коричневий - бавовна (теплий бленд)",
+    "description": "Костюм Каприз шоколадний - бавовна (теплий бленд)",
     "critical_check": "НЕМАЄ капюшона? Так = Каприз. Є = Ритм"
   },
   {

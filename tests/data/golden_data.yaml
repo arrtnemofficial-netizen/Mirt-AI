@@ -4,23 +4,37 @@
 
 suites:
   - name: "Strict Size Boundaries"
-    description: "Verifies that the bot correctly up-sizes on the 119/131/143 boundaries."
+    description: "Verifies that the bot correctly handles boundaries (120, 131, 143, 155) - does NOT up-size."
     cases:
-      - id: "SIZE_119_BOUNDARY"
-        input: "Зріст 119 см"
+      - id: "SIZE_120_BOUNDARY"
+        input: "Зріст 120 см"
         expected_state: "STATE_3_SIZE_COLOR"
         must_contain: 
-          - "122"
-          - "122-128"
-        must_not_contain:
-          - "116"
           - "110-116"
+        must_not_contain:
+          - "122-128"
+          - "122"
       
       - id: "SIZE_131_BOUNDARY"
         input: "131 см"
         expected_state: "STATE_3_SIZE_COLOR"
-        must_contain: "134"
-        must_not_contain: "128"
+        must_contain: "122-128"
+        must_not_contain: "134-140"
+        must_not_contain: "134"
+      
+      - id: "SIZE_143_BOUNDARY"
+        input: "143 см"
+        expected_state: "STATE_3_SIZE_COLOR"
+        must_contain: "134-140"
+        must_not_contain: "146-152"
+        must_not_contain: "146"
+      
+      - id: "SIZE_155_BOUNDARY"
+        input: "155 см"
+        expected_state: "STATE_3_SIZE_COLOR"
+        must_contain: "146-152"
+        must_not_contain: "158-164"
+        must_not_contain: "158"
 
   - name: "Color Equivalence"
     description: "Verifies White=Milk rule."

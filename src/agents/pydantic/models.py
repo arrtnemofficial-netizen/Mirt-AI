@@ -1,5 +1,5 @@
 """
-Structured Output Models - Based on OUTPUT_CONTRACT from system_prompt_full.yaml
+Structured Output Models - Based on OUTPUT_CONTRACT from prompts
 ================================================================================
 БЛОК 10: OUTPUT CONTRACT (Final JSON Schema)
 

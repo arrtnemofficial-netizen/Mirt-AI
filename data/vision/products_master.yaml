@@ -81,7 +81,7 @@ products:
       червоний:
         photo_url: "https://cdn.sitniks.com/cmp-2065/products/2024-09-30/6f80bb/ba5e9d-1727726125546.jpeg"
         sku: "3786442-RED-CHECK"
-      коричневий:
+      шоколадний:
         photo_url: "https://cdn.sitniks.com/cmp-2065/products/2024-09-08/809486/997072-1725797349166.jpeg"
         sku: "3646358-CHOCOLATE"
       рожевий:
@@ -197,7 +197,7 @@ products:
       рожевий:
         photo_url: "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/605462/8365109-1758523787925.jpeg"
         sku: "11089055-PINK"
-      коричневий:
+      шоколадний:
         photo_url: "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/f11460/bdea2d-1758524955446.jpeg"
         sku: "11089244-BROWN"
       бордовий:
@@ -256,7 +256,7 @@ products:
       бордовий:
         photo_url: "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/2e181f/973828-1758534352656.jpeg"
         sku: "11101056-BURGUNDY"
-      коричневий:
+      шоколадний:
         photo_url: "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/d76999/c51309-1758534535069.jpeg"
         sku: "11101074-BROWN"
     

@@ -30,6 +30,15 @@ def height_to_size(height_cm: int) -> str:
     """
     Convert height in cm to size label.
     
+    ЗАЛІЗОБЕТОННЕ ПРАВИЛО: На межах (120, 131, 143, 155) НЕ переходимо в більший розмір!
+    
+    Лінійка відповідності:
+    - 110-120 см включно → 110-116
+    - 121-131 см включно → 122-128
+    - 132-143 см включно → 134-140
+    - 144-155 см включно → 146-152
+    - 156-168 см включно → 158-164
+    
     Uses the same logic as get_size_and_price_for_height but returns only size.
     
     Args:
@@ -38,19 +47,32 @@ def height_to_size(height_cm: int) -> str:
     Returns:
         Size label (e.g., "98-104", "146-152")
     """
-    if height_cm <= 92:
+    if height_cm < 80:
+        return "80-92"
+    elif height_cm <= 92:
         return "80-92"
     elif height_cm <= 104:
         return "98-104"
-    elif height_cm <= 116:
+    elif height_cm <= 109:
+        # 105-109 см - проміжний діапазон, використовуємо найближчий менший
+        return "98-104"
+    elif height_cm <= 120:
+        # 110-120 см включно → 110-116 (ВАЖЛИВО: 120 включно!)
         return "110-116"
-    elif height_cm <= 128:
+    elif height_cm <= 131:
+        # 121-131 см включно → 122-128 (ВАЖЛИВО: 131 включно!)
         return "122-128"
-    elif height_cm <= 140:
+    elif height_cm <= 143:
+        # 132-143 см включно → 134-140 (ВАЖЛИВО: 143 включно!)
         return "134-140"
-    elif height_cm <= 152:
+    elif height_cm <= 155:
+        # 144-155 см включно → 146-152 (ВАЖЛИВО: 155 включно!)
         return "146-152"
+    elif height_cm <= 168:
+        # 156-168 см включно → 158-164
+        return "158-164"
     else:
+        # Більше 168 см - найбільший розмір
         return "158-164"
 
 

@@ -34,7 +34,8 @@ from src.types import ModelConfig, ModelsConfig, TestCase, TestSuite
 CONFIG_DIR = Path(__file__).parent / "config"
 DATASETS_DIR = Path(__file__).parent / "datasets"
 RESULTS_DIR = Path(__file__).parent / "results"
-SYSTEM_PROMPT_PATH = Path(__file__).parent.parent.parent / "data" / "system_prompt_full.yaml"
+# LEGACY: system_prompt_full.yaml was removed - prompts are now in data/prompts/
+# SYSTEM_PROMPT_PATH = Path(__file__).parent.parent.parent / "data" / "system_prompt_full.yaml"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -45,9 +46,15 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def load_system_prompt() -> str:
-    """Load system prompt from YAML file."""
-    if SYSTEM_PROMPT_PATH.exists():
-        return SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+    """
+    Load system prompt.
+    
+    LEGACY: Previously loaded from system_prompt_full.yaml.
+    Now prompts are in data/prompts/ (states/ and system/).
+    Returns fallback prompt for eval tests.
+    """
+    # Prompts are now in data/prompts/states/ and data/prompts/system/
+    # For eval, use fallback or load from new structure
     return "You are a helpful assistant for MIRT children's clothing store."
 
 
