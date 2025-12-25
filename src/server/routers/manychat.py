@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -109,6 +110,36 @@ async def manychat_webhook(
                 if not image_url:
                     data = payload.get("data", {})
                     image_url = data.get("image_url") or data.get("photo_url")
+                
+                # FALLBACK: Extract image URL from text if it looks like a URL
+                # ManyChat sometimes sends image URLs in text field (e.g., ".; https://...")
+                if not image_url and text:
+                    # Look for URLs in text (especially Facebook CDN URLs)
+                    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+                    urls = re.findall(url_pattern, text)
+                    for url in urls:
+                        # Check if it's a known image CDN URL
+                        if any(cdn in url.lower() for cdn in ['fbsbx.com', 'fbcdn.net', 'lookaside', 'cdn', 'image', 'photo', 'img']):
+                            image_url = url
+                            # Remove URL from text (clean up ".; " prefix if present)
+                            text = re.sub(r'\.;\s*' + re.escape(url), '', text)
+                            text = text.replace(url, '').strip()
+                            logger.info(
+                                "[MANYCHAT_WEBHOOK] Extracted image URL from text: user_id=%s url=%s cleaned_text=%s",
+                                user_id,
+                                url[:50],
+                                safe_preview(text, 30),
+                            )
+                            break
+                
+                # DEBUG: Log extracted values
+                logger.debug(
+                    "[MANYCHAT_WEBHOOK] Extracted: user_id=%s text_preview=%s image_url=%s attachments_count=%d",
+                    user_id,
+                    safe_preview(text, 50),
+                    image_url[:50] if image_url else None,
+                    len(message.get("attachments", [])) if isinstance(message, dict) else 0,
+                )
 
                 channel = payload.get("type") or "instagram"
 
