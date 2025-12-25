@@ -178,27 +178,19 @@ class Settings(BaseSettings):
     )
     LLM_MODEL_GPT: str = Field(
         default="gpt-5.1",
-        description="OpenAI GPT model identifier (GPT-5.1 only)",
-    )
-    LLM_MODEL_GEMINI: str = Field(
-        default="gemini-3-pro",
-        description="Google Gemini model identifier",
+        description="OpenAI GPT model identifier (GPT-5.1 ONLY - no other models supported)",
     )
     LLM_REASONING_EFFORT: str = Field(
         default="low",
-        description="Reasoning effort for reasoning models (none, low, medium, high).",
+        description="Reasoning effort for GPT-5.1 (none, low, medium, high).",
     )
     LLM_TEMPERATURE: float = Field(
         default=0.3,
-        description="LLM temperature (0.0-1.0)",
+        description="LLM temperature for GPT-5.1 (0.0-1.0)",
     )
     LLM_MAX_TOKENS: int = Field(
         default=2048,
-        description="Max tokens for LLM response",
-    )
-    PROMPT_TEMPLATE: str = Field(
-        default="default",
-        description="Prompt template to use: default, grok, gpt, gemini",
+        description="Max tokens for GPT-5.1 response",
     )
 
     # =========================================================================
@@ -231,6 +223,20 @@ class Settings(BaseSettings):
     DELIBERATION_MIN_CONFIDENCE: float = Field(
         default=0.8,
         description="Minimum acceptable offer deliberation confidence (0.0-1.0). Below => fallback.",
+    )
+
+    # TOKEN USAGE MONITORING / ALERTS
+    TOKEN_ALERT_THRESHOLD_PER_CALL: int = Field(
+        default=50000,
+        description="Alert if single LLM call exceeds this many tokens (default: 50K).",
+    )
+    TOKEN_ALERT_THRESHOLD_PER_SESSION: int = Field(
+        default=200000,
+        description="Alert if session total exceeds this many tokens (default: 200K).",
+    )
+    TOKEN_COST_ALERT_THRESHOLD: float = Field(
+        default=1.0,
+        description="Alert if single LLM call cost exceeds this USD amount (default: $1.00).",
     )
     # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
     # - LangGraph v2 is now the only architecture

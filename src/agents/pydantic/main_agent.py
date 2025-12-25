@@ -555,6 +555,83 @@ async def run_main(
         # Record success in circuit breaker
         _llm_circuit_breaker.record_success()
 
+        # Track token usage if available (GPT 5.1 only)
+        try:
+            from src.services.core.observability import track_token_usage
+            from src.workers.tasks.llm_usage import calculate_cost
+            
+            # PydanticAI result structure for GPT 5.1:
+            # result.snapshot.usage.input_tokens / output_tokens
+            # result.snapshot.model_name
+            tokens_input = 0
+            tokens_output = 0
+            model = "gpt-5.1"  # Default to GPT 5.1
+            
+            if hasattr(result, "snapshot") and result.snapshot:
+                snapshot = result.snapshot
+                
+                # Get model name from snapshot
+                if hasattr(snapshot, "model_name") and snapshot.model_name:
+                    model = snapshot.model_name
+                elif hasattr(snapshot, "model") and snapshot.model:
+                    model = str(snapshot.model)
+                
+                # Normalize model name to "gpt-5.1" if it's GPT 5.1 variant
+                if "gpt-5" in model.lower() or "5.1" in model:
+                    model = "gpt-5.1"
+                
+                # Get usage info from snapshot
+                if hasattr(snapshot, "usage") and snapshot.usage:
+                    usage = snapshot.usage
+                    # Try different attribute names for token counts
+                    tokens_input = (
+                        getattr(usage, "input_tokens", None) or
+                        getattr(usage, "prompt_tokens", None) or
+                        getattr(usage, "tokens_input", None) or
+                        0
+                    )
+                    tokens_output = (
+                        getattr(usage, "output_tokens", None) or
+                        getattr(usage, "completion_tokens", None) or
+                        getattr(usage, "tokens_output", None) or
+                        0
+                    )
+                # Alternative: check if usage is a dict
+                elif isinstance(snapshot.usage, dict):
+                    usage_dict = snapshot.usage
+                    tokens_input = usage_dict.get("input_tokens") or usage_dict.get("prompt_tokens") or 0
+                    tokens_output = usage_dict.get("output_tokens") or usage_dict.get("completion_tokens") or 0
+                
+                # Track if we have valid token counts
+                if tokens_input > 0 or tokens_output > 0:
+                    cost = calculate_cost(model, tokens_input, tokens_output)
+                    track_token_usage(
+                        tokens_input=tokens_input,
+                        tokens_output=tokens_output,
+                        model=model,
+                        session_id=deps.session_id,
+                        cost_usd=float(cost),
+                    )
+                    
+                    # Dispatch to background worker for DB recording
+                    from src.workers.dispatcher import dispatch_llm_usage
+                    dispatch_llm_usage(
+                        user_id=None,  # Can be extracted from deps if needed
+                        model=model,
+                        tokens_input=tokens_input,
+                        tokens_output=tokens_output,
+                        session_id=deps.session_id,
+                    )
+                else:
+                    logger.debug(
+                        "[TOKEN_TRACKING] No token usage found in snapshot for GPT 5.1. "
+                        "Snapshot structure: %s",
+                        type(snapshot).__name__ if snapshot else "None",
+                    )
+        except Exception as e:
+            # Don't fail the request if token tracking fails
+            logger.debug("[TOKEN_TRACKING] Failed to track tokens for GPT 5.1: %s", e)
+
         # Record tracing attributes
         if span:
             span.set_attribute("event", result.output.event)

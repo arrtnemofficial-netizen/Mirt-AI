@@ -32,17 +32,11 @@ from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
 logger = logging.getLogger(__name__)
 
 
-# Pricing per 1M tokens (USD) - update as needed
+# Pricing per 1M tokens (USD) - GPT 5.1 ONLY
 MODEL_PRICING: dict[str, dict[str, Decimal]] = {
-    "gpt-4o": {"input": Decimal("2.50"), "output": Decimal("10.00")},
-    "gpt-4o-mini": {"input": Decimal("0.15"), "output": Decimal("0.60")},
-    "gpt-4-turbo": {"input": Decimal("10.00"), "output": Decimal("30.00")},
-    "gpt-4": {"input": Decimal("30.00"), "output": Decimal("60.00")},
-    "gpt-3.5-turbo": {"input": Decimal("0.50"), "output": Decimal("1.50")},
-    "claude-3-5-sonnet": {"input": Decimal("3.00"), "output": Decimal("15.00")},
-    "claude-3-5-haiku": {"input": Decimal("0.25"), "output": Decimal("1.25")},
-    # Default fallback
-    "default": {"input": Decimal("1.00"), "output": Decimal("3.00")},
+    "gpt-5.1": {"input": Decimal("2.50"), "output": Decimal("10.00")},
+    # Default fallback (same as GPT 5.1)
+    "default": {"input": Decimal("2.50"), "output": Decimal("10.00")},
 }
 
 
@@ -94,7 +88,7 @@ def record_usage(
 
     Args:
         user_id: User ID (optional)
-        model: Model name (e.g., "gpt-4o-mini")
+        model: Model name (GPT-5.1 only)
         tokens_input: Input tokens used
         tokens_output: Output tokens used
         session_id: Optional session ID for context

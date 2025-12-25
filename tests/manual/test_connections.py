@@ -88,7 +88,7 @@ class TestLLMConnection:
         client = openai.OpenAI(api_key=api_key)
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Use cheap model for smoke test
+            model="gpt-5.1",  # GPT-5.1 only
             messages=[{"role": "user", "content": "Say 'OK'"}],
             max_tokens=5,
         )

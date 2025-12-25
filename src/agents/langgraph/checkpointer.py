@@ -45,6 +45,8 @@ def _compact_payload(
     - Limits total number of messages in state
     - Truncates very long messages
     - Optionally removes base64 image data
+    - Compacts metadata and other large fields
+    - Adaptive compaction for large payloads (>100KB)
     
     SAFEGUARDS:
     - Whitelist critical fields (selected_products, customer_*)
@@ -93,48 +95,123 @@ def _compact_payload(
             critical_data[field] = cv[field]
     
     # SAFEGUARD_2: Log size before compaction
-    import json
-    payload_before = json.dumps(checkpoint, default=str)
+    try:
+        import orjson
+        json_dumps = lambda obj: orjson.dumps(obj).decode("utf-8")
+    except ImportError:
+        import json
+        json_dumps = lambda obj: json.dumps(obj, default=str)
+    
+    payload_before = json_dumps(checkpoint)
     payload_size_before = len(payload_before)
     messages_before = len(cv.get("messages", [])) if "messages" in cv else 0
     
+    # Adaptive compaction: if payload is large, use more aggressive settings
+    ADAPTIVE_THRESHOLD_KB = 100  # 100KB
+    is_large_payload = payload_size_before > (ADAPTIVE_THRESHOLD_KB * 1024)
+    
+    if is_large_payload:
+        # More aggressive compaction for large payloads
+        max_messages = min(max_messages, 100)  # Reduce to 100 if > 200
+        max_chars = min(max_chars, 2000)  # Reduce to 2000 if > 4000
+        logger.debug(
+            "[COMPACTION] Large payload detected (%d bytes), using aggressive compaction: max_messages=%d max_chars=%d",
+            payload_size_before,
+            max_messages,
+            max_chars,
+        )
+    
     if "messages" not in cv or not isinstance(cv["messages"], list):
-        return checkpoint
-
-    messages = cv["messages"]
-    
-    # 1. Limit message count (keep tail)
-    if len(messages) > max_messages:
-        messages = messages[-max_messages:]
-    
-    compacted = []
-    for msg in messages:
-        # For LangChain messages or dicts
-        content = getattr(msg, "content", None)
-        is_obj = True
-        if content is None and isinstance(msg, dict):
-            content = msg.get("content")
-            is_obj = False
+        # Even without messages, we can compact other fields
+        pass
+    else:
+        messages = cv["messages"]
         
-        if isinstance(content, str):
-            # 2. Drop base64
-            if drop_base64 and ("base64" in content or "data:image" in content):
-                content = "<base64_stripped>"
+        # 1. Limit message count (keep tail)
+        if len(messages) > max_messages:
+            messages = messages[-max_messages:]
+
+        compacted = []
+        for msg in messages:
+            # For LangChain messages or dicts
+            content = getattr(msg, "content", None)
+            is_obj = True
+            if content is None and isinstance(msg, dict):
+                content = msg.get("content")
+                is_obj = False
             
-            # 3. Truncate chars
-            if len(content) > max_chars:
-                content = content[:max_chars] + "... [TRUNCATED]"
+            if isinstance(content, str):
+                # 2. Drop base64
+                if drop_base64 and ("base64" in content or "data:image" in content):
+                    content = "<base64_stripped>"
+                
+                # 3. Truncate chars
+                if len(content) > max_chars:
+                    content = content[:max_chars] + "... [TRUNCATED]"
+                
+                if is_obj:
+                    msg.content = content
+                else:
+                    msg["content"] = content
             
-            if is_obj:
-                msg.content = content
+            compacted.append(msg)
+        
+        cv["messages"] = compacted
+
+    # 4. Compact metadata (keep only last N entries if it's a history)
+    if "metadata" in cv and isinstance(cv["metadata"], dict):
+        metadata = cv["metadata"]
+        # Compact step_history if it exists
+        if "step_history" in metadata and isinstance(metadata["step_history"], list):
+            max_history_entries = 10
+            if len(metadata["step_history"]) > max_history_entries:
+                metadata["step_history"] = metadata["step_history"][-max_history_entries:]
+                logger.debug("[COMPACTION] Truncated step_history to last %d entries", max_history_entries)
+        
+        # Remove debug info for large payloads
+        if is_large_payload:
+            for key in list(metadata.keys()):
+                if key in ("debug_info", "trace_id", "trace_details"):
+                    del metadata[key]
+                    logger.debug("[COMPACTION] Removed %s from metadata", key)
+    
+    # 5. Compact agent_response (remove large fields)
+    if "agent_response" in cv and isinstance(cv["agent_response"], dict):
+        agent_response = cv["agent_response"]
+        # Remove deliberation and debug info for large payloads
+        if is_large_payload:
+            for key in list(agent_response.keys()):
+                if key in ("deliberation", "debug_info", "raw_response"):
+                    del agent_response[key]
+                    logger.debug("[COMPACTION] Removed %s from agent_response", key)
+        # Truncate long text fields
+        for key in ("response_text", "reasoning"):
+            if key in agent_response and isinstance(agent_response[key], str):
+                if len(agent_response[key]) > max_chars:
+                    agent_response[key] = agent_response[key][:max_chars] + "... [TRUNCATED]"
+    
+    # 6. Compact selected_products (keep only essential fields)
+    if "selected_products" in cv and isinstance(cv["selected_products"], list) and is_large_payload:
+        # Only compact if payload is large and field is not critical
+        # But we preserve it in critical_data, so we can safely compact here
+        compacted_products = []
+        for product in cv["selected_products"]:
+            if isinstance(product, dict):
+                # Keep only essential fields
+                compacted_product = {
+                    "name": product.get("name"),
+                    "sku": product.get("sku"),
+                    "price": product.get("price"),
+                    "quantity": product.get("quantity"),
+                }
+                # Remove large fields like images, descriptions, etc.
+                compacted_products.append(compacted_product)
             else:
-                msg["content"] = content
-        
-        compacted.append(msg)
+                compacted_products.append(product)
+        cv["selected_products"] = compacted_products
+        logger.debug("[COMPACTION] Compacted selected_products to essential fields only")
     
-    cv["messages"] = compacted
-
-    # 4. Strip base64/data URLs from the rest of channel_values (e.g. image_url)
+    # 7. Strip base64/data URLs from the rest of channel_values (e.g. image_url)
     # This keeps checkpoints small and makes tests deterministic.
     cv = _strip_base64(cv)
     checkpoint["channel_values"] = cv
@@ -144,19 +221,20 @@ def _compact_payload(
         cv[field] = value
     
     # SAFEGUARD_2: Log size after compaction
-    payload_after = json.dumps(checkpoint, default=str)
+    payload_after = json_dumps(checkpoint)
     payload_size_after = len(payload_after)
     messages_after = len(cv.get("messages", []))
-    
+
     compaction_ratio = payload_size_after / payload_size_before if payload_size_before > 0 else 1.0
     
     logger.info(
-        "[COMPACTION] Payload compacted: size_before=%d size_after=%d ratio=%.2f messages_before=%d messages_after=%d",
+        "[COMPACTION] Payload compacted: size_before=%d size_after=%d ratio=%.2f messages_before=%d messages_after=%d adaptive=%s",
         payload_size_before,
         payload_size_after,
         compaction_ratio,
         messages_before,
         messages_after,
+        is_large_payload,
     )
     
     return checkpoint
@@ -385,8 +463,8 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         # Optimized pool settings for better performance
         # Increased min_size to reduce connection acquisition time (warm pool)
-        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 2)  # Was 1, now 2 for faster access
-        pool_max_size = _setting_int(settings, "CHECKPOINTER_POOL_MAX_SIZE", 5)
+        pool_min_size = _setting_int(settings, "CHECKPOINTER_POOL_MIN_SIZE", 3)  # Increased from 2 to 3
+        pool_max_size = _setting_int(settings, "CHECKPOINTER_POOL_MAX_SIZE", 10)  # Increased from 5 to 10
         pool_timeout_s = _setting_float(settings, "CHECKPOINTER_POOL_TIMEOUT_SECONDS", 15.0)
         pool_max_idle_s = _setting_float(settings, "CHECKPOINTER_POOL_MAX_IDLE_SECONDS", 120.0)
         # Reduced connect_timeout for faster failure detection

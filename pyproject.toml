@@ -66,6 +66,7 @@ dependencies = [
     "opentelemetry-instrumentation==0.60b1",
     # Utilities
     "python-dotenv>=1.0.0",
+    "orjson>=3.10.0",  # Fast JSON serialization for checkpointer compaction
     # Build system
     "setuptools>=68.0",
 ]

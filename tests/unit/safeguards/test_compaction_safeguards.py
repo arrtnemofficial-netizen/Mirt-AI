@@ -153,5 +153,151 @@ def test_compaction_removes_base64():
     message_content = cv["messages"][0]["content"]
     
     # Should be replaced with placeholder
-    assert message_content == "[IMAGE DATA REMOVED]"
+    assert message_content == "<base64_stripped>"
+
+
+def test_compaction_reduces_payload_size():
+    """Test that compaction reduces payload size for large payloads (>100KB)."""
+    # Create a large checkpoint (>100KB)
+    large_messages = [
+        {"role": "user", "content": "A" * 1000} for _ in range(150)
+    ]
+    
+    # Add large metadata
+    large_metadata = {
+        "step_history": [{"step": i, "data": "X" * 5000} for i in range(50)],
+        "debug_info": {"trace": "Y" * 10000},
+        "trace_id": "Z" * 1000,
+    }
+    
+    # Add large agent_response
+    large_agent_response = {
+        "response_text": "B" * 5000,
+        "deliberation": {"reasoning": "C" * 10000},
+        "debug_info": {"raw": "D" * 5000},
+    }
+    
+    checkpoint = {
+        "channel_values": {
+            "messages": large_messages,
+            "metadata": large_metadata,
+            "agent_response": large_agent_response,
+            "selected_products": [{"id": 1, "name": "Product 1"}],
+        }
+    }
+    
+    compacted = _compact_payload(checkpoint.copy())
+    
+    # Calculate sizes
+    import json
+    try:
+        import orjson
+        size_before = len(orjson.dumps(checkpoint))
+        size_after = len(orjson.dumps(compacted))
+    except ImportError:
+        size_before = len(json.dumps(checkpoint, default=str))
+        size_after = len(json.dumps(compacted, default=str))
+    
+    # Should reduce size significantly (ratio < 0.7 for >100KB)
+    if size_before > 100 * 1024:  # >100KB
+        ratio = size_after / size_before
+        assert ratio < 0.7, f"Compaction ratio {ratio:.2f} should be < 0.7 for large payloads"
+    
+    # Critical fields should be preserved
+    assert "selected_products" in compacted["channel_values"]
+    assert compacted["channel_values"]["selected_products"] == [{"id": 1, "name": "Product 1"}]
+
+
+def test_compaction_truncates_metadata():
+    """Test that metadata step_history is truncated to last 10 entries."""
+    checkpoint = {
+        "channel_values": {
+            "messages": [],
+            "metadata": {
+                "step_history": [{"step": i} for i in range(50)],
+                "other_data": "preserved",
+            },
+            "selected_products": [],
+        }
+    }
+    
+    compacted = _compact_payload(checkpoint.copy())
+    
+    cv = compacted["channel_values"]
+    assert "metadata" in cv
+    assert "step_history" in cv["metadata"]
+    
+    # Should be truncated to last 10 entries
+    assert len(cv["metadata"]["step_history"]) == 10
+    assert cv["metadata"]["step_history"][0]["step"] == 40  # Last 10: 40-49
+    assert cv["metadata"]["step_history"][-1]["step"] == 49
+    
+    # Other metadata should be preserved
+    assert cv["metadata"]["other_data"] == "preserved"
+
+
+def test_compaction_removes_debug_info_for_large_payloads():
+    """Test that debug_info is removed for large payloads."""
+    # Create a large checkpoint (>100KB)
+    large_messages = [
+        {"role": "user", "content": "A" * 2000} for _ in range(100)
+    ]
+    
+    checkpoint = {
+        "channel_values": {
+            "messages": large_messages,
+            "metadata": {
+                "debug_info": {"trace": "X" * 10000},
+                "trace_id": "Y" * 1000,
+            },
+            "agent_response": {
+                "deliberation": {"reasoning": "Z" * 10000},
+                "debug_info": {"raw": "W" * 5000},
+            },
+            "selected_products": [],
+        }
+    }
+    
+    compacted = _compact_payload(checkpoint.copy())
+    
+    cv = compacted["channel_values"]
+    
+    # Debug info should be removed for large payloads
+    if "metadata" in cv:
+        assert "debug_info" not in cv["metadata"]
+        assert "trace_id" not in cv["metadata"]
+    
+    if "agent_response" in cv:
+        assert "deliberation" not in cv["agent_response"]
+        assert "debug_info" not in cv["agent_response"]
+
+
+def test_adaptive_compaction_reduces_limits():
+    """Test that adaptive compaction reduces max_messages and max_chars for large payloads."""
+    # Create a large checkpoint (>100KB)
+    large_messages = [
+        {"role": "user", "content": "A" * 5000} for _ in range(150)
+    ]
+    
+    checkpoint = {
+        "channel_values": {
+            "messages": large_messages,
+            "selected_products": [],
+        }
+    }
+    
+    # Use default max_messages=200, max_chars=4000
+    compacted = _compact_payload(checkpoint.copy(), max_messages=200, max_chars=4000)
+    
+    cv = compacted["channel_values"]
+    messages = cv["messages"]
+    
+    # For large payloads, adaptive compaction should reduce to 100 messages max
+    # But we start with 150, so should keep 100 (not 200)
+    assert len(messages) == 100
+    
+    # Messages should be truncated to 2000 chars (not 4000)
+    for msg in messages:
+        if isinstance(msg.get("content"), str):
+            assert len(msg["content"]) <= 2020  # 2000 + "... [TRUNCATED]"
 

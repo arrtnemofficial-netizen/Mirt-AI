@@ -292,12 +292,12 @@ class TestLLMUsageTasks:
         """Should calculate cost correctly."""
         from src.workers.tasks.llm_usage import calculate_cost
 
-        # GPT-4o-mini: $0.15 per 1M input, $0.60 per 1M output
-        cost = calculate_cost("gpt-4o-mini", 1000, 500)
+        # GPT-5.1: $2.50 per 1M input, $10.00 per 1M output
+        cost = calculate_cost("gpt-5.1", 1000, 500)
 
-        # Expected: (1000/1M * 0.15) + (500/1M * 0.60) = 0.00015 + 0.0003 = 0.00045
+        # Expected: (1000/1M * 2.50) + (500/1M * 10.00) = 0.0025 + 0.005 = 0.0075
         assert cost > 0
-        assert float(cost) < 0.001  # Should be tiny for small usage
+        assert float(cost) < 0.01  # Should be small for small usage
 
     def test_calculate_cost_unknown_model(self):
         """Should use default pricing for unknown models."""
@@ -315,7 +315,7 @@ class TestLLMUsageTasks:
 
             result = record_usage(
                 user_id=123,
-                model="gpt-4o-mini",
+                model="gpt-5.1",
                 tokens_input=100,
                 tokens_output=50,
             )
@@ -335,7 +335,7 @@ class TestLLMUsageTasks:
 
             result = record_usage(
                 user_id=123,
-                model="gpt-4o-mini",
+                model="gpt-5.1",
                 tokens_input=100,
                 tokens_output=50,
             )

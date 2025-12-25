@@ -181,6 +181,102 @@ def track_metric(name: str, value: float, tags: dict[str, str] | None = None) ->
     _metrics.record(name, value, tags)
 
 
+def track_token_usage(
+    tokens_input: int,
+    tokens_output: int,
+    model: str,
+    session_id: str | None = None,
+    cost_usd: float | None = None,
+) -> None:
+    """
+    Track LLM token usage metrics.
+    
+    Args:
+        tokens_input: Input tokens used
+        tokens_output: Output tokens used
+        model: Model name (GPT-5.1 only)
+        session_id: Optional session ID for context
+        cost_usd: Optional cost in USD
+    """
+    tags = {"model": model}
+    if session_id:
+        tags["session_id"] = session_id
+    
+    tokens_total = tokens_input + tokens_output
+    
+    # Track individual metrics
+    track_metric("llm_tokens_input", float(tokens_input), tags)
+    track_metric("llm_tokens_output", float(tokens_output), tags)
+    track_metric("llm_tokens_total", float(tokens_total), tags)
+    
+    # Track cost if provided
+    if cost_usd is not None:
+        track_metric("llm_cost_usd", cost_usd, tags)
+    
+    # Check thresholds and alert
+    _check_token_thresholds(tokens_total, tokens_input, tokens_output, model, session_id, cost_usd)
+    
+    # Log for monitoring
+    logger.info(
+        "[TOKEN_USAGE] model=%s tokens_in=%d tokens_out=%d tokens_total=%d cost=$%.6f session=%s",
+        model,
+        tokens_input,
+        tokens_output,
+        tokens_total,
+        cost_usd or 0.0,
+        session_id or "unknown",
+    )
+
+
+def _check_token_thresholds(
+    tokens_total: int,
+    tokens_input: int,
+    tokens_output: int,
+    model: str,
+    session_id: str | None = None,
+    cost_usd: float | None = None,
+) -> None:
+    """
+    Check token usage thresholds and alert if exceeded.
+    
+    Thresholds (configurable via env vars):
+    - TOKEN_ALERT_THRESHOLD_PER_CALL: Alert if single call exceeds this (default: 50K)
+    - TOKEN_ALERT_THRESHOLD_PER_SESSION: Alert if session total exceeds this (default: 200K)
+    - TOKEN_COST_ALERT_THRESHOLD: Alert if cost exceeds this per call (default: $1.00)
+    """
+    from src.conf.config import settings
+    
+    # Get thresholds from settings (with defaults)
+    threshold_per_call = int(getattr(settings, "TOKEN_ALERT_THRESHOLD_PER_CALL", 50000))
+    threshold_per_session = int(getattr(settings, "TOKEN_ALERT_THRESHOLD_PER_SESSION", 200000))
+    cost_threshold = float(getattr(settings, "TOKEN_COST_ALERT_THRESHOLD", 1.0))
+    
+    # Check per-call threshold
+    if tokens_total > threshold_per_call:
+        logger.warning(
+            "[TOKEN_ALERT] High token usage per call: tokens_total=%d (threshold=%d) model=%s session=%s",
+            tokens_total,
+            threshold_per_call,
+            model,
+            session_id or "unknown",
+        )
+        track_metric("token_alert_high_per_call", 1, {"model": model})
+    
+    # Check cost threshold
+    if cost_usd is not None and cost_usd > cost_threshold:
+        logger.warning(
+            "[TOKEN_ALERT] High cost per call: cost=$%.6f (threshold=$%.2f) model=%s session=%s",
+            cost_usd,
+            cost_threshold,
+            model,
+            session_id or "unknown",
+        )
+        track_metric("token_alert_high_cost", 1, {"model": model})
+    
+    # TODO: Check per-session threshold (requires session-level aggregation)
+    # This would need to track session totals separately
+
+
 def get_metrics_summary() -> dict[str, Any]:
     """Get summary of all tracked metrics."""
     return _metrics.get_summary()
