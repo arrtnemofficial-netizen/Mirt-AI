@@ -154,11 +154,11 @@ def retry_with_backoff(
 
 
 class SupabaseSessionStore:
-    """Session storage using Supabase table 'mirt_sessions'."""
+    """Session storage using Supabase table 'agent_sessions'."""
 
     def __init__(self, table_name: str | None = None) -> None:
         if table_name is None:
-            table_name = settings.SUPABASE_TABLE or "mirt_sessions"
+            table_name = settings.SUPABASE_TABLE or "agent_sessions"
         self.table_name = table_name
         # In-process fallback store to keep sessions alive when Supabase is down
         # or returns transient errors (e.g. 521 Web server is down).

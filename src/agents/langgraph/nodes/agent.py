@@ -669,6 +669,43 @@ async def agent_node(
             if response.customer_data.nova_poshta:
                 metadata_update["customer_nova_poshta"] = response.customer_data.nova_poshta
 
+        # =====================================================================
+        # CRITICAL: Set vision_greeted if greeting was shown
+        # =====================================================================
+        # Перевіряємо чи показується привітання в поточній відповіді
+        # або чи є привітання в історії повідомлень
+        # Це запобігає повторному привітанню навіть якщо vision_greeted не було встановлено
+        if not metadata_update.get("vision_greeted"):
+            # Перевірка 1: чи є привітання в поточній відповіді
+            greeting_in_response = False
+            if response.messages:
+                for msg in response.messages:
+                    content = str(msg.content if hasattr(msg, "content") else msg.get("content", "")).lower()
+                    if "менеджер соф" in content or ("вітаю" in content and "mirt" in content):
+                        greeting_in_response = True
+                        break
+            
+            # Перевірка 2: чи є привітання в історії повідомлень
+            greeting_in_history = False
+            messages = state.get("messages", [])
+            for msg in messages:
+                if isinstance(msg, dict):
+                    role = msg.get("role", "")
+                    content = str(msg.get("content", "")).lower()
+                    if role == "assistant" and ("менеджер соф" in content or ("вітаю" in content and "mirt" in content)):
+                        greeting_in_history = True
+                        break
+            
+            # Якщо привітання показано або було раніше - встановлюємо vision_greeted
+            if greeting_in_response or greeting_in_history:
+                metadata_update["vision_greeted"] = True
+                logger.info(
+                    "[SESSION %s] Set vision_greeted=True (greeting_in_response=%s, greeting_in_history=%s)",
+                    session_id,
+                    greeting_in_response,
+                    greeting_in_history,
+                )
+
         # =====================================================
         # DIALOG PHASE (Turn-Based State Machine)
         # =====================================================
