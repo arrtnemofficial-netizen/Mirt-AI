@@ -116,8 +116,16 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     except Exception as e:
         logger.error("Failed to send manager notification: %s", e)
 
+    # Determine dialog_phase based on current_state
+    # If already in COMPLAINT state, keep COMPLAINT phase
+    # Otherwise, escalation node sets STATE_8_COMPLAINT, so use COMPLAINT phase
+    dialog_phase = "COMPLAINT"
+    if current_state == State.STATE_9_OOD.value:
+        dialog_phase = "OUT_OF_DOMAIN"
+    
     return {
         "current_state": State.STATE_8_COMPLAINT.value,
+        "dialog_phase": dialog_phase,
         "messages": [{"role": "assistant", "content": response.model_dump_json()}],
         "metadata": response.metadata.model_dump(),
         "should_escalate": True,

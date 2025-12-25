@@ -35,8 +35,15 @@ def determine_phase(
     Determine dialog_phase from LLM response for Turn-Based routing.
     Wrapper around state_prompts logic with added safe-guards.
     """
-    # Escalation always ends dialog
+    # Escalation: set phase based on current_state
     if event == "escalation":
+        # COMPLAINT state should use COMPLAINT phase, not COMPLETED
+        if current_state == State.STATE_8_COMPLAINT.value:
+            return "COMPLAINT"
+        # OUT_OF_DOMAIN state should use OUT_OF_DOMAIN phase
+        if current_state == State.STATE_9_OOD.value:
+            return "OUT_OF_DOMAIN"
+        # Other escalations end dialog
         return "COMPLETED"
 
     has_products = bool(selected_products)

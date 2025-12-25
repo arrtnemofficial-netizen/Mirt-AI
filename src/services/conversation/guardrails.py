@@ -129,13 +129,35 @@ def apply_transition_guardrails(
 
     # Check phase-state consistency
     expected_state = expected_state_for_phase(dialog_phase)
-    if expected_state and after_state.get("current_state") != expected_state.value:
+    current_state_str = after_state.get("current_state", "")
+    
+    # Special case: COMPLAINT and OUT_OF_DOMAIN states should keep their phases
+    # Don't override if current_state is STATE_8_COMPLAINT or STATE_9_OOD
+    if current_state_str == State.STATE_8_COMPLAINT.value:
+        if dialog_phase != "COMPLAINT":
+            logger.info(
+                "[SESSION %s] FSM guard: fixing dialog_phase=COMPLAINT for STATE_8_COMPLAINT",
+                session_id,
+            )
+            after_state["dialog_phase"] = "COMPLAINT"
+            dialog_phase = "COMPLAINT"
+            state_meta["dialog_phase"] = "COMPLAINT"
+    elif current_state_str == State.STATE_9_OOD.value:
+        if dialog_phase != "OUT_OF_DOMAIN":
+            logger.info(
+                "[SESSION %s] FSM guard: fixing dialog_phase=OUT_OF_DOMAIN for STATE_9_OOD",
+                session_id,
+            )
+            after_state["dialog_phase"] = "OUT_OF_DOMAIN"
+            dialog_phase = "OUT_OF_DOMAIN"
+            state_meta["dialog_phase"] = "OUT_OF_DOMAIN"
+    elif expected_state and current_state_str != expected_state.value:
         logger.warning(
             "[SESSION %s] FSM guard: phase=%s expected_state=%s got=%s",
             session_id,
             dialog_phase,
             expected_state.value,
-            after_state.get("current_state"),
+            current_state_str,
         )
         track_metric(
             "fsm_guard_phase_override",
@@ -143,7 +165,7 @@ def apply_transition_guardrails(
             {
                 "phase": str(dialog_phase),
                 "expected_state": expected_state.value,
-                "actual_state": str(after_state.get("current_state") or ""),
+                "actual_state": str(current_state_str or ""),
             },
         )
         after_state["current_state"] = expected_state.value
