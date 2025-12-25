@@ -113,6 +113,10 @@ async def payment_node(
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
     dialog_phase = state.get("dialog_phase", "")
+    
+    # Get payment sub-phase for observability and correct phase mapping
+    from src.agents.langgraph.state_prompts import get_payment_sub_phase
+    payment_sub_phase = get_payment_sub_phase(state)
 
     if settings.DEBUG_TRACE_LOGS:
         debug_log.node_entry(
@@ -122,8 +126,26 @@ async def payment_node(
             state_name=state.get("current_state", "?"),
             extra={
                 "awaiting": str(bool(state.get("awaiting_human_approval"))),
+                "payment_sub_phase": payment_sub_phase,
             },
         )
+    
+    # Observability: Log payment_sub_phase vs dialog_phase for mismatch detection
+    logger.info(
+        "[SESSION %s] Payment node: dialog_phase=%s, payment_sub_phase=%s",
+        session_id,
+        dialog_phase,
+        payment_sub_phase,
+    )
+    
+    # Detect phase mismatch (potential bug indicator)
+    if dialog_phase == "WAITING_FOR_PAYMENT_PROOF" and payment_sub_phase not in ("SHOW_PAYMENT", "THANK_YOU"):
+        logger.warning(
+            "[SESSION %s] Phase mismatch detected: dialog_phase=WAITING_FOR_PAYMENT_PROOF but payment_sub_phase=%s",
+            session_id,
+            payment_sub_phase,
+        )
+        track_metric("payment_phase_mismatch", 1, {"session_id": session_id, "sub_phase": payment_sub_phase})
 
     # Check if we're resuming from interrupt (HITL enabled)
     if state.get("awaiting_human_approval"):
@@ -133,6 +155,11 @@ async def payment_node(
     # User has sent delivery data or payment proof - process and go to upsell
     if dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
         return await _handle_delivery_data(state, runner, session_id)
+    
+    # Check if we're in WAITING_FOR_PAYMENT_METHOD phase
+    # User needs to choose payment method (full payment vs prepayment)
+    if dialog_phase == "WAITING_FOR_PAYMENT_METHOD":
+        return await _handle_payment_method_selection(state, runner, session_id)
 
     # First entry - prepare payment and request approval
     return await _prepare_payment_and_interrupt(state, runner, session_id)
@@ -230,10 +257,29 @@ async def _prepare_payment_and_interrupt(
         # Lightweight mode: skip human approval interrupt, but WAIT for delivery data
         # User must provide: ПІБ, телефон, адреса НП
         # THEN we go to upsell (after they send payment proof)
+        
+        # CRITICAL: Determine correct dialog_phase based on payment_sub_phase
+        # This prevents setting WAITING_FOR_PAYMENT_PROOF when we're still collecting data
+        from src.agents.langgraph.state_prompts import get_payment_sub_phase, determine_next_dialog_phase
+        
+        payment_sub_phase = get_payment_sub_phase(state)
+        
+        # Map payment_sub_phase to dialog_phase deterministically
+        phase_map = {
+            "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",
+            "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",  # Data collected, need payment method choice
+            "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",  # Requisites shown, waiting for screenshot
+            "THANK_YOU": "COMPLETED",
+        }
+        correct_dialog_phase = phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
+        
         logger.info(
-            "[SESSION %s] HITL disabled - waiting for delivery data (ПІБ, адреса, НП)",
+            "[SESSION %s] HITL disabled - payment_sub_phase=%s -> dialog_phase=%s",
             session_id,
+            payment_sub_phase,
+            correct_dialog_phase,
         )
+        
         # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
         # Розбиваємо по подвійних переносах рядків (\n\n) для багатобаблових відповідей
         response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
@@ -253,11 +299,11 @@ async def _prepare_payment_and_interrupt(
                         "escalation_level": "NONE",
                     },
                 },
-                "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                "dialog_phase": correct_dialog_phase,
                 "awaiting_human_approval": False,
                 "step_number": state.get("step_number", 0) + 1,
             },
-            goto="end",  # WAIT for user to send delivery data, don't skip to upsell!
+            goto="end",  # WAIT for user input, don't skip to upsell!
         )
 
         if settings.DEBUG_TRACE_LOGS:
@@ -265,7 +311,7 @@ async def _prepare_payment_and_interrupt(
                 session_id=session_id,
                 node_name="payment",
                 goto=cmd.goto,
-                new_phase="WAITING_FOR_PAYMENT_PROOF",
+                new_phase=correct_dialog_phase,
                 response_preview=response_text,
             )
         return cmd
@@ -314,6 +360,104 @@ async def _prepare_payment_and_interrupt(
             goto=cmd.goto,
             new_phase="WAITING_FOR_PAYMENT_PROOF",
             response_preview=response_text,
+        )
+    return cmd
+
+
+async def _handle_payment_method_selection(
+    state: dict[str, Any],
+    runner: Callable[..., Any] | None,
+    session_id: str,
+) -> Command[Literal["end", "payment"]]:
+    """
+    Handle payment method selection (full payment vs prepayment).
+    
+    User has chosen payment method ("Повна оплата" / "Передплата").
+    We show requisites and transition to WAITING_FOR_PAYMENT_PROOF.
+    """
+    from .utils import extract_user_message
+    
+    user_message = extract_user_message(state.get("messages", []))
+    products = state.get("selected_products", []) or state.get("offered_products", [])
+    products = await _ensure_prices_from_catalog(products, session_id=session_id)
+    total_price = sum(p.get("price", 0) for p in products)
+    
+    # Create deps with payment context
+    deps = create_deps_from_state(state)
+    deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
+    deps.selected_products = products
+    
+    # Set sub-phase to SHOW_PAYMENT (we're about to show requisites)
+    try:
+        from src.agents.langgraph.state_prompts import get_payment_sub_phase
+        deps.payment_sub_phase = "SHOW_PAYMENT"
+    except Exception:
+        deps.payment_sub_phase = "SHOW_PAYMENT"
+    
+    try:
+        # Call payment agent to generate response with requisites
+        response = await run_payment(
+            message=user_message,
+            deps=deps,
+            message_history=None,
+        )
+        response_text = response.reply_to_user or ""
+        
+        # Mark that payment details were sent
+        metadata_update = state.get("metadata", {}).copy()
+        metadata_update["payment_details_sent"] = True
+        metadata_update["awaiting_payment_confirmation"] = True
+        
+    except Exception as e:
+        logger.error("[SESSION %s] Payment method selection processing error: %s", session_id, e)
+        # Fallback: show requisites directly
+        from src.conf.payment_config import format_requisites_with_receipt_request
+        requisites_parts = format_requisites_with_receipt_request(price=int(total_price))
+        response_text = "\n\n".join(requisites_parts)
+        metadata_update = state.get("metadata", {}).copy()
+        metadata_update["payment_details_sent"] = True
+        metadata_update["awaiting_payment_confirmation"] = True
+    
+    logger.info(
+        "[SESSION %s] Payment method selected: '%s', showing requisites",
+        session_id,
+        user_message[:50] if user_message else "(empty)",
+    )
+    
+    # Split response into message bubbles
+    response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
+    if not response_parts:
+        response_parts = [response_text]
+    assistant_messages = [{"role": "assistant", "content": part} for part in response_parts]
+    
+    cmd = Command(
+        update={
+            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            "messages": assistant_messages,
+            "agent_response": {
+                "event": "simple_answer",
+                "messages": [{"type": "text", "content": part} for part in response_parts],
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "intent": "PAYMENT_DELIVERY",
+                    "escalation_level": "NONE",
+                },
+            },
+            "metadata": metadata_update,
+            "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",  # Now waiting for screenshot
+            "step_number": state.get("step_number", 0) + 1,
+        },
+        goto="end",
+    )
+    
+    if settings.DEBUG_TRACE_LOGS:
+        debug_log.node_exit(
+            session_id=session_id,
+            node_name="payment",
+            goto=cmd.goto,
+            new_phase="WAITING_FOR_PAYMENT_PROOF",
+            response_preview=response_text[:100],
         )
     return cmd
 

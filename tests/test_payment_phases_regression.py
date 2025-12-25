@@ -140,3 +140,69 @@ class TestPaymentPhaseRegression:
             f"got {phase_after_confirmation}"
         )
 
+    def test_payment_method_selection_not_treated_as_proof(self):
+        """
+        Regression test for log issue: "Повна оплата" after payment method question
+        should be treated as method selection, NOT as delivery/proof.
+        
+        Scenario from log:
+        - Bot asks: "Як вам зручніше оплатити: повна оплата 1885 грн чи передплата 200 грн?"
+        - User responds: "Повна оплата"
+        - Expected: WAITING_FOR_PAYMENT_METHOD → process as method selection → show requisites
+        - Bug: Was treated as WAITING_FOR_PAYMENT_PROOF → wrong handler → wrong response
+        """
+        # Simulate state after bot asked payment method question
+        state = create_initial_state(
+            session_id="test_payment_method_selection",
+            messages=[
+                {"role": "assistant", "content": "Як вам зручніше оплатити: повна оплата 1885 грн чи передплата 200 грн?"},
+                {"role": "user", "content": "Повна оплата"},
+            ],
+            metadata={
+                "channel": "instagram",
+                # All delivery data collected
+                "customer_name": "Іван Іванович",
+                "customer_phone": "+380951234567",
+                "customer_city": "Київ",
+                "customer_nova_poshta": "54",
+            },
+        )
+        state["current_state"] = State.STATE_5_PAYMENT_DELIVERY.value
+        state["dialog_phase"] = "WAITING_FOR_PAYMENT_METHOD"  # Bot asked method question
+        state["selected_products"] = [{"name": "Костюм Каприз", "price": 1885.0}]
+        
+        # Get payment sub-phase - should detect that we have data but no payment method selected yet
+        sub_phase = get_payment_sub_phase(state)
+        
+        # With all delivery data but user just selected method, we should be in CONFIRM_DATA or moving to SHOW_PAYMENT
+        # But the key is: dialog_phase should remain WAITING_FOR_PAYMENT_METHOD until requisites are shown
+        assert sub_phase in ("CONFIRM_DATA", "SHOW_PAYMENT"), (
+            f"After selecting payment method with all data, sub-phase should be CONFIRM_DATA or SHOW_PAYMENT, "
+            f"got {sub_phase}"
+        )
+        
+        # Critical: dialog_phase should NOT be WAITING_FOR_PAYMENT_PROOF until requisites are actually shown
+        # This is the bug we're fixing - payment_node was setting WAITING_FOR_PAYMENT_PROOF too early
+        phase = determine_next_dialog_phase(
+            current_state=State.STATE_5_PAYMENT_DELIVERY.value,
+            intent="PAYMENT_DELIVERY",
+            has_products=True,
+            has_size=True,
+            has_color=True,
+            user_confirmed=True,
+            payment_sub_phase=sub_phase,
+        )
+        
+        # If sub-phase is CONFIRM_DATA, phase should be WAITING_FOR_PAYMENT_METHOD
+        # If sub-phase is SHOW_PAYMENT (requisites shown), phase should be WAITING_FOR_PAYMENT_PROOF
+        if sub_phase == "CONFIRM_DATA":
+            assert phase == "WAITING_FOR_PAYMENT_METHOD", (
+                f"When sub-phase is CONFIRM_DATA (method selected, requisites not shown yet), "
+                f"dialog_phase should be WAITING_FOR_PAYMENT_METHOD, got {phase}"
+            )
+        elif sub_phase == "SHOW_PAYMENT":
+            assert phase == "WAITING_FOR_PAYMENT_PROOF", (
+                f"When sub-phase is SHOW_PAYMENT (requisites shown), "
+                f"dialog_phase should be WAITING_FOR_PAYMENT_PROOF, got {phase}"
+            )
+
