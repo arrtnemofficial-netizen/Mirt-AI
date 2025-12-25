@@ -65,6 +65,7 @@ def setup_opentelemetry_tracing() -> bool:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import ConsoleSpanExporter, BatchSpanProcessor
         from opentelemetry.sdk.resources import Resource
+        import logging
 
         # Create tracer provider
         resource = Resource.create(
@@ -75,17 +76,25 @@ def setup_opentelemetry_tracing() -> bool:
         )
         provider = TracerProvider(resource=resource)
 
-        # Add console exporter (can be replaced with OTLP exporter for production)
-        console_exporter = ConsoleSpanExporter()
-        processor = BatchSpanProcessor(console_exporter)
-        provider.add_span_processor(processor)
+        # Add console exporter only in development (disable in production to avoid log spam)
+        is_production = settings.PUBLIC_BASE_URL != "http://localhost:8000"
+        if not is_production:
+            console_exporter = ConsoleSpanExporter()
+            # Set OpenTelemetry logger to DEBUG to reduce noise
+            otel_logger = logging.getLogger("opentelemetry.sdk.trace.export")
+            otel_logger.setLevel(logging.DEBUG)
+            processor = BatchSpanProcessor(console_exporter)
+            provider.add_span_processor(processor)
+            logger.info("OpenTelemetry tracing enabled (console exporter, debug level)")
+        else:
+            # In production, don't use console exporter (use OTLP or disable)
+            logger.info("OpenTelemetry tracing enabled (no console exporter in production)")
 
         # Set global tracer provider
         trace.set_tracer_provider(provider)
         _opentelemetry_tracer = trace.get_tracer(__name__)
         _tracing_enabled = True
 
-        logger.info("OpenTelemetry tracing enabled (console exporter)")
         return True
 
     except ImportError:

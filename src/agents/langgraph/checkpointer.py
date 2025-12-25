@@ -284,15 +284,27 @@ def _compact_payload(
 
     compaction_ratio = payload_size_after / payload_size_before if payload_size_before > 0 else 1.0
     
-    logger.info(
-        "[COMPACTION] Payload compacted: size_before=%d size_after=%d ratio=%.2f messages_before=%d messages_after=%d adaptive=%s",
-        payload_size_before,
-        payload_size_after,
-        compaction_ratio,
-        messages_before,
-        messages_after,
-        is_large_payload,
-    )
+    # Log compaction details at DEBUG level to reduce log noise
+    # Only log at INFO if compaction actually reduced size significantly or is adaptive
+    if is_large_payload or compaction_ratio < 0.8:
+        logger.info(
+            "[COMPACTION] Payload compacted: size_before=%d size_after=%d ratio=%.2f messages_before=%d messages_after=%d adaptive=%s",
+            payload_size_before,
+            payload_size_after,
+            compaction_ratio,
+            messages_before,
+            messages_after,
+            is_large_payload,
+        )
+    else:
+        logger.debug(
+            "[COMPACTION] Payload compacted: size_before=%d size_after=%d ratio=%.2f messages_before=%d messages_after=%d",
+            payload_size_before,
+            payload_size_after,
+            compaction_ratio,
+            messages_before,
+            messages_after,
+        )
     
     return checkpoint
 

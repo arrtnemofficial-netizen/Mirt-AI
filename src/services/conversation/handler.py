@@ -112,7 +112,17 @@ class ConversationHandler:
                     step_number=0,
                 )
             
-            # Validate state structure (defensive check for corrupted states)
+            # Fill in missing required fields BEFORE validation
+            if "messages" not in state:
+                state["messages"] = []
+            if "metadata" not in state:
+                state["metadata"] = {"session_id": session_id, "vision_greeted": False}
+            state["metadata"].setdefault("session_id", session_id)
+            state["metadata"].setdefault("thread_id", state["metadata"].get("thread_id", session_id))
+            state.setdefault("session_id", session_id)
+            state.setdefault("current_state", "STATE_0_INIT")
+            
+            # Validate state structure AFTER filling missing fields (defensive check for corrupted states)
             from src.core.conversation_state import validate_state_structure
             
             is_valid, validation_errors = validate_state_structure(state)
@@ -135,13 +145,6 @@ class ConversationHandler:
                     })
                 except Exception:
                     pass  # Don't fail if metrics unavailable
-            
-            if "messages" not in state:
-                state["messages"] = []
-            if "metadata" not in state:
-                state["metadata"] = {"session_id": session_id, "vision_greeted": False}
-            state["metadata"].setdefault("session_id", session_id)
-            state["metadata"].setdefault("thread_id", state["metadata"].get("thread_id", session_id))
 
             state.setdefault("session_id", session_id)
             state["messages"].append({"role": "user", "content": text})
