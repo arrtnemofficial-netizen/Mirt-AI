@@ -228,10 +228,20 @@ def route_after_intent(state: dict[str, Any]) -> IntentRoute:
 
     intent = state.get("detected_intent", "DISCOVERY_OR_QUESTION")
     current_state = state.get("current_state", State.STATE_0_INIT.value)
+    has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+    image_url = state.get("image_url") or state.get("metadata", {}).get("image_url")
 
-    logger.debug("Routing after intent: %s (state=%s)", intent, current_state)
+    logger.info(
+        "[ROUTING] route_after_intent: intent=%s state=%s has_image=%s image_url=%s",
+        intent,
+        current_state,
+        has_image,
+        "present" if image_url else "none",
+    )
 
-    return _resolve_intent_route(intent, current_state, state)
+    route = _resolve_intent_route(intent, current_state, state)
+    logger.info("[ROUTING] route_after_intent: intent=%s -> route=%s", intent, route)
+    return route
 
 
 def _resolve_intent_route(

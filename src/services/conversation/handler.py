@@ -157,13 +157,24 @@ class ConversationHandler:
 
             if extra_metadata:
                 state["metadata"].update(extra_metadata)
-                if extra_metadata.get("has_image"):
+                # Check for image in extra_metadata (either has_image flag or image_url presence)
+                image_url_from_metadata = extra_metadata.get("image_url")
+                has_image_flag = extra_metadata.get("has_image", False)
+                
+                # If image_url is present, treat it as has_image=True (even if flag is not set)
+                if image_url_from_metadata or has_image_flag:
                     from src.services.infra.media_utils import normalize_image_url
-                    normalized = normalize_image_url(extra_metadata.get("image_url"))
+                    normalized = normalize_image_url(image_url_from_metadata)
                     if normalized:
                         state["has_image"] = True
                         state["image_url"] = normalized
+                        state["metadata"]["has_image"] = True
                         state["metadata"]["image_url"] = normalized
+                        logger.debug(
+                            "[SESSION %s] Image detected: url=%s (from extra_metadata)",
+                            session_id,
+                            normalized[:50] if normalized else None,
+                        )
 
             # Trace ID
             trace_id = None
