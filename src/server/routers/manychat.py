@@ -83,12 +83,26 @@ async def manychat_webhook(
             
             # External Request format: {type, clientId, message, image_url}
             # Webhook format: {subscriber: {id}, message: {text}, ...}
+            # #region agent log
+            try:
+                import json as _json
+                with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"manychat.py:86","message":"Webhook payload format check","data":{"has_clientId":bool(payload.get("clientId")),"has_sessionId":bool(payload.get("sessionId")),"has_subscriber":bool(payload.get("subscriber"))},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except: pass
+            # #endregion
             if payload.get("clientId") or payload.get("sessionId"):
                 # External Request / n8n format
                 user_id = str(payload.get("clientId") or payload.get("sessionId") or payload.get("client_id") or payload.get("session_id") or "unknown")
                 text = payload.get("message") or payload.get("messages") or ""
                 image_url = payload.get("image_url") or payload.get("imageUrl") or payload.get("photo_url") or payload.get("photoUrl") or payload.get("image") or payload.get("photo")
                 channel = payload.get("type") or "instagram"
+                # #region agent log
+                try:
+                    import json as _json
+                    with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(_json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"manychat.py:91","message":"External Request format path","data":{"user_id":user_id,"text_preview":text[:50],"image_url":image_url[:50] if image_url else None},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                except: pass
+                # #endregion
             else:
                 # Standard ManyChat webhook format
                 message = payload.get("message") or payload.get("data", {}).get("message") or {}
@@ -113,6 +127,13 @@ async def manychat_webhook(
                 
                 # FALLBACK: Extract image URL from text if it looks like a URL
                 # ManyChat sometimes sends image URLs in text field (e.g., ".; https://...")
+                # #region agent log
+                try:
+                    import json as _json
+                    with open(r'c:\Users\Zoroo\Documents\GitHub\Mirt-AI\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(_json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"manychat.py:116","message":"Before URL extraction check","data":{"user_id":user_id,"image_url":image_url[:50] if image_url else None,"text":text[:100] if text else None,"text_bool":bool(text)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                except: pass
+                # #endregion
                 if not image_url and text:
                     # Look for URLs in text (especially Facebook CDN URLs)
                     url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
