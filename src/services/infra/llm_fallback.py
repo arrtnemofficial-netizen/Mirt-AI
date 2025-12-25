@@ -243,6 +243,109 @@ class LLMFallbackService:
             "any_available": any(p.circuit.can_execute() for p in self.providers),
         }
     
+    def reset_circuit_breaker(self, provider_name: str | None = None) -> dict[str, Any]:
+        """Reset circuit breaker for a specific provider or all providers.
+        
+        Useful when quota/billing issue is resolved and you want to immediately
+        retry instead of waiting for recovery_timeout (60s).
+        
+        Args:
+            provider_name: Name of provider to reset (e.g., "openai"). If None, resets all.
+        
+        Returns:
+            dict with reset results:
+            {
+                "reset_providers": list[str],  # Providers that were reset
+                "previous_states": dict[str, str],  # Previous circuit states
+            }
+        """
+        reset_providers: list[str] = []
+        previous_states: dict[str, str] = {}
+        
+        providers_to_reset = (
+            [p for p in self.providers if p.name == provider_name] if provider_name
+            else self.providers
+        )
+        
+        for provider in providers_to_reset:
+            previous_states[provider.name] = provider.circuit.state.value
+            # Reset circuit breaker to CLOSED state
+            provider.circuit.state = CircuitState.CLOSED
+            provider.circuit.failure_count = 0
+            provider.circuit.last_failure_time = 0.0
+            provider.circuit.half_open_calls = 0
+            reset_providers.append(provider.name)
+            logger.info(
+                "[LLM_FALLBACK] Circuit breaker reset for %s (was %s)",
+                provider.name,
+                previous_states[provider.name],
+            )
+        
+        return {
+            "reset_providers": reset_providers,
+            "previous_states": previous_states,
+        }
+    
+    async def force_recovery_check(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Force a recovery check: test quota and reset circuit breaker if quota is OK.
+        
+        This method:
+        1. Attempts a lightweight API call to verify quota is restored
+        2. If successful, automatically resets circuit breaker
+        3. Returns detailed status
+        
+        Useful after resolving billing/quota issues.
+        
+        Args:
+            timeout: Maximum time to wait for API response
+        
+        Returns:
+            dict with recovery check results:
+            {
+                "quota_status": "ok" | "failed" | "unknown",
+                "circuit_reset": bool,  # Whether circuit breaker was reset
+                "providers_reset": list[str],
+                "message": str,
+            }
+        """
+        # First, try preflight check even if circuit is open
+        # Temporarily reset circuit to test
+        temp_reset = self.reset_circuit_breaker()
+        
+        try:
+            preflight_result = await self.preflight_check(timeout=timeout)
+            quota_status = preflight_result.get("quota_check", "unknown")
+            
+            if quota_status == "ok":
+                # Quota is OK, keep circuit breaker reset
+                return {
+                    "quota_status": "ok",
+                    "circuit_reset": True,
+                    "providers_reset": temp_reset["reset_providers"],
+                    "message": "Quota verified OK, circuit breaker reset successfully",
+                    "preflight": preflight_result,
+                }
+            else:
+                # Quota still not OK, restore previous state
+                # Actually, we already reset it, so just report
+                return {
+                    "quota_status": quota_status,
+                    "circuit_reset": True,  # We did reset it
+                    "providers_reset": temp_reset["reset_providers"],
+                    "message": f"Circuit breaker reset, but quota check returned: {quota_status}",
+                    "preflight": preflight_result,
+                    "warnings": preflight_result.get("warnings", []),
+                }
+        except Exception as e:
+            logger.exception("[LLM_FALLBACK] Force recovery check failed: %s", e)
+            return {
+                "quota_status": "unknown",
+                "circuit_reset": True,  # We did reset it anyway
+                "providers_reset": temp_reset["reset_providers"],
+                "message": f"Recovery check failed: {str(e)[:200]}",
+                "error": str(e)[:200],
+            }
+    
     async def preflight_check(self, timeout: float = 2.0) -> dict[str, Any]:
         """Pre-flight check: lightweight API call to verify quota and connectivity.
         

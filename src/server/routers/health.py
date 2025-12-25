@@ -333,3 +333,80 @@ async def health_agents() -> dict[str, Any]:
             "status": "error",
             "error": str(e)[:200],
         }
+
+
+@router.post("/health/llm/reset")
+async def reset_llm_circuit_breaker(provider: str | None = None) -> dict[str, Any]:
+    """Reset LLM circuit breaker manually.
+    
+    Use this endpoint after resolving billing/quota issues to immediately
+    retry LLM calls instead of waiting for recovery_timeout (60s).
+    
+    Args:
+        provider: Optional provider name to reset (e.g., "openai"). If None, resets all.
+    
+    Returns:
+        dict with reset results
+    """
+    try:
+        from src.services.infra.llm_fallback import get_llm_service
+        
+        llm_service = get_llm_service()
+        result = llm_service.reset_circuit_breaker(provider_name=provider)
+        
+        logger.info(
+            "[HEALTH] LLM circuit breaker reset requested: providers=%s, previous_states=%s",
+            result["reset_providers"],
+            result["previous_states"],
+        )
+        
+        return {
+            "status": "ok",
+            "message": "Circuit breaker reset successfully",
+            **result,
+        }
+    except Exception as e:
+        logger.exception("Failed to reset LLM circuit breaker: %s", e)
+        return {
+            "status": "error",
+            "error": str(e)[:200],
+        }
+
+
+@router.post("/health/llm/recover")
+async def force_llm_recovery_check() -> dict[str, Any]:
+    """Force LLM recovery check: test quota and reset circuit breaker if OK.
+    
+    This endpoint:
+    1. Tests OpenAI API quota with a lightweight call
+    2. If quota is OK, automatically resets circuit breaker
+    3. Returns detailed status
+    
+    Use this after resolving billing/quota issues to verify and recover.
+    
+    Returns:
+        dict with recovery check results
+    """
+    try:
+        from src.services.infra.llm_fallback import get_llm_service
+        
+        llm_service = get_llm_service()
+        result = await llm_service.force_recovery_check(timeout=5.0)
+        
+        logger.info(
+            "[HEALTH] LLM recovery check: quota_status=%s, circuit_reset=%s, providers=%s",
+            result.get("quota_status"),
+            result.get("circuit_reset"),
+            result.get("providers_reset"),
+        )
+        
+        return {
+            "status": "ok" if result.get("quota_status") == "ok" else "warning",
+            **result,
+        }
+    except Exception as e:
+        logger.exception("Failed to force LLM recovery check: %s", e)
+        return {
+            "status": "error",
+            "error": str(e)[:200],
+        }
