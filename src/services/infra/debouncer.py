@@ -526,6 +526,12 @@ class RedisDebouncer:
                 f"[REDIS_DEBOUNCER] {session_id}: Aggregated {len(messages)} messages. "
                 f"Final Text: '{combined_text[:50]}...' has_image={has_image} image_url={'present' if last_image_url else 'none'}"
             )
+            
+            # DEBUG: Log each message's image status
+            for i, msg in enumerate(messages):
+                logger.debug(
+                    f"[REDIS_DEBOUNCER] Message {i+1}/{len(messages)}: has_image={msg.has_image} image_url={'present' if msg.image_url else 'none'}"
+                )
 
             # Track metrics
             try:

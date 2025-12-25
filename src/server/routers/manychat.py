@@ -117,23 +117,42 @@ async def manychat_webhook(
                     # Look for URLs in text (especially Facebook CDN URLs)
                     url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
                     urls = re.findall(url_pattern, text)
+                    logger.info(
+                        "[MANYCHAT_WEBHOOK] Checking text for image URLs: user_id=%s found_urls_count=%d urls=%s",
+                        user_id,
+                        len(urls),
+                        [u[:50] for u in urls[:3]],  # Show first 3 URLs
+                    )
                     for url in urls:
                         # Check if it's a known image CDN URL
-                        if any(cdn in url.lower() for cdn in ['fbsbx.com', 'fbcdn.net', 'lookaside', 'cdn', 'image', 'photo', 'img']):
+                        url_lower = url.lower()
+                        is_image_cdn = any(cdn in url_lower for cdn in ['fbsbx.com', 'fbcdn.net', 'lookaside', 'cdn', 'image', 'photo', 'img'])
+                        logger.info(
+                            "[MANYCHAT_WEBHOOK] Checking URL: url=%s is_image_cdn=%s",
+                            url[:80],
+                            is_image_cdn,
+                        )
+                        if is_image_cdn:
                             image_url = url
                             # Remove URL from text (clean up ".; " prefix if present)
                             text = re.sub(r'\.;\s*' + re.escape(url), '', text)
                             text = text.replace(url, '').strip()
                             logger.info(
-                                "[MANYCHAT_WEBHOOK] Extracted image URL from text: user_id=%s url=%s cleaned_text=%s",
+                                "[MANYCHAT_WEBHOOK] ✅ Extracted image URL from text: user_id=%s url=%s cleaned_text=%s",
                                 user_id,
-                                url[:50],
+                                url[:80],
                                 safe_preview(text, 30),
                             )
                             break
+                    if not image_url:
+                        logger.warning(
+                            "[MANYCHAT_WEBHOOK] ⚠️ No image URL extracted from text despite URLs found: user_id=%s text_preview=%s",
+                            user_id,
+                            safe_preview(text, 100),
+                        )
                 
-                # DEBUG: Log extracted values
-                logger.debug(
+                # Log extracted values (INFO level for debugging)
+                logger.info(
                     "[MANYCHAT_WEBHOOK] Extracted: user_id=%s text_preview=%s image_url=%s attachments_count=%d",
                     user_id,
                     safe_preview(text, 50),

@@ -38,8 +38,8 @@ async def process_manychat_pipeline(
     on_superseded: Callable[[], None] | None = None,
     on_debounced: Callable[[BufferedMessage, bool, str, dict[str, Any] | None], None] | None = None,
 ) -> PipelineResult | None:
-    # DEBUG: Log what we're creating BufferedMessage with
-    logger.debug(
+    # Log what we're creating BufferedMessage with (INFO level for debugging)
+    logger.info(
         "[PIPELINE] Creating BufferedMessage: user_id=%s text_preview=%s image_url=%s has_image=%s",
         user_id,
         text[:50] if text else "",

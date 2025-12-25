@@ -179,8 +179,8 @@ class ManyChatAsyncService:
         image_url_raw = image_url
         image_url = normalize_image_url(image_url)
         
-        # DEBUG: Log image_url before and after normalization
-        logger.debug(
+        # Log image_url before and after normalization (INFO level for debugging)
+        logger.info(
             "[MANYCHAT_ASYNC] process_message_async: user_id=%s image_url_raw=%s image_url_normalized=%s text_preview=%s",
             user_id,
             image_url_raw[:50] if image_url_raw else None,
