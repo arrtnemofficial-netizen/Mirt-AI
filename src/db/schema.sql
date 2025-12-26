@@ -10,11 +10,11 @@ create table if not exists products (
     description text,
     category text not null,
     subcategory text,
-    price numeric(10, 2) not null,
     sizes text[] not null default '{}', -- Array of available sizes
     colors text[] not null default '{}', -- Array of available colors
     photo_url text,
     sku text unique,
+    price_by_size jsonb, -- Size-based pricing map
     
     -- Metadata
     created_at timestamptz default now(),
@@ -26,7 +26,6 @@ create table if not exists products (
 
 -- Indexes for faster search
 create index if not exists idx_products_category on products(category);
-create index if not exists idx_products_price on products(price);
 
 -- ============================================================================
 -- ORDERS TABLE

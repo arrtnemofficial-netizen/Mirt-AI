@@ -1,8 +1,8 @@
 {
   "_generated": {
     "source": "products_master.yaml",
-    "timestamp": "2025-12-07T17:32:35.384967",
-    "catalog_hash": "da84300ec88a"
+    "timestamp": "2025-12-26T18:53:13.924182",
+    "catalog_hash": "ed2953828c7a"
   },
   "visual_recognition_guide": {
     "description": "Детальні візуальні характеристики товарів MIRT",
@@ -14,7 +14,7 @@
           "малина",
           "чорний",
           "червоний",
-          "коричневий",
+          "шоколадний",
           "рожевий",
           "сірий"
         ],

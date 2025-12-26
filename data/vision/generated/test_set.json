@@ -6,7 +6,10 @@
     "expected_product": "Сукня Анна",
     "expected_color": "голубий",
     "sku": "3443041-BLUE",
-    "expected_price": 1850,
+    "expected_price_range": {
+      "min": 2050,
+      "max": 2050
+    },
     "description": "Сукня Анна голубий - поплін, підкладка саржа"
   },
   {
@@ -16,7 +19,10 @@
     "expected_product": "Сукня Анна",
     "expected_color": "малина",
     "sku": "3443041-RASPBERRY",
-    "expected_price": 1850,
+    "expected_price_range": {
+      "min": 2050,
+      "max": 2050
+    },
     "description": "Сукня Анна малина - поплін, підкладка саржа"
   },
   {
@@ -26,7 +32,10 @@
     "expected_product": "Сукня Анна",
     "expected_color": "чорний",
     "sku": "3443041-BLACK",
-    "expected_price": 1850,
+    "expected_price_range": {
+      "min": 2050,
+      "max": 2050
+    },
     "description": "Сукня Анна чорний - поплін, підкладка саржа"
   },
   {
@@ -36,18 +45,24 @@
     "expected_product": "Сукня Анна",
     "expected_color": "червоний",
     "sku": "3786442-RED-CHECK",
-    "expected_price": 1850,
+    "expected_price_range": {
+      "min": 2050,
+      "max": 2050
+    },
     "description": "Сукня Анна червоний - поплін, підкладка саржа"
   },
   {
-    "id": "suknya_anna_коричневий",
+    "id": "suknya_anna_шоколадний",
     "product_id": 3443041,
     "image_url": "https://cdn.sitniks.com/cmp-2065/products/2024-09-08/809486/997072-1725797349166.jpeg",
     "expected_product": "Сукня Анна",
-    "expected_color": "коричневий",
+    "expected_color": "шоколадний",
     "sku": "3646358-CHOCOLATE",
-    "expected_price": 1850,
-    "description": "Сукня Анна коричневий - поплін, підкладка саржа"
+    "expected_price_range": {
+      "min": 2050,
+      "max": 2050
+    },
+    "description": "Сукня Анна шоколадний - поплін, підкладка саржа"
   },
   {
     "id": "suknya_anna_рожевий",
@@ -56,7 +71,10 @@
     "expected_product": "Сукня Анна",
     "expected_color": "рожевий",
     "sku": "3663608-ROSE-LEO",
-    "expected_price": 1850,
+    "expected_price_range": {
+      "min": 2050,
+      "max": 2050
+    },
     "description": "Сукня Анна рожевий - поплін, підкладка саржа"
   },
   {
@@ -66,7 +84,10 @@
     "expected_product": "Сукня Анна",
     "expected_color": "сірий",
     "sku": "3646356-GREY",
-    "expected_price": 1850,
+    "expected_price_range": {
+      "min": 2050,
+      "max": 2050
+    },
     "description": "Сукня Анна сірий - поплін, підкладка саржа"
   },
   {
@@ -76,7 +97,10 @@
     "expected_product": "Костюм Валері",
     "expected_color": "універсальний",
     "sku": "9251497-UNIV",
-    "expected_price": 1950,
+    "expected_price_range": {
+      "min": 2150,
+      "max": 2150
+    },
     "description": "Костюм Валері універсальний - бавовна"
   },
   {
@@ -86,19 +110,25 @@
     "expected_product": "Костюм Ритм",
     "expected_color": "рожевий",
     "sku": "11089055-PINK",
-    "expected_price": 1975,
+    "expected_price_range": {
+      "min": 2175,
+      "max": 2175
+    },
     "description": "Костюм Ритм рожевий - бавовна (щільна, еластична)",
     "critical_check": "Бачиш КАПЮШОН? Так = Ритм. Ні = Каприз"
   },
   {
-    "id": "kostum_ritm_коричневий",
+    "id": "kostum_ritm_шоколадний",
     "product_id": 11089055,
     "image_url": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/f11460/bdea2d-1758524955446.jpeg",
     "expected_product": "Костюм Ритм",
-    "expected_color": "коричневий",
+    "expected_color": "шоколадний",
     "sku": "11089244-BROWN",
-    "expected_price": 1975,
-    "description": "Костюм Ритм коричневий - бавовна (щільна, еластична)",
+    "expected_price_range": {
+      "min": 2175,
+      "max": 2175
+    },
+    "description": "Костюм Ритм шоколадний - бавовна (щільна, еластична)",
     "critical_check": "Бачиш КАПЮШОН? Так = Ритм. Ні = Каприз"
   },
   {
@@ -108,7 +138,10 @@
     "expected_product": "Костюм Ритм",
     "expected_color": "бордовий",
     "sku": "11089288-BURGUNDY",
-    "expected_price": 1975,
+    "expected_price_range": {
+      "min": 2175,
+      "max": 2175
+    },
     "description": "Костюм Ритм бордовий - бавовна (щільна, еластична)",
     "critical_check": "Бачиш КАПЮШОН? Так = Ритм. Ні = Каприз"
   },
@@ -119,7 +152,10 @@
     "expected_product": "Костюм Каприз",
     "expected_color": "рожевий",
     "sku": "11100944-PINK",
-    "expected_price": 1885,
+    "expected_price_range": {
+      "min": 2085,
+      "max": 2085
+    },
     "description": "Костюм Каприз рожевий - бавовна (теплий бленд)",
     "critical_check": "НЕМАЄ капюшона? Так = Каприз. Є = Ритм"
   },
@@ -130,7 +166,10 @@
     "expected_product": "Костюм Каприз",
     "expected_color": "бордовий",
     "sku": "11101056-BURGUNDY",
-    "expected_price": 1885,
+    "expected_price_range": {
+      "min": 2085,
+      "max": 2085
+    },
     "description": "Костюм Каприз бордовий - бавовна (теплий бленд)",
     "critical_check": "НЕМАЄ капюшона? Так = Каприз. Є = Ритм"
   },
@@ -141,7 +180,10 @@
     "expected_product": "Костюм Каприз",
     "expected_color": "шоколадний",
     "sku": "11101074-BROWN",
-    "expected_price": 1885,
+    "expected_price_range": {
+      "min": 2085,
+      "max": 2085
+    },
     "description": "Костюм Каприз шоколадний - бавовна (теплий бленд)",
     "critical_check": "НЕМАЄ капюшона? Так = Каприз. Є = Ритм"
   },
@@ -278,7 +320,10 @@
     "expected_product": "Тренч екошкіра",
     "expected_color": "капучіно",
     "sku": "10676401-CAPPUCCINO",
-    "expected_price": 2180,
+    "expected_price_range": {
+      "min": 2380,
+      "max": 2380
+    },
     "description": "Тренч екошкіра капучіно - екошкіра (БЛИСКУЧА!)",
     "critical_check": "Тканина БЛИЩИТЬ? Так = Екошкіра. Ні = Тканинний"
   },
@@ -289,7 +334,10 @@
     "expected_product": "Тренч екошкіра",
     "expected_color": "молочний",
     "sku": "25159535-MILK",
-    "expected_price": 2180,
+    "expected_price_range": {
+      "min": 2380,
+      "max": 2380
+    },
     "description": "Тренч екошкіра молочний - екошкіра (БЛИСКУЧА!)",
     "critical_check": "Тканина БЛИЩИТЬ? Так = Екошкіра. Ні = Тканинний"
   },
@@ -300,7 +348,10 @@
     "expected_product": "Тренч екошкіра",
     "expected_color": "чорний",
     "sku": "60809311-BLACK",
-    "expected_price": 2180,
+    "expected_price_range": {
+      "min": 2380,
+      "max": 2380
+    },
     "description": "Тренч екошкіра чорний - екошкіра (БЛИСКУЧА!)",
     "critical_check": "Тканина БЛИЩИТЬ? Так = Екошкіра. Ні = Тканинний"
   },
@@ -311,7 +362,10 @@
     "expected_product": "Тренч",
     "expected_color": "рожевий",
     "sku": "90308298-PINK",
-    "expected_price": 2380,
+    "expected_price_range": {
+      "min": 2580,
+      "max": 2580
+    },
     "description": "Тренч рожевий - костюмна тканина (МАТОВА)",
     "critical_check": "Тканина НЕ блищить (матова)? Так = Тканинний. Блищить = Екошкіра"
   },
@@ -322,7 +376,10 @@
     "expected_product": "Тренч",
     "expected_color": "голубий",
     "sku": "10984996-BLUE",
-    "expected_price": 2380,
+    "expected_price_range": {
+      "min": 2580,
+      "max": 2580
+    },
     "description": "Тренч голубий - костюмна тканина (МАТОВА)",
     "critical_check": "Тканина НЕ блищить (матова)? Так = Тканинний. Блищить = Екошкіра"
   },
@@ -333,7 +390,10 @@
     "expected_product": "Тренч",
     "expected_color": "темно синій",
     "sku": "1091363-NAVY",
-    "expected_price": 2380,
+    "expected_price_range": {
+      "min": 2580,
+      "max": 2580
+    },
     "description": "Тренч темно синій - костюмна тканина (МАТОВА)",
     "critical_check": "Тканина НЕ блищить (матова)? Так = Тканинний. Блищить = Екошкіра"
   }

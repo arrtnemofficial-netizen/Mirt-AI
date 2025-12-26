@@ -44,11 +44,11 @@ BEGIN
             description TEXT,
             category TEXT NOT NULL,
             subcategory TEXT,
-            price NUMERIC(10, 2) NOT NULL,
             sizes TEXT[] NOT NULL DEFAULT ''{}'',
             colors TEXT[] NOT NULL DEFAULT ''{}'',
             photo_url TEXT,
             sku TEXT UNIQUE,
+            price_by_size JSONB,
             embedding VECTOR(1536),
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -61,11 +61,11 @@ BEGIN
             description TEXT,
             category TEXT NOT NULL,
             subcategory TEXT,
-            price NUMERIC(10, 2) NOT NULL,
             sizes TEXT[] NOT NULL DEFAULT ''{}'',
             colors TEXT[] NOT NULL DEFAULT ''{}'',
             photo_url TEXT,
             sku TEXT UNIQUE,
+            price_by_size JSONB,
             embedding BYTEA,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -75,7 +75,6 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
-CREATE INDEX IF NOT EXISTS idx_products_price ON products(price);
 
 -- ============================================================================
 -- 2. ORDERS TABLE (with user_nickname!)

@@ -35,7 +35,7 @@ If you change how the bot handles "Returns", you MUST add a "Return Policy" scen
 
 > **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
 
-- Якщо змінюєш архітектуру → Оновлюй `DEV_SYSTEM_GUIDE.md` (НЕ `docs/ARCHITECTURE.md` — він legacy).
+- Якщо змінюєш архітектуру → Оновлюй `docs/development/DEV_SYSTEM_GUIDE.md` (НЕ `docs/architecture/ARCHITECTURE.md` — він legacy).
 - Якщо додаєш Env Vars → Оновлюй `README.md` і `.env.example`.
-- Якщо змінюєш FSM логіку → **СПОЧАТКУ** оновлюй `docs/FSM_TRANSITION_TABLE.md`, потім код.
-- Якщо змінюєш промпти → Читай `docs/PROMPT_ENGINEERING.md`.
+- Якщо змінюєш FSM логіку → **СПОЧАТКУ** оновлюй `docs/architecture/FSM_TRANSITION_TABLE.md`, потім код.
+- Якщо змінюєш промпти → Читай `docs/development/PROMPT_ENGINEERING.md`.

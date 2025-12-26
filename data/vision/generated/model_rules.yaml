@@ -1,13 +1,13 @@
 _generated:
   source: products_master.yaml
-  timestamp: '2025-12-07T17:32:35.088130'
-  catalog_hash: da84300ec88a
+  timestamp: '2025-12-26T18:53:13.892134'
+  catalog_hash: ed2953828c7a
   warning: НЕ РЕДАГУЙ! Зміни в products_master.yaml → python generate.py
 MODEL_RULES:
   Сукня Анна:
     category: сукні
     fabric_type: поплін, підкладка саржа
-    price: 1850
+    price: 2050-2050
     visual_markers:
     - А-силует (розширюється від талії донизу)
     - Довжина МІДІ (нижче коліна)
@@ -26,7 +26,7 @@ MODEL_RULES:
   Костюм Валері:
     category: костюми
     fabric_type: бавовна
-    price: 1950
+    price: 2150-2150
     visual_markers:
     - Блуза У СМУЖКУ (горизонтальну)
     - Штани PALAZZO (дуже широкі, прямі)
@@ -42,7 +42,7 @@ MODEL_RULES:
   Костюм Ритм:
     category: костюми
     fabric_type: бавовна (щільна, еластична)
-    price: 1975
+    price: 2175-2175
     visual_markers:
     - КАПЮШОН (обов'язково!)
     - Oversize ХУДІ
@@ -64,7 +64,7 @@ MODEL_RULES:
   Костюм Каприз:
     category: костюми
     fabric_type: бавовна (теплий бленд)
-    price: 1885
+    price: 2085-2085
     visual_markers:
     - БЕЗ КАПЮШОНА (світшот!)
     - Штани PALAZZO (дуже широкі)
@@ -168,7 +168,7 @@ MODEL_RULES:
   Тренч екошкіра:
     category: верхній одяг
     fabric_type: екошкіра (БЛИСКУЧА!)
-    price: 2180
+    price: 2380-2380
     visual_markers:
     - БЛИСКУЧА поверхня (екошкіра)
     - Пояс на талії
@@ -191,7 +191,7 @@ MODEL_RULES:
   Тренч:
     category: верхній одяг
     fabric_type: костюмна тканина (МАТОВА)
-    price: 2380
+    price: 2580-2580
     visual_markers:
     - МАТОВА тканина (НЕ блищить!)
     - Пояс на талії

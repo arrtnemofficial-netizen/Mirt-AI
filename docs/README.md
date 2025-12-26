@@ -1,38 +1,36 @@
-# 📚 MIRT AI — Технічна документація (docs/)
+﻿# MIRT AI — Документація (docs/)
 
 > **Центральний індекс:** [../DOCUMENTATION.md](../DOCUMENTATION.md)
 
----
+## Швидкі посилання
+- Старт для розробника: `development/DEV_SYSTEM_GUIDE.md`
+- Деплой: `deployment/DEPLOYMENT.md`
+- Каталог і БД: `database/POSTGRES_CATALOG_SYNC.md`
+- Тести: `quality/TESTING.md`
 
-## ✅ АКТУАЛЬНІ ДОКУМЕНТИ
+## Структура папок
+- `architecture/` — архітектура та FSM
+- `development/` — гайд розробника, внески, промпти
+- `deployment/` — деплой та runbook
+- `database/` — Postgres міграції та sync
+- `integrations/` — ManyChat / CRM інтеграції
+- `operations/` — фонові задачі
+- `quality/` — тестування та технічний борг
+- `status/` — статуси та аналізи
+- `roadmap/` — плани розвитку
+- `audits/` — аудити
 
-| Документ | Опис |
-|----------|------|
-| [DEV_SYSTEM_GUIDE.md](DEV_SYSTEM_GUIDE.md) | 👨‍💻 **Повний гайд розробника** |
-| [STATUS_REPORT.md](STATUS_REPORT.md) | 📊 Поточний статус реалізації |
-| [AGENTS_ARCHITECTURE.md](AGENTS_ARCHITECTURE.md) | 🤖 Архітектура агентів |
-| [FSM_TRANSITION_TABLE.md](FSM_TRANSITION_TABLE.md) | 🔀 **FROZEN SPEC:** Стани, інтенти, переходи |
-| [TESTING.md](TESTING.md) | 🧪 Стратегія тестування (Golden Suite) |
-| [PROMPT_ENGINEERING.md](PROMPT_ENGINEERING.md) | ✏️ Гайд по роботі з промптами |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | 🚀 Інструкції деплою (Docker, Railway) |
-| [CELERY.md](CELERY.md) | ⚙️ Background tasks (Celery + Redis) |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 🤝 Правила контрибʼюції |
+## Ключові документи
+- `development/DEV_SYSTEM_GUIDE.md`
+- `architecture/AGENTS_ARCHITECTURE.md`
+- `architecture/FSM_TRANSITION_TABLE.md`
+- `deployment/DEPLOYMENT.md`
+- `operations/CELERY.md`
+- `quality/TESTING.md`
+- `database/POSTGRES_CATALOG_SYNC.md`
+- `status/STATUS_REPORT.md`
 
----
-
-## 📜 LEGACY / ROADMAP
-
-| Документ | Статус | Примітка |
-|----------|--------|----------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | LEGACY | Історичний опис v3.0. Актуальну архітектуру див. в [DEV_SYSTEM_GUIDE.md](DEV_SYSTEM_GUIDE.md) |
-| [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | LEGACY | Snapshot міграції 2025-12-07. Актуальний стан див. в [STATUS_REPORT.md](STATUS_REPORT.md) |
-| [PRODUCTION_IMPROVEMENT_PLAN.md](PRODUCTION_IMPROVEMENT_PLAN.md) | ROADMAP | Плани подальшого розвитку (кешування, CI/CD тощо) |
-
----
-
-## 🔗 ГОЛОВНІ ДОКУМЕНТИ (корінь проекту)
-
-- [README.md](../README.md) — Головний огляд
-- [PRD.md](../PRD.md) — Product Requirements Document
-- [DOCUMENTATION.md](../DOCUMENTATION.md) — Центральний індекс
-- [.rules/rulesllm.md](../.rules/rulesllm.md) — Правила для AI/LLM
+## Legacy / Roadmap
+- `architecture/ARCHITECTURE.md`
+- `status/IMPLEMENTATION_STATUS.md`
+- `roadmap/PRODUCTION_IMPROVEMENT_PLAN.md`
