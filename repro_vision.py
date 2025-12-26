@@ -13,19 +13,19 @@ sys.path.append(".")
 from langchain_core.messages import HumanMessage
 
 from src.agents import get_active_graph
-from src.services.supabase_store import create_supabase_store
+from src.services.postgres_store import create_postgres_store
 
 
 async def main():
     print("--- STARTING REPRO ---")
 
     # 1. Initialize Store
-    store = create_supabase_store()
+    store = create_postgres_store()
     if not store:
-        print("ERROR: Could not create Supabase store. Check env vars.")
+        print("ERROR: Could not create Postgres store. Check env vars.")
         return
 
-    print("Supabase Store created.")
+    print("Postgres Store created.")
 
     # 2. Get Graph
     graph = get_active_graph()

@@ -59,8 +59,6 @@ nano .env
 OPENAI_API_KEY=sk-your-openai-key
 
 # Supabase
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-supabase-anon-key
 
 # ManyChat
 MANYCHAT_API_KEY=your-manychat-api-key
@@ -163,7 +161,6 @@ sudo certbot --nginx -d your-domain.com
 curl https://your-domain.com/health
 
 # Очікуваний результат:
-# {"status":"ok","checks":{"supabase":"ok"}}
 ```
 
 ---

@@ -70,7 +70,7 @@ class ExternalServiceError(RetryableError):
 class DatabaseError(RetryableError):
     """Database operation failed.
 
-    Use for Supabase connection/query failures.
+    Use for PostgreSQL connection/query failures.
     """
 
     pass

@@ -24,8 +24,7 @@ class TestConfigLoads:
 
         # These should exist as attributes (may be empty in test env)
         assert hasattr(settings, "TELEGRAM_BOT_TOKEN")
-        assert hasattr(settings, "SUPABASE_URL")
-        assert hasattr(settings, "SUPABASE_API_KEY")
+        assert hasattr(settings, "DATABASE_URL")
 
     def test_payment_config_structure(self):
         """Payment config has required fields."""

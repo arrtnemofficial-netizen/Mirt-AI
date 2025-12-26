@@ -4,17 +4,24 @@ Handles:
 - Summarizing old conversations after SUMMARY_RETENTION_DAYS
 - Saving summaries to users table
 - Pruning old messages from messages table
-- Integration with Supabase function summarize_inactive_users
+- Integration with PostgreSQL function summarize_inactive_users
 """
 
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:
+    psycopg = None  # type: ignore
+    dict_row = None  # type: ignore
+
 from src.conf.config import settings
 from src.core.constants import DBTable, MessageTag
 from src.services.message_store import MessageStore, StoredMessage
-from src.services.supabase_client import get_supabase_client
+from src.services.postgres_pool import get_postgres_url
 
 
 logger = logging.getLogger(__name__)
@@ -52,28 +59,35 @@ def summarise_messages(messages: list[StoredMessage]) -> str:
 
 def update_user_summary(user_id: int, summary: str) -> None:
     """Update summary field in users table."""
-    client = get_supabase_client()
-    if not client:
+    if psycopg is None:
+        logger.error("psycopg not installed")
         return
 
     try:
-        client.table(DBTable.USERS).upsert(
-            {
-                "user_id": user_id,
-                "summary": summary,
-            }
-        ).execute()
+        url = get_postgres_url()
+        with psycopg.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    INSERT INTO {DBTable.USERS} (user_id, summary, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET summary = EXCLUDED.summary, updated_at = NOW()
+                    """,
+                    (str(user_id), summary),
+                )
+                conn.commit()
     except Exception as e:
         logger.error("Failed to update summary for user %s: %s", user_id, e)
 
 
 def call_summarize_inactive_users() -> list[dict[str, Any]]:
-    """Call Supabase function summarize_inactive_users.
+    """Call PostgreSQL function summarize_inactive_users.
 
     This function marks users as needing summary after 3 days of inactivity.
     It's called by the periodic summarization task.
 
-    The Supabase function:
+    The PostgreSQL function:
     - Finds users where last_interaction_at < NOW() - INTERVAL '3 days'
     - Excludes already summarized users
     - Adds 'needs_summary' tag
@@ -85,21 +99,25 @@ def call_summarize_inactive_users() -> list[dict[str, Any]]:
         - username
         - last_interaction_at
     """
-    client = get_supabase_client()
-    if not client:
-        logger.warning("Supabase not configured, skipping summarize_inactive_users")
+    if psycopg is None:
+        logger.warning("psycopg not installed, skipping summarize_inactive_users")
         return []
 
     try:
-        response = client.rpc("summarize_inactive_users").execute()
-
-        if response.data:
-            logger.info(
-                "summarize_inactive_users: marked %d users for summarization",
-                len(response.data),
-            )
-            return response.data
-        return []
+        url = get_postgres_url()
+        with psycopg.connect(url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("SELECT * FROM summarize_inactive_users()")
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description] if cur.description else []
+                result = [dict(zip(columns, row)) for row in rows]
+                
+                if result:
+                    logger.info(
+                        "summarize_inactive_users: marked %d users for summarization",
+                        len(result),
+                    )
+                return result
 
     except Exception as e:
         logger.error("Failed to call summarize_inactive_users: %s", e)
@@ -112,18 +130,24 @@ def get_users_needing_summary() -> list[dict[str, Any]]:
     Returns:
         List of users needing summarization
     """
-    client = get_supabase_client()
-    if not client:
+    if psycopg is None:
+        logger.error("psycopg not installed")
         return []
 
     try:
-        response = (
-            client.table(DBTable.USERS)
-            .select("user_id, username, last_interaction_at")
-            .contains("tags", ["needs_summary"])
-            .execute()
-        )
-        return response.data or []
+        url = get_postgres_url()
+        with psycopg.connect(url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"""
+                    SELECT user_id, username, last_interaction_at
+                    FROM {DBTable.USERS}
+                    WHERE tags @> %s::jsonb
+                    """,
+                    ('["needs_summary"]',),
+                )
+                rows = cur.fetchall()
+                return [dict(row) for row in rows]
 
     except Exception as e:
         logger.error("Failed to get users needing summary: %s", e)
@@ -135,30 +159,47 @@ def mark_user_summarized(user_id: int) -> None:
 
     Removes 'needs_summary' and adds 'summarized' tag.
     """
-    client = get_supabase_client()
-    if not client:
+    if psycopg is None:
+        logger.error("psycopg not installed")
         return
 
     try:
-        # Get current tags
-        response = (
-            client.table(DBTable.USERS).select("tags").eq("user_id", user_id).single().execute()
-        )
-
-        current_tags = response.data.get("tags", []) if response.data else []
-
-        # Update tags
-        new_tags = [t for t in current_tags if t != "needs_summary"]
-        if "summarized" not in new_tags:
-            new_tags.append("summarized")
-
-        client.table(DBTable.USERS).update(
-            {
-                "tags": new_tags,
-            }
-        ).eq("user_id", user_id).execute()
-
-        logger.info("Marked user %s as summarized", user_id)
+        url = get_postgres_url()
+        with psycopg.connect(url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                # Get current tags
+                cur.execute(
+                    f"""
+                    SELECT tags FROM {DBTable.USERS}
+                    WHERE user_id = %s
+                    """,
+                    (str(user_id),),
+                )
+                row = cur.fetchone()
+                
+                if not row:
+                    logger.warning("User %s not found", user_id)
+                    return
+                
+                current_tags = row.get("tags") or []
+                
+                # Update tags
+                new_tags = [t for t in current_tags if t != "needs_summary"]
+                if "summarized" not in new_tags:
+                    new_tags.append("summarized")
+                
+                # Update tags
+                import json
+                cur.execute(
+                    f"""
+                    UPDATE {DBTable.USERS}
+                    SET tags = %s::jsonb, updated_at = NOW()
+                    WHERE user_id = %s
+                    """,
+                    (json.dumps(new_tags), str(user_id)),
+                )
+                conn.commit()
+                logger.info("Marked user %s as summarized", user_id)
 
     except Exception as e:
         logger.error("Failed to mark user %s as summarized: %s", user_id, e)

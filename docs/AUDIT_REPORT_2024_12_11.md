@@ -165,7 +165,6 @@ SQL функція для маркування неактивних корист
 - [x] Виправити hardcoded prices в промптах ✅
 - [x] Створити test_workers.py ✅
 - [x] Запустити Memory System SQL в Supabase ✅
-- [ ] Перевірити env vars: SUPABASE_URL, SUPABASE_API_KEY
 - [ ] Перевірити env vars: OPENROUTER_API_KEY або XAI_API_KEY
 - [ ] Запустити `python scripts/migrate_price_by_size.py`
 - [ ] Запустити тести: `pytest tests/unit/ -q`

@@ -24,6 +24,7 @@ Observability - метрики та структуроване логуванн�
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -270,13 +271,13 @@ def log_validation_result(
 
 
 # =============================================================================
-# ASYNC TRACING SERVICE (Supabase)
+# ASYNC TRACING SERVICE
 # =============================================================================
 
 
 class AsyncTracingService:
     """
-    Background service for logging LLM traces to Supabase.
+    Background service for logging LLM traces to PostgreSQL.
 
     Designed to be fire-and-forget so it doesn't block the bot.
     """
@@ -314,16 +315,12 @@ class AsyncTracingService:
         cost: float | None = None,
         model_name: str | None = None,
     ) -> None:
-        """Log a trace record to Supabase."""
+        """Log a trace record to PostgreSQL."""
         if not self._enabled:
             return
 
         try:
-            from src.services.supabase_client import get_supabase_client
-
-            client = get_supabase_client()
-            if not client:
-                return
+            # Use PostgreSQL for tracing
 
             payload = {
                 "session_id": session_id,
@@ -349,10 +346,86 @@ class AsyncTracingService:
             # Remove None values to let DB defaults work or avoid null issues
             payload = {k: v for k, v in payload.items() if v is not None}
 
+            # Use PostgreSQL for tracing
+            import psycopg
+            from src.services.postgres_pool import get_postgres_url
+            
             try:
-                await client.table("llm_traces").insert(payload).execute()
-            except Exception:
-                await client.table("llm_usage").insert(payload).execute()
+                postgres_url = get_postgres_url()
+            except ValueError:
+                return
+            try:
+                with psycopg.connect(postgres_url) as conn:
+                    with conn.cursor() as cur:
+                        # Try llm_traces first
+                        try:
+                            cur.execute(
+                                """
+                                INSERT INTO llm_traces (
+                                    session_id, trace_id, node_name, status, state_name,
+                                    prompt_key, prompt_version, prompt_label,
+                                    input_snapshot, output_snapshot,
+                                    error_category, error_message,
+                                    latency_ms, tokens_in, tokens_out, cost, model_name,
+                                    created_at
+                                ) VALUES (
+                                    %s, %s, %s, %s::trace_status, %s,
+                                    %s, %s, %s,
+                                    %s, %s,
+                                    %s::error_category, %s,
+                                    %s, %s, %s, %s, %s,
+                                    %s
+                                )
+                                """,
+                                (
+                                    payload.get("session_id"),
+                                    payload.get("trace_id"),
+                                    payload.get("node_name"),
+                                    payload.get("status", "SUCCESS"),
+                                    payload.get("state_name"),
+                                    payload.get("prompt_key"),
+                                    payload.get("prompt_version"),
+                                    payload.get("prompt_label"),
+                                    json.dumps(payload.get("input_snapshot")) if payload.get("input_snapshot") else None,
+                                    json.dumps(payload.get("output_snapshot")) if payload.get("output_snapshot") else None,
+                                    payload.get("error_category"),
+                                    payload.get("error_message"),
+                                    payload.get("latency_ms"),
+                                    payload.get("tokens_in"),
+                                    payload.get("tokens_out"),
+                                    payload.get("cost"),
+                                    payload.get("model_name"),
+                                    payload.get("created_at"),
+                                ),
+                            )
+                            conn.commit()
+                        except Exception:
+                            # Fallback to llm_usage if llm_traces fails
+                            conn.rollback()
+                            cur.execute(
+                                """
+                                INSERT INTO llm_usage (
+                                    user_id, session_id, model, tokens_input, tokens_output,
+                                    cost_usd, latency_ms, success, error_message, metadata, created_at
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    None,  # user_id
+                                    payload.get("session_id"),
+                                    payload.get("model_name"),
+                                    payload.get("tokens_in", 0),
+                                    payload.get("tokens_out", 0),
+                                    payload.get("cost", 0),
+                                    payload.get("latency_ms"),
+                                    payload.get("status") == "SUCCESS",
+                                    payload.get("error_message"),
+                                    json.dumps(payload) if payload else None,
+                                    payload.get("created_at"),
+                                ),
+                            )
+                            conn.commit()
+            except Exception as e:
+                logger.debug(f"Failed to log trace to PostgreSQL: {e}")
 
         except Exception as e:
             # Observability shouldn't crash the app - use debug level to avoid spam

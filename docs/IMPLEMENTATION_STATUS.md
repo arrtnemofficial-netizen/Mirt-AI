@@ -33,7 +33,7 @@ We have successfully migrated the legacy architecture to a modern, type-safe sta
 - [x] **Config**: Cleaned up `src/conf/config.py`, removed unused feature flags.
 
 ### 🔧 Dependency & Vision Upgrades (2025-12-07)
-- [x] **LLM Clients**: Upgraded to `openai==2.9.0`, `supabase==2.25.0`.
+- [x] **LLM Clients**: Upgraded to `openai==2.9.0`.
 - [x] **Agents**: Switched to `OpenAIChatModel` (PydanticAI) to avoid deprecations.
 - [x] **Observability**: Added structured logging + tracing for `CatalogService` and `vision_node`.
 - [x] **Vision Health**: Added `tests/test_vision_health.py` + generator `data/vision/generate.py` + wrapper `scripts/generate_vision_artifacts.py`.

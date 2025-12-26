@@ -3,7 +3,6 @@ Circuit Breaker - захист від каскадних відмов.
 ==============================================
 Патерн Circuit Breaker для зовнішніх API:
 - ManyChat API
-- Supabase
 - LLM (Grok/GPT)
 
 Стани:
@@ -167,7 +166,6 @@ def get_circuit_breaker(
 
 # Pre-defined breakers for main services
 MANYCHAT_BREAKER = get_circuit_breaker("manychat", failure_threshold=3, recovery_timeout=30)
-SUPABASE_BREAKER = get_circuit_breaker("supabase", failure_threshold=2, recovery_timeout=60)
 LLM_BREAKER = get_circuit_breaker("llm", failure_threshold=2, recovery_timeout=45)
 
 

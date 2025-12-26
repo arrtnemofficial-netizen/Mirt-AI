@@ -171,15 +171,9 @@ class Settings(BaseSettings):
         ),
     )
 
-    SUPABASE_URL: str = Field(
-        default="", description="Supabase project URL for session persistence."
-    )
-    SUPABASE_API_KEY: SecretStr = Field(
-        default=SecretStr(""), description="Service or anon key for Supabase client."
-    )
     DATABASE_URL: str = Field(
         default="",
-        description="Primary Postgres connection string for LangGraph checkpointer and direct DB access (falls back to SUPABASE_* when empty).",
+        description="Primary Postgres connection string for LangGraph checkpointer and direct DB access.",
     )
     POSTGRES_URL: str = Field(
         default="",
@@ -197,19 +191,7 @@ class Settings(BaseSettings):
         default=30,
         description="Maximum idle time (seconds) for PostgreSQL pool connections.",
     )
-    SUPABASE_TABLE: str = Field(
-        default="agent_sessions", description="Table name storing chat session state JSON."
-    )
-    SUPABASE_MESSAGES_TABLE: str = Field(
-        default="messages",  # Was: mirt_messages (dropped in migration)
-        description="Table storing raw chat messages (session-scoped).",
-    )
-    SUPABASE_USERS_TABLE: str = Field(
-        default="users",  # Was: mirt_users (dropped, profiles in mirt_profiles)
-        description="Table storing user profiles and summaries.",
-    )
-    # RAG tables removed - using Embedded Catalog in prompt
-    # SUPABASE_CATALOG_TABLE, SUPABASE_EMBEDDINGS_TABLE, SUPABASE_MATCH_RPC - DELETED
+    # Table names are now hardcoded in services or use DBTable constants
     SUMMARY_RETENTION_DAYS: int = Field(
         default=3,
         description="Days after which conversations are summarized and pruned.",
@@ -363,7 +345,7 @@ class Settings(BaseSettings):
         default="auto",
         description=(
             "Backend for LangGraph checkpointer: 'auto', 'memory', 'postgres', 'redis'. "
-            "Use 'memory' for local Telegram polling if Supabase/Postgres is unstable."
+            "Use 'memory' for local Telegram polling if PostgreSQL is unstable."
         ),
     )
     CHECKPOINTER_WARMUP: bool = Field(

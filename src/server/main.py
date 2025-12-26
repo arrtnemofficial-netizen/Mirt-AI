@@ -319,23 +319,23 @@ class ApiV1MessageRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict[str, Any]:
     """Health check endpoint with dependency status."""
-    from src.services.supabase_client import get_supabase_client
+    from src.services.postgres_pool import health_check as postgres_health_check
 
     status = "ok"
     checks: dict[str, Any] = {}
 
-    # Перевірка Supabase
+    # Перевірка PostgreSQL
     try:
-        client = get_supabase_client()
-        if client:
-            client.table(settings.SUPABASE_TABLE).select("session_id").limit(1).execute()
-            checks["supabase"] = "ok"
+        is_healthy = await postgres_health_check()
+        if is_healthy:
+            checks["postgresql"] = "ok"
         else:
-            checks["supabase"] = "disabled"
+            checks["postgresql"] = "error"
+            status = "degraded"
     except Exception as e:
-        checks["supabase"] = f"error: {type(e).__name__}"
+        checks["postgresql"] = f"error: {type(e).__name__}"
         status = "degraded"
-        logger.warning("Health check: Supabase unavailable: %s", e)
+        logger.warning("Health check: PostgreSQL unavailable: %s", e)
 
     # Перевірка Redis (якщо Celery увімкнено)
     if settings.CELERY_ENABLED:
@@ -585,20 +585,8 @@ async def manychat_webhook(
                 message_id = _extract_manychat_message_id(payload, message)
 
             if message_id:
-                from src.services.supabase_client import get_supabase_client
-                from src.conf.config import settings
-
-                # Try PostgreSQL first, fallback to Supabase
-                use_postgres = bool(settings.DATABASE_URL or getattr(settings, "POSTGRES_URL", ""))
-                
-                if use_postgres:
-                    dedupe_store = WebhookDedupeStore(db=None, ttl_hours=24, use_postgres=True)
-                else:
-                    db = get_supabase_client()
-                    if db:
-                        dedupe_store = WebhookDedupeStore(db=db, ttl_hours=24, use_postgres=False)
-                    else:
-                        dedupe_store = None
+                # Use PostgreSQL for webhook deduplication
+                dedupe_store = WebhookDedupeStore(db=None, ttl_hours=24, use_postgres=True)
 
                 if dedupe_store:
                     # Check for duplicates using DB store
@@ -618,7 +606,7 @@ async def manychat_webhook(
                         return {"status": "accepted"}
                 else:
                     logger.warning(
-                        "[MANYCHAT] Supabase disabled, skipping dedupe (push mode) user=%s message_id=%s",
+                        "[MANYCHAT] Database disabled, skipping dedupe (push mode) user=%s message_id=%s",
                         user_id,
                         message_id,
                     )
@@ -1028,7 +1016,7 @@ async def manychat_create_order(
         build_missing_data_prompt,
         validate_order_data,
     )
-    from src.services.supabase_client import get_supabase_client
+    # PostgreSQL implementation
 
     # Verify token
     verify_token = settings.MANYCHAT_VERIFY_TOKEN
@@ -1084,47 +1072,56 @@ async def manychat_create_order(
         price,
     )
 
-    # === CHECK FOR EXISTING ORDER IN crm_orders ===
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            existing = (
-                supabase.table("crm_orders")
-                .select("id, crm_order_id, status, task_id")
-                .eq("external_id", external_id)
-                .limit(1)
-                .execute()
-            )
-            if existing.data:
-                order_data = existing.data[0]
-                logger.info(
-                    "[CREATE_ORDER] Duplicate detected, returning existing order: %s",
-                    order_data.get("crm_order_id"),
+    # === CHECK FOR EXISTING ORDER IN crm_orders (PostgreSQL) ===
+    import psycopg
+    from src.services.postgres_pool import get_postgres_url
+    
+    try:
+        postgres_url = get_postgres_url()
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, crm_order_id, status, task_id
+                    FROM crm_orders
+                    WHERE external_id = %s
+                    LIMIT 1
+                    """,
+                    (external_id,),
                 )
-                return {
-                    "success": True,
-                    "order_id": order_data.get("crm_order_id"),
-                    "status": order_data.get("status"),
-                    "task_id": order_data.get("task_id"),
-                    "message": "Замовлення вже створено! 🎉",
-                    "duplicate": True,
-                    "set_field_values": [
-                        {
-                            "field_name": "order_status",
-                            "field_value": order_data.get("status", "created"),
-                        },
-                        {"field_name": "crm_external_id", "field_value": external_id},
-                        {
-                            "field_name": "crm_order_id",
-                            "field_value": order_data.get("crm_order_id") or "",
-                        },
-                    ],
-                    "add_tag": ["order_created"]
-                    if order_data.get("status") == "created"
-                    else ["order_queued"],
-                }
-        except Exception as e:
-            logger.warning("[CREATE_ORDER] Failed to check for duplicate: %s", e)
+                existing = cur.fetchone()
+        
+        if existing:
+            # existing is a tuple: (id, crm_order_id, status, task_id)
+            order_id, crm_order_id, order_status, task_id = existing
+            logger.info(
+                "[CREATE_ORDER] Duplicate detected, returning existing order: %s",
+                crm_order_id,
+            )
+            return {
+                "success": True,
+                "order_id": crm_order_id,
+                "status": order_status,
+                "task_id": task_id,
+                "message": "Замовлення вже створено! 🎉",
+                "duplicate": True,
+                "set_field_values": [
+                    {
+                        "field_name": "order_status",
+                        "field_value": order_status or "created",
+                    },
+                    {"field_name": "crm_external_id", "field_value": external_id},
+                    {
+                        "field_name": "crm_order_id",
+                        "field_value": crm_order_id or "",
+                    },
+                ],
+                "add_tag": ["order_created"]
+                if order_status == "created"
+                else ["order_queued"],
+            }
+    except Exception as e:
+        logger.warning("[CREATE_ORDER] Failed to check for duplicate: %s", e)
 
     # Create order using CRMService
     try:

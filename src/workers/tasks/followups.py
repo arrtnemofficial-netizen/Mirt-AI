@@ -14,9 +14,10 @@ from datetime import UTC, datetime
 from celery import shared_task
 
 from src.conf.config import settings
+from src.core.constants import DBTable
 from src.services.followups import next_followup_due_at, run_followups
 from src.services.message_store import create_message_store
-from src.services.supabase_client import get_supabase_client
+# PostgreSQL only - no Supabase dependency
 
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,11 @@ def send_followup(
             from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
             
             night_bubbles = get_snippet_by_header("FOLLOWUP_NIGHT")
-            night_content = "".join(night_bubbles) if night_bubbles else "Спеціаліст зв'яжеться з вами вранці 🤍"
+            night_content = (
+                "".join(night_bubbles)
+                if night_bubbles
+                else "?????????? ??'??????? ? ???? ?????? ??"
+            )
             followup.content = night_content
             logger.info(
                 "[WORKER:FOLLOWUP] Using night mode message for session %s (hour=%d)",
@@ -159,26 +164,33 @@ def check_all_sessions_for_followups(self) -> dict:
     """
     logger.info("[WORKER:FOLLOWUP] Starting periodic followup check")
 
-    client = get_supabase_client()
-    if not client:
-        logger.warning("[WORKER:FOLLOWUP] Supabase not configured, skipping")
-        return {"status": "skipped", "reason": "no_supabase"}
-
+    # Use PostgreSQL
     try:
-        # Get sessions with their chat info
-        # We need session_id and the channel info to send follow-ups
-        response = (
-            client.table(settings.SUPABASE_MESSAGES_TABLE).select("session_id, user_id").execute()
-        )
-
-        if not response.data:
+        import psycopg
+        from psycopg.rows import dict_row
+        from src.services.postgres_pool import get_postgres_url
+        
+        # Get sessions with their chat info from PostgreSQL
+        try:
+            postgres_url = get_postgres_url()
+        except ValueError:
+            logger.warning("[WORKER:FOLLOWUP] PostgreSQL not configured, skipping")
+            return {"status": "skipped", "reason": "no_postgres"}
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"SELECT DISTINCT session_id, user_id FROM {DBTable.MESSAGES}"
+                )
+                rows = cur.fetchall()
+        
+        if not rows:
             return {"status": "ok", "queued": 0}
 
         # Get unique sessions with user mapping
         sessions: dict[str, int | None] = {}
-        for row in response.data:
-            sid = row["session_id"]
-            if sid not in sessions:
+        for row in rows:
+            sid = row.get("session_id")
+            if sid and sid not in sessions:
                 sessions[sid] = row.get("user_id")
 
         message_store = create_message_store()
@@ -317,26 +329,34 @@ def handle_24h_followup_escalation(
     )
 
     try:
-        # Get user_id from messages table (session_id is stored there)
-        client = get_supabase_client()
-        if not client:
-            logger.warning("[WORKER:FOLLOWUP] Supabase not configured, skipping escalation")
-            return {"status": "skipped", "reason": "no_supabase"}
-
-        # Get user_id from messages table
+        # Get user_id from PostgreSQL messages table
+        import psycopg
+        from psycopg.rows import dict_row
+        from src.services.postgres_pool import get_postgres_url
         from src.conf.config import settings
         
-        messages_response = (
-            client.table(settings.SUPABASE_MESSAGES_TABLE)
-            .select("user_id")
-            .eq("session_id", session_id)
-            .not_.is_("user_id", "null")
-            .limit(1)
-            .execute()
-        )
-        user_id = None
-        if messages_response.data:
-            user_id = messages_response.data[0].get("user_id")
+        try:
+            postgres_url = get_postgres_url()
+        except ValueError:
+            logger.warning(
+                "[WORKER:FOLLOWUP] PostgreSQL not configured, skipping escalation",
+            )
+            return {"status": "skipped", "reason": "no_postgres"}
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"""
+                    SELECT user_id
+                    FROM {DBTable.MESSAGES}
+                    WHERE session_id = %s
+                    AND user_id IS NOT NULL
+                    LIMIT 1
+                    """,
+                    (session_id,),
+                )
+                row = cur.fetchone()
+        
+        user_id = row.get("user_id") if row else None
 
         if not user_id:
             logger.warning(

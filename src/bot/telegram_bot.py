@@ -92,7 +92,7 @@ def build_dispatcher(
     async def handle_restart(message: Message) -> None:
         """Жорсткий ресет: повністю очистити сесію.
 
-        - Перезаписує state в SessionStore (Supabase / in-memory)
+        - Перезаписує state в SessionStore (PostgreSQL / in-memory)
         - Видаляє історію повідомлень з MessageStore
         """
 
@@ -306,20 +306,20 @@ async def run_polling(store: SessionStore | None = None) -> None:
 
     print("🚀 Starting Telegram bot with INFO logging enabled...")
 
-    from src.services.supabase_store import create_supabase_store
+    from src.services.postgres_store import create_postgres_store
 
-    # Try to use Supabase store if not provided
+    # Try to use PostgreSQL store if not provided
     if store is None:
-        store = create_supabase_store()
+        store = create_postgres_store()
 
     if store is None:
         print(
             "⚠️ Using InMemorySessionStore - session state will be lost on restart!\n"
-            "   Set SUPABASE_URL and SUPABASE_API_KEY for persistent session storage."
+            "   Set DATABASE_URL for persistent session storage."
         )
         session_store = InMemorySessionStore()
     else:
-        print("✅ Using SupabaseSessionStore - session state is persistent.")
+        print("✅ Using PostgresSessionStore - session state is persistent.")
         session_store = store
 
     message_store = create_message_store()

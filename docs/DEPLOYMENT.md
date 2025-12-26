@@ -64,8 +64,6 @@ The project is configured for one-click deployment on [Railway](https://railway.
 ### Environment Variables
 Ensure these are set in Railway dashboard:
 - `OPENROUTER_API_KEY`
-- `SUPABASE_URL`
-- `SUPABASE_API_KEY`
 - `TELEGRAM_BOT_TOKEN` (if using Telegram)
 - `PUBLIC_BASE_URL` (Your Railway URL)
 

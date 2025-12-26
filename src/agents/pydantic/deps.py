@@ -36,14 +36,14 @@ from src.services.order_service import OrderService
 
 
 # =============================================================================
-# DATABASE SERVICE (Real Supabase Implementation)
+# DATABASE SERVICE (PostgreSQL Implementation)
 # =============================================================================
 
 # We use OrderService as the main database interface for agents
 Database = OrderService
 
 # =============================================================================
-# CATALOG SERVICE (Real Supabase Implementation)
+# CATALOG SERVICE (PostgreSQL Implementation)
 # =============================================================================
 
 # CatalogService is now imported directly from src.services.catalog_service
@@ -282,7 +282,7 @@ async def create_deps_with_memory(
     """
     Create AgentDeps with memory context loaded.
 
-    This is an async version that loads memory from Supabase.
+    This is an async version that loads memory from PostgreSQL.
     Use this when memory_context_node hasn't run yet.
 
     Args:

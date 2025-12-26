@@ -17,8 +17,10 @@ from src.conf.config import Settings, get_settings
 from src.integrations.manychat.webhook import ManychatWebhook
 from src.services.message_store import MessageStore, create_message_store
 from src.services.session_store import InMemorySessionStore, SessionStore
-from src.services.supabase_store import create_supabase_store
 from src.services.postgres_store import create_postgres_store
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Type aliases for cleaner dependency injection
@@ -27,21 +29,16 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 @lru_cache(maxsize=1)
 def get_session_store() -> SessionStore:
-    """Get or create the session store (PostgreSQL preferred, fallback to Supabase, then in-memory)."""
-    # Try PostgreSQL first
+    """Get or create the session store (PostgreSQL only, fallback to in-memory)."""
+    # Use PostgreSQL only
     try:
         postgres_store = create_postgres_store()
         if postgres_store:
             return postgres_store
-    except Exception:
-        pass  # Fall through to Supabase
+    except Exception as e:
+        logger.warning("PostgreSQL store not available, using in-memory: %s", e)
     
-    # Fallback to Supabase
-    supabase_store = create_supabase_store()
-    if supabase_store:
-        return supabase_store
-    
-    # Final fallback to in-memory
+    # Fallback to in-memory only
     return InMemorySessionStore()
 
 

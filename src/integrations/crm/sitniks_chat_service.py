@@ -4,9 +4,9 @@ Handles chat status updates and manager assignments.
 Requires paid Sitniks plan for API access.
 
 Statuses flow:
-- "Взято в роботу" → first touch, AI starts handling
-- "Виставлено рахунок" → payment requisites sent
-- "AI Увага" → escalation, needs human manager
+- "????? ? ??????" ? first touch, AI starts handling
+- "?????????? ???????" ? payment requisites sent
+- "AI ?????" ? escalation, needs human manager
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 
 from src.conf.config import settings
-from src.services.supabase_client import get_supabase_client
+# PostgreSQL only - no Supabase dependency
 
 
 logger = logging.getLogger(__name__)
@@ -26,12 +26,12 @@ logger = logging.getLogger(__name__)
 
 # Sitniks status names (from user's CRM)
 class SitniksStatus:
-    FIRST_TOUCH = "Взято в роботу"
-    INVOICE_SENT = "Виставлено рахунок"
-    AI_ATTENTION = "AI Увага"
-    NEW = "Нові заявки"
-    PAID = "ОПЛАЧЕНО"
-    ORDER_FORMED = "Оформлено замовлення"
+    FIRST_TOUCH = "????? ? ??????"
+    INVOICE_SENT = "?????????? ???????"
+    AI_ATTENTION = "AI ?????"
+    NEW = "???? ??????"
+    PAID = "????????"
+    ORDER_FORMED = "????????? ??????????"
 
 
 # Manager configuration loaded from settings
@@ -48,7 +48,7 @@ class SitniksChatService:
             self.api_key = api_key_secret.get_secret_value()
         else:
             self.api_key = str(api_key_secret) if api_key_secret else ""
-        self.supabase = get_supabase_client()
+        # PostgreSQL only - no Supabase
         self._managers_cache: dict[str, int] = {}
 
     @property
@@ -419,40 +419,60 @@ class SitniksChatService:
         instagram_username: str | None,
         telegram_username: str | None,
     ) -> None:
-        """Save user-to-chat mapping in Supabase."""
-        if not self.supabase:
-            return
-
+        """Save user-to-chat mapping in PostgreSQL."""
         try:
-            self.supabase.table("sitniks_chat_mappings").upsert(
-                {
-                    "user_id": user_id,
-                    "sitniks_chat_id": chat_id,
-                    "instagram_username": instagram_username,
-                    "telegram_username": telegram_username,
-                    "first_touch_at": datetime.now(UTC).isoformat(),
-                    "updated_at": datetime.now(UTC).isoformat(),
-                },
-                on_conflict="user_id",
-            ).execute()
+            import psycopg
+            from src.services.postgres_pool import get_postgres_url
+            
+            try:
+                postgres_url = get_postgres_url()
+            except ValueError:
+                return
+            with psycopg.connect(postgres_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO sitniks_chat_mappings 
+                        (user_id, sitniks_chat_id, instagram_username, telegram_username, first_touch_at, updated_at)
+                        VALUES (%s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (user_id) 
+                        DO UPDATE SET
+                            sitniks_chat_id = EXCLUDED.sitniks_chat_id,
+                            instagram_username = EXCLUDED.instagram_username,
+                            telegram_username = EXCLUDED.telegram_username,
+                            updated_at = NOW()
+                        """,
+                        (user_id, chat_id, instagram_username, telegram_username),
+                    )
+                    conn.commit()
         except Exception as e:
             logger.error("[SITNIKS] Failed to save chat mapping: %s", e)
 
     async def _get_chat_id_for_user(self, user_id: str) -> str | None:
-        """Get Sitniks chat ID for a MIRT user from Supabase."""
-        if not self.supabase:
-            return None
-
+        """Get Sitniks chat ID for a MIRT user from PostgreSQL."""
         try:
-            response = (
-                self.supabase.table("sitniks_chat_mappings")
-                .select("sitniks_chat_id")
-                .eq("user_id", user_id)
-                .single()
-                .execute()
-            )
-            if response.data:
-                return response.data.get("sitniks_chat_id")
+            import psycopg
+            from src.services.postgres_pool import get_postgres_url
+            
+            try:
+                postgres_url = get_postgres_url()
+            except ValueError:
+                return None
+            with psycopg.connect(postgres_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT sitniks_chat_id
+                        FROM sitniks_chat_mappings
+                        WHERE user_id = %s
+                        LIMIT 1
+                        """,
+                        (user_id,),
+                    )
+                    row = cur.fetchone()
+            
+            if row:
+                return row[0]
             return None
         except Exception:
             return None

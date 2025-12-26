@@ -12,12 +12,21 @@ This service provides:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:
+    psycopg = None  # type: ignore
+    dict_row = None  # type: ignore
+
 from src.conf.config import settings
-from src.services.supabase_client import get_supabase_client
+from src.services.postgres_pool import get_postgres_url
 
 
 logger = logging.getLogger(__name__)
@@ -27,7 +36,7 @@ class CRMService:
     """High-level CRM service with persistence and error handling."""
 
     def __init__(self):
-        self.supabase = get_supabase_client()
+        pass
 
     async def create_order_with_persistence(
         self,
@@ -295,15 +304,31 @@ class CRMService:
 
     async def get_session_orders(self, session_id: str) -> list[dict[str, Any]]:
         """Get all orders for a session."""
+        if psycopg is None:
+            logger.error("psycopg not installed")
+            return []
+
         try:
-            response = (
-                self.supabase.table("crm_orders")
-                .select("*")
-                .eq("session_id", session_id)
-                .order("created_at", desc=True)
-                .execute()
-            )
-            return response.data or []
+            try:
+                url = get_postgres_url()
+            except ValueError:
+                return []
+            
+            def _get_session_orders_sync():
+                with psycopg.connect(url) as conn:
+                    with conn.cursor(row_factory=dict_row) as cur:
+                        cur.execute(
+                            """
+                            SELECT * FROM crm_orders
+                            WHERE session_id = %s
+                            ORDER BY created_at DESC
+                            """,
+                            (session_id,),
+                        )
+                        rows = cur.fetchall()
+                        return [dict(row) for row in rows]
+            
+            return await asyncio.to_thread(_get_session_orders_sync)
         except Exception as e:
             logger.exception(
                 "[CRM:SERVICE] Failed to get orders for session %s: %s",
@@ -322,18 +347,37 @@ class CRMService:
         status: str,
         order_data: dict[str, Any],
     ) -> None:
-        """Store order mapping in Supabase."""
-        self.supabase.table("crm_orders").insert(
-            {
-                "session_id": session_id,
-                "external_id": external_id,
-                "crm_order_id": crm_order_id,
-                "status": status,
-                "order_data": order_data,
-                "created_at": datetime.now(UTC).isoformat(),
-                "updated_at": datetime.now(UTC).isoformat(),
-            }
-        ).execute()
+        """Store order mapping in PostgreSQL."""
+        if psycopg is None:
+            logger.error("psycopg not installed")
+            return
+
+        try:
+            url = get_postgres_url()
+        except ValueError:
+            return
+        
+        def _store_order_mapping_sync():
+            with psycopg.connect(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO crm_orders (
+                            session_id, external_id, crm_order_id, status, order_data
+                        )
+                        VALUES (%s, %s, %s, %s, %s::jsonb)
+                        """,
+                        (
+                            session_id,
+                            external_id,
+                            crm_order_id,
+                            status,
+                            json.dumps(order_data),
+                        ),
+                    )
+                    conn.commit()
+        
+        await asyncio.to_thread(_store_order_mapping_sync)
 
     async def _update_order_mapping(
         self,
@@ -342,13 +386,29 @@ class CRMService:
         status: str,
     ) -> None:
         """Update order mapping with CRM order ID and status."""
-        self.supabase.table("crm_orders").update(
-            {
-                "crm_order_id": crm_order_id,
-                "status": status,
-                "updated_at": datetime.now(UTC).isoformat(),
-            }
-        ).eq("external_id", external_id).execute()
+        if psycopg is None:
+            logger.error("psycopg not installed")
+            return
+
+        try:
+            url = get_postgres_url()
+        except ValueError:
+            return
+        
+        def _update_order_mapping_sync():
+            with psycopg.connect(url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE crm_orders
+                        SET crm_order_id = %s, status = %s, updated_at = NOW()
+                        WHERE external_id = %s
+                        """,
+                        (crm_order_id, status, external_id),
+                    )
+                    conn.commit()
+        
+        await asyncio.to_thread(_update_order_mapping_sync)
 
     async def _update_order_status(
         self,
@@ -359,62 +419,128 @@ class CRMService:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Update order status with optional task_id and error_message."""
-        update_data = {
-            "status": status,
-            "updated_at": datetime.now(UTC).isoformat(),
-        }
-        if task_id:
-            update_data["task_id"] = task_id
-        if error_message:
-            update_data["error_message"] = error_message
-        if metadata:
-            update_data["metadata"] = metadata
+        if psycopg is None:
+            logger.error("psycopg not installed")
+            return
 
-        self.supabase.table("crm_orders").update(update_data).eq(
-            "external_id", external_id
-        ).execute()
+        try:
+            url = get_postgres_url()
+        except ValueError:
+            return
+        
+        def _update_order_status_sync():
+            with psycopg.connect(url) as conn:
+                with conn.cursor() as cur:
+                    # Build UPDATE query dynamically
+                    updates = ["status = %s", "updated_at = NOW()"]
+                    params = [status]
+                    
+                    if task_id:
+                        updates.append("task_id = %s")
+                        params.append(task_id)
+                    if error_message:
+                        updates.append("error_message = %s")
+                        params.append(error_message)
+                    if metadata:
+                        updates.append("metadata = %s::jsonb")
+                        params.append(json.dumps(metadata))
+                    
+                    params.append(external_id)
+                    query = f"""
+                        UPDATE crm_orders
+                        SET {', '.join(updates)}
+                        WHERE external_id = %s
+                    """
+                    cur.execute(query, params)
+                    conn.commit()
+        
+        await asyncio.to_thread(_update_order_status_sync)
 
     async def _get_existing_order(self, external_id: str) -> dict[str, Any] | None:
         """Get existing order by external ID."""
+        if psycopg is None:
+            return None
+
         try:
-            response = (
-                self.supabase.table("crm_orders")
-                .select("*")
-                .eq("external_id", external_id)
-                .single()
-                .execute()
-            )
-            return response.data
+            try:
+                url = get_postgres_url()
+            except ValueError:
+                return None
+            
+            def _get_existing_order_sync():
+                with psycopg.connect(url) as conn:
+                    with conn.cursor(row_factory=dict_row) as cur:
+                        cur.execute(
+                            """
+                            SELECT * FROM crm_orders
+                            WHERE external_id = %s
+                            LIMIT 1
+                            """,
+                            (external_id,),
+                        )
+                        row = cur.fetchone()
+                        return dict(row) if row else None
+            
+            return await asyncio.to_thread(_get_existing_order_sync)
         except Exception:
             return None
 
     async def _get_order_by_crm_id(self, crm_order_id: str) -> dict[str, Any] | None:
         """Get order by CRM order ID."""
+        if psycopg is None:
+            return None
+
         try:
-            response = (
-                self.supabase.table("crm_orders")
-                .select("*")
-                .eq("crm_order_id", crm_order_id)
-                .single()
-                .execute()
-            )
-            return response.data
+            try:
+                url = get_postgres_url()
+            except ValueError:
+                return None
+            
+            def _get_order_by_crm_id_sync():
+                with psycopg.connect(url) as conn:
+                    with conn.cursor(row_factory=dict_row) as cur:
+                        cur.execute(
+                            """
+                            SELECT * FROM crm_orders
+                            WHERE crm_order_id = %s
+                            LIMIT 1
+                            """,
+                            (crm_order_id,),
+                        )
+                        row = cur.fetchone()
+                        return dict(row) if row else None
+            
+            return await asyncio.to_thread(_get_order_by_crm_id_sync)
         except Exception:
             return None
 
     async def _get_latest_order_by_session(self, session_id: str) -> dict[str, Any] | None:
         """Get latest order for session."""
+        if psycopg is None:
+            return None
+
         try:
-            response = (
-                self.supabase.table("crm_orders")
-                .select("*")
-                .eq("session_id", session_id)
-                .order("created_at", desc=True)
-                .limit(1)
-                .single()
-                .execute()
-            )
-            return response.data
+            try:
+                url = get_postgres_url()
+            except ValueError:
+                return None
+            
+            def _get_latest_order_by_session_sync():
+                with psycopg.connect(url) as conn:
+                    with conn.cursor(row_factory=dict_row) as cur:
+                        cur.execute(
+                            """
+                            SELECT * FROM crm_orders
+                            WHERE session_id = %s
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                            """,
+                            (session_id,),
+                        )
+                        row = cur.fetchone()
+                        return dict(row) if row else None
+            
+            return await asyncio.to_thread(_get_latest_order_by_session_sync)
         except Exception:
             return None
 
@@ -426,7 +552,7 @@ class CRMService:
     ) -> None:
         """Sync order status from CRM back to session.
 
-        Updates session state in Supabase with order status.
+        Updates session state in PostgreSQL with order status.
         This replaces the Celery task sync_order_status.
 
         Args:
@@ -449,14 +575,32 @@ class CRMService:
                 )
                 return
 
-            # Update session state in Supabase
-            if self.supabase:
-                self.supabase.table("agent_sessions").update(
-                    {
-                        "order_status": new_status,
-                        "order_id": order_id,
-                    }
-                ).eq("session_id", session_id).execute()
+            # Update session state in PostgreSQL
+            if psycopg:
+                try:
+                    url = get_postgres_url()
+                except ValueError:
+                    return
+                
+                def _sync_order_status_sync():
+                    with psycopg.connect(url) as conn:
+                        with conn.cursor() as cur:
+                            # Update state JSONB field
+                            cur.execute(
+                                """
+                                UPDATE agent_sessions
+                                SET state = jsonb_set(
+                                    jsonb_set(state, '{order_status}', %s::jsonb),
+                                    '{order_id}', %s::jsonb
+                                ),
+                                updated_at = NOW()
+                                WHERE session_id = %s
+                                """,
+                                (json.dumps(new_status), json.dumps(order_id), session_id),
+                            )
+                            conn.commit()
+                
+                await asyncio.to_thread(_sync_order_status_sync)
 
                 logger.info(
                     "[CRM:SERVICE] Updated session %s with order status: %s",

@@ -18,13 +18,16 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from src.services.supabase_client import get_supabase_client
+# PostgreSQL implementation
+import psycopg
+from psycopg.rows import dict_row
+from src.services.postgres_pool import get_postgres_url
 
 
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from supabase import Client
+    # PostgreSQL implementation
 
     from src.agents.pydantic.memory_models import (
         Fact,
@@ -106,13 +109,25 @@ class MemoryService:
     - Memory context loading
     """
 
-    def __init__(self, client: Client | None = None) -> None:
-        self.client = client or get_supabase_client()
-        self._enabled = self.client is not None
+    def __init__(self, client: Any | None = None) -> None:
+        # PostgreSQL only - client parameter kept for compatibility but not used
+        try:
+            get_postgres_url()
+            self._enabled = True
+        except ValueError:
+            self._enabled = False
         self._models = None  # Lazy loaded
-
+        
         if not self._enabled:
-            logger.warning("MemoryService disabled - Supabase client not available")
+            logger.warning("MemoryService disabled - PostgreSQL URL not available")
+    
+    def _get_connection(self):
+        """Get PostgreSQL connection."""
+        try:
+            postgres_url = get_postgres_url()
+        except ValueError as e:
+            raise RuntimeError("DATABASE_URL not configured") from e
+        return psycopg.connect(postgres_url)
 
     @property
     def models(self):
@@ -143,18 +158,19 @@ class MemoryService:
             return None
 
         try:
-            response = (
-                self.client.table(TABLE_PROFILES)
-                .select("*")
-                .eq("user_id", user_id)
-                .single()
-                .execute()
-            )
+            # Get profile from PostgreSQL
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(
+                        f"SELECT * FROM {TABLE_PROFILES} WHERE user_id = %s LIMIT 1",
+                        (user_id,),
+                    )
+                    row = cur.fetchone()
 
-            if not response.data:
+            if not row:
                 return None
 
-            return self._row_to_profile(response.data)
+            return self._row_to_profile(row)
 
         except Exception as e:
             # Handle "no rows returned" gracefully
@@ -206,11 +222,33 @@ class MemoryService:
                 "last_seen_at": now,
             }
 
-            response = self.client.table(TABLE_PROFILES).insert(data).execute()
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {TABLE_PROFILES}
+                        (user_id, child_profile, style_preferences, logistics, commerce,
+                         created_at, updated_at, last_seen_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING *
+                        """,
+                        (
+                            data["user_id"],
+                            data["child_profile"],
+                            data["style_preferences"],
+                            data["logistics"],
+                            data["commerce"],
+                            data["created_at"],
+                            data["updated_at"],
+                            data["last_seen_at"],
+                        ),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
 
-            if response.data:
+            if row:
                 logger.info("Created profile for user %s", user_id)
-                return self._row_to_profile(response.data[0])
+                return self._row_to_profile(row)
 
             return self.models["UserProfile"](user_id=user_id)
 
@@ -283,13 +321,25 @@ class MemoryService:
                 updates["commerce"] = merged
 
             # Apply update
-            response = (
-                self.client.table(TABLE_PROFILES).update(updates).eq("user_id", user_id).execute()
-            )
+            set_clause = ", ".join(f"{key} = %s" for key in updates.keys())
+            values = list(updates.values()) + [user_id]
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE_PROFILES}
+                        SET {set_clause}
+                        WHERE user_id = %s
+                        RETURNING *
+                        """,
+                        values,
+                    )
+                    row = cur.fetchone()
+                conn.commit()
 
-            if response.data:
+            if row:
                 logger.info("Updated profile for user %s", user_id)
-                return self._row_to_profile(response.data[0])
+                return self._row_to_profile(row)
 
             return current
 
@@ -303,9 +353,17 @@ class MemoryService:
             return
 
         try:
-            self.client.table(TABLE_PROFILES).update(
-                {"last_seen_at": datetime.now(UTC).isoformat()}
-            ).eq("user_id", user_id).execute()
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE_PROFILES}
+                        SET last_seen_at = %s
+                        WHERE user_id = %s
+                        """,
+                        (datetime.now(UTC).isoformat(), user_id),
+                    )
+                conn.commit()
         except Exception as e:
             logger.warning("Failed to touch profile for user %s: %s", user_id, e)
 
@@ -398,19 +456,76 @@ class MemoryService:
                 "is_active": True,
             }
 
-            if embedding:
-                data["embedding"] = embedding
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    if embedding is not None:
+                        cur.execute(
+                            f"""
+                            INSERT INTO {TABLE_MEMORIES}
+                            (user_id, session_id, content, fact_type, category,
+                             importance, surprise, confidence, ttl_days,
+                             created_at, updated_at, last_accessed_at, expires_at,
+                             is_active, embedding)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING *
+                            """,
+                            (
+                                data["user_id"],
+                                data["session_id"],
+                                data["content"],
+                                data["fact_type"],
+                                data["category"],
+                                data["importance"],
+                                data["surprise"],
+                                data["confidence"],
+                                data["ttl_days"],
+                                data["created_at"],
+                                data["updated_at"],
+                                data["last_accessed_at"],
+                                data["expires_at"],
+                                data["is_active"],
+                                embedding,
+                            ),
+                        )
+                    else:
+                        cur.execute(
+                            f"""
+                            INSERT INTO {TABLE_MEMORIES}
+                            (user_id, session_id, content, fact_type, category,
+                             importance, surprise, confidence, ttl_days,
+                             created_at, updated_at, last_accessed_at, expires_at,
+                             is_active)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING *
+                            """,
+                            (
+                                data["user_id"],
+                                data["session_id"],
+                                data["content"],
+                                data["fact_type"],
+                                data["category"],
+                                data["importance"],
+                                data["surprise"],
+                                data["confidence"],
+                                data["ttl_days"],
+                                data["created_at"],
+                                data["updated_at"],
+                                data["last_accessed_at"],
+                                data["expires_at"],
+                                data["is_active"],
+                            ),
+                        )
+                    row = cur.fetchone()
+                conn.commit()
 
-            response = self.client.table(TABLE_MEMORIES).insert(data).execute()
-
-            if response.data:
+            if row:
                 logger.info(
                     "Stored fact for user %s: importance=%.2f, surprise=%.2f",
                     user_id,
                     fact.importance,
                     fact.surprise,
                 )
-                return self._row_to_fact(response.data[0])
+                return self._row_to_fact(row)
 
             return None
 
@@ -447,30 +562,30 @@ class MemoryService:
                 "last_accessed_at": now,
             }
 
-            if embedding:
+            if embedding is not None:
                 data["embedding"] = embedding
 
-            # Increment version
-            data["version"] = (
-                self.client.table(TABLE_MEMORIES)
-                .select("version")
-                .eq("id", str(update.fact_id))
-                .single()
-                .execute()
-                .data.get("version", 0)
-                + 1
-            )
+            set_clause = ", ".join(f"{key} = %s" for key in data.keys())
+            values = list(data.values()) + [str(update.fact_id)]
 
-            response = (
-                self.client.table(TABLE_MEMORIES)
-                .update(data)
-                .eq("id", str(update.fact_id))
-                .execute()
-            )
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE_MEMORIES}
+                        SET {set_clause},
+                            version = COALESCE(version, 0) + 1
+                        WHERE id = %s
+                        RETURNING *
+                        """,
+                        values,
+                    )
+                    row = cur.fetchone()
+                conn.commit()
 
-            if response.data:
+            if row:
                 logger.info("Updated fact %s", update.fact_id)
-                return self._row_to_fact(response.data[0])
+                return self._row_to_fact(row)
 
             return None
 
@@ -501,27 +616,30 @@ class MemoryService:
             return []
 
         try:
-            query = (
-                self.client.table(TABLE_MEMORIES)
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("is_active", True)
-                .gte("importance", min_importance)
-                .order("importance", desc=True)
-                .limit(min(limit, MAX_FACTS_LIMIT))
+            params: list[Any] = [user_id, min_importance]
+            sql = (
+                f"SELECT * FROM {TABLE_MEMORIES} "
+                "WHERE user_id = %s AND is_active = TRUE AND importance >= %s"
             )
 
             if categories:
-                query = query.in_("category", categories)
+                sql += " AND category = ANY(%s)"
+                params.append(categories)
 
-            response = query.execute()
+            sql += " ORDER BY importance DESC LIMIT %s"
+            params.append(min(limit, MAX_FACTS_LIMIT))
 
-            if response.data:
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(sql, params)
+                    rows = cur.fetchall()
+
+            if rows:
                 # Update last_accessed_at for retrieved facts
-                fact_ids = [row["id"] for row in response.data]
+                fact_ids = [row["id"] for row in rows]
                 await self._touch_facts(fact_ids)
 
-                return [self._row_to_fact(row) for row in response.data]
+                return [self._row_to_fact(row) for row in rows]
 
             return []
 
@@ -554,20 +672,23 @@ class MemoryService:
             return []
 
         try:
-            # Use RPC function for vector search
-            params = {
-                "p_user_id": user_id,
-                "p_query_embedding": query_embedding,
-                "p_limit": min(limit, MAX_FACTS_LIMIT),
-                "p_min_importance": min_importance,
-                "p_categories": categories,
-            }
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(
+                        "SELECT * FROM search_memories(%s, %s, %s, %s, %s)",
+                        (
+                            user_id,
+                            query_embedding,
+                            min(limit, MAX_FACTS_LIMIT),
+                            min_importance,
+                            categories,
+                        ),
+                    )
+                    rows = cur.fetchall()
 
-            response = self.client.rpc("search_memories", params).execute()
-
-            if response.data:
+            if rows:
                 results = []
-                for row in response.data:
+                for row in rows:
                     fact = self.models["Fact"](
                         id=row["id"],
                         user_id=user_id,
@@ -593,12 +714,18 @@ class MemoryService:
             return False
 
         try:
-            self.client.table(TABLE_MEMORIES).update(
-                {
-                    "is_active": False,
-                    "updated_at": datetime.now(UTC).isoformat(),
-                }
-            ).eq("id", str(fact_id)).execute()
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE_MEMORIES}
+                        SET is_active = FALSE,
+                            updated_at = %s
+                        WHERE id = %s
+                        """,
+                        (datetime.now(UTC).isoformat(), str(fact_id)),
+                    )
+                conn.commit()
 
             logger.info("Deactivated fact %s: %s", fact_id, reason)
             return True
@@ -614,10 +741,17 @@ class MemoryService:
 
         try:
             now = datetime.now(UTC).isoformat()
-            for fact_id in fact_ids:
-                self.client.table(TABLE_MEMORIES).update({"last_accessed_at": now}).eq(
-                    "id", fact_id
-                ).execute()
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE_MEMORIES}
+                        SET last_accessed_at = %s
+                        WHERE id = ANY(%s)
+                        """,
+                        (now, fact_ids),
+                    )
+                conn.commit()
         except Exception as e:
             logger.warning("Failed to touch facts: %s", e)
 
@@ -649,18 +783,22 @@ class MemoryService:
             return None
 
         try:
-            response = (
-                self.client.table(TABLE_SUMMARIES)
-                .select("*")
-                .eq("user_id", user_id)
-                .eq("summary_type", "user")
-                .eq("is_current", True)
-                .single()
-                .execute()
-            )
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(
+                        f"""
+                        SELECT * FROM {TABLE_SUMMARIES}
+                        WHERE user_id = %s
+                          AND summary_type = %s
+                          AND is_current = TRUE
+                        LIMIT 1
+                        """,
+                        (user_id, "user"),
+                    )
+                    row = cur.fetchone()
 
-            if response.data:
-                return self._row_to_summary(response.data)
+            if row:
+                return self._row_to_summary(row)
 
             return None
 
@@ -692,32 +830,48 @@ class MemoryService:
             return None
 
         try:
-            # Deactivate old summaries
-            self.client.table(TABLE_SUMMARIES).update(
-                {
-                    "is_current": False,
-                    "updated_at": datetime.now(UTC).isoformat(),
-                }
-            ).eq("user_id", user_id).eq("summary_type", "user").execute()
-
-            # Create new summary
             now = datetime.now(UTC).isoformat()
-            data = {
-                "user_id": user_id,
-                "summary_type": "user",
-                "summary_text": summary_text,
-                "key_facts": key_facts or [],
-                "facts_count": facts_count,
-                "created_at": now,
-                "updated_at": now,
-                "is_current": True,
-            }
 
-            response = self.client.table(TABLE_SUMMARIES).insert(data).execute()
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    # Deactivate old summaries
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE_SUMMARIES}
+                        SET is_current = FALSE,
+                            updated_at = %s
+                        WHERE user_id = %s
+                          AND summary_type = %s
+                        """,
+                        (now, user_id, "user"),
+                    )
 
-            if response.data:
+                    # Create new summary
+                    cur.execute(
+                        f"""
+                        INSERT INTO {TABLE_SUMMARIES}
+                        (user_id, summary_type, summary_text, key_facts, facts_count,
+                         created_at, updated_at, is_current)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING *
+                        """,
+                        (
+                            user_id,
+                            "user",
+                            summary_text,
+                            key_facts or [],
+                            facts_count,
+                            now,
+                            now,
+                            True,
+                        ),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+
+            if row:
                 logger.info("Saved summary for user %s", user_id)
-                return self._row_to_summary(response.data[0])
+                return self._row_to_summary(row)
 
             return None
 
@@ -864,8 +1018,13 @@ class MemoryService:
             return 0
 
         try:
-            response = self.client.rpc("apply_memory_decay").execute()
-            affected = response.data if isinstance(response.data, int) else 0
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute("SELECT apply_memory_decay() AS affected")
+                    row = cur.fetchone()
+                conn.commit()
+
+            affected = int(row.get("affected", 0)) if row else 0
             logger.info("Applied time decay to %d memories", affected)
             return affected
         except Exception as e:
@@ -885,15 +1044,20 @@ class MemoryService:
         try:
             now = datetime.now(UTC).isoformat()
 
-            response = (
-                self.client.table(TABLE_MEMORIES)
-                .update({"is_active": False})
-                .lt("expires_at", now)
-                .eq("is_active", True)
-                .execute()
-            )
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE {TABLE_MEMORIES}
+                        SET is_active = FALSE
+                        WHERE expires_at < %s
+                          AND is_active = TRUE
+                        """,
+                        (now,),
+                    )
+                    count = cur.rowcount
+                conn.commit()
 
-            count = len(response.data) if response.data else 0
             logger.info("Cleaned up %d expired memories", count)
             return count
 

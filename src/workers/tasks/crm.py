@@ -124,20 +124,27 @@ def create_crm_order(
                 response.order_id,
             )
 
-            # Update CRM order status in database
+            # Update CRM order status in PostgreSQL
             try:
-                from src.services.supabase_client import get_supabase_client
-
-                supabase = get_supabase_client()
-
-                supabase.table("crm_orders").update(
-                    {
-                        "status": "created",
-                        "crm_order_id": response.order_id,
-                        "error_message": None,
-                        "updated_at": datetime.now().isoformat(),
-                    }
-                ).eq("external_id", external_id).execute()
+                # Update crm_orders in PostgreSQL
+                import psycopg
+                from src.services.postgres_pool import get_postgres_url
+                
+                postgres_url = get_postgres_url()
+                with psycopg.connect(postgres_url) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE crm_orders
+                            SET status = 'created',
+                                crm_order_id = %s,
+                                error_message = NULL,
+                                updated_at = NOW()
+                            WHERE external_id = %s
+                            """,
+                            (response.order_id, external_id),
+                        )
+                        conn.commit()
 
                 logger.info(
                     "[WORKER:CRM] Updated crm_orders status to 'created' for external_id=%s",
@@ -161,19 +168,25 @@ def create_crm_order(
                 response.error,
             )
 
-            # Update CRM order with failed status
+            # Update CRM order with failed status in PostgreSQL
             try:
-                from src.services.supabase_client import get_supabase_client
-
-                supabase = get_supabase_client()
-
-                supabase.table("crm_orders").update(
-                    {
-                        "status": "failed",
-                        "error_message": f"CRM rejected order: {response.error}",
-                        "updated_at": datetime.now().isoformat(),
-                    }
-                ).eq("external_id", external_id).execute()
+                import psycopg
+                from src.services.postgres_pool import get_postgres_url
+                
+                postgres_url = get_postgres_url()
+                with psycopg.connect(postgres_url) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE crm_orders
+                            SET status = 'failed',
+                                error_message = %s,
+                                updated_at = NOW()
+                            WHERE external_id = %s
+                            """,
+                            (f"CRM rejected order: {response.error}", external_id),
+                        )
+                        conn.commit()
 
                 logger.info(
                     "[WORKER:CRM] Updated crm_orders status to 'failed' for external_id=%s",
@@ -230,7 +243,6 @@ def sync_order_status(
         dict with sync result
     """
     from src.integrations.crm.snitkix import get_snitkix_client
-    from src.services.supabase_client import get_supabase_client
 
     logger.info(
         "[WORKER:CRM] Syncing order status order_id=%s session=%s new_status=%s",
@@ -258,22 +270,30 @@ def sync_order_status(
             logger.warning("[WORKER:CRM] Could not fetch status for order %s", order_id)
             return {"status": "error", "reason": "status_not_found"}
 
-        # Update session state in Supabase
-        client = get_supabase_client()
-        if client:
-            # Update agent_sessions with order status
-            client.table("agent_sessions").update(
-                {
-                    "order_status": new_status,
-                    "order_id": order_id,
-                }
-            ).eq("session_id", session_id).execute()
+        # Update session state in PostgreSQL
+        import psycopg
+        from src.services.postgres_pool import get_postgres_url
+        
+        postgres_url = get_postgres_url()
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE agent_sessions
+                    SET order_status = %s,
+                        order_id = %s,
+                        updated_at = NOW()
+                    WHERE session_id = %s
+                    """,
+                    (new_status, order_id, session_id),
+                )
+                conn.commit()
 
-            logger.info(
-                "[WORKER:CRM] Updated session %s with order status: %s",
-                session_id,
-                new_status,
-            )
+        logger.info(
+            "[WORKER:CRM] Updated session %s with order status: %s",
+            session_id,
+            new_status,
+        )
 
         return {
             "status": "synced",
@@ -304,32 +324,36 @@ def check_pending_orders(self) -> dict:
     Returns:
         dict with check results
     """
-    from src.services.supabase_client import get_supabase_client
-
     logger.info("[WORKER:CRM] Checking pending orders for status updates")
 
     if not settings.snitkix_enabled:
         return {"status": "skipped", "reason": "crm_not_configured"}
 
-    client = get_supabase_client()
-    if not client:
-        return {"status": "skipped", "reason": "no_supabase"}
-
+    # Use PostgreSQL
     try:
-        # Get sessions with pending orders
-        response = (
-            client.table("agent_sessions")
-            .select("session_id, order_id, order_status")
-            .not_.is_("order_id", "null")
-            .in_("order_status", ["pending", "processing", "new"])
-            .execute()
-        )
+        import psycopg
+        from psycopg.rows import dict_row
+        from src.services.postgres_pool import get_postgres_url
+        
+        # Get sessions with pending orders from PostgreSQL
+        postgres_url = get_postgres_url()
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT session_id, order_id, order_status
+                    FROM agent_sessions
+                    WHERE order_id IS NOT NULL
+                    AND order_status IN ('pending', 'processing', 'new')
+                    """
+                )
+                rows = cur.fetchall()
 
-        if not response.data:
+        if not rows:
             return {"status": "ok", "checked": 0}
 
         queued = 0
-        for row in response.data:
+        for row in rows:
             # Queue status sync for each pending order
             sync_order_status.delay(
                 order_id=row["order_id"],

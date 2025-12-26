@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 REAL integration test for Celery workers.
-Tests with actual Supabase connection and 1-minute follow-up delay.
+Tests with actual PostgreSQL connection and 1-minute follow-up delay.
 
 Usage:
     python scripts/test_workers_real.py
@@ -26,7 +26,8 @@ from src.conf.config import settings
 from src.services.followups import build_followup_message, next_followup_due_at, run_followups
 from src.services.message_store import StoredMessage, create_message_store
 from src.services.summarization import summarise_messages
-from src.services.supabase_client import get_supabase_client
+from src.core.constants import DBTable
+from src.services.postgres_pool import get_postgres_url
 
 
 def print_header(title: str):
@@ -40,24 +41,25 @@ def print_result(name: str, success: bool, details: str = ""):
     print(f"{icon} {name}: {details}")
 
 
-def test_supabase_connection():
-    """Test 1: Supabase connection."""
-    print_header("TEST 1: Supabase Connection")
-
-    client = get_supabase_client()
-    if not client:
-        print_result("Connection", False, "No client returned")
-        return False
+def test_postgres_connection():
+    """Test 1: PostgreSQL connection."""
+    print_header("TEST 1: PostgreSQL Connection")
 
     try:
-        # Try to query messages table
-        response = (
-            client.table(settings.SUPABASE_MESSAGES_TABLE).select("session_id").limit(1).execute()
-        )
-        print_result("Connection", True, f"Connected to {settings.SUPABASE_URL}")
-        print_result(
-            "Messages table", True, f"Table '{settings.SUPABASE_MESSAGES_TABLE}' accessible"
-        )
+        import psycopg
+
+        postgres_url = get_postgres_url()
+        if not postgres_url:
+            print_result("Connection", False, "No DATABASE_URL configured")
+            return False
+
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT 1 FROM {DBTable.MESSAGES} LIMIT 1")
+                cur.fetchone()
+
+        print_result("Connection", True, "Connected to PostgreSQL")
+        print_result("Messages table", True, f"Table '{DBTable.MESSAGES}' accessible")
         return True
     except Exception as e:
         print_result("Connection", False, str(e))
@@ -150,8 +152,8 @@ def test_summarization_logic():
 
 
 def test_message_store_real():
-    """Test 4: Real MessageStore with Supabase."""
-    print_header("TEST 4: Real MessageStore (Supabase)")
+    """Test 4: Real MessageStore with PostgreSQL."""
+    print_header("TEST 4: Real MessageStore (PostgreSQL)")
 
     store = create_message_store()
     session_id = f"test_store_{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
@@ -272,12 +274,12 @@ def test_full_followup_flow():
 def main():
     print("\n" + "🚀 MIRT AI Workers - Real Integration Tests 🚀".center(60))
     print(f"Time: {datetime.now(UTC).isoformat()}")
-    print(f"Supabase: {settings.SUPABASE_URL}")
+    print(f"PostgreSQL: {settings.DATABASE_URL}")
 
     results = []
 
     # Run all tests
-    results.append(("Supabase Connection", test_supabase_connection()))
+    results.append(("PostgreSQL Connection", test_postgres_connection()))
     results.append(("Follow-up Logic (1-min)", test_followup_logic_1min()))
     results.append(("Summarization Logic", test_summarization_logic()))
     results.append(("Real MessageStore", test_message_store_real()))

@@ -41,9 +41,9 @@ class PostgresMessageStore:
                     # Insert message
                     cur.execute(
                         f"""
-                        INSERT INTO {self.table} 
-                        (session_id, role, content, content_type, user_id, created_at, tags)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO {self.table}
+                        (session_id, role, content, content_type, user_id, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         """,
                         (
                             message.session_id,
@@ -52,7 +52,6 @@ class PostgresMessageStore:
                             message.content_type,
                             message.user_id,
                             message.created_at.isoformat(),
-                            message.tags,
                         ),
                     )
                     
@@ -71,10 +70,10 @@ class PostgresMessageStore:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    INSERT INTO {DBTable.USERS} (user_id, last_interaction_at, updated_at)
-                    VALUES (%s, NOW(), NOW())
+                    INSERT INTO {DBTable.USERS} (user_id, last_interaction_at)
+                    VALUES (%s, NOW())
                     ON CONFLICT (user_id) 
-                    DO UPDATE SET last_interaction_at = NOW(), updated_at = NOW()
+                    DO UPDATE SET last_interaction_at = NOW()
                     """,
                     (str(user_id),),
                 )
@@ -93,7 +92,7 @@ class PostgresMessageStore:
                 with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(
                         f"""
-                        SELECT user_id, session_id, role, content, content_type, created_at, tags
+                        SELECT user_id, session_id, role, content, content_type, created_at
                         FROM {self.table}
                         WHERE session_id = %s
                         ORDER BY created_at
@@ -123,7 +122,7 @@ class PostgresMessageStore:
                                 user_id=row.get("user_id"),
                                 content_type=row.get("content_type", "text"),
                                 created_at=dt,
-                                tags=row.get("tags", []),
+                                tags=[],
                             )
                         )
                     return messages
@@ -143,12 +142,12 @@ class PostgresMessageStore:
                 with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(
                         f"""
-                        SELECT user_id, session_id, role, content, content_type, created_at, tags
+                        SELECT user_id, session_id, role, content, content_type, created_at
                         FROM {self.table}
                         WHERE user_id = %s
                         ORDER BY created_at
                         """,
-                        (str(user_id),),
+                        (user_id,),
                     )
                     rows = cur.fetchall()
                     
@@ -173,7 +172,7 @@ class PostgresMessageStore:
                                 user_id=row.get("user_id"),
                                 content_type=row.get("content_type", "text"),
                                 created_at=dt,
-                                tags=row.get("tags", []),
+                                tags=[],
                             )
                         )
                     return messages

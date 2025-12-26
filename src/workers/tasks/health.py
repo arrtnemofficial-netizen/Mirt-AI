@@ -31,7 +31,7 @@ def worker_health_check(self) -> dict:
     Returns:
         dict with health status
     """
-    from src.services.supabase_client import get_supabase_client
+    # PostgreSQL only - no Supabase dependency
 
     health = {
         "status": "healthy",
@@ -45,17 +45,18 @@ def worker_health_check(self) -> dict:
     # Check Redis (we're running, so it works)
     health["checks"]["redis"] = {"status": "ok"}
 
-    # Check Supabase
+    # Check PostgreSQL
     try:
-        client = get_supabase_client()
-        if client:
-            # Simple query to verify connection
-            client.table(DBTable.MESSAGES).select("id").limit(1).execute()
-            health["checks"]["supabase"] = {"status": "ok"}
-        else:
-            health["checks"]["supabase"] = {"status": "not_configured"}
+        import psycopg
+        from src.services.postgres_pool import get_postgres_url
+        
+        postgres_url = get_postgres_url()
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT id FROM {DBTable.MESSAGES} LIMIT 1")
+        health["checks"]["postgresql"] = {"status": "ok"}
     except Exception as e:
-        health["checks"]["supabase"] = {"status": "error", "error": str(e)}
+        health["checks"]["postgresql"] = {"status": "error", "error": str(e)}
         health["status"] = "degraded"
 
     # Log health status

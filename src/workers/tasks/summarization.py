@@ -21,7 +21,7 @@ from src.services.summarization import (
     mark_user_summarized,
     run_retention,
 )
-from src.services.supabase_client import get_supabase_client
+# PostgreSQL only - no Supabase dependency
 from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
 from src.workers.sync_utils import run_sync
 
@@ -160,16 +160,27 @@ def check_all_sessions_for_summarization(self) -> dict:
     """
     logger.info("[WORKER:SUMMARIZATION] Starting periodic summarization check")
 
-    client = get_supabase_client()
-    if not client:
-        logger.warning("[WORKER:SUMMARIZATION] Supabase not configured, skipping")
-        return {"status": "skipped", "reason": "no_supabase"}
-
+    # Use PostgreSQL
     try:
-        # Step 1: Call Supabase function to mark inactive users
-        marked_users = call_summarize_inactive_users()
+        import psycopg
+        from psycopg.rows import dict_row
+        from src.services.postgres_pool import get_postgres_url
+        
+        # Step 1: Call PostgreSQL function to mark inactive users
+        try:
+            postgres_url = get_postgres_url()
+        except ValueError:
+            logger.warning("[WORKER:SUMMARIZATION] PostgreSQL not configured, skipping")
+            return {"status": "skipped", "reason": "no_postgres"}
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM summarize_inactive_users()")
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description] if cur.description else []
+                marked_users = [dict(zip(columns, row)) for row in rows]
+        
         logger.info(
-            "[WORKER:SUMMARIZATION] Marked %d inactive users via Supabase function",
+            "[WORKER:SUMMARIZATION] Marked %d inactive users via PostgreSQL function",
             len(marked_users),
         )
 
@@ -186,33 +197,44 @@ def check_all_sessions_for_summarization(self) -> dict:
             cutoff_date = (datetime.now(UTC) - timedelta(days=3)).isoformat()
             
             try:
-                # Get inactive users from users table
-                inactive_users = (
-                    client.table(DBTable.USERS)
-                    .select("user_id, last_interaction_at")
-                    .lt("last_interaction_at", cutoff_date)
-                    .not_.is_("user_id", "null")
-                    .execute()
-                )
+                # Get inactive users from PostgreSQL users table
+                with psycopg.connect(postgres_url) as conn:
+                    with conn.cursor(row_factory=dict_row) as cur:
+                        cur.execute(
+                            f"""
+                            SELECT user_id, last_interaction_at
+                            FROM {DBTable.USERS}
+                            WHERE last_interaction_at < %s
+                            AND user_id IS NOT NULL
+                            """,
+                            (cutoff_date,),
+                        )
+                        inactive_users = cur.fetchall()
                 
-                if inactive_users.data:
+                if inactive_users:
                     # Get their session_ids from messages table
-                    user_ids = [u.get("user_id") for u in inactive_users.data if u.get("user_id")]
+                    user_ids = [u.get("user_id") for u in inactive_users if u.get("user_id")]
                     
                     if user_ids:
-                        # Get sessions for these users
-                        # Get latest session per user (order by created_at DESC, then group by user_id)
-                        sessions_response = (
-                            client.table(settings.SUPABASE_MESSAGES_TABLE)
-                            .select("session_id, user_id, created_at")
-                            .in_("user_id", user_ids)
-                            .order("created_at", desc=True)
-                            .execute()
-                        )
+                        # Get sessions for these users from PostgreSQL
+                        with psycopg.connect(postgres_url) as conn:
+                            with conn.cursor(row_factory=dict_row) as cur:
+                                placeholders = ",".join(["%s"] * len(user_ids))
+                                from src.core.constants import DBTable
+                                cur.execute(
+                                    f"""
+                                    SELECT DISTINCT ON (user_id) session_id, user_id, created_at
+                                    FROM {DBTable.MESSAGES}
+                                    WHERE user_id IN ({placeholders})
+                                    ORDER BY user_id, created_at DESC
+                                    """,
+                                    tuple(user_ids),
+                                )
+                                sessions_rows = cur.fetchall()
                         
                         # Group by user_id to get latest session
                         user_sessions: dict[str, str] = {}
-                        for row in sessions_response.data or []:
+                        for row in sessions_rows:
                             uid = row.get("user_id")
                             sid = row.get("session_id")
                             if uid and sid and uid not in user_sessions:
@@ -335,26 +357,19 @@ def summarize_user_history(
     try:
         message_store = create_message_store()
 
-        # Get session for this user
-        client = get_supabase_client()
-        if not client:
-            return {"status": "skipped", "reason": "no_supabase"}
-
-        # Find user's session(s)
-        response = (
-            client.table(settings.SUPABASE_MESSAGES_TABLE)
-            .select("session_id")
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-
-        if not response.data:
+        # Get session for this user from PostgreSQL
+        message_store = create_message_store()
+        
+        # Find user's session(s) using message_store
+        messages = message_store.list_by_user(int(user_id) if isinstance(user_id, str) and user_id.isdigit() else user_id)
+        
+        if not messages:
             # No messages, just mark as summarized
             mark_user_summarized(user_id)
             return {"status": "skipped", "reason": "no_messages"}
 
-        session_id = response.data[0]["session_id"]
+        # Get first session_id from messages
+        session_id = messages[0].session_id
 
         # Run retention/summarization
         summary = run_retention(

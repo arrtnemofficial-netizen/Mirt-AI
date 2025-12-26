@@ -121,7 +121,7 @@ class TestEnvironmentSecurity:
         # Check they're attributes (loaded dynamically)
         sensitive_attrs = [
             "TELEGRAM_BOT_TOKEN",
-            "SUPABASE_API_KEY",
+            "DATABASE_URL",
             "OPENAI_API_KEY",
         ]
 

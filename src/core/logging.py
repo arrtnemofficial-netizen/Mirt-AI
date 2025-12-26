@@ -53,7 +53,7 @@ def classify_root_cause(
         return "LLM_RATE_LIMIT"
     if "vision" in msg or "image" in msg or "cdn" in msg:
         return "VISION_ERROR"
-    if "supabase" in msg or "postgres" in msg or "psycopg" in msg:
+    if "postgres" in msg or "psycopg" in msg or "database" in msg:
         return "STORAGE_ERROR"
     if "manychat" in msg:
         return "MANYCHAT_ERROR"
@@ -344,7 +344,6 @@ def setup_logging(
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("aiogram").setLevel(logging.INFO)
-    logging.getLogger("supabase").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
 
 

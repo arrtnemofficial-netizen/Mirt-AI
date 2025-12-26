@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run database migration script against Supabase/Postgres.
+Run database migration script against PostgreSQL.
 
 Usage:
     python scripts/run_db_migration.py
@@ -9,10 +9,7 @@ Requirements:
     - DATABASE_URL in .env (direct Postgres connection string)
     - Or: Set DATABASE_URL env var before running
 
-To get DATABASE_URL from Supabase:
-    1. Go to Supabase Dashboard -> Settings -> Database
-    2. Copy "Connection string" (URI format)
-    3. Add to .env: DATABASE_URL=postgresql://postgres:PASSWORD@db.PROJECT.supabase.co:5432/postgres
+Make sure DATABASE_URL is set to a valid PostgreSQL connection string.
 """
 
 import os
@@ -42,21 +39,6 @@ def get_database_url() -> str | None:
     if url:
         return url
 
-    # Try to construct from Supabase settings
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    if supabase_url and "supabase.co" in supabase_url:
-        # Extract project ref from URL
-        # https://abc123.supabase.co -> abc123
-        project_ref = supabase_url.replace("https://", "").split(".")[0]
-        print("⚠️  DATABASE_URL not set.")
-        print("")
-        print("To get it from Supabase:")
-        print(f"  1. Go to: https://supabase.com/dashboard/project/{project_ref}/settings/database")
-        print("  2. Copy 'Connection string' (URI format)")
-        print(
-            f"  3. Add to .env: DATABASE_URL=postgresql://postgres:PASSWORD@db.{project_ref}.supabase.co:5432/postgres"
-        )
-        print("")
     return None
 
 

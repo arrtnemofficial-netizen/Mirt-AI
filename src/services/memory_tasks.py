@@ -22,8 +22,15 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:
+    psycopg = None  # type: ignore
+    dict_row = None  # type: ignore
+
 from src.services.memory_service import MemoryService
-from src.services.supabase_client import get_supabase_client
+from src.services.postgres_pool import get_postgres_url
 
 
 logger = logging.getLogger(__name__)
@@ -179,24 +186,31 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
     logger.info("📝 Starting summary generation for active users (last %d days)...", days)
     start = datetime.now(UTC)
 
-    client = get_supabase_client()
-    if not client:
-        logger.warning("Supabase client not available")
+    if psycopg is None:
+        logger.warning("psycopg not installed")
         return {"processed": 0, "error": "no_client"}
 
     try:
         # Get active users
-        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        cutoff = datetime.now(UTC) - timedelta(days=days)
 
-        response = (
-            client.table("mirt_profiles").select("user_id").gte("last_seen_at", cutoff).execute()
-        )
+        url = get_postgres_url()
+        with psycopg.connect(url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT user_id FROM mirt_profiles
+                    WHERE last_seen_at >= %s
+                    """,
+                    (cutoff,),
+                )
+                rows = cur.fetchall()
 
-        if not response.data:
+        if not rows:
             logger.info("No active users found")
             return {"processed": 0}
 
-        user_ids = [row["user_id"] for row in response.data]
+        user_ids = [row["user_id"] for row in rows]
         logger.info("Found %d active users", len(user_ids))
 
         # Generate summaries

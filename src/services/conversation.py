@@ -465,7 +465,7 @@ class ConversationHandler:
 
             # Load or create session state
             # CRITICAL: Use to_thread() to avoid blocking event loop!
-            # Supabase client is synchronous and blocks the entire async loop
+            # Database operations are wrapped in to_thread() to avoid blocking the async loop
             _get_start = _time.time()
             try:
                 state = await asyncio.wait_for(

@@ -1,6 +1,6 @@
 """
-Catalog Service - Supabase implementation.
-==========================================
+Catalog Service - PostgreSQL implementation.
+============================================
 Production-ready catalog service with Vision AI support.
 
 Features:
@@ -19,14 +19,17 @@ from typing import Any
 
 from src.services.exceptions import CatalogUnavailableError
 from src.services.observability import log_tool_execution, track_metric
-from src.services.supabase_client import get_supabase_client
+# PostgreSQL implementation
+import psycopg
+from psycopg.rows import dict_row
+from src.services.postgres_pool import get_postgres_url
 
 
 logger = logging.getLogger(__name__)
 
 _GLOBAL_CACHE: dict[str, Any] = {}
 
-# Cache TTL in seconds - increase to reduce Supabase load
+# Cache TTL in seconds - increase to reduce database load
 CACHE_TTL_VISION = 300.0  # 5 minutes for vision products
 CACHE_TTL_SEARCH = 120.0  # 2 minutes for search results
 
@@ -36,7 +39,7 @@ RAISE_ON_CATALOG_ERROR = True
 
 class CatalogService:
     """
-    Product catalog service backed by Supabase.
+    Product catalog service backed by PostgreSQL.
 
     Optimized for Vision AI recognition with:
     - Feature-based search (fabric, closure, hood)
@@ -46,8 +49,13 @@ class CatalogService:
     """
 
     def __init__(self) -> None:
-        self.client = get_supabase_client()
+        # PostgreSQL connection will be created per-request
         self._cache = _GLOBAL_CACHE
+    
+    def _get_connection(self):
+        """Get PostgreSQL connection."""
+        postgres_url = get_postgres_url()
+        return psycopg.connect(postgres_url)
 
     # =========================================================================
     # PRICE HELPERS
@@ -145,7 +153,7 @@ class CatalogService:
         """
         Search products by text query.
         Minimal version - only uses columns that exist in DB.
-        Cached to reduce Supabase load.
+        Cached to reduce database load.
         """
         tool_name = "catalog.search_products"
 
@@ -161,35 +169,23 @@ class CatalogService:
         except Exception:
             pass
 
-        if not self.client:
-            error_msg = "Supabase client not available"
-            logger.error("[CATALOG] %s - cannot search products", error_msg)
-            log_tool_execution(
-                tool_name,
-                success=False,
-                latency_ms=0.0,
-                result_count=0,
-                error="no_client",
-            )
-            if RAISE_ON_CATALOG_ERROR:
-                raise CatalogUnavailableError("Database connection not configured")
-            return []
-
         start = time.perf_counter()
         success = False
         result_count = 0
         error_msg: str | None = None
 
         try:
-            # Get all products, filter in code to avoid column errors
-            db_query = self.client.table("products").select("*")
-
-            # Only filter by name if query provided (name column should exist)
-            if query:
-                db_query = db_query.ilike("name", f"%{query}%")
-
-            response = db_query.limit(limit).execute()
-            data = response.data or []
+            # Get products from PostgreSQL
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    if query:
+                        cur.execute(
+                            "SELECT * FROM products WHERE name ILIKE %s LIMIT %s",
+                            (f"%{query}%", limit),
+                        )
+                    else:
+                        cur.execute("SELECT * FROM products LIMIT %s", (limit,))
+                    data = cur.fetchall()
             success = True
             result_count = len(data)
             # Cache the results
@@ -240,25 +236,17 @@ class CatalogService:
         """
         tool_name = "catalog.search_by_features"
 
-        if not self.client:
-            log_tool_execution(
-                tool_name,
-                success=False,
-                latency_ms=0.0,
-                result_count=0,
-                error="no_client",
-            )
-            return []
-
         start = time.perf_counter()
         success = False
         result_count = 0
         error_msg: str | None = None
 
         try:
-            # Just get all products - let AI do the matching
-            response = self.client.table("products").select("*").limit(limit).execute()
-            data = response.data or []
+            # Get all products from PostgreSQL
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute("SELECT * FROM products LIMIT %s", (limit,))
+                    data = cur.fetchall()
             success = True
             result_count = len(data)
             return data
@@ -320,9 +308,11 @@ class CatalogService:
         error_msg: str | None = None
 
         try:
-            # Use SELECT * to avoid column errors - works with any schema
-            response = self.client.table("products").select("*").execute()
-            products = response.data or []
+            # Get all products from PostgreSQL
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute("SELECT * FROM products")
+                    products = cur.fetchall()
             success = True
             result_count = len(products)
             logger.info("Loaded %d products from DB for vision", len(products))
@@ -391,15 +381,15 @@ class CatalogService:
                     limit=limit,
                 )
 
-            # Get products by names in confused_with
-            response = (
-                self.client.table("products")
-                .select("*")
-                .in_("name", confused_with)
-                .limit(limit)
-                .execute()
-            )
-            data = response.data or []
+            # Get products by names in confused_with from PostgreSQL
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    placeholders = ",".join(["%s"] * len(confused_with))
+                    cur.execute(
+                        f"SELECT * FROM products WHERE name IN ({placeholders}) LIMIT %s",
+                        tuple(confused_with) + (limit,),
+                    )
+                    data = cur.fetchall()
             success = True
             result_count = len(data)
             return data
@@ -444,17 +434,6 @@ class CatalogService:
             }
         """
         tool_name = "catalog.check_stock"
-
-        if not self.client:
-            result = {"in_stock": False, "quantity": 0, "available_sizes": []}
-            log_tool_execution(
-                tool_name,
-                success=False,
-                latency_ms=0.0,
-                result_count=0,
-                error="no_client",
-            )
-            return result
 
         start = time.perf_counter()
         success = False
@@ -503,25 +482,17 @@ class CatalogService:
         """Get product details by ID."""
         tool_name = "catalog.get_product_by_id"
 
-        if not self.client:
-            log_tool_execution(
-                tool_name,
-                success=False,
-                latency_ms=0.0,
-                result_count=0,
-                error="no_client",
-            )
-            return None
-
         start = time.perf_counter()
         success = False
         error_msg: str | None = None
 
         try:
-            response = (
-                self.client.table("products").select("*").eq("id", product_id).single().execute()
-            )
-            data = response.data
+            # Get product by ID from PostgreSQL
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute("SELECT * FROM products WHERE id = %s LIMIT 1", (product_id,))
+                    row = cur.fetchone()
+                    data = dict(row) if row else None
             success = data is not None
             return data
         except Exception as e:
@@ -548,7 +519,7 @@ class CatalogService:
         """Get multiple products by IDs."""
         tool_name = "catalog.get_products_by_ids"
 
-        if not self.client or not product_ids:
+        if not product_ids:
             log_tool_execution(
                 tool_name,
                 success=False,
@@ -564,8 +535,15 @@ class CatalogService:
         error_msg: str | None = None
 
         try:
-            response = self.client.table("products").select("*").in_("id", product_ids).execute()
-            data = response.data or []
+            # Get products by IDs from PostgreSQL
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    placeholders = ",".join(["%s"] * len(product_ids))
+                    cur.execute(
+                        f"SELECT * FROM products WHERE id IN ({placeholders})",
+                        tuple(product_ids),
+                    )
+                    data = cur.fetchall()
             success = True
             result_count = len(data)
             return data

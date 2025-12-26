@@ -78,8 +78,6 @@ OPENROUTER_API_KEY=sk-or-v1-xxx
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 AI_MODEL=x-ai/grok-3-mini-beta
 
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_API_KEY=eyJxxx
 ```
 
 ### 2.3. Запуск тестів
@@ -177,7 +175,6 @@ Mirt-AI/
 │   ├── services/                 # Бізнес-логіка
 │   │   ├── catalog_service.py    # Робота з каталогом товарів
 │   │   ├── order_service.py      # OrderService / CRM інтеграція
-│   │   ├── supabase_client.py    # Клієнт Supabase
 │   │   ├── observability.py      # Логування та метрики
 │   │   └── product_matcher.py    # Нормалізація назв товарів
 │   │
@@ -418,8 +415,6 @@ LLM_MODEL_GROK=x-ai/grok-3-mini-beta  # Для OpenRouter
 AI_MODEL=x-ai/grok-3-mini-beta   # Fallback
 
 # Supabase
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_API_KEY=eyJxxx
 
 # Redis (для Celery)
 REDIS_URL=redis://localhost:6379/0
@@ -431,7 +426,6 @@ REDIS_URL=redis://localhost:6379/0
 |-------|--------|
 | pydantic-ai | 1.23.0 |
 | openai | 2.9.0 |
-| supabase | 2.25.0 |
 | langgraph | 1.0.4 |
 | fastapi | 0.115.2 |
 | pydantic | 2.12.5 |
@@ -453,7 +447,6 @@ REDIS_URL=redis://localhost:6379/0
 **Рішення:** Перевір `products_master.yaml` та перегенеруй артефакти
 
 ### ❌ "Supabase disabled"
-**Причина:** Немає `SUPABASE_URL` або `SUPABASE_API_KEY`  
 **Рішення:** Додай в `.env` або система працюватиме з fallback JSON
 
 ---

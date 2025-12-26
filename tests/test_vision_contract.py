@@ -5,7 +5,7 @@ Tests that enforce the VisionResponse specification.
 
 INVARIANTS:
 1. If confidence >= 0.5 → identified_product.name MUST NOT be null
-2. Product price/color MUST come from Supabase, NOT from LLM
+2. Product price/color MUST come from the catalog database, NOT from LLM
 3. needs_clarification=True → clarification_question MUST NOT be empty
 """
 
@@ -106,16 +106,16 @@ class TestHighConfidenceProductInvariant:
 
 
 # =============================================================================
-# INVARIANT 2: Product data from Supabase (enrichment test)
+# INVARIANT 2: Product data from catalog database (enrichment test)
 # =============================================================================
 
 
 class TestProductEnrichmentInvariant:
-    """Product price/color MUST be enriched from Supabase."""
+    """Product price/color MUST be enriched from catalog database."""
 
     @pytest.mark.asyncio
     async def test_vision_node_enriches_product_from_db(self):
-        """vision_node should enrich product data from Supabase."""
+        """vision_node should enrich product data from catalog database."""
 
         # Mock run_vision to return product with price=0 (LLM doesn't know price)
         async def mock_run_vision(message, deps):
@@ -135,7 +135,7 @@ class TestProductEnrichmentInvariant:
             return {
                 "price": 2350,
                 "color": "рожевий",
-                "photo_url": "https://supabase.com/real_photo.jpg",
+                "photo_url": "https://example.com/real_photo.jpg",
                 "id": 123,
             }
 

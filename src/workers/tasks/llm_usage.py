@@ -25,7 +25,7 @@ from typing import Any
 from celery import shared_task
 
 from src.core.constants import DBTable
-from src.services.supabase_client import get_supabase_client
+# PostgreSQL only - no Supabase dependency
 from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
 
 
@@ -118,29 +118,43 @@ def record_usage(
     if not model:
         raise PermanentError("Model name is required", error_code="INVALID_INPUT")
 
-    client = get_supabase_client()
-    if not client:
-        logger.warning("[WORKER:LLM_USAGE] Supabase not configured, skipping")
-        return {"status": "skipped", "reason": "no_supabase"}
-
+    # Use PostgreSQL
     try:
+        import psycopg
+        from src.services.postgres_pool import get_postgres_url
+        
         # Calculate cost
         cost_usd = calculate_cost(model, tokens_input, tokens_output)
 
-        # Insert record
-        record = {
-            "user_id": user_id,
-            "model": model,
-            "tokens_input": tokens_input,
-            "tokens_output": tokens_output,
-            "cost_usd": float(cost_usd),
-            "created_at": datetime.now(UTC).isoformat(),
-        }
+        # Insert record into PostgreSQL
+        try:
+            postgres_url = get_postgres_url()
+        except ValueError:
+            logger.warning("[WORKER:LLM_USAGE] PostgreSQL not configured, skipping")
+            return {"status": "skipped", "reason": "no_postgres"}
+        created_at = datetime.now(UTC).isoformat()
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    INSERT INTO {DBTable.LLM_USAGE}
+                    (user_id, model, tokens_input, tokens_output, cost_usd, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        user_id,
+                        model,
+                        tokens_input,
+                        tokens_output,
+                        float(cost_usd),
+                        created_at,
+                    ),
+                )
+                record_id = cur.fetchone()[0]
+                conn.commit()
 
-        response = client.table(DBTable.LLM_USAGE).insert(record).execute()
-
-        if response.data:
-            record_id = response.data[0].get("id")
+        if record_id:
             logger.info(
                 "[WORKER:LLM_USAGE] Recorded usage id=%s cost=$%.6f",
                 record_id,
@@ -187,25 +201,35 @@ def get_user_usage_summary(
         days,
     )
 
-    client = get_supabase_client()
-    if not client:
-        return {"status": "skipped", "reason": "no_supabase"}
-
+    # Use PostgreSQL
     try:
+        import psycopg
+        from psycopg.rows import dict_row
+        from src.services.postgres_pool import get_postgres_url
+        
         # Calculate date cutoff
         cutoff = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff = cutoff.replace(day=cutoff.day - days) if cutoff.day > days else cutoff
 
-        # Query usage records
-        response = (
-            client.table(DBTable.LLM_USAGE)
-            .select("model, tokens_input, tokens_output, cost_usd")
-            .eq("user_id", user_id)
-            .gte("created_at", cutoff.isoformat())
-            .execute()
-        )
+        # Query usage records from PostgreSQL
+        try:
+            postgres_url = get_postgres_url()
+        except ValueError:
+            return {"status": "skipped", "reason": "no_postgres"}
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"""
+                    SELECT model, tokens_input, tokens_output, cost_usd
+                    FROM {DBTable.LLM_USAGE}
+                    WHERE user_id = %s
+                    AND created_at >= %s
+                    """,
+                    (user_id, cutoff),
+                )
+                rows = cur.fetchall()
 
-        if not response.data:
+        if not rows:
             return {
                 "status": "ok",
                 "user_id": user_id,
@@ -222,7 +246,7 @@ def get_user_usage_summary(
         total_output = 0
         by_model: dict[str, dict[str, Any]] = {}
 
-        for row in response.data:
+        for row in rows:
             model = row["model"]
             total_cost += Decimal(str(row["cost_usd"]))
             total_input += row["tokens_input"]
@@ -251,7 +275,7 @@ def get_user_usage_summary(
             "total_cost_usd": float(total_cost),
             "total_tokens_input": total_input,
             "total_tokens_output": total_output,
-            "request_count": len(response.data),
+            "request_count": len(rows),
             "by_model": by_model,
         }
 
@@ -275,22 +299,33 @@ def aggregate_daily_usage(self) -> dict:
     """
     logger.info("[WORKER:LLM_USAGE] Aggregating daily usage")
 
-    client = get_supabase_client()
-    if not client:
-        return {"status": "skipped", "reason": "no_supabase"}
-
+    # Use PostgreSQL
     try:
+        import psycopg
+        from psycopg.rows import dict_row
+        from src.services.postgres_pool import get_postgres_url
+        
         # Get today's usage
         today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
-        response = (
-            client.table(DBTable.LLM_USAGE)
-            .select("model, tokens_input, tokens_output, cost_usd, user_id")
-            .gte("created_at", today.isoformat())
-            .execute()
-        )
+        # Query from PostgreSQL
+        try:
+            postgres_url = get_postgres_url()
+        except ValueError:
+            return {"status": "skipped", "reason": "no_postgres"}
+        with psycopg.connect(postgres_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"""
+                    SELECT model, tokens_input, tokens_output, cost_usd, user_id
+                    FROM {DBTable.LLM_USAGE}
+                    WHERE created_at >= %s
+                    """,
+                    (today,),
+                )
+                rows = cur.fetchall()
 
-        if not response.data:
+        if not rows:
             return {
                 "status": "ok",
                 "date": today.date().isoformat(),
@@ -299,13 +334,13 @@ def aggregate_daily_usage(self) -> dict:
                 "unique_users": 0,
             }
 
-        total_cost = sum(Decimal(str(row["cost_usd"])) for row in response.data)
-        unique_users = len({row["user_id"] for row in response.data if row["user_id"]})
+        total_cost = sum(Decimal(str(row["cost_usd"])) for row in rows)
+        unique_users = len({row["user_id"] for row in rows if row["user_id"]})
 
         logger.info(
             "[WORKER:LLM_USAGE] Daily aggregate: $%.4f, %d requests, %d users",
             total_cost,
-            len(response.data),
+            len(rows),
             unique_users,
         )
 
@@ -313,7 +348,7 @@ def aggregate_daily_usage(self) -> dict:
             "status": "ok",
             "date": today.date().isoformat(),
             "total_cost_usd": float(total_cost),
-            "request_count": len(response.data),
+            "request_count": len(rows),
             "unique_users": unique_users,
         }
 

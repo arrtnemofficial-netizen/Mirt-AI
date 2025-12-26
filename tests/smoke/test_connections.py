@@ -13,36 +13,35 @@ import pytest
 @pytest.mark.smoke
 @pytest.mark.integration
 class TestDatabaseConnection:
-    """Test Supabase database connectivity."""
+    """Test PostgreSQL database connectivity."""
 
     @pytest.mark.asyncio
-    async def test_supabase_client_creates(self):
-        """Supabase client can be created."""
-        from supabase import create_client
+    async def test_postgres_client_connects(self):
+        """PostgreSQL client can connect."""
+        import psycopg
 
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_API_KEY")
+        url = os.getenv("DATABASE_URL")
 
-        if not url or not key or "test" in url.lower():
-            pytest.skip("No real Supabase credentials")
+        if not url or "test" in url.lower():
+            pytest.skip("No real PostgreSQL credentials")
 
-        client = create_client(url, key)
-        assert client is not None
+        with psycopg.connect(url) as conn:
+            assert conn is not None
 
     @pytest.mark.asyncio
-    async def test_supabase_can_query(self):
-        """Supabase can execute a simple query."""
-        from supabase import create_client
+    async def test_postgres_can_query(self):
+        """PostgreSQL can execute a simple query."""
+        import psycopg
 
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_API_KEY")
+        url = os.getenv("DATABASE_URL")
 
-        if not url or not key or "test" in url.lower():
-            pytest.skip("No real Supabase credentials")
+        if not url or "test" in url.lower():
+            pytest.skip("No real PostgreSQL credentials")
 
-        client = create_client(url, key)
-        # Try to query products table (should exist)
-        result = client.table("products").select("id").limit(1).execute()
+        with psycopg.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                result = cur.fetchone()
         assert result is not None
 
 

@@ -30,7 +30,7 @@ class FallbackType(Enum):
 
     LLM_UNAVAILABLE = "llm_unavailable"
     LLM_TIMEOUT = "llm_timeout"
-    SUPABASE_UNAVAILABLE = "supabase_unavailable"
+    DATABASE_UNAVAILABLE = "database_unavailable"
     MANYCHAT_UNAVAILABLE = "manychat_unavailable"
     VISION_FAILED = "vision_failed"
     CATALOG_EMPTY = "catalog_empty"
@@ -60,7 +60,7 @@ FALLBACK_MESSAGES: dict[FallbackType, dict[str, Any]] = {
         "should_escalate": False,
         "retry_after_seconds": 30,
     },
-    FallbackType.SUPABASE_UNAVAILABLE: {
+    FallbackType.DATABASE_UNAVAILABLE: {
         "text": (
             "Вибачте, не можу зараз зберегти дані.\n"
             "Ваше повідомлення я отримав, продовжуйте спілкування!"
@@ -203,8 +203,8 @@ def get_contextual_fallback(
         fallback_type = FallbackType.LLM_TIMEOUT
     elif "rate limit" in error_str or "429" in error_str:
         fallback_type = FallbackType.RATE_LIMITED
-    elif "supabase" in error_str or "postgres" in error_str:
-        fallback_type = FallbackType.SUPABASE_UNAVAILABLE
+    elif "postgres" in error_str or "database" in error_str or "psycopg" in error_str:
+        fallback_type = FallbackType.DATABASE_UNAVAILABLE
     elif "manychat" in error_str:
         fallback_type = FallbackType.MANYCHAT_UNAVAILABLE
     elif "vision" in error_str or "image" in error_str:

@@ -70,8 +70,7 @@ ruff check .
 pytest
 ```
 
-Note: chaos DB verification tests are skipped unless `SUPABASE_URL` and
-`SUPABASE_API_KEY` are set.
+Note: chaos DB verification tests are skipped unless `DATABASE_URL` is set.
 
 ---
 
