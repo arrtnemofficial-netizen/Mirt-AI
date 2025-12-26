@@ -27,7 +27,7 @@ class TestPhotoToPaymentFlow:
     def mock_services(self):
         """Mock all external services for E2E testing."""
         with (
-            patch("src.services.catalog_service.CatalogService") as mock_catalog,
+            patch("src.services.catalog.CatalogService") as mock_catalog,
             patch("src.services.memory_service.MemoryService") as mock_memory,
             patch("src.agents.pydantic.vision_agent.vision_agent") as mock_vision,
             patch("src.agents.pydantic.support_agent.support_agent") as mock_support,

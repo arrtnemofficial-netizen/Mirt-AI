@@ -389,6 +389,7 @@ class TestRitmKaprizDistinction:
         "рожевий": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/6915c4/c6faad-1758534106660.jpeg",
         "бордовий": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/2e181f/973828-1758534352656.jpeg",
         "шоколадний": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/d76999/c51309-1758534535069.jpeg",
+        "коричневий": "https://cdn.sitniks.com/cmp-2065/products/2025-09-22/d76999/c51309-1758534535069.jpeg",
     }
 
     @pytest.mark.parametrize("color", ["рожевий", "шоколадний", "бордовий"])

@@ -119,7 +119,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     else:
         # Only send notification if vision_node didn't already send it
         try:
-            from src.services.notification_service import NotificationService
+            from src.services.notifications import NotificationService
 
             notifier = NotificationService()
 

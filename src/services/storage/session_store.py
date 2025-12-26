@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain_core.messages import BaseMessage
 
-from src.agents import ConversationState
 from src.core.constants import AgentState as StateEnum
 
+if TYPE_CHECKING:
+    from src.agents import ConversationState
 
 def _serialize_for_json(value: Any) -> Any:
     """Recursively serialize values, converting LangChain Message objects to dicts."""
@@ -55,6 +56,8 @@ class InMemorySessionStore:
         existing = self._store.get(session_id)
         if existing:
             return deepcopy(existing)
+        from src.agents import ConversationState
+
         return ConversationState(messages=[], metadata={}, current_state=StateEnum.default())
 
     def save(self, session_id: str, state: ConversationState) -> None:
@@ -74,6 +77,8 @@ class InMemorySessionStore:
 
 def state_from_text(text: str, session_id: str) -> ConversationState:
     """Helper to bootstrap state from a single user message."""
+
+    from src.agents import ConversationState
 
     return ConversationState(
         messages=[{"role": "user", "content": text}],

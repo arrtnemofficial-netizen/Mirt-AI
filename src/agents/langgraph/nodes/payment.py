@@ -24,7 +24,7 @@ from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
-from src.services.catalog_service import CatalogService
+from src.services.catalog import CatalogService
 from src.services.observability import log_agent_step, track_metric
 
 
@@ -266,7 +266,7 @@ async def _prepare_payment_and_interrupt(
         
         # Map payment_sub_phase to dialog_phase deterministically
         phase_map = {
-            "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",
+            "REQUEST_DATA": "WAITING_FOR_PAYMENT_PROOF",
             "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",  # Data collected, need payment method choice
             "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",  # Requisites shown, waiting for screenshot
             "THANK_YOU": "COMPLETED",

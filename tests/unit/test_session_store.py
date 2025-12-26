@@ -1,4 +1,4 @@
-from src.services.session_store import InMemorySessionStore
+from src.services.storage import InMemorySessionStore
 
 
 def test_session_store_roundtrip():

@@ -13,10 +13,10 @@ except ImportError:
     psycopg = None  # type: ignore
     dict_row = None  # type: ignore
 
-from src.services.message_store import MessageStore, StoredMessage
+from .message_store import MessageStore, StoredMessage
 from src.conf.config import settings
 from src.core.constants import DBTable
-from src.services.postgres_pool import get_postgres_url
+from .postgres_pool import get_postgres_url
 
 logger = logging.getLogger(__name__)
 

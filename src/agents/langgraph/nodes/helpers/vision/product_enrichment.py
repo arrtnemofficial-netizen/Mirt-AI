@@ -32,7 +32,7 @@ async def enrich_product_from_db(
         Enriched product dict or None if not found
     """
     try:
-        from src.services.catalog_service import CatalogService
+        from src.services.catalog import CatalogService
 
         catalog = CatalogService()
 
@@ -91,11 +91,21 @@ async def enrich_product_from_db(
 
         # Якщо є колір - шукаємо товар з цим кольором
         product = None
-        if color and results:
+        matched_by_color = False
+        color_norm = _norm(color or "")
+        if color_norm and results:
             for p in results:
-                p_name = p.get("name", "").lower()
-                if color.lower() in p_name:
+                p_name = _norm(p.get("name", ""))
+                if color_norm in p_name:
                     product = p
+                    matched_by_color = True
+                    break
+                for c in _extract_colors(p):
+                    if color_norm == _norm(c):
+                        product = p
+                        matched_by_color = True
+                        break
+                if product:
                     break
 
         def _extract_colors(row: dict[str, Any]) -> list[str]:
@@ -131,20 +141,22 @@ async def enrich_product_from_db(
                 or ""
             )
 
-            ambiguous_color = bool((not color) and len(color_options) >= 2)
-            if ambiguous_color:
-                photo_url = ""
-                with suppress(Exception):
-                    product["_color_options"] = color_options
+            color_mismatch = bool(color_norm and results and (not matched_by_color))
+            ambiguous_color = bool(((not color_norm) and len(color_options) >= 2) or color_mismatch)
+        if ambiguous_color:
+            photo_url = ""
+            with suppress(Exception):
+                product["_color_options"] = color_options
 
-            logger.info(
-                "📦 Enriched from DB: %s (color=%s) -> %s, photo=%s",
-                product_name,
-                color,
-                price_display,
-                photo_url[:50] if photo_url else "<no photo>",
-            )
-            return {
+        logger.info(
+            "📦 Enriched from DB: %s (color=%s, mismatch=%s) -> %s, photo=%s",
+            product_name,
+            color,
+            color_mismatch,
+            price_display,
+            photo_url[:50] if photo_url else "<no photo>",
+        )
+        return {
                 "id": product.get("id", 0),
                 "name": product.get("name", product_name),
                 "price": CatalogService.get_price_for_size(product),

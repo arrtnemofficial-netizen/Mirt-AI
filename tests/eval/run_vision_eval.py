@@ -123,7 +123,7 @@ async def evaluate_vision_case(
         enrichment_success = False
         if identified_product:
             try:
-                from src.services.catalog_service import CatalogService
+                from src.services.catalog import CatalogService
                 catalog = CatalogService()
                 results = await catalog.search_products(query=identified_product, limit=1)
                 enrichment_success = len(results) > 0

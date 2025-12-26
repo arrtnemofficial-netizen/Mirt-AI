@@ -192,7 +192,7 @@ def build_escalation_state_update(
 
     async def _send_notification_background() -> None:
         try:
-            from src.services.notification_service import NotificationService
+            from src.services.notifications import NotificationService
 
             notification = NotificationService()
             reason_parts = []

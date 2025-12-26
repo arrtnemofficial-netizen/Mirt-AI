@@ -21,7 +21,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Path to canonical names - все в data/vision/
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CANONICAL_NAMES_PATH = PROJECT_ROOT / "data" / "vision" / "generated" / "canonical_names.json"
 
 

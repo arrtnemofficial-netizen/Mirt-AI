@@ -4,7 +4,7 @@ from src.core.models import AgentResponse, Message, Metadata, Product
 from src.integrations.manychat.async_service import ManyChatAsyncService
 from src.integrations.manychat.response_builder import build_manychat_messages
 from src.integrations.manychat.webhook import ManychatWebhook
-from src.services.session_store import InMemorySessionStore
+from src.services.storage import InMemorySessionStore
 
 
 pytestmark = [pytest.mark.manychat]

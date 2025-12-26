@@ -31,7 +31,7 @@ from src.server.dependencies import (
     get_cached_manychat_handler,
 )
 from src.server.middleware import setup_middleware
-from src.services.webhook_dedupe import WebhookDedupeStore
+from src.services.webhook import WebhookDedupeStore
 
 
 logger = logging.getLogger(__name__)
@@ -319,7 +319,7 @@ class ApiV1MessageRequest(BaseModel):
 @app.get("/health")
 async def health() -> dict[str, Any]:
     """Health check endpoint with dependency status."""
-    from src.services.postgres_pool import health_check as postgres_health_check
+    from src.services.storage import health_check as postgres_health_check
 
     status = "ok"
     checks: dict[str, Any] = {}
@@ -369,7 +369,7 @@ async def health() -> dict[str, Any]:
 
     # LLM Provider health (circuit breaker status)
     try:
-        from src.services.llm_fallback import get_llm_service
+        from src.services.llm import get_llm_service
 
         llm_service = get_llm_service()
         llm_health = llm_service.get_health_status()
@@ -1012,7 +1012,7 @@ async def manychat_create_order(
     import hashlib
 
     from src.integrations.crm.crmservice import CRMService
-    from src.services.order_model import (
+    from src.services.orders import (
         build_missing_data_prompt,
         validate_order_data,
     )
@@ -1074,7 +1074,7 @@ async def manychat_create_order(
 
     # === CHECK FOR EXISTING ORDER IN crm_orders (PostgreSQL) ===
     import psycopg
-    from src.services.postgres_pool import get_postgres_url
+    from src.services.storage import get_postgres_url
     
     try:
         postgres_url = get_postgres_url()

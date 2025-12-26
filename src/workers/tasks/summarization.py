@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from celery import shared_task
 
 from src.conf.config import settings
-from src.services.message_store import create_message_store
+from src.services.storage import create_message_store
 from src.services.summarization import (
     call_summarize_inactive_users,
     get_users_needing_summary,
@@ -164,7 +164,7 @@ def check_all_sessions_for_summarization(self) -> dict:
     try:
         import psycopg
         from psycopg.rows import dict_row
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         # Step 1: Call PostgreSQL function to mark inactive users
         try:

@@ -230,7 +230,7 @@ async def _search_products(
 
 
 async def _load_vision_guide_from_db() -> str:
-    from src.services.catalog_service import CatalogService
+    from src.services.catalog import CatalogService
 
     try:
         catalog = CatalogService()

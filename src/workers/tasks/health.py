@@ -48,7 +48,7 @@ def worker_health_check(self) -> dict:
     # Check PostgreSQL
     try:
         import psycopg
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         postgres_url = get_postgres_url()
         with psycopg.connect(postgres_url) as conn:

@@ -24,8 +24,8 @@ from src.core.fallbacks import FallbackType, get_fallback_response
 from src.core.logging import classify_root_cause, log_event, safe_preview
 from src.core.rate_limiter import check_rate_limit
 from src.services.conversation import create_conversation_handler
-from src.services.debouncer import BufferedMessage, MessageDebouncer
-from src.services.message_store import MessageStore, create_message_store
+from src.services.conversation import BufferedMessage, MessageDebouncer
+from src.services.storage import MessageStore, create_message_store
 
 from .push_client import ManyChatPushClient, get_manychat_push_client
 from .response_builder import (
@@ -37,7 +37,7 @@ from .response_builder import (
 
 if TYPE_CHECKING:
     from src.core.models import AgentResponse
-    from src.services.session_store import SessionStore
+    from src.services.storage import SessionStore
 
 
 logger = logging.getLogger(__name__)

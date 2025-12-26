@@ -18,7 +18,7 @@ import httpx
 
 from src.conf.config import settings
 from src.integrations.crm.base import BaseCRMClient, CRMErrorType, CRMResponse
-from src.services.order_model import Order, OrderStatus
+from src.services.orders import Order, OrderStatus
 
 
 @dataclass

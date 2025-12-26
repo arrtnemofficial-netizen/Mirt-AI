@@ -54,7 +54,7 @@ class WebhookDedupeStore:
         image_url: str | None,
     ) -> bool:
         """PostgreSQL implementation."""
-        from src.services.postgres_pool import get_postgres_pool
+        from src.services.storage import get_postgres_pool
 
         if message_id:
             dedupe_key = f"manychat:{user_id}:{message_id}"
@@ -97,7 +97,7 @@ class WebhookDedupeStore:
 
     async def _cleanup_expired_postgres(self) -> int:
         """PostgreSQL implementation."""
-        from src.services.postgres_pool import get_postgres_pool
+        from src.services.storage import get_postgres_pool
 
         try:
             pool = await get_postgres_pool()

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from src.services.message_store import InMemoryMessageStore, StoredMessage
+from src.services.storage import InMemoryMessageStore, StoredMessage
 from src.services.summarization import run_retention
 
 

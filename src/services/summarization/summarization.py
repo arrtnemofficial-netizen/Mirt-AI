@@ -20,8 +20,8 @@ except ImportError:
 
 from src.conf.config import settings
 from src.core.constants import DBTable, MessageTag
-from src.services.message_store import MessageStore, StoredMessage
-from src.services.postgres_pool import get_postgres_url
+from src.services.storage import MessageStore, StoredMessage
+from src.services.storage import get_postgres_url
 
 
 logger = logging.getLogger(__name__)

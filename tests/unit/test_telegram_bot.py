@@ -7,8 +7,8 @@ from pydantic import SecretStr
 from src.bot import telegram_bot
 from src.bot.telegram_bot import _dispatch_to_telegram, build_dispatcher
 from src.core.models import AgentResponse, Message, Metadata, Product
-from src.services.message_store import InMemoryMessageStore, StoredMessage
-from src.services.session_store import InMemorySessionStore
+from src.services.storage import InMemoryMessageStore, StoredMessage
+from src.services.storage import InMemorySessionStore
 
 
 pytestmark = [pytest.mark.telegram]

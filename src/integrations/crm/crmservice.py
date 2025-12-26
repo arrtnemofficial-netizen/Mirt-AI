@@ -26,7 +26,7 @@ except ImportError:
     dict_row = None  # type: ignore
 
 from src.conf.config import settings
-from src.services.postgres_pool import get_postgres_url
+from src.services.storage import get_postgres_url
 
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class CRMService:
 
             # Create order directly in CRM (no Celery)
             from src.integrations.crm.snitkix import get_snitkix_client
-            from src.services.order_model import CustomerInfo, Order, OrderItem
+            from src.services.orders import CustomerInfo, Order, OrderItem
 
             customer_data = order_data.get("customer", {})
             customer = CustomerInfo(

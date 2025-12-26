@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 _PRODUCTS_MASTER_CACHE: dict[str, Any] | None = None
 
 
+def _count_color_variants(products: dict[str, Any]) -> int:
+    total = 0
+    for product_data in products.values():
+        if not isinstance(product_data, dict):
+            continue
+        colors = product_data.get("colors", {})
+        if isinstance(colors, dict):
+            total += len(colors)
+    return total
+
+
 def _load_products_master() -> dict[str, Any]:
     """Load products_master.yaml with caching."""
     global _PRODUCTS_MASTER_CACHE
@@ -44,7 +55,17 @@ def _load_products_master() -> dict[str, Any]:
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
             _PRODUCTS_MASTER_CACHE = yaml.safe_load(f) or {}
-        logger.info("Loaded products_master.yaml from %s: %d products", yaml_path, len(_PRODUCTS_MASTER_CACHE.get("products", {})))
+        products = _PRODUCTS_MASTER_CACHE.get("products") or {}
+        if not isinstance(products, dict):
+            products = {}
+        base_count = len(products)
+        variant_count = _count_color_variants(products)
+        logger.info(
+            "Loaded products_master.yaml from %s: %d base products, %d color variants",
+            yaml_path,
+            base_count,
+            variant_count,
+        )
     except Exception as e:
         logger.error("Failed to load products_master.yaml from %s: %s", yaml_path, e)
         _PRODUCTS_MASTER_CACHE = {}

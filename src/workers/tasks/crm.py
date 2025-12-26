@@ -55,7 +55,7 @@ def create_crm_order(
         dict with order creation result
     """
     from src.integrations.crm.snitkix import get_snitkix_client
-    from src.services.order_model import CustomerInfo, Order, OrderItem
+    from src.services.orders import CustomerInfo, Order, OrderItem
 
     external_id = order_data.get("external_id", "unknown")
 
@@ -128,7 +128,7 @@ def create_crm_order(
             try:
                 # Update crm_orders in PostgreSQL
                 import psycopg
-                from src.services.postgres_pool import get_postgres_url
+                from src.services.storage import get_postgres_url
                 
                 postgres_url = get_postgres_url()
                 with psycopg.connect(postgres_url) as conn:
@@ -171,7 +171,7 @@ def create_crm_order(
             # Update CRM order with failed status in PostgreSQL
             try:
                 import psycopg
-                from src.services.postgres_pool import get_postgres_url
+                from src.services.storage import get_postgres_url
                 
                 postgres_url = get_postgres_url()
                 with psycopg.connect(postgres_url) as conn:
@@ -272,7 +272,7 @@ def sync_order_status(
 
         # Update session state in PostgreSQL
         import psycopg
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         postgres_url = get_postgres_url()
         with psycopg.connect(postgres_url) as conn:
@@ -333,7 +333,7 @@ def check_pending_orders(self) -> dict:
     try:
         import psycopg
         from psycopg.rows import dict_row
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         # Get sessions with pending orders from PostgreSQL
         postgres_url = get_postgres_url()

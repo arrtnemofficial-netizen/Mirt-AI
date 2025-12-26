@@ -51,7 +51,7 @@ class TestVisionEscalationRegression:
             # Mock manager notification + ensure background task is scheduled
             real_create_task = asyncio.create_task
             with (
-                patch("src.services.notification_service.NotificationService") as mock_notif_service,
+                patch("src.services.notifications.NotificationService") as mock_notif_service,
                 patch("src.agents.langgraph.nodes.vision.asyncio.create_task") as mock_create_task,
             ):
                 mock_notif_instance = AsyncMock()
@@ -122,7 +122,7 @@ class TestVisionEscalationRegression:
                 
                 real_create_task = asyncio.create_task
                 with (
-                    patch("src.services.notification_service.NotificationService") as mock_notif_service,
+                    patch("src.services.notifications.NotificationService") as mock_notif_service,
                     patch("src.agents.langgraph.nodes.vision.asyncio.create_task") as mock_create_task,
                 ):
                     mock_notif_instance = AsyncMock()

@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     import psycopg
@@ -21,13 +21,14 @@ except ImportError:
     dict_row = None  # type: ignore
     Json = None  # type: ignore
 
-from src.services.session_store import InMemorySessionStore, SessionStore, _serialize_for_json
-from src.agents import ConversationState
+from .session_store import InMemorySessionStore, SessionStore, _serialize_for_json
 from src.conf.config import settings
-from src.services.postgres_pool import get_postgres_url
+from .postgres_pool import get_postgres_url
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from src.agents import ConversationState
 
 class PostgresSessionStore:
     """Session storage using PostgreSQL table 'agent_sessions'."""
@@ -212,6 +213,7 @@ class PostgresSessionStore:
         """Create a fresh empty state."""
         # Import here to avoid circular dependency
         from src.core.constants import AgentState as StateEnum
+        from src.agents import ConversationState
         
         return ConversationState(
             messages=[],

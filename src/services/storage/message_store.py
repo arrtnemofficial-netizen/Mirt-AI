@@ -47,7 +47,7 @@ def create_message_store() -> MessageStore:
     """Factory to create message store (PostgreSQL preferred, fallback to in-memory)."""
     # Try PostgreSQL first
     try:
-        from src.services.postgres_message_store import create_postgres_message_store
+        from .postgres_message_store import create_postgres_message_store
         postgres_store = create_postgres_message_store()
         if postgres_store:
             return postgres_store

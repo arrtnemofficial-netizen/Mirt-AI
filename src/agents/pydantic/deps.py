@@ -30,9 +30,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from src.services.catalog_service import CatalogService
+from src.services.catalog import CatalogService
 from src.services.memory_service import MemoryService
-from src.services.order_service import OrderService
+from src.services.orders import OrderService
 
 
 # =============================================================================
@@ -46,7 +46,7 @@ Database = OrderService
 # CATALOG SERVICE (PostgreSQL Implementation)
 # =============================================================================
 
-# CatalogService is now imported directly from src.services.catalog_service
+# CatalogService is now imported directly from src.services.catalog
 
 
 # =============================================================================

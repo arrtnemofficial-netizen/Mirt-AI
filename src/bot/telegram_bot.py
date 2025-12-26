@@ -19,10 +19,10 @@ from aiogram.filters import Command, CommandStart
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
 from src.services.conversation import ConversationHandler, create_conversation_handler
-from src.services.debouncer import BufferedMessage, MessageDebouncer
-from src.services.message_store import MessageStore, create_message_store
-from src.services.renderer import render_agent_response_text
-from src.services.session_store import InMemorySessionStore, SessionStore
+from src.services.conversation import BufferedMessage, MessageDebouncer
+from src.services.storage import MessageStore, create_message_store
+from src.services.notifications import render_agent_response_text
+from src.services.storage import InMemorySessionStore, SessionStore
 
 
 if TYPE_CHECKING:
@@ -306,7 +306,7 @@ async def run_polling(store: SessionStore | None = None) -> None:
 
     print("🚀 Starting Telegram bot with INFO logging enabled...")
 
-    from src.services.postgres_store import create_postgres_store
+    from src.services.storage import create_postgres_store
 
     # Try to use PostgreSQL store if not provided
     if store is None:

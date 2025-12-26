@@ -7,7 +7,7 @@ from pydantic import SecretStr
 
 from src.server import main
 from src.server.main import app
-from src.services.session_store import InMemorySessionStore
+from src.services.storage import InMemorySessionStore
 
 
 pytestmark = [pytest.mark.manychat, pytest.mark.integration]

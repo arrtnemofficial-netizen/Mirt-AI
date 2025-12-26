@@ -5,7 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import psycopg
-from src.services.postgres_pool import get_postgres_url
+from src.services.storage import get_postgres_url
 
 
 if TYPE_CHECKING:

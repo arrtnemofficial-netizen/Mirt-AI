@@ -15,9 +15,9 @@ from fastapi import Depends
 from src.bot.telegram_bot import build_bot, build_dispatcher
 from src.conf.config import Settings, get_settings
 from src.integrations.manychat.webhook import ManychatWebhook
-from src.services.message_store import MessageStore, create_message_store
-from src.services.session_store import InMemorySessionStore, SessionStore
-from src.services.postgres_store import create_postgres_store
+from src.services.storage import MessageStore, create_message_store
+from src.services.storage import InMemorySessionStore, SessionStore
+from src.services.storage import create_postgres_store
 import logging
 
 logger = logging.getLogger(__name__)

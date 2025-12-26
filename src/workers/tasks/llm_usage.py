@@ -121,7 +121,7 @@ def record_usage(
     # Use PostgreSQL
     try:
         import psycopg
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         # Calculate cost
         cost_usd = calculate_cost(model, tokens_input, tokens_output)
@@ -205,7 +205,7 @@ def get_user_usage_summary(
     try:
         import psycopg
         from psycopg.rows import dict_row
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         # Calculate date cutoff
         cutoff = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -303,7 +303,7 @@ def aggregate_daily_usage(self) -> dict:
     try:
         import psycopg
         from psycopg.rows import dict_row
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         # Get today's usage
         today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)

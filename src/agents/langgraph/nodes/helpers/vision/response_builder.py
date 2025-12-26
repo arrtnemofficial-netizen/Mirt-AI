@@ -8,7 +8,7 @@ Extracted from vision.py for better testability and maintainability.
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from src.services.catalog_service import CatalogService
+from src.services.catalog import CatalogService
 
 from ...utils import (
     extract_height_from_text,

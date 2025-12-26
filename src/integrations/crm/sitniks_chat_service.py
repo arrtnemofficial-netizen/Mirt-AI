@@ -422,7 +422,7 @@ class SitniksChatService:
         """Save user-to-chat mapping in PostgreSQL."""
         try:
             import psycopg
-            from src.services.postgres_pool import get_postgres_url
+            from src.services.storage import get_postgres_url
             
             try:
                 postgres_url = get_postgres_url()
@@ -452,7 +452,7 @@ class SitniksChatService:
         """Get Sitniks chat ID for a MIRT user from PostgreSQL."""
         try:
             import psycopg
-            from src.services.postgres_pool import get_postgres_url
+            from src.services.storage import get_postgres_url
             
             try:
                 postgres_url = get_postgres_url()

@@ -27,7 +27,7 @@ from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, log_trace, track_metric
-from src.services.product_matcher import extract_requested_color
+from src.services.catalog import extract_requested_color
 
 # State prompts and transition logic
 from ..state_prompts import (
@@ -366,7 +366,7 @@ async def agent_node(
     # =========================================================================
     # HISTORY TRIMMING: Prevent LLM context overflow
     # =========================================================================
-    from src.services.history_trimmer import trim_message_history
+    from src.services.conversation import trim_message_history
 
     original_messages = state.get("messages", [])
     trimmed_messages = trim_message_history(original_messages)

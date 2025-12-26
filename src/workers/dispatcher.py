@@ -47,7 +47,7 @@ def dispatch_summarization(session_id: str, user_id: int | None = None) -> dict:
         # Sync execution
         from datetime import UTC, datetime
 
-        from src.services.message_store import create_message_store
+        from src.services.storage import create_message_store
         from src.services.summarization import run_retention
 
         message_store = create_message_store()
@@ -85,8 +85,8 @@ def dispatch_followup(
         # Sync execution
         from datetime import UTC, datetime
 
-        from src.services.followups import run_followups
-        from src.services.message_store import create_message_store
+        from src.services.conversation import run_followups
+        from src.services.storage import create_message_store
 
         message_store = create_message_store()
         followup = run_followups(

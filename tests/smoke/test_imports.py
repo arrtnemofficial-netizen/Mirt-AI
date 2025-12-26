@@ -84,10 +84,10 @@ class TestCriticalImports:
 
     def test_services_importable(self):
         """Core services must import."""
-        from src.services.catalog_service import CatalogService
+        from src.services.catalog import CatalogService
         from src.services.conversation import ConversationHandler
         from src.services.memory_service import MemoryService
-        from src.services.order_service import OrderService
+        from src.services.orders import OrderService
 
         assert CatalogService is not None
         assert OrderService is not None

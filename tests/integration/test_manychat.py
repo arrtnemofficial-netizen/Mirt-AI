@@ -12,8 +12,8 @@ from src.integrations.manychat.webhook import (
     TAG_NEEDS_HUMAN,
     ManychatWebhook,
 )
-from src.services.message_store import InMemoryMessageStore
-from src.services.session_store import InMemorySessionStore
+from src.services.storage import InMemoryMessageStore
+from src.services.storage import InMemorySessionStore
 
 
 class DummyRunner:

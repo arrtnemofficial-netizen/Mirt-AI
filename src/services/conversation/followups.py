@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from src.conf.config import settings
 from src.core.constants import MessageTag
-from src.services.message_store import MessageStore, StoredMessage
+from src.services.storage import MessageStore, StoredMessage
 
 
 if TYPE_CHECKING:

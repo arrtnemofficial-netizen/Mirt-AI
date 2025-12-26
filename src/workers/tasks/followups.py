@@ -15,8 +15,8 @@ from celery import shared_task
 
 from src.conf.config import settings
 from src.core.constants import DBTable
-from src.services.followups import next_followup_due_at, run_followups
-from src.services.message_store import create_message_store
+from src.services.conversation import next_followup_due_at, run_followups
+from src.services.storage import create_message_store
 # PostgreSQL only - no Supabase dependency
 
 
@@ -168,7 +168,7 @@ def check_all_sessions_for_followups(self) -> dict:
     try:
         import psycopg
         from psycopg.rows import dict_row
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         
         # Get sessions with their chat info from PostgreSQL
         try:
@@ -332,7 +332,7 @@ def handle_24h_followup_escalation(
         # Get user_id from PostgreSQL messages table
         import psycopg
         from psycopg.rows import dict_row
-        from src.services.postgres_pool import get_postgres_url
+        from src.services.storage import get_postgres_url
         from src.conf.config import settings
         
         try:

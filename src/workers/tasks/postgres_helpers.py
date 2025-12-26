@@ -12,7 +12,7 @@ except ImportError:
     psycopg = None  # type: ignore
     dict_row = None  # type: ignore
 
-from src.services.postgres_pool import get_postgres_url
+from src.services.storage import get_postgres_url
 
 logger = logging.getLogger(__name__)
 

@@ -21,7 +21,7 @@ from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.debug_logger import debug_log
 from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
-from src.services.message_store import MessageStore, StoredMessage
+from src.services.storage import MessageStore, StoredMessage
 from src.services.observability import track_metric
 
 
@@ -126,7 +126,7 @@ def validate_state_transition(
 
 
 if TYPE_CHECKING:
-    from src.services.session_store import SessionStore
+    from src.services.storage import SessionStore
 
 
 logger = logging.getLogger(__name__)
@@ -630,7 +630,7 @@ class ConversationHandler:
                     or bool(result_state.get("should_escalate"))
                 )
                 if is_escalation and not notification_already_sent:
-                    from src.services.notification_service import NotificationService
+                    from src.services.notifications import NotificationService
 
                     reason = ""
                     if agent_response.escalation and agent_response.escalation.reason:

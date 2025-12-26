@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.vision_agent import run_vision
 from src.core.state_machine import State
-from src.services.catalog_service import CatalogService
+from src.services.catalog import CatalogService
 from src.services.observability import log_agent_step, log_trace, track_metric
 
 from .utils import (
@@ -178,7 +178,7 @@ async def vision_node(
 
         async def _send_notification_background() -> None:
             try:
-                from src.services.notification_service import NotificationService
+                from src.services.notifications import NotificationService
 
                 notification = NotificationService()
                 await notification.send_escalation_alert(

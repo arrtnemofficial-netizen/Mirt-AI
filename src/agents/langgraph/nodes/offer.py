@@ -24,7 +24,7 @@ from src.agents.pydantic.support_agent import run_support
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
-from src.services.catalog_service import CatalogService
+from src.services.catalog import CatalogService
 from src.services.observability import log_agent_step, track_metric
 
 

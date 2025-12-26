@@ -17,12 +17,12 @@ import time
 from contextlib import suppress
 from typing import Any
 
-from src.services.exceptions import CatalogUnavailableError
+from src.services.common import CatalogUnavailableError
 from src.services.observability import log_tool_execution, track_metric
 # PostgreSQL implementation
 import psycopg
 from psycopg.rows import dict_row
-from src.services.postgres_pool import get_postgres_url
+from src.services.storage import get_postgres_url
 
 
 logger = logging.getLogger(__name__)
