@@ -12,8 +12,14 @@ from typing import Any
 try:
     import psycopg
     from psycopg.rows import dict_row
+    try:
+        from psycopg.types.json import Json
+    except ImportError:
+        Json = None  # type: ignore
 except ImportError:
     psycopg = None  # type: ignore
+    dict_row = None  # type: ignore
+    Json = None  # type: ignore
 
 from src.services.session_store import InMemorySessionStore, SessionStore, _serialize_for_json
 from src.agents import ConversationState
@@ -116,6 +122,7 @@ class PostgresSessionStore:
         try:
             # Serialize state to handle LangChain objects
             serialized_state = _serialize_for_json(dict(state))
+            state_param = Json(serialized_state) if Json else json.dumps(serialized_state)
             
             try:
                 url = get_postgres_url()
@@ -130,7 +137,7 @@ class PostgresSessionStore:
                         ON CONFLICT (session_id) 
                         DO UPDATE SET state = %s, updated_at = NOW()
                         """,
-                        (session_id, serialized_state, serialized_state),
+                        (session_id, state_param, state_param),
                     )
                     conn.commit()
                     return True

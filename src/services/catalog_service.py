@@ -51,6 +51,14 @@ class CatalogService:
     def __init__(self) -> None:
         # PostgreSQL connection will be created per-request
         self._cache = _GLOBAL_CACHE
+        try:
+            get_postgres_url()
+            self._enabled = True
+            self.client = True
+        except ValueError:
+            self._enabled = False
+            self.client = None
+            logger.warning("[CATALOG] PostgreSQL not configured, catalog disabled")
     
     def _get_connection(self):
         """Get PostgreSQL connection."""
@@ -292,7 +300,7 @@ class CatalogService:
         except Exception:
             pass
 
-        if not self.client:
+        if not self._enabled:
             log_tool_execution(
                 tool_name,
                 success=False,
@@ -352,7 +360,7 @@ class CatalogService:
         """
         tool_name = "catalog.get_similar_products"
 
-        if not self.client:
+        if not self._enabled:
             log_tool_execution(
                 tool_name,
                 success=False,
