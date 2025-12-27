@@ -541,6 +541,11 @@ async def vision_node(
         if next_phase == "ESCALATED" or (not response.needs_clarification) or (confidence < settings.VISION_CONFIDENCE_THRESHOLD):
             escalation_level = "L1"  # SOFT escalation → L1 (contract-compliant)
 
+    current_product_name = None
+    if selected_products:
+        first_name = str(selected_products[0].get("name") or "").strip()
+        if first_name:
+            current_product_name = first_name
     return {
         "current_state": next_state,
         "messages": assistant_messages,
@@ -558,6 +563,7 @@ async def vision_node(
             "vision_greeted": True,  # greeting уже відправлено
             "available_colors": available_colors,
             "escalation_level": escalation_level,
+            "current_product_name": current_product_name or state.get("metadata", {}).get("current_product_name"),
         },
         # Lightweight agent_response so renderers (Telegram/ManyChat) можуть показати фото/текст
         "agent_response": {

@@ -147,6 +147,72 @@ async def payment_node(
         )
         track_metric("payment_phase_mismatch", 1, {"session_id": session_id, "sub_phase": payment_sub_phase})
 
+    # =========================================================================
+    # SNIPPETS-FIRST POLICY: Check for predefined snippets before LLM
+    # =========================================================================
+    # This handles: "no" responses, payment problems, off-topic questions
+    from src.agents.langgraph.nodes.helpers.policy_snippets import maybe_apply_snippet_policy
+    from .utils import extract_user_message
+    
+    user_message = extract_user_message(state.get("messages", []))
+    detected_intent = state.get("detected_intent")
+    
+    snippet_response = maybe_apply_snippet_policy(
+        state,
+        detected_intent=detected_intent,
+        user_text=user_message,
+    )
+    
+    if snippet_response:
+        # Snippet found - return response without LLM call
+        # Check if we need to notify manager
+        should_notify = snippet_response.get("agent_response", {}).get("metadata", {}).get("should_notify_manager", False)
+        
+        if should_notify:
+            # Notify manager for "no" in payment proof phase or payment problems
+            try:
+                from src.services.notifications import NotificationService
+                
+                notifier = NotificationService()
+                reason = "Клієнт сказав 'ні' під час оплати" if "user_says_no" in str(snippet_response.get("metadata", {}).get("policy_case", "")) else "Проблема з оплатою"
+                
+                details = {
+                    "trace_id": state.get("trace_id"),
+                    "dialog_phase": dialog_phase,
+                    "current_state": state.get("current_state", "STATE_5_PAYMENT_DELIVERY"),
+                    "intent": detected_intent,
+                    **state.get("metadata", {}),
+                }
+                
+                # Provide product summary (for manager context)
+                try:
+                    products = state.get("selected_products", []) or state.get("offered_products", [])
+                    details["products"] = [p if isinstance(p, dict) else p.model_dump() if hasattr(p, "model_dump") else {} for p in products]
+                except Exception:
+                    details["products"] = []
+                
+                await notifier.send_escalation_alert(
+                    session_id=session_id,
+                    reason=reason,
+                    user_context=user_message,
+                    details=details,
+                )
+            except Exception as notify_exc:
+                logger.warning(
+                    "Manager notification failed for session %s: %s",
+                    session_id,
+                    str(notify_exc)[:200],
+                )
+        
+        # Return snippet response (continues dialogue, doesn't break FSM)
+        return Command(
+            update={
+                **snippet_response,
+                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            },
+            goto="escalation" if snippet_response.get("should_escalate") else "end",
+        )
+
     # Check if we're resuming from interrupt (HITL enabled)
     if state.get("awaiting_human_approval"):
         return await _handle_approval_response(state, session_id)
@@ -272,6 +338,20 @@ async def _prepare_payment_and_interrupt(
             "THANK_YOU": "COMPLETED",
         }
         correct_dialog_phase = phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
+        
+        # Reset policy counters if dialog phase changed
+        old_dialog_phase = state.get("dialog_phase", "")
+        if old_dialog_phase != correct_dialog_phase:
+            from src.agents.langgraph.nodes.helpers.policy_snippets import _reset_policy_counters
+            metadata = state.get("metadata", {}).copy()
+            metadata = _reset_policy_counters(metadata)
+            logger.debug(
+                "[SESSION %s] Payment dialog phase changed: %s -> %s, resetting policy counters",
+                session_id,
+                old_dialog_phase,
+                correct_dialog_phase,
+            )
+            state["metadata"] = metadata
         
         logger.info(
             "[SESSION %s] HITL disabled - payment_sub_phase=%s -> dialog_phase=%s",
@@ -525,6 +605,51 @@ async def _handle_delivery_data(
         has_image_now,
         has_url,
     )
+
+    # PHASE-AWARE IMAGE HANDLING: If image is sent in payment proof phase,
+    # classify it as payment proof vs product photo
+    dialog_phase = state.get("dialog_phase", "")
+    if has_image_now and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
+        from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+        
+        is_payment_proof = detect_payment_proof(
+            user_text=user_message or "",
+            has_image=True,
+            has_url=has_url,
+        )
+        
+        if not is_payment_proof:
+            # Image doesn't look like payment proof - ask for clarification
+            # WITHOUT resetting the payment flow
+            clarification = (
+                "Це фото квитанції/скріну оплати? 🤍\n"
+                "Якщо так - все добре, обробляю!\n"
+                "Якщо це фото товару - надішліть, будь ласка, скрін оплати окремо."
+            )
+            logger.info(
+                "[SESSION %s] Image in payment phase doesn't match proof heuristics, asking clarification",
+                session_id,
+            )
+            return Command(
+                update={
+                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "messages": [{"role": "assistant", "content": clarification}],
+                    "agent_response": {
+                        "event": "clarifying_question",
+                        "messages": [{"type": "text", "content": clarification}],
+                        "metadata": {
+                            "session_id": session_id,
+                            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                            "intent": "PAYMENT_DELIVERY",
+                            "escalation_level": "NONE",
+                        },
+                    },
+                    "metadata": state.get("metadata", {}).copy(),
+                    "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",  # Stay in same phase
+                    "step_number": state.get("step_number", 0) + 1,
+                },
+                goto="end",
+            )
 
     # Create deps for agent
     deps = create_deps_from_state(state)

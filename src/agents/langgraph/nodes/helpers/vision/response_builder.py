@@ -75,7 +75,8 @@ def build_vision_messages(
         return ("/" in ss) or (" або " in ss)
 
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
-    if (not vision_greeted) or (not _history_has_greeting(previous_messages)):
+    # CRITICAL: Use AND (not OR) to prevent repeat greeting when history is trimmed/missing
+    if (not vision_greeted) and (not _history_has_greeting(previous_messages)):
         messages.append(text_msg("Вітаю 🎀 З вами MIRT_UA, менеджер Софія."))
 
     # 2. Product highlight БЕЗ ЦІНИ (ціна тільки після зросту!)

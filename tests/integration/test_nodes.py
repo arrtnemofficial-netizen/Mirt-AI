@@ -182,6 +182,261 @@ async def test_intent_node_with_photo():
     assert output.get("has_image") is True
 
 
+@pytest.mark.asyncio
+async def test_intent_node_photo_during_payment_routes_as_payment_not_photo_ident():
+    """
+    Regression: photo during payment proof phase must NOT force PHOTO_IDENT.
+
+    In production logs, has_image=True in WAITING_FOR_PAYMENT_PROOF used to override
+    escalation and route to vision, restarting dialog with greeting.
+    """
+    from src.agents.langgraph.nodes.intent import intent_detection_node
+    from src.core.state_machine import State
+
+    state = create_minimal_state("test_photo_mid_payment")
+    state["current_state"] = State.STATE_5_PAYMENT_DELIVERY.value
+    state["dialog_phase"] = "WAITING_FOR_PAYMENT_PROOF"
+    state["has_image"] = True
+    state["image_url"] = "https://example.com/proof.jpg"
+    state["metadata"] = {
+        "session_id": "test_photo_mid_payment",
+        "has_image": True,
+        "image_url": "https://example.com/proof.jpg",
+        "vision_greeted": True,
+    }
+    state["messages"] = [{"role": "user", "content": "Ось квитанція"}]
+
+    output = await intent_detection_node(state)
+    errors = validate_node_output(output, "intent_detection_node")
+    assert not errors, f"Validation errors: {errors}"
+
+    assert output.get("has_image") is True
+    assert output.get("detected_intent") == "PAYMENT_DELIVERY", (
+        f"Mid-payment photo must return PAYMENT_DELIVERY, got {output.get('detected_intent')}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_intent_node_explicit_new_product_trigger():
+    """
+    Test that explicit "new product" trigger routes to PHOTO_IDENT regardless of phase.
+    """
+    from src.agents.langgraph.nodes.intent import intent_detection_node
+    from src.core.state_machine import State
+
+    # Test in mid-conversation phase (should normally route to agent)
+    state = create_minimal_state("test_explicit_new_product")
+    state["current_state"] = State.STATE_3_SIZE_COLOR.value
+    state["dialog_phase"] = "WAITING_FOR_SIZE"
+    state["has_image"] = True
+    state["image_url"] = "https://example.com/new_product.jpg"
+    state["metadata"] = {
+        "session_id": "test_explicit_new_product",
+        "has_image": True,
+        "image_url": "https://example.com/new_product.jpg",
+        "vision_greeted": True,  # Already greeted, so normally would NOT route to vision
+    }
+    state["messages"] = [{"role": "user", "content": "це новий товар"}]
+
+    output = await intent_detection_node(state)
+    errors = validate_node_output(output, "intent_detection_node")
+    assert not errors, f"Validation errors: {errors}"
+
+    # Explicit trigger should override phase-aware routing
+    assert output.get("has_image") is True
+    assert output.get("detected_intent") == "PHOTO_IDENT", (
+        f"Explicit 'new product' trigger must return PHOTO_IDENT, got {output.get('detected_intent')}"
+    )
+    assert output.get("metadata", {}).get("explicit_new_product_trigger") is True
+
+
+@pytest.mark.asyncio
+async def test_intent_node_offtopic_in_payment_allowed():
+    """
+    Test that off-topic intents (PRODUCT_CATEGORY, REQUEST_PHOTO) are allowed in payment state.
+    """
+    from src.agents.langgraph.nodes.intent import intent_detection_node
+    from src.core.state_machine import State
+
+    # Test PRODUCT_CATEGORY in payment state
+    state = create_minimal_state("test_offtopic_payment")
+    state["current_state"] = State.STATE_5_PAYMENT_DELIVERY.value
+    state["dialog_phase"] = "WAITING_FOR_PAYMENT_PROOF"
+    state["messages"] = [{"role": "user", "content": "покажи сукні"}]
+
+    output = await intent_detection_node(state)
+    errors = validate_node_output(output, "intent_detection_node")
+    assert not errors, f"Validation errors: {errors}"
+
+    # Off-topic intent should be allowed (not forced to PAYMENT_DELIVERY)
+    assert output.get("detected_intent") == "PRODUCT_CATEGORY", (
+        f"Off-topic in payment should return PRODUCT_CATEGORY, got {output.get('detected_intent')}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_policy_snippets_user_says_no():
+    """
+    Test that policy_snippets detects "user says no" and returns snippet response.
+    """
+    from src.agents.langgraph.nodes.helpers.policy_snippets import (
+        detect_user_says_no,
+        maybe_apply_snippet_policy,
+    )
+
+    # Test detection (now returns tuple)
+    is_refusal, reason = detect_user_says_no("ні")
+    assert is_refusal is True
+    assert reason == "refusal"
+    
+    is_refusal, reason = detect_user_says_no("не хочу")
+    assert is_refusal is True
+    assert reason == "refusal"
+    
+    is_refusal, reason = detect_user_says_no("передумала")
+    assert is_refusal is True
+    assert reason == "refusal"
+    
+    is_refusal, reason = detect_user_says_no("відміняємо")
+    assert is_refusal is True
+    assert reason == "refusal"
+    
+    is_refusal, reason = detect_user_says_no("так")
+    assert is_refusal is False
+    
+    is_refusal, reason = detect_user_says_no("хочу купити")
+    assert is_refusal is False
+    
+    # Test clarification (should NOT be treated as refusal)
+    is_refusal, reason = detect_user_says_no("ні, не підходить розмір")
+    assert is_refusal is False
+    assert reason == "clarification"
+
+    # Test snippet policy in payment phase
+    state = create_minimal_state("test_no_in_payment")
+    state["current_state"] = "STATE_5_PAYMENT_DELIVERY"
+    state["dialog_phase"] = "WAITING_FOR_PAYMENT_PROOF"
+    state["messages"] = [{"role": "user", "content": "ні"}]
+    state["detected_intent"] = "PAYMENT_DELIVERY"
+    state["metadata"] = {"policy_stats": {"no_count": 0}}
+
+    result = maybe_apply_snippet_policy(state, detected_intent="PAYMENT_DELIVERY", user_text="ні")
+    
+    assert result is not None, "Snippet policy should return response for 'no' in payment phase"
+    assert "messages" in result
+    assert "agent_response" in result
+    assert result.get("dialog_phase") == "WAITING_FOR_PAYMENT_PROOF", "Should keep dialog_phase unchanged"
+    assert result.get("agent_response", {}).get("metadata", {}).get("policy_case") == "user_says_no"
+    assert result.get("agent_response", {}).get("metadata", {}).get("should_notify_manager") is True
+    # Check that counter was incremented
+    assert result.get("metadata", {}).get("policy_stats", {}).get("no_count") == 1
+
+
+@pytest.mark.asyncio
+async def test_policy_snippets_payment_problem():
+    """
+    Test that policy_snippets detects payment problems and flags for manager notification.
+    """
+    from src.agents.langgraph.nodes.helpers.policy_snippets import (
+        detect_payment_problem,
+        maybe_apply_snippet_policy,
+    )
+
+    # Test detection
+    assert detect_payment_problem("не отримується оплата") is True
+    assert detect_payment_problem("не проходить") is True
+    assert detect_payment_problem("помилка оплати") is True
+    assert detect_payment_problem("не можу оплатити") is True
+    assert detect_payment_problem("все добре") is False
+
+    # Test snippet policy in payment phase
+    state = create_minimal_state("test_payment_problem")
+    state["current_state"] = "STATE_5_PAYMENT_DELIVERY"
+    state["dialog_phase"] = "WAITING_FOR_PAYMENT_PROOF"
+    state["messages"] = [{"role": "user", "content": "не отримується оплата"}]
+    state["detected_intent"] = "PAYMENT_DELIVERY"
+
+    result = maybe_apply_snippet_policy(
+        state, detected_intent="PAYMENT_DELIVERY", user_text="не отримується оплата"
+    )
+    
+    assert result is not None, "Snippet policy should return response for payment problem"
+    assert "agent_response" in result
+    assert result.get("dialog_phase") == "WAITING_FOR_PAYMENT_PROOF", "Should keep dialog_phase unchanged"
+    assert result.get("agent_response", {}).get("metadata", {}).get("policy_case") == "payment_problem"
+    assert result.get("agent_response", {}).get("metadata", {}).get("should_notify_manager") is True
+
+
+@pytest.mark.asyncio
+async def test_policy_snippets_offtopic_in_payment():
+    """
+    Test that policy_snippets handles off-topic questions in payment phase.
+    """
+    from src.agents.langgraph.nodes.helpers.policy_snippets import maybe_apply_snippet_policy
+
+    state = create_minimal_state("test_offtopic_payment")
+    state["current_state"] = "STATE_5_PAYMENT_DELIVERY"
+    state["dialog_phase"] = "WAITING_FOR_PAYMENT_PROOF"
+    state["messages"] = [{"role": "user", "content": "що ще є"}]
+    state["detected_intent"] = "PRODUCT_CATEGORY"
+    state["metadata"] = {"policy_stats": {"offtopic_count": 0}}
+
+    result = maybe_apply_snippet_policy(
+        state, detected_intent="PRODUCT_CATEGORY", user_text="що ще є"
+    )
+    
+    assert result is not None, "Snippet policy should return response for off-topic in payment"
+    assert "messages" in result
+    assert result.get("dialog_phase") == "WAITING_FOR_PAYMENT_PROOF", "Should keep dialog_phase unchanged"
+    assert result.get("agent_response", {}).get("metadata", {}).get("policy_case") == "offtopic_in_payment"
+    # Check that counter was incremented
+    assert result.get("metadata", {}).get("policy_stats", {}).get("offtopic_count") == 1
+
+
+@pytest.mark.asyncio
+async def test_policy_counters_reset_on_phase_change():
+    """
+    Test that policy counters are reset when dialog phase changes.
+    """
+    from src.agents.langgraph.nodes.helpers.policy_snippets import _reset_policy_counters, _get_offtopic_count, _get_no_count
+
+    metadata = {
+        "policy_stats": {
+            "offtopic_count": 2,
+            "no_count": 1,
+        }
+    }
+    
+    # Reset counters
+    updated_metadata = _reset_policy_counters(metadata.copy())
+    
+    assert _get_offtopic_count(updated_metadata) == 0
+    assert _get_no_count(updated_metadata) == 0
+
+
+@pytest.mark.asyncio
+async def test_payment_reminder_by_phase():
+    """
+    Test that payment reminder is generated correctly for each phase.
+    """
+    from src.agents.langgraph.nodes.helpers.policy_snippets import _get_payment_reminder_by_phase
+
+    reminder_proof = _get_payment_reminder_by_phase("WAITING_FOR_PAYMENT_PROOF")
+    assert reminder_proof is not None
+    assert "квитанцію" in reminder_proof.lower()
+    
+    reminder_method = _get_payment_reminder_by_phase("WAITING_FOR_PAYMENT_METHOD")
+    assert reminder_method is not None
+    assert "спосіб оплати" in reminder_method.lower() or "оплата" in reminder_method.lower()
+    
+    reminder_delivery = _get_payment_reminder_by_phase("WAITING_FOR_DELIVERY_DATA")
+    assert reminder_delivery is not None
+    assert "дані" in reminder_delivery.lower() or "доставк" in reminder_delivery.lower()
+    
+    # Non-payment phase should return None
+    assert _get_payment_reminder_by_phase("INIT") is None
+
+
 # =============================================================================
 # VISION NODE TESTS (Integration - requires API)
 # =============================================================================

@@ -182,13 +182,30 @@ async def _add_image_context(ctx: RunContext[AgentDeps]) -> str:
     if not ctx.deps.has_image:
         return ""
 
-    return """
---- ФОТО ВІД КЛІЄНТА ---
+    # Check if this is first photo (INIT/DISCOVERY) or ongoing conversation
+    current_state = ctx.deps.current_state
+    is_first_photo_phase = current_state in ("STATE_0_INIT", "STATE_1_DISCOVERY")
+    
+    if is_first_photo_phase:
+        # First photo: full vision analysis
+        return """
+--- ФОТО ВІД КЛІЄНТА (ПЕРШЕ ФОТО) ---
 ВАЖЛИВО: Користувач надіслав ФОТО!
 1. Проаналізуй фото та визнач товар з EMBEDDED CATALOG
 2. Якщо знайшов товар - ОДРАЗУ дай ціну та запропонуй розмір
 3. Intent має бути PHOTO_IDENT
 4. Не питай 'що вас цікавить' - відповідай конкретно!
+"""
+    else:
+        # Photo in ongoing conversation: handle in current phase context
+        return """
+--- ФОТО ВІД КЛІЄНТА (ПРОДОВЖЕННЯ ДІАЛОГУ) ---
+ВАЖЛИВО: Користувач надіслав ФОТО в контексті поточної фази!
+1. Оброби фото в контексті поточної фази (не як нове фото товару!)
+2. Якщо це STATE_3_SIZE_COLOR - фото може бути для уточнення розміру/кольору
+3. Якщо це STATE_5_PAYMENT_DELIVERY - фото може бути квитанцією оплати
+4. НЕ встановлюй intent=PHOTO_IDENT - використовуй intent відповідно до фази
+5. Продовжуй діалог в контексті поточної фази, не починай заново!
 """
 
 
@@ -418,8 +435,21 @@ async def run_support(
         Validated SupportResponse
     """
     import asyncio
+    import time
+
+    from src.services.llm_usage_logger import log_llm_usage_best_effort
 
     agent = get_support_agent()
+    
+    # Track latency and result for logging
+    start_time = time.perf_counter()
+    result = None
+    response: SupportResponse | None = None
+    success = True
+    error_message: str | None = None
+    tokens_input = 0
+    tokens_output = 0
+    model_name: str | None = None
 
     try:
         result = await asyncio.wait_for(
@@ -433,11 +463,36 @@ async def run_support(
 
         # result.output is the typed output (SupportResponse)
         # Note: output_type param (not result_type) but result.output (not result.response)
-        return result.output
+        response = result.output
+        
+        # Try to extract usage from result (if available)
+        if hasattr(result, "usage"):
+            usage = result.usage
+            if hasattr(usage, "input_tokens"):
+                tokens_input = usage.input_tokens or 0
+            if hasattr(usage, "output_tokens"):
+                tokens_output = usage.output_tokens or 0
+        elif hasattr(result, "model_used"):
+            model_name = str(result.model_used)
+        
+        # Extract model from agent if not in result
+        if not model_name and hasattr(agent, "model"):
+            if hasattr(agent.model, "model_id"):
+                model_name = agent.model.model_id
+            elif hasattr(agent.model, "name"):
+                model_name = agent.model.name
+        
+        # Fallback: try to get model from settings or deps
+        if not model_name:
+            model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+        
+        return response
 
     except TimeoutError:
+        success = False
+        error_message = "LLM_TIMEOUT"
         logger.error("Support agent timeout for session %s", deps.session_id)
-        return SupportResponse(
+        response = SupportResponse(
             event="escalation",
             messages=[MessageItem(content=_get_timeout_response())],
             metadata=ResponseMetadata(
@@ -448,10 +503,13 @@ async def run_support(
             ),
             escalation=EscalationInfo(reason="LLM_TIMEOUT"),
         )
+        return response
 
     except Exception as e:
+        success = False
+        error_message = f"AGENT_ERROR: {str(e)[:100]}"
         logger.exception("Support agent error: %s", e)
-        return SupportResponse(
+        response = SupportResponse(
             event="escalation",
             messages=[MessageItem(content=_get_error_response())],
             metadata=ResponseMetadata(
@@ -460,5 +518,35 @@ async def run_support(
                 intent="UNKNOWN_OR_EMPTY",
                 escalation_level="L2",
             ),
-            escalation=EscalationInfo(reason=f"AGENT_ERROR: {str(e)[:100]}"),
+            escalation=EscalationInfo(reason=error_message),
+        )
+        return response
+    
+    finally:
+        # Log usage (best-effort, non-blocking)
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        
+        # Prepare minimal metadata
+        metadata: dict[str, Any] = {}
+        if response:
+            metadata["current_state"] = response.metadata.current_state
+            metadata["intent"] = response.metadata.intent
+            metadata["dialog_phase"] = getattr(deps, "dialog_phase", None)
+            metadata["has_image"] = bool(deps.has_image if hasattr(deps, "has_image") else False)
+            if deps.has_image and hasattr(deps, "image_url") and deps.image_url:
+                metadata["image_url"] = deps.image_url
+        
+        # Log asynchronously (fire-and-forget)
+        asyncio.create_task(
+            log_llm_usage_best_effort(
+                session_id=deps.session_id,
+                model=model_name or "gpt-4o-mini",
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_message,
+                metadata=metadata if metadata else None,
+                user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+            )
         )

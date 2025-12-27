@@ -658,18 +658,48 @@ async def run_vision(
     message_history: list[Any] | None = None,
 ) -> VisionResponse:
     import asyncio
+    import time
     from urllib.parse import urlparse
 
+    from src.services.llm_usage_logger import log_llm_usage_best_effort
+
     agent = get_vision_agent()
+    
+    # Track latency and result for logging
+    start_time = time.perf_counter()
+    result = None
+    response: VisionResponse | None = None
+    success = True
+    error_message: str | None = None
+    tokens_input = 0
+    tokens_output = 0
+    model_name: str | None = None
 
     if not deps.image_url:
         logger.error("👁️ Vision agent called WITHOUT image! deps.image_url is empty.")
-        return VisionResponse(
+        response = VisionResponse(
             reply_to_user="Надішліть фото товару, будь ласка 📷",
             confidence=0.0,
             needs_clarification=True,
             clarification_question="Чи можете надіслати фото товару?",
         )
+        success = False
+        error_message = "NO_IMAGE_URL"
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        asyncio.create_task(
+            log_llm_usage_best_effort(
+                session_id=deps.session_id,
+                model="gpt-4o-mini",
+                tokens_input=0,
+                tokens_output=0,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_message,
+                metadata={"has_image": False},
+                user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+            )
+        )
+        return response
 
     image_url = deps.image_url.strip()
 
@@ -677,38 +707,106 @@ async def run_vision(
         parsed = urlparse(image_url)
         if parsed.scheme not in ("http", "https"):
             logger.error("👁️ Invalid image URL scheme: %s", parsed.scheme)
-            return VisionResponse(
+            response = VisionResponse(
                 reply_to_user=get_human_response("photo_error"),
                 confidence=0.0,
                 needs_clarification=True,
                 clarification_question="Надішліть, будь ласка, фото ще раз 📷",
             )
+            success = False
+            error_message = "INVALID_IMAGE_URL_SCHEME"
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            asyncio.create_task(
+                log_llm_usage_best_effort(
+                    session_id=deps.session_id,
+                    model="gpt-4o-mini",
+                    tokens_input=0,
+                    tokens_output=0,
+                    latency_ms=latency_ms,
+                    success=success,
+                    error_message=error_message,
+                    metadata={"has_image": True, "image_url": image_url},
+                    user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+                )
+            )
+            return response
         if not parsed.netloc:
             logger.error("👁️ Invalid image URL - no host: %s", image_url[:50])
-            return VisionResponse(
+            response = VisionResponse(
                 reply_to_user=get_human_response("photo_error"),
                 confidence=0.0,
                 needs_clarification=True,
                 clarification_question="Надішліть, будь ласка, фото ще раз 📷",
             )
+            success = False
+            error_message = "INVALID_IMAGE_URL_NO_HOST"
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            asyncio.create_task(
+                log_llm_usage_best_effort(
+                    session_id=deps.session_id,
+                    model="gpt-4o-mini",
+                    tokens_input=0,
+                    tokens_output=0,
+                    latency_ms=latency_ms,
+                    success=success,
+                    error_message=error_message,
+                    metadata={"has_image": True, "image_url": image_url},
+                    user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+                )
+            )
+            return response
     except Exception as e:
         logger.error("👁️ URL parse error: %s", e)
-        return VisionResponse(
+        response = VisionResponse(
             reply_to_user=get_human_response("photo_error"),
             confidence=0.0,
             needs_clarification=True,
             clarification_question="Надішліть, будь ласка, фото ще раз 📷",
         )
+        success = False
+        error_message = f"URL_PARSE_ERROR: {str(e)[:50]}"
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        asyncio.create_task(
+            log_llm_usage_best_effort(
+                session_id=deps.session_id,
+                model="gpt-4o-mini",
+                tokens_input=0,
+                tokens_output=0,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_message,
+                metadata={"has_image": True, "image_url": image_url},
+                user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+            )
+        )
+        return response
 
     blocked_hosts = ("localhost", "127.0.0.1", "0.0.0.0", "169.254.", "10.", "192.168.", "172.16.")
     if any(parsed.netloc.startswith(h) or parsed.netloc == h.rstrip(".") for h in blocked_hosts):
         logger.warning("👁️ Blocked internal URL attempt: %s", parsed.netloc)
-        return VisionResponse(
+        response = VisionResponse(
             reply_to_user=get_human_response("photo_error"),
             confidence=0.0,
             needs_clarification=True,
             clarification_question="Надішліть фото ще раз 📷",
         )
+        success = False
+        error_message = "BLOCKED_INTERNAL_URL"
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        asyncio.create_task(
+            log_llm_usage_best_effort(
+                session_id=deps.session_id,
+                model="gpt-4o-mini",
+                tokens_input=0,
+                tokens_output=0,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_message,
+                metadata={"has_image": True, "image_url": image_url},
+                user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+            )
+        )
+        return response
 
     final_image_url = image_url
     if _is_private_cdn_url(image_url):
@@ -719,12 +817,29 @@ async def run_vision(
             logger.info("👁️ Successfully converted to base64 (%d chars)", len(base64_url))
         else:
             logger.error("👁️ Failed to download image from private CDN")
-            return VisionResponse(
+            response = VisionResponse(
                 reply_to_user="Не вдалось завантажити фото. Спробуйте надіслати ще раз 📷",
                 confidence=0.0,
                 needs_clarification=True,
                 clarification_question="Чи можете надіслати фото ще раз?",
             )
+            success = False
+            error_message = "FAILED_TO_DOWNLOAD_IMAGE"
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            asyncio.create_task(
+                log_llm_usage_best_effort(
+                    session_id=deps.session_id,
+                    model="gpt-4o-mini",
+                    tokens_input=0,
+                    tokens_output=0,
+                    latency_ms=latency_ms,
+                    success=success,
+                    error_message=error_message,
+                    metadata={"has_image": True, "image_url": image_url},
+                    user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+                )
+            )
+            return response
 
     user_input: list[str | ImageUrl] = [
         message or "Аналізуй це фото та знайди товар MIRT.",
@@ -769,6 +884,27 @@ async def run_vision(
             timeout=120,
         )
         response = result.output
+        
+        # Try to extract usage from result (if available)
+        if hasattr(result, "usage"):
+            usage = result.usage
+            if hasattr(usage, "input_tokens"):
+                tokens_input = usage.input_tokens or 0
+            if hasattr(usage, "output_tokens"):
+                tokens_output = usage.output_tokens or 0
+        elif hasattr(result, "model_used"):
+            model_name = str(result.model_used)
+        
+        # Extract model from agent if not in result
+        if not model_name and hasattr(agent, "model"):
+            if hasattr(agent.model, "model_id"):
+                model_name = agent.model.model_id
+            elif hasattr(agent.model, "name"):
+                model_name = agent.model.name
+        
+        # Fallback: try to get model from settings
+        if not model_name:
+            model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
 
         logger.info(
             "👁️ Vision result: product='%s', confidence=%.2f, needs_clarification=%s",
@@ -779,10 +915,53 @@ async def run_vision(
         return response
 
     except Exception as e:
+        success = False
+        error_message = f"VISION_ERROR: {str(e)[:100]}"
         logger.exception("👁️ Vision agent error: %s", e)
-        return VisionResponse(
+        response = VisionResponse(
             reply_to_user=get_human_response("photo_analysis_error"),
             confidence=0.0,
             needs_clarification=True,
             clarification_question="Чи можете надіслати фото ще раз або описати товар?",
+        )
+        return response
+    
+    finally:
+        # Log usage (best-effort, non-blocking)
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        
+        # Prepare minimal metadata for vision
+        metadata: dict[str, Any] = {
+            "has_image": True,
+            "image_url": image_url,
+        }
+        if response:
+            metadata["confidence"] = response.confidence
+            if response.identified_product:
+                metadata["detected_product_id"] = response.identified_product.id
+                metadata["detected_product_name"] = response.identified_product.name
+        
+        # Extract model if not already set
+        if not model_name:
+            if hasattr(agent, "model"):
+                if hasattr(agent.model, "model_id"):
+                    model_name = agent.model.model_id
+                elif hasattr(agent.model, "name"):
+                    model_name = agent.model.name
+            if not model_name:
+                model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+        
+        # Log asynchronously (fire-and-forget)
+        asyncio.create_task(
+            log_llm_usage_best_effort(
+                session_id=deps.session_id,
+                model=model_name or "gpt-4o-mini",
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_message,
+                metadata=metadata if metadata else None,
+                user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+            )
         )

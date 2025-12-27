@@ -329,6 +329,13 @@ class Settings(BaseSettings):
         default=False,
         description="Enable pretty debug trace logs (request/routing/node entry/exit) for ManyChat testing.",
     )
+    PHASE_AWARE_IMAGE_ROUTING: bool = Field(
+        default=True,
+        description=(
+            "Enable phase-aware image routing: images in payment/delivery phases route to payment node "
+            "instead of vision to prevent conversation restart. Set to False to disable (legacy behavior)."
+        ),
+    )
     USE_OFFER_DELIBERATION: bool = Field(
         default=True,
         description="Enable Multi-Role Deliberation for STATE_4_OFFER (Customer/Business/Quality views)",

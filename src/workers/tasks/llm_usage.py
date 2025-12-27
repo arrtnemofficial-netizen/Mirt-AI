@@ -133,21 +133,37 @@ def record_usage(
             logger.warning("[WORKER:LLM_USAGE] PostgreSQL not configured, skipping")
             return {"status": "skipped", "reason": "no_postgres"}
         created_at = datetime.now(UTC).isoformat()
+        
+        # Prepare metadata JSON if provided
+        metadata_json = None
+        if metadata:
+            try:
+                import json
+                metadata_json = json.dumps(metadata)
+            except Exception as e:
+                logger.debug("[WORKER:LLM_USAGE] Metadata serialization failed: %s", e)
+        
         with psycopg.connect(postgres_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
                     INSERT INTO {DBTable.LLM_USAGE}
-                    (user_id, model, tokens_input, tokens_output, cost_usd, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    (user_id, session_id, model, tokens_input, tokens_output, cost_usd,
+                     latency_ms, success, error_message, metadata, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                     RETURNING id
                     """,
                     (
                         user_id,
+                        session_id,
                         model,
                         tokens_input,
                         tokens_output,
                         float(cost_usd),
+                        None,  # latency_ms - not available in Celery task
+                        True,  # success - assume True for Celery task
+                        None,  # error_message - not available in Celery task
+                        metadata_json,
                         created_at,
                     ),
                 )

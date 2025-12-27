@@ -260,6 +260,27 @@ async def agent_node(
         }
 
     # =====================================================================
+    # SNIPPETS-FIRST POLICY: Check for predefined snippets before LLM
+    # =====================================================================
+    # This handles: "no" responses, off-topic questions
+    from src.agents.langgraph.nodes.helpers.policy_snippets import maybe_apply_snippet_policy
+    
+    detected_intent = state.get("detected_intent")
+    snippet_response = maybe_apply_snippet_policy(
+        state,
+        detected_intent=detected_intent,
+        user_text=user_message,
+    )
+    
+    if snippet_response:
+        # Snippet found - return response without LLM call
+        # Note: Manager notifications for "no" in payment phase are handled in payment_node
+        return {
+            **snippet_response,
+            "step_number": state.get("step_number", 0) + 1,
+        }
+
+    # =====================================================================
     # UNIVERSAL COLOR SHOW REQUEST HANDLER (any state)
     # =====================================================================
     # Якщо клієнт просить показати кольори (в будь-якому стані) - показуємо фото
@@ -659,6 +680,11 @@ async def agent_node(
         metadata_update["current_state"] = new_state_str
         metadata_update["intent"] = intent
 
+        if selected_products:
+            first_name = str(selected_products[0].get("name") or "").strip()
+            if first_name:
+                metadata_update["current_product_name"] = first_name
+
         if response.customer_data:
             if response.customer_data.name:
                 metadata_update["customer_name"] = response.customer_data.name
@@ -713,6 +739,7 @@ async def agent_node(
         # - Враховує intent, products, size, color
         # - Для payment враховує sub-phases
         # =====================================================
+        old_dialog_phase = state.get("dialog_phase", "INIT")
         dialog_phase = _determine_dialog_phase(
             current_state=new_state_str,
             event=response.event,
@@ -720,6 +747,20 @@ async def agent_node(
             metadata=response.metadata,
             state=state,  # Передаємо state для payment sub-phase detection
         )
+        
+        # Reset policy counters if dialog phase changed
+        if old_dialog_phase != dialog_phase:
+            from src.agents.langgraph.nodes.helpers.policy_snippets import _reset_policy_counters
+            metadata_update = state.get("metadata", {}).copy()
+            metadata_update = _reset_policy_counters(metadata_update)
+            logger.debug(
+                "[SESSION %s] Dialog phase changed: %s -> %s, resetting policy counters",
+                session_id,
+                old_dialog_phase,
+                dialog_phase,
+            )
+            # Update metadata in state (will be merged in return)
+            state["metadata"] = metadata_update
 
         # Build assistant message (OUTPUT_CONTRACT format) **after** all overrides
         assistant_content = {

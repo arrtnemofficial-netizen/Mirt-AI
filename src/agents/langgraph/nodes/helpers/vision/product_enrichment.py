@@ -89,8 +89,17 @@ async def enrich_product_from_db(
             logger.debug("Retry search with base name: '%s'", base_name)
             results = await catalog.search_products(query=base_name, limit=5)
 
-        # Якщо є колір - шукаємо товар з цим кольором
-        product = None
+        def _extract_colors(row: dict[str, Any]) -> list[str]:
+            """Extract color options from product row."""
+            raw = row.get("colors") or row.get("color") or []
+            if isinstance(raw, list):
+                return [str(x).strip() for x in raw if str(x).strip()]
+            if isinstance(raw, str):
+                return [raw.strip()] if raw.strip() else []
+            return []
+
+        # If color was provided, try to pick the best match by color.
+        product: dict[str, Any] | None = None
         matched_by_color = False
         color_norm = _norm(color or "")
         if color_norm and results:
@@ -108,14 +117,6 @@ async def enrich_product_from_db(
                 if product:
                     break
 
-        def _extract_colors(row: dict[str, Any]) -> list[str]:
-            raw = row.get("colors") or row.get("color") or []
-            if isinstance(raw, list):
-                return [str(x).strip() for x in raw if str(x).strip()]
-            if isinstance(raw, str):
-                return [raw.strip()] if raw.strip() else []
-            return []
-
         color_options: list[str] = []
         if results:
             seen: set[str] = set()
@@ -126,23 +127,25 @@ async def enrich_product_from_db(
                         seen.add(lc)
                         color_options.append(c)
 
-        # Якщо не знайшли з кольором - беремо перший
+        # If still no product selected, nothing to enrich.
         if not product and results:
             product = results[0]
+        if not product:
+            return None
 
-        if product:
-            price_display = CatalogService.format_price_display(product)
-            # Try multiple possible column names for photo URL
-            photo_url = (
-                product.get("photo_url")
-                or product.get("image_url")
-                or product.get("photo")
-                or product.get("image")
-                or ""
-            )
+        price_display = CatalogService.format_price_display(product)
+        # Try multiple possible column names for photo URL
+        photo_url = (
+            product.get("photo_url")
+            or product.get("image_url")
+            or product.get("photo")
+            or product.get("image")
+            or ""
+        )
 
-            color_mismatch = bool(color_norm and results and (not matched_by_color))
-            ambiguous_color = bool(((not color_norm) and len(color_options) >= 2) or color_mismatch)
+        color_mismatch = bool(color_norm and results and (not matched_by_color))
+        ambiguous_color = bool(((not color_norm) and len(color_options) >= 2) or color_mismatch)
+
         if ambiguous_color:
             photo_url = ""
             with suppress(Exception):
@@ -156,28 +159,29 @@ async def enrich_product_from_db(
             price_display,
             photo_url[:50] if photo_url else "<no photo>",
         )
+
         return {
-                "id": product.get("id", 0),
-                "name": product.get("name", product_name),
-                "price": CatalogService.get_price_for_size(product),
-                "price_display": price_display,
-                "color": ""
-                if ambiguous_color
-                else (
-                    (product.get("colors") or [""])[0]
-                    if isinstance(product.get("colors"), list)
-                    else product.get("colors", "")
-                    if isinstance(product.get("colors"), str)
-                    else product.get("color", "")
-                    if isinstance(product.get("color"), str)
-                    else product.get("color", "")
-                ),
-                "photo_url": photo_url,
-                "description": product.get("description", ""),
-                "_catalog_row": product,
-                "_color_options": color_options,
-                "_ambiguous_color": ambiguous_color,
-            }
+            "id": product.get("id", 0),
+            "name": product.get("name", product_name),
+            "price": CatalogService.get_price_for_size(product),
+            "price_display": price_display,
+            "color": ""
+            if ambiguous_color
+            else (
+                (product.get("colors") or [""])[0]
+                if isinstance(product.get("colors"), list)
+                else product.get("colors", "")
+                if isinstance(product.get("colors"), str)
+                else product.get("color", "")
+                if isinstance(product.get("color"), str)
+                else product.get("color", "")
+            ),
+            "photo_url": photo_url,
+            "description": product.get("description", ""),
+            "_catalog_row": product,
+            "_color_options": color_options,
+            "_ambiguous_color": ambiguous_color,
+        }
     except Exception as e:
         logger.warning("DB enrichment failed: %s", e)
     return None

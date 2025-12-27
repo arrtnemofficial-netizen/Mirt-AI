@@ -237,20 +237,95 @@ async def run_payment(
         Validated PaymentResponse
     """
     import asyncio
+    import time
+
+    from src.services.llm_usage_logger import log_llm_usage_best_effort
 
     agent = get_payment_agent()
+    
+    # Track latency and result for logging
+    start_time = time.perf_counter()
+    result = None
+    response: PaymentResponse | None = None
+    success = True
+    error_message: str | None = None
+    tokens_input = 0
+    tokens_output = 0
+    model_name: str | None = None
 
     try:
         result = await asyncio.wait_for(
             agent.run(message, deps=deps, message_history=message_history),
             timeout=30,
         )
-        return result.output  # output_type param, result.output attr
+        response = result.output  # output_type param, result.output attr
+        
+        # Try to extract usage from result (if available)
+        if hasattr(result, "usage"):
+            usage = result.usage
+            if hasattr(usage, "input_tokens"):
+                tokens_input = usage.input_tokens or 0
+            if hasattr(usage, "output_tokens"):
+                tokens_output = usage.output_tokens or 0
+        elif hasattr(result, "model_used"):
+            model_name = str(result.model_used)
+        
+        # Extract model from agent if not in result
+        if not model_name and hasattr(agent, "model"):
+            if hasattr(agent.model, "model_id"):
+                model_name = agent.model.model_id
+            elif hasattr(agent.model, "name"):
+                model_name = agent.model.name
+        
+        # Fallback: try to get model from settings
+        if not model_name:
+            model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+        
+        return response
 
     except Exception as e:
+        success = False
+        error_message = f"PAYMENT_ERROR: {str(e)[:100]}"
         logger.exception("Payment agent error: %s", e)
-        return PaymentResponse(
+        response = PaymentResponse(
             reply_to_user=get_human_response("payment_error"),
             missing_fields=["name", "phone", "city", "nova_poshta"],
             order_ready=False,
+        )
+        return response
+    
+    finally:
+        # Log usage (best-effort, non-blocking)
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
+        
+        # Prepare minimal metadata for payment
+        metadata: dict[str, Any] = {}
+        if response:
+            metadata["order_ready"] = response.order_ready
+            if hasattr(deps, "dialog_phase"):
+                metadata["dialog_phase"] = deps.dialog_phase
+        
+        # Extract model if not already set
+        if not model_name:
+            if hasattr(agent, "model"):
+                if hasattr(agent.model, "model_id"):
+                    model_name = agent.model.model_id
+                elif hasattr(agent.model, "name"):
+                    model_name = agent.model.name
+            if not model_name:
+                model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+        
+        # Log asynchronously (fire-and-forget)
+        asyncio.create_task(
+            log_llm_usage_best_effort(
+                session_id=deps.session_id,
+                model=model_name or "gpt-4o-mini",
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_message,
+                metadata=metadata if metadata else None,
+                user_id=str(deps.user_id) if hasattr(deps, "user_id") and deps.user_id else None,
+            )
         )

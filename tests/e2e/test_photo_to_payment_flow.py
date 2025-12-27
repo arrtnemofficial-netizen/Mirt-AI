@@ -153,21 +153,32 @@ class TestFlowEdgeCases:
     """E2E tests for edge cases in user journeys."""
 
     def test_user_can_restart_from_any_state(self):
-        """User sending new photo should restart identification."""
-        from src.agents.langgraph.edges import route_after_intent
-        from src.core.state_machine import Intent, State
+        """
+        Photo mid-flow must NOT restart identification.
+        
+        Regression for the production bug:
+        - In payment phases, has_image=True was forcing PHOTO_IDENT -> vision -> re-greeting/reset UX.
+        - Expected now: route to payment (transactional phases) and handle as proof/clarification.
+        """
+        from src.agents.langgraph.edges import master_router
+        from src.core.state_machine import State
 
-        # User in payment flow sends new photo
         state = {
             "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-            "detected_intent": Intent.PHOTO_IDENT.value,
             "has_image": True,
-            "is_escalated": False,
             "dialog_phase": "WAITING_FOR_PAYMENT_METHOD",
+            "metadata": {
+                "session_id": "test_mid_payment_photo",
+                "has_image": True,
+                # Simulate that vision already greeted earlier in the session
+                "vision_greeted": True,
+            },
+            "messages": [{"role": "user", "content": "Ось фото"}],
+            "session_id": "test_mid_payment_photo",
         }
 
-        route = route_after_intent(state)
-        assert route == "vision", "New photo in any state should go to vision"
+        route = master_router(state)
+        assert route == "payment", f"Mid-payment photo must route to payment, got '{route}'"
 
     def test_complaint_escalates_from_any_state(self):
         """Complaint must escalate regardless of current state."""

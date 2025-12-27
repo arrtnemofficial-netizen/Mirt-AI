@@ -105,26 +105,179 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     user_message = extract_user_message(state.get("messages", []))
     detected_intent = detect_simple_intent(user_message) if user_message else None
 
+    # Get thread_id for observability
+    thread_id = metadata.get("thread_id", session_id)
+    
     logger.info(
-        " [SESSION %s] Master router: trace_id=%s phase=%s has_image=%s intent=%s msg='%s'",
+        " [SESSION %s] Master router: trace_id=%s phase=%s has_image=%s intent=%s msg='%s' thread_id=%s",
         session_id,
         trace_id,
         dialog_phase,
         has_image,
         detected_intent,
         user_message[:50] if user_message else "",
+        thread_id,
     )
 
     # =========================================================================
     # SPECIAL CASES (highest priority)
     # =========================================================================
+    # CRITICAL: Vision should ONLY run for FIRST photo in session (INIT/DISCOVERY)
+    # All subsequent photos must be handled in current phase context to prevent restart
     if has_image:
+        # CRITICAL: Check for EXPLICIT "new product" trigger FIRST
+        # If user explicitly says "new product" + photo, ALWAYS route to vision (regardless of phase)
+        if user_message:
+            from src.agents.langgraph.nodes.helpers.policy_snippets import detect_explicit_new_product
+            
+            if detect_explicit_new_product(user_message, state):
+                from src.services.observability import track_metric
+                track_metric(
+                    "image_routed_to_vision",
+                    1,
+                    {
+                        "session_id": session_id,
+                        "phase": dialog_phase,
+                        "thread_id": thread_id,
+                        "reason": "explicit_new_product_trigger",
+                    },
+                )
+                _route_debug(
+                    session_id=session_id,
+                    current_phase=dialog_phase,
+                    detected_intent=detected_intent,
+                    destination="moderation",
+                    reason="explicit 'new product' trigger detected, routing to vision",
+                )
+                return "moderation"
+        
+        # Feature flag: allow disabling phase-aware routing for rollback
+        phase_aware_enabled = getattr(settings, "PHASE_AWARE_IMAGE_ROUTING", True)
+        
+        # Check if this is first photo in session
+        vision_greeted = bool(metadata.get("vision_greeted", False))
+        
+        # Phases where vision is allowed (first photo scenarios)
+        vision_allowed_phases = {"INIT", "DISCOVERY"}
+        
+        # Transactional phases where images should be interpreted as payment proof
+        transactional_phases = {
+            "WAITING_FOR_PAYMENT_PROOF",
+            "WAITING_FOR_PAYMENT_METHOD",
+            "WAITING_FOR_DELIVERY_DATA",
+        }
+        
+        if phase_aware_enabled:
+            # CRITICAL: If already greeted, NEVER route to vision (prevents restart)
+            if vision_greeted and dialog_phase not in vision_allowed_phases:
+                # Photo in ongoing conversation - handle in current context
+                from src.services.observability import track_metric
+                
+                if dialog_phase in transactional_phases:
+                    # Payment/delivery phases: route to payment
+                    track_metric(
+                        "image_routed_to_payment",
+                        1,
+                        {
+                            "session_id": session_id,
+                            "phase": dialog_phase,
+                            "thread_id": thread_id,
+                            "reason": "ongoing_conversation_payment",
+                        },
+                    )
+                    _route_debug(
+                        session_id=session_id,
+                        current_phase=dialog_phase,
+                        detected_intent=detected_intent,
+                        destination="payment",
+                        reason=f"ongoing conversation: image in {dialog_phase} (already greeted)",
+                    )
+                    return "payment"
+                else:
+                    # Other phases: route to agent to handle in context
+                    track_metric(
+                        "image_routed_to_agent",
+                        1,
+                        {
+                            "session_id": session_id,
+                            "phase": dialog_phase,
+                            "thread_id": thread_id,
+                            "reason": "ongoing_conversation",
+                        },
+                    )
+                    _route_debug(
+                        session_id=session_id,
+                        current_phase=dialog_phase,
+                        detected_intent=detected_intent,
+                        destination="agent",
+                        reason=f"ongoing conversation: image in {dialog_phase} (already greeted, handle in context)",
+                    )
+                    return "agent"
+            
+            # Transactional phases: always route to payment (even if not greeted yet)
+            if dialog_phase in transactional_phases:
+                from src.services.observability import track_metric
+                track_metric(
+                    "image_routed_to_payment",
+                    1,
+                    {
+                        "session_id": session_id,
+                        "phase": dialog_phase,
+                        "thread_id": thread_id,
+                        "reason": "transactional_phase",
+                    },
+                )
+                _route_debug(
+                    session_id=session_id,
+                    current_phase=dialog_phase,
+                    detected_intent=detected_intent,
+                    destination="payment",
+                    reason=f"phase-aware routing: image in {dialog_phase}",
+                )
+                return "payment"
+            
+            # CRITICAL: If phase is NOT INIT/DISCOVERY and NOT transactional, 
+            # route to agent (NOT vision) to prevent restart, even if vision_greeted=False
+            # This handles cases like WAITING_FOR_SIZE, WAITING_FOR_COLOR, OFFER_MADE, etc.
+            if dialog_phase not in vision_allowed_phases:
+                from src.services.observability import track_metric
+                track_metric(
+                    "image_routed_to_agent",
+                    1,
+                    {
+                        "session_id": session_id,
+                        "phase": dialog_phase,
+                        "thread_id": thread_id,
+                        "reason": "mid_conversation_phase",
+                    },
+                )
+                _route_debug(
+                    session_id=session_id,
+                    current_phase=dialog_phase,
+                    detected_intent=detected_intent,
+                    destination="agent",
+                    reason=f"photo in {dialog_phase} (not INIT/DISCOVERY, handle in context)",
+                )
+                return "agent"
+        
+        # First photo in session (INIT/DISCOVERY) or phase-aware disabled: route to vision
+        from src.services.observability import track_metric
+        track_metric(
+            "image_routed_to_vision",
+            1,
+            {
+                "session_id": session_id,
+                "phase": dialog_phase,
+                "thread_id": thread_id,
+                "reason": "first_photo" if not vision_greeted else "phase_aware_disabled",
+            },
+        )
         _route_debug(
             session_id=session_id,
             current_phase=dialog_phase,
             detected_intent=detected_intent,
             destination="moderation",
-            reason="new image detected",
+            reason="first photo in session or phase-aware disabled",
         )
         return "moderation"
 

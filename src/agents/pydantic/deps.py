@@ -242,6 +242,10 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
     except Exception:
         payment_sub_phase = None
 
+    # Extract has_image and image_url from state or metadata (photo handler writes to metadata)
+    has_image = state.get("has_image", False) or metadata.get("has_image", False)
+    image_url = state.get("image_url") or metadata.get("image_url")
+    
     return AgentDeps(
         session_id=state.get("session_id", metadata.get("session_id", "")),
         trace_id=state.get("trace_id", ""),  # Must be populated by graph
@@ -250,8 +254,8 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
         current_state=state.get("current_state", "STATE_0_INIT"),
         channel=metadata.get("channel", "instagram"),
         language=metadata.get("language", "uk"),
-        has_image=state.get("has_image", False),
-        image_url=state.get("image_url"),
+        has_image=has_image,
+        image_url=image_url,
         selected_products=state.get("selected_products", []),
         customer_name=metadata.get("customer_name"),
         customer_phone=metadata.get("customer_phone"),
