@@ -174,7 +174,49 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
                 from src.services.observability import track_metric
                 
                 if dialog_phase in transactional_phases:
-                    # Payment/delivery phases: route to payment
+                    # CRITICAL: Check if this is product addition intent BEFORE routing to payment
+                    # If user wants to add a product, route to agent instead
+                    if user_message and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
+                        from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
+                        from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+                        
+                        # Check for product addition intent
+                        is_product_addition = detect_product_addition_intent(user_message)
+                        # Check if it's actually payment proof
+                        is_payment_proof = detect_payment_proof(
+                            user_text=user_message,
+                            has_image=True,
+                            has_url=False,
+                        )
+                        
+                        if is_product_addition and not is_payment_proof:
+                            # User wants to add product with photo → route to vision for product identification
+                            # CRITICAL: Vision will process photo, identify product, and add to order
+                            track_metric(
+                                "image_routed_to_vision",
+                                1,
+                                {
+                                    "session_id": session_id,
+                                    "phase": dialog_phase,
+                                    "thread_id": thread_id,
+                                    "reason": "product_addition_intent_with_photo",
+                                },
+                            )
+                            _route_debug(
+                                session_id=session_id,
+                                current_phase=dialog_phase,
+                                detected_intent=detected_intent,
+                                destination="moderation",
+                                reason=f"product addition intent with photo detected in {dialog_phase}, routing to vision",
+                            )
+                            # Set metadata to indicate product addition context for vision node
+                            if "metadata" not in state:
+                                state["metadata"] = {}
+                            state["metadata"]["product_addition_context"] = True
+                            state["metadata"]["intent"] = "PRODUCT_ADDITION"
+                            return "moderation"  # Route to moderation → vision
+                    
+                    # Payment/delivery phases: route to payment (default behavior)
                     track_metric(
                         "image_routed_to_payment",
                         1,
@@ -214,9 +256,52 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
                     )
                     return "agent"
             
-            # Transactional phases: always route to payment (even if not greeted yet)
+            # Transactional phases: check for product addition before routing to payment
             if dialog_phase in transactional_phases:
                 from src.services.observability import track_metric
+                
+                # CRITICAL: Check if this is product addition intent BEFORE routing to payment
+                if user_message and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
+                    from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
+                    from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+                    
+                    # Check for product addition intent
+                    is_product_addition = detect_product_addition_intent(user_message)
+                    # Check if it's actually payment proof
+                    is_payment_proof = detect_payment_proof(
+                        user_text=user_message,
+                        has_image=True,
+                        has_url=False,
+                    )
+                    
+                    if is_product_addition and not is_payment_proof:
+                        # User wants to add product with photo → route to vision for product identification
+                        # CRITICAL: Vision will process photo, identify product, and add to order
+                        track_metric(
+                            "image_routed_to_vision",
+                            1,
+                            {
+                                "session_id": session_id,
+                                "phase": dialog_phase,
+                                "thread_id": thread_id,
+                                "reason": "product_addition_intent_with_photo_transactional",
+                            },
+                        )
+                        _route_debug(
+                            session_id=session_id,
+                            current_phase=dialog_phase,
+                            detected_intent=detected_intent,
+                            destination="moderation",
+                            reason=f"product addition intent with photo in transactional phase {dialog_phase}, routing to vision",
+                        )
+                        # Set metadata to indicate product addition context for vision node
+                        if "metadata" not in state:
+                            state["metadata"] = {}
+                        state["metadata"]["product_addition_context"] = True
+                        state["metadata"]["intent"] = "PRODUCT_ADDITION"
+                        return "moderation"  # Route to moderation → vision
+                
+                # Default: route to payment for transactional phases
                 track_metric(
                     "image_routed_to_payment",
                     1,

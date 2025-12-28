@@ -70,18 +70,15 @@ def _get_model() -> OpenAIChatModel:
     """Get or create OpenAI model (lazy initialization)."""
     global _model
     if _model is None:
+        # SENIOR-LEVEL: Use AI_MODEL as single source of truth
+        model_name = settings.AI_MODEL
+        
         if settings.LLM_PROVIDER == "openai":
             api_key = settings.OPENAI_API_KEY.get_secret_value()
             base_url = "https://api.openai.com/v1"
-            model_name = settings.LLM_MODEL_GPT
         else:
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
             base_url = settings.OPENROUTER_BASE_URL
-            model_name = (
-                settings.LLM_MODEL_GROK
-                if settings.LLM_PROVIDER == "openrouter"
-                else settings.AI_MODEL
-            )
 
         if not api_key:
             # Fallback or error
@@ -90,7 +87,6 @@ def _get_model() -> OpenAIChatModel:
             if settings.LLM_PROVIDER == "openai":
                 api_key = settings.OPENROUTER_API_KEY.get_secret_value()
                 base_url = settings.OPENROUTER_BASE_URL
-                model_name = settings.AI_MODEL
 
         client = AsyncOpenAI(
             base_url=base_url,
@@ -449,7 +445,10 @@ async def run_support(
     error_message: str | None = None
     tokens_input = 0
     tokens_output = 0
+    # SENIOR-LEVEL: Get model name from actual model, not hardcoded fallback
     model_name: str | None = None
+    # Use AI_MODEL as single source of truth
+    support_model_name = settings.AI_MODEL
 
     try:
         result = await asyncio.wait_for(
@@ -482,9 +481,9 @@ async def run_support(
             elif hasattr(agent.model, "name"):
                 model_name = agent.model.name
         
-        # Fallback: try to get model from settings or deps
+        # SENIOR-LEVEL: Fallback to actual support model from settings, not hardcoded
         if not model_name:
-            model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+            model_name = support_model_name
         
         return response
 
@@ -540,7 +539,7 @@ async def run_support(
         asyncio.create_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model=model_name or "gpt-4o-mini",
+                model=model_name or support_model_name,
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
                 latency_ms=latency_ms,

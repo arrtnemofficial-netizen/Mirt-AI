@@ -169,8 +169,12 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
     - Confirmed, no payment → SHOW_PAYMENT
     - User says "оплатила/оплатив" → SHOW_PAYMENT (waiting for proof)
     - Has payment proof → THANK_YOU
+    
+    CRITICAL: If dialog_phase is WAITING_FOR_PAYMENT_PROOF and image is not payment proof,
+    return SHOW_PAYMENT (not CONFIRM_DATA) to avoid phase mismatch.
     """
     metadata = state.get("metadata", {})
+    dialog_phase = state.get("dialog_phase", "")
     
     # Check user message for payment confirmation keywords
     messages = state.get("messages", [])
@@ -185,6 +189,31 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
             break
     
     user_message_lower = user_message.lower() if user_message else ""
+    
+    # Check for image presence
+    has_image = bool(
+        state.get("has_image", False) or metadata.get("has_image", False)
+    )
+    
+    # CRITICAL: If we're in WAITING_FOR_PAYMENT_PROOF phase and have an image,
+    # check if it's actually payment proof or product addition
+    if dialog_phase == "WAITING_FOR_PAYMENT_PROOF" and has_image:
+        from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+        from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
+        
+        # Check if this is product addition (not payment proof)
+        is_product_addition = detect_product_addition_intent(user_message) if user_message else False
+        is_payment_proof = detect_payment_proof(
+            user_text=user_message,
+            has_image=True,
+            has_url=False,
+        )
+        
+        # If it's NOT payment proof (e.g., product photo), return SHOW_PAYMENT
+        # to maintain consistency with dialog_phase (we already showed payment details)
+        if not is_payment_proof:
+            return "SHOW_PAYMENT"
+    
     # Use SSOT rules module - but for sub-phase detection, we want to detect "оплатила" even without image/URL
     # (because user saying "оплатила" means they claim to have paid, even if proof not attached yet)
     from src.agents.langgraph.rules.payment_proof import PAYMENT_PROOF_KEYWORDS, PAYMENT_PROOF_WEAK_KEYWORDS

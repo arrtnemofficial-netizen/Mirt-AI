@@ -30,6 +30,8 @@ def build_vision_messages(
     vision_greeted: bool,
     user_message: str = "",
     catalog_product: dict[str, Any] | None = None,
+    product_addition_context: bool = False,
+    existing_products_count: int = 0,
 ) -> list[dict[str, str]]:
     """
     Build multi-bubble assistant response from VisionResponse.
@@ -83,17 +85,11 @@ def build_vision_messages(
     # НЕ використовуємо reply_to_user від LLM - будуємо відповідь самі з точними даними з БД
     product = response.identified_product
     if product:
-        # БАБЛА 2: Назва товару + колір (БЕЗ ЦІНИ!)
-        # Ціна буде показана тільки після того як клієнт вкаже зріст
         product_name = product.name
 
         # Check if color is already in the name (e.g., "Костюм Ритм (рожевий)")
         # to avoid duplication like "Костюм Ритм (рожевий) у кольорі рожевий"
         color_already_in_name = product.color and product.color.lower() in product_name.lower()
-
-        prefix = "Це наш"
-        if confidence < 0.5:
-            prefix = "Схоже, це наш"
 
         color_options: list[str] = []
         try:
@@ -114,17 +110,45 @@ def build_vision_messages(
             )
         )
 
-        if color_already_in_name:
-            # Color is in name - just use the name
-            message_text = f"{prefix} {product_name} 💛"
-        elif product.color and (not needs_color_confirmation):
-            # Color NOT in name - add it
-            message_text = f"{prefix} {product_name} у кольорі {product.color} 💛"
+        # CRITICAL: Different message for product addition context
+        if product_addition_context:
+            # SENIOR-LEVEL: Professional product addition messaging
+            # First bubble: "Зафіксували [товар] 🫶"
+            if color_already_in_name:
+                message_text = f"Зафіксували {product_name} 🫶"
+            elif product.color and (not needs_color_confirmation):
+                message_text = f"Зафіксували {product_name} у кольорі {product.color} 🫶"
+            else:
+                message_text = f"Зафіксували {product_name} 🫶"
+            messages.append(text_msg(message_text))
+            
+            # Second bubble: Add to order message with proper pluralization
+            total_count = existing_products_count + 1
+            if total_count == 1:
+                messages.append(text_msg("Додаємо до замовлення 🤍"))
+            elif total_count == 2:
+                messages.append(text_msg("Додаємо до замовлення. Зараз у вас: 2 товари 🤍"))
+            elif total_count in (3, 4):
+                messages.append(text_msg(f"Додаємо до замовлення. Зараз у вас: {total_count} товари 🤍"))
+            else:
+                messages.append(text_msg(f"Додаємо до замовлення. Зараз у вас: {total_count} товарів 🤍"))
         else:
-            # No color info at all
-            message_text = f"{prefix} {product_name} 💛"
+            # Normal vision flow: "Це наш [товар]"
+            prefix = "Це наш"
+            if confidence < 0.5:
+                prefix = "Схоже, це наш"
 
-        messages.append(text_msg(message_text))
+            if color_already_in_name:
+                # Color is in name - just use the name
+                message_text = f"{prefix} {product_name} 💛"
+            elif product.color and (not needs_color_confirmation):
+                # Color NOT in name - add it
+                message_text = f"{prefix} {product_name} у кольорі {product.color} 💛"
+            else:
+                # No color info at all
+                message_text = f"{prefix} {product_name} 💛"
+
+            messages.append(text_msg(message_text))
 
         # Try to get beautiful presentation text using presentation builder
         # Priority: snippets.md → YAML (visual) → Supabase description (formatted nicely)

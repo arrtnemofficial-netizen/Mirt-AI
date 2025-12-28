@@ -606,11 +606,45 @@ async def _handle_delivery_data(
         has_url,
     )
 
+    dialog_phase = state.get("dialog_phase", "")
+    
+    # =====================================================
+    # SNIPPETS-FIRST POLICY: Check snippets BEFORE keywords
+    # =====================================================
+    # For product addition WITHOUT photo → snippet response
+    if not has_image_now and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
+        from src.agents.langgraph.nodes.helpers.policy_snippets import maybe_apply_snippet_policy
+        
+        snippet_result = maybe_apply_snippet_policy(
+            state=state,
+            user_text=user_message,
+            detected_intent="PRODUCT_ADDITION",
+        )
+        
+        if snippet_result and snippet_result.get("agent_response"):
+            logger.info(
+                "[SESSION %s] Snippets-first: product addition snippet applied (no photo)",
+                session_id,
+            )
+            return Command(
+                update={
+                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "messages": [
+                        {"role": "assistant", "content": snippet_result["agent_response"]["messages"][0]["content"]}
+                    ],
+                    "agent_response": snippet_result["agent_response"],
+                    "metadata": snippet_result.get("metadata", state.get("metadata", {})).copy(),
+                    "dialog_phase": snippet_result.get("dialog_phase", dialog_phase),
+                    "step_number": state.get("step_number", 0) + 1,
+                },
+                goto="end",
+            )
+
     # PHASE-AWARE IMAGE HANDLING: If image is sent in payment proof phase,
     # classify it as payment proof vs product photo
-    dialog_phase = state.get("dialog_phase", "")
     if has_image_now and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
         from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+        from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
         
         is_payment_proof = detect_payment_proof(
             user_text=user_message or "",
@@ -619,7 +653,39 @@ async def _handle_delivery_data(
         )
         
         if not is_payment_proof:
-            # Image doesn't look like payment proof - ask for clarification
+            # Image doesn't look like payment proof - check if it's product addition
+            is_product_addition = detect_product_addition_intent(user_message or "")
+            
+            if is_product_addition:
+                # User wants to add a product - route to agent for processing
+                logger.info(
+                    "[SESSION %s] Product addition intent detected in payment phase, routing to agent",
+                    session_id,
+                )
+                # Return command that will route to agent node
+                # We need to update state to allow agent to handle product addition
+                return Command(
+                    update={
+                        "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                        "messages": [],  # Agent will generate response
+                        "agent_response": {
+                            "event": "product_addition",
+                            "messages": [],
+                            "metadata": {
+                                "session_id": session_id,
+                                "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                                "intent": "PRODUCT_ADDITION",
+                                "escalation_level": "NONE",
+                            },
+                        },
+                        "metadata": state.get("metadata", {}).copy(),
+                        "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",  # Stay in same phase
+                        "step_number": state.get("step_number", 0) + 1,
+                    },
+                    goto="agent",  # Route to agent to handle product addition
+                )
+            
+            # Image doesn't look like payment proof and not product addition - ask for clarification
             # WITHOUT resetting the payment flow
             clarification = (
                 "Це фото квитанції/скріну оплати? 🤍\n"

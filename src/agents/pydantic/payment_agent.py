@@ -33,23 +33,21 @@ logger = logging.getLogger(__name__)
 
 def _build_model() -> OpenAIChatModel:
     """Build OpenAI model."""
+    # SENIOR-LEVEL: Use AI_MODEL as single source of truth
+    model_name = settings.AI_MODEL
+    
     if settings.LLM_PROVIDER == "openai":
         api_key = settings.OPENAI_API_KEY.get_secret_value()
         base_url = "https://api.openai.com/v1"
-        model_name = settings.LLM_MODEL_GPT
     else:
         api_key = settings.OPENROUTER_API_KEY.get_secret_value()
         base_url = settings.OPENROUTER_BASE_URL
-        model_name = (
-            settings.LLM_MODEL_GROK if settings.LLM_PROVIDER == "openrouter" else settings.AI_MODEL
-        )
 
     if not api_key:
         logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
         if settings.LLM_PROVIDER == "openai":
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
             base_url = settings.OPENROUTER_BASE_URL
-            model_name = settings.AI_MODEL
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)
@@ -251,7 +249,10 @@ async def run_payment(
     error_message: str | None = None
     tokens_input = 0
     tokens_output = 0
+    # SENIOR-LEVEL: Get model name from actual model, not hardcoded fallback
     model_name: str | None = None
+    # Use AI_MODEL as single source of truth
+    payment_model_name = settings.AI_MODEL
 
     try:
         result = await asyncio.wait_for(
@@ -277,9 +278,9 @@ async def run_payment(
             elif hasattr(agent.model, "name"):
                 model_name = agent.model.name
         
-        # Fallback: try to get model from settings
+        # SENIOR-LEVEL: Fallback to actual payment model from settings, not hardcoded
         if not model_name:
-            model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+            model_name = payment_model_name
         
         return response
 
@@ -313,13 +314,14 @@ async def run_payment(
                 elif hasattr(agent.model, "name"):
                     model_name = agent.model.name
             if not model_name:
-                model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+                model_name = payment_model_name
         
+        # SENIOR-LEVEL: Use actual payment model, not hardcoded fallback
         # Log asynchronously (fire-and-forget)
         asyncio.create_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model=model_name or "gpt-4o-mini",
+                model=model_name or payment_model_name,
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
                 latency_ms=latency_ms,

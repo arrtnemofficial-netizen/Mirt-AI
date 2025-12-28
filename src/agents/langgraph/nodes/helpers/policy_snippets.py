@@ -417,6 +417,36 @@ def maybe_apply_snippet_policy(
     metadata = state.get("metadata", {}) or {}
     session_id = state.get("session_id") or metadata.get("session_id") or "?"
     
+    # Check for product addition intent WITHOUT photo (snippet response)
+    has_image = bool(state.get("has_image", False) or metadata.get("has_image", False))
+    if not has_image and dialog_phase in {"WAITING_FOR_PAYMENT_PROOF", "WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_DELIVERY_DATA"}:
+        from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
+        
+        if detect_product_addition_intent(user_text):
+            logger.info(
+                "[SESSION %s] Snippets-first: product addition intent detected without photo, returning snippet",
+                session_id,
+            )
+            return {
+                "agent_response": {
+                    "event": "product_addition",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "content": "Так, звісно, можна додати 😊 Надішліть, будь ласка, фото товару або опишіть що хочете додати до замовлення.",
+                        }
+                    ],
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": state.get("current_state", "STATE_5_PAYMENT_DELIVERY"),
+                        "intent": "PRODUCT_ADDITION",
+                        "escalation_level": "NONE",
+                    },
+                },
+                "dialog_phase": dialog_phase,  # Stay in same phase
+                "metadata": metadata,
+            }
+    
     # Check for "user says no" scenarios
     is_refusal, refusal_reason = detect_user_says_no(user_text, state)
     

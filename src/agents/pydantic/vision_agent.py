@@ -173,7 +173,8 @@ def _is_private_cdn_url(url: str) -> bool:
 
 
 def _build_model() -> OpenAIChatModel:
-    model_name = settings.LLM_MODEL_VISION
+    # SENIOR-LEVEL: Use AI_MODEL as single source of truth
+    model_name = settings.AI_MODEL
 
     is_openai_model = (
         model_name.startswith("gpt-") or model_name.startswith("o1") or model_name.startswith("o3")
@@ -673,7 +674,10 @@ async def run_vision(
     error_message: str | None = None
     tokens_input = 0
     tokens_output = 0
+    # SENIOR-LEVEL: Get model name from actual model, not hardcoded fallback
     model_name: str | None = None
+    # Use AI_MODEL as single source of truth
+    vision_model_name = settings.AI_MODEL
 
     if not deps.image_url:
         logger.error("👁️ Vision agent called WITHOUT image! deps.image_url is empty.")
@@ -689,7 +693,7 @@ async def run_vision(
         asyncio.create_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model="gpt-4o-mini",
+                model=settings.AI_MODEL,
                 tokens_input=0,
                 tokens_output=0,
                 latency_ms=latency_ms,
@@ -719,7 +723,7 @@ async def run_vision(
             asyncio.create_task(
                 log_llm_usage_best_effort(
                     session_id=deps.session_id,
-                    model="gpt-4o-mini",
+                    model=settings.AI_MODEL,
                     tokens_input=0,
                     tokens_output=0,
                     latency_ms=latency_ms,
@@ -744,7 +748,7 @@ async def run_vision(
             asyncio.create_task(
                 log_llm_usage_best_effort(
                     session_id=deps.session_id,
-                    model="gpt-4o-mini",
+                    model=settings.AI_MODEL,
                     tokens_input=0,
                     tokens_output=0,
                     latency_ms=latency_ms,
@@ -769,7 +773,7 @@ async def run_vision(
         asyncio.create_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model="gpt-4o-mini",
+                model=settings.AI_MODEL,
                 tokens_input=0,
                 tokens_output=0,
                 latency_ms=latency_ms,
@@ -796,7 +800,7 @@ async def run_vision(
         asyncio.create_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model="gpt-4o-mini",
+                model=settings.AI_MODEL,
                 tokens_input=0,
                 tokens_output=0,
                 latency_ms=latency_ms,
@@ -829,7 +833,7 @@ async def run_vision(
             asyncio.create_task(
                 log_llm_usage_best_effort(
                     session_id=deps.session_id,
-                    model="gpt-4o-mini",
+                    model=settings.AI_MODEL,
                     tokens_input=0,
                     tokens_output=0,
                     latency_ms=latency_ms,
@@ -902,9 +906,9 @@ async def run_vision(
             elif hasattr(agent.model, "name"):
                 model_name = agent.model.name
         
-        # Fallback: try to get model from settings
+        # SENIOR-LEVEL: Fallback to actual vision model from settings, not hardcoded
         if not model_name:
-            model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+            model_name = vision_model_name
 
         logger.info(
             "👁️ Vision result: product='%s', confidence=%.2f, needs_clarification=%s",
@@ -949,13 +953,14 @@ async def run_vision(
                 elif hasattr(agent.model, "name"):
                     model_name = agent.model.name
             if not model_name:
-                model_name = getattr(settings, "DEFAULT_LLM_MODEL", "gpt-4o-mini")
+                model_name = vision_model_name
         
+        # SENIOR-LEVEL: Use actual vision model, not hardcoded fallback
         # Log asynchronously (fire-and-forget)
         asyncio.create_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model=model_name or "gpt-4o-mini",
+                model=model_name or vision_model_name,
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
                 latency_ms=latency_ms,

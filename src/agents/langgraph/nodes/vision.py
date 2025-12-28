@@ -66,23 +66,69 @@ from .helpers.vision.escalation import (
 def _extract_products(
     response: VisionResponse,
     existing: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
+    is_product_addition: bool = False,
 ) -> list[dict[str, Any]]:
     """Extract products from VisionResponse into state format.
 
     Logic:
     - If confidence >= 85% → show ONLY identified product (no alternatives)
     - If confidence < 85% → show identified + alternatives for user to choose
+    - If existing products provided (product addition context) → ADD to existing, don't replace
+    
+    Args:
+        response: VisionResponse from vision agent
+        existing: Existing products list (for product addition context)
+        session_id: Session ID for logging
+        is_product_addition: Whether this is product addition context
+    
+    Returns:
+        Updated products list
     """
-    products = list(existing)
+    # CRITICAL: If existing products provided, keep them (product addition context)
+    # Otherwise, start fresh (normal vision flow)
+    products = list(existing) if existing else []
     confidence = response.confidence or 0.0
 
     if response.identified_product:
-        products = [response.identified_product.model_dump()]
-        logger.info(
-            "Vision identified: %s (confidence=%.0f%%)",
-            response.identified_product.name,
-            confidence * 100,
-        )
+        new_product = response.identified_product.model_dump()
+        
+        # SENIOR-LEVEL: Use professional deduplication utility
+        if is_product_addition and existing:
+            # Product addition: use safe add with duplicate checking
+            from .helpers.vision.product_deduplication import add_product_safely
+            
+            products, was_added = add_product_safely(
+                new_product=new_product,
+                existing_products=existing,
+                strict_duplicate_check=True,
+                session_id=session_id,
+            )
+            
+            if was_added:
+                logger.info(
+                    "[SESSION %s] Vision identified product for addition: '%s' (confidence=%.0f%%)",
+                    session_id or "?",
+                    response.identified_product.name,
+                    confidence * 100,
+                )
+            else:
+                logger.info(
+                    "[SESSION %s] Vision identified duplicate product: '%s' (skipped, confidence=%.0f%%)",
+                    session_id or "?",
+                    response.identified_product.name,
+                    confidence * 100,
+                )
+        else:
+            # Normal flow: replace (no existing products)
+            products = [new_product]
+            logger.info(
+                "[SESSION %s] Vision identified: '%s' (confidence=%.0f%%)",
+                session_id or "?",
+                response.identified_product.name,
+                confidence * 100,
+            )
 
     # Only show alternatives if NOT confident enough
     # High confidence = we know what it is, no need to confuse user with options
@@ -344,21 +390,34 @@ async def vision_node(
     )
 
     if should_escalate:
+        # Check if this is product addition context for better UX messaging
+        metadata = state.get("metadata", {})
+        is_product_addition = bool(metadata.get("product_addition_context", False))
+        
         logger.warning(
-            "🚨 [SESSION %s] ESCALATION: %s! claimed='%s' confidence=%.0f%% catalog_found=%s enrichment_failed=%s",
+            "🚨 [SESSION %s] ESCALATION: %s! claimed='%s' confidence=%.0f%% catalog_found=%s enrichment_failed=%s product_addition=%s",
             session_id,
             escalation_reason,
             claimed_name or "<none>",
             confidence * 100,
             catalog_row is not None,
             enrichment_failed,
+            is_product_addition,
         )
+        
         # Do NOT show incomplete/foreign product to customer
         response.identified_product = None
         response.needs_clarification = False  # Escalation, not clarification
 
+        # SENIOR-LEVEL: Enhanced escalation for product addition context
+        # Store context in escalation for better manager handling
+        escalation_metadata = {
+            "product_addition_context": is_product_addition,
+            "existing_products_count": len(state.get("selected_products", [])) if is_product_addition else 0,
+        }
+
         # Build escalation state update with dual-track notification
-        return build_escalation_state_update(
+        escalation_update = build_escalation_state_update(
             state=state,
             session_id=session_id,
             trace_id=trace_id,
@@ -371,6 +430,12 @@ async def vision_node(
             active_escalations=_ACTIVE_ESCALATIONS,
             bg_tasks=_BG_TASKS,
         )
+        
+        # Enhance metadata with product addition context
+        if "metadata" in escalation_update:
+            escalation_update["metadata"].update(escalation_metadata)
+        
+        return escalation_update
 
     # Log response with clear visibility
     product_name = (
@@ -409,9 +474,31 @@ async def vision_node(
         logger.debug("Vision trace logging skipped: %s", trace_error)
 
     # Extract products and build messages using helpers
-    selected_products = _extract_products(response, state.get("selected_products", []))
-
     metadata = state.get("metadata", {})
+    is_product_addition = bool(metadata.get("product_addition_context", False))
+    
+    # CRITICAL: For product addition, ADD to existing products (don't replace)
+    existing_products = state.get("selected_products", []) if is_product_addition else []
+    
+    # SENIOR-LEVEL: Use professional extraction with deduplication
+    selected_products = _extract_products(
+        response,
+        existing_products,
+        session_id=session_id,
+        is_product_addition=is_product_addition,
+    )
+    
+    # Log product addition summary
+    if is_product_addition:
+        new_count = len(selected_products) - len(existing_products)
+        logger.info(
+            "[SESSION %s] Product addition summary: existing=%d, new=%d, total=%d",
+            session_id,
+            len(existing_products),
+            new_count,
+            len(selected_products),
+        )
+    
     vision_greeted_before = bool(metadata.get("vision_greeted", False))
     assistant_messages = _build_vision_messages(
         response,
@@ -419,6 +506,8 @@ async def vision_node(
         vision_greeted=vision_greeted_before,
         user_message=user_message,  # Передаємо текст для витягування зросту!
         catalog_product=catalog_row,
+        product_addition_context=is_product_addition,  # Pass context for custom messages
+        existing_products_count=len(existing_products) if is_product_addition else 0,
     )
 
     available_colors: list[str] = []
@@ -505,8 +594,22 @@ async def vision_node(
     #
     # 3. needs_clarification → VISION_DONE
     #    - Vision не впевнений, питає уточнення
+    #
+    # 4. Product addition context → залишаємося в payment flow
+    #    - Товар додано до замовлення
+    #    - Залишаємося в WAITING_FOR_PAYMENT_PROOF
     # =====================================================
-    if selected_products:
+    if is_product_addition and selected_products:
+        # Product addition: товар додано, залишаємося в payment flow
+        # Не переходимо до SIZE_COLOR, бо це додавання до існуючого замовлення
+        next_phase = state.get("dialog_phase", "WAITING_FOR_PAYMENT_PROOF")
+        next_state = State.STATE_5_PAYMENT_DELIVERY.value
+        logger.info(
+            "[SESSION %s] Product addition: товар додано, залишаємося в payment flow (phase=%s)",
+            session_id,
+            next_phase,
+        )
+    elif selected_products:
         if height_in_text:
             # Зріст вже є - готові до оформлення!
             next_phase = "SIZE_COLOR_DONE"
