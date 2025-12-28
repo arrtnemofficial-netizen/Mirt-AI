@@ -46,9 +46,7 @@ TASK_QUEUES = (
     Queue("default", routing_key="default"),
     Queue("summarization", routing_key="summarization"),
     Queue("followups", routing_key="followups"),
-    Queue("crm", routing_key="crm"),
-    Queue("webhooks", routing_key="webhooks"),
-    Queue("llm", routing_key="llm"),  # For LLM pipeline tasks
+    # Removed: crm, webhooks, llm queues (not used - only summarization+followups in Celery)
 )
 
 # Queue-specific time limits (seconds)
@@ -56,9 +54,7 @@ QUEUE_TIME_LIMITS = {
     "default": {"soft": 60, "hard": 120},
     "summarization": {"soft": 120, "hard": 180},
     "followups": {"soft": 30, "hard": 60},
-    "crm": {"soft": 30, "hard": 60},
-    "webhooks": {"soft": 10, "hard": 20},
-    "llm": {"soft": 90, "hard": 120},
+    # Removed: crm, webhooks, llm time limits (queues not used)
 }
 
 # =============================================================================
@@ -79,9 +75,8 @@ celery_app = Celery(
     include=[
         "src.workers.tasks.summarization",
         "src.workers.tasks.followups",
-        "src.workers.tasks.memory",  # Memory maintenance tasks
-        # NOTE: CRM, health, manychat, messages, llm_usage tasks are no longer in Celery.
-        # They run synchronously or via BackgroundTasks.
+        # NOTE: Memory cleanup, CRM, health, manychat, messages, llm_usage tasks are no longer in Celery.
+        # They run synchronously or via BackgroundTasks, or are disabled.
     ],
 )
 
@@ -194,13 +189,7 @@ celery_app.conf.beat_schedule = {
         "schedule": 3600.0,  # 1 hour
         "options": {"queue": "summarization"},
     },
-    # Cleanup expired memories daily at 3:00 UTC
-    "memory-cleanup-expired-daily": {
-        "task": "src.workers.tasks.memory.cleanup_expired_memories",
-        "schedule": 86400.0,  # 24 hours (daily)
-        "options": {"queue": "default"},
-    },
-    # NOTE: Health, CRM, and LLM usage tasks are no longer scheduled via Celery Beat.
+    # NOTE: Memory cleanup, health, CRM, and LLM usage tasks are no longer scheduled via Celery Beat.
     # They should be handled via external cron or other scheduling mechanisms if needed.
 }
 

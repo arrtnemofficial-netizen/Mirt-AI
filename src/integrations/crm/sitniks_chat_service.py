@@ -3,10 +3,10 @@
 Handles chat status updates and manager assignments.
 Requires paid Sitniks plan for API access.
 
-Statuses flow:
-- "????? ? ??????" ? first touch, AI starts handling
-- "?????????? ???????" ? payment requisites sent
-- "AI ?????" ? escalation, needs human manager
+Statuses (configured via env SITNIKS_STATUS_*):
+- SITNIKS_STATUS_FIRST_TOUCH: first touch, AI starts handling
+- SITNIKS_STATUS_INVOICE_SENT: payment requisites sent
+- SITNIKS_STATUS_AI_ATTENTION: escalation, needs human manager
 """
 
 from __future__ import annotations
@@ -24,14 +24,8 @@ from src.conf.config import settings
 logger = logging.getLogger(__name__)
 
 
-# Sitniks status names (from user's CRM)
-class SitniksStatus:
-    FIRST_TOUCH = "????? ? ??????"
-    INVOICE_SENT = "?????????? ???????"
-    AI_ATTENTION = "AI ?????"
-    NEW = "???? ??????"
-    PAID = "????????"
-    ORDER_FORMED = "????????? ??????????"
+# Sitniks status names loaded from settings (no hardcoded strings to avoid encoding issues)
+# Status values come from env: SITNIKS_STATUS_FIRST_TOUCH, SITNIKS_STATUS_INVOICE_SENT, SITNIKS_STATUS_AI_ATTENTION
 
 
 # Manager configuration loaded from settings
@@ -335,24 +329,28 @@ class SitniksChatService:
             telegram_username=telegram_username,
         )
 
-        # 3. Set status to "Взято в роботу"
+        # 3. Set status to "Взято в роботу" (from settings)
         status_ok = await self.update_chat_status(
             chat_id=chat_id,
-            status=SitniksStatus.FIRST_TOUCH,
+            status=settings.SITNIKS_STATUS_FIRST_TOUCH,
         )
         result["status_set"] = status_ok
 
         # 4. Assign AI manager
-        ai_manager_name = settings.SITNIKS_AI_MANAGER_NAME
-        ai_manager_id = await self.get_manager_id_by_name(ai_manager_name)
+        # Prefer explicit ID if set, otherwise lookup by name
+        ai_manager_id = settings.SITNIKS_AI_MANAGER_ID
+        if not ai_manager_id:
+            ai_manager_name = settings.SITNIKS_AI_MANAGER_NAME
+            ai_manager_id = await self.get_manager_id_by_name(ai_manager_name)
+            if not ai_manager_id:
+                logger.warning(
+                    "[SITNIKS] AI manager '%s' not found in CRM",
+                    ai_manager_name,
+                )
+        
         if ai_manager_id:
             manager_ok = await self.assign_manager(chat_id, ai_manager_id)
             result["manager_assigned"] = manager_ok
-        else:
-            logger.warning(
-                "[SITNIKS] AI manager '%s' not found in CRM",
-                ai_manager_name,
-            )
 
         result["success"] = status_ok
         return result
@@ -364,7 +362,11 @@ class SitniksChatService:
             logger.warning("[SITNIKS] No chat_id found for user %s", user_id)
             return False
 
-        return await self.update_chat_status(chat_id, SitniksStatus.INVOICE_SENT)
+        return await self.update_chat_status(chat_id, settings.SITNIKS_STATUS_INVOICE_SENT)
+    
+    async def handle_give_requisites(self, user_id: str) -> bool:
+        """Alias for handle_invoice_sent (for API consistency)."""
+        return await self.handle_invoice_sent(user_id)
 
     async def handle_escalation(self, user_id: str) -> dict[str, Any]:
         """Handle escalation: set AI Attention status, assign to human manager.
@@ -386,8 +388,8 @@ class SitniksChatService:
 
         result["chat_id"] = chat_id
 
-        # 1. Set status to "AI Увага"
-        status_ok = await self.update_chat_status(chat_id, SitniksStatus.AI_ATTENTION)
+        # 1. Set status to "AI Увага" (from settings)
+        status_ok = await self.update_chat_status(chat_id, settings.SITNIKS_STATUS_AI_ATTENTION)
         result["status_set"] = status_ok
 
         # 2. Assign to a human manager

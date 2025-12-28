@@ -9,7 +9,7 @@ Memory System (Titans-like):
 """
 
 from .agent import agent_node
-from .crm_error import crm_error_node
+# crm_error_node removed - CRM orders integration disabled
 from .escalation import escalation_node
 from .intent import intent_detection_node
 from .memory import (
@@ -44,7 +44,7 @@ __all__ = [
     "upsell_node",
     "escalation_node",
     "validation_node",
-    "crm_error_node",
+    # crm_error_node removed - CRM orders integration disabled
     # Memory System
     "memory_context_node",
     "memory_update_node",

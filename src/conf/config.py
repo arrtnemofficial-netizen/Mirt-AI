@@ -213,16 +213,36 @@ class Settings(BaseSettings):
         ),
     )
 
-    # Snitkix CRM integration
-    SNITKIX_API_URL: str = Field(default="", description="Snitkix CRM API base URL.")
-    SNITKIX_API_KEY: SecretStr = Field(default=SecretStr(""), description="Snitkix CRM API key.")
+    # Sitniks CRM integration (chat statuses only, no orders)
+    SNITKIX_API_URL: str = Field(default="", description="Sitniks CRM API base URL.")
+    SNITKIX_API_KEY: SecretStr = Field(default=SecretStr(""), description="Sitniks CRM API key.")
+    
+    # Sitniks chat status names (must match exact strings from Sitniks UI)
+    SITNIKS_STATUS_FIRST_TOUCH: str = Field(
+        default="Взято в роботу",
+        description="Sitniks chat status for first touch (when AI first responds to client).",
+    )
+    SITNIKS_STATUS_INVOICE_SENT: str = Field(
+        default="Виставлено рахунок",
+        description="Sitniks chat status when payment requisites are sent.",
+    )
+    SITNIKS_STATUS_AI_ATTENTION: str = Field(
+        default="AI Увага",
+        description="Sitniks chat status for escalation (needs human manager).",
+    )
+    
+    # Manager configuration
     SITNIKS_AI_MANAGER_NAME: str = Field(
         default="Павло",
         description="Name of AI manager in Sitniks CRM (for first touch assignment).",
     )
+    SITNIKS_AI_MANAGER_ID: int | None = Field(
+        default=None,
+        description="Explicit AI manager ID (if set, used instead of name lookup).",
+    )
     SITNIKS_HUMAN_MANAGER_ID: int | None = Field(
         default=None,
-        description="Explicit manager ID for escalation. If None, picks first non-AI manager.",
+        description="Explicit human manager ID for escalation. Required in production.",
     )
 
     # Celery / Redis configuration

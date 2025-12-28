@@ -144,7 +144,7 @@ _ALLOWED_DIALOG_PHASES: set[str] = {
     "WAITING_FOR_PAYMENT_METHOD",
     "WAITING_FOR_PAYMENT_PROOF",
     "UPSELL_OFFERED",
-    "CRM_ERROR_HANDLING",
+    # "CRM_ERROR_HANDLING",  # Removed - CRM orders integration disabled
     "ESCALATED",
     "COMPLAINT",
     "OUT_OF_DOMAIN",

@@ -1,4 +1,30 @@
 import os
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch: pytest.MonkeyPatch):
+    """
+    Make tests deterministic:
+    - ensure we don't accidentally rely on developer machine env
+    - allow tests to override env vars safely
+    """
+    # Keep existing env, but provide a predictable default for tokens
+    monkeypatch.setenv("MANYCHAT_VERIFY_TOKEN", os.getenv("MANYCHAT_VERIFY_TOKEN", "test-token"))
+    yield
+
+
+@pytest.fixture()
+def reset_sitniks_singleton(monkeypatch: pytest.MonkeyPatch):
+    """Reset SitniksChatService singleton between tests."""
+    import src.integrations.crm.sitniks_chat_service as mod
+
+    monkeypatch.setattr(mod, "_chat_service", None, raising=False)
+    yield
+    monkeypatch.setattr(mod, "_chat_service", None, raising=False)
+
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path

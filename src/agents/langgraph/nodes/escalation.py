@@ -156,6 +156,8 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
             )
     except Exception as e:
         logger.warning("[SESSION %s] Sitniks escalation error: %s", session_id, e)
+    
+    # NOTE: Night time message removed - managers receive notifications at any time
 
     # =====================================================
     # DIALOG PHASE (Turn-Based State Machine)

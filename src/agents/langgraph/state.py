@@ -284,7 +284,7 @@ VALID_DIALOG_PHASES: frozenset[str] = frozenset({
     "COMPLAINT",
     "OUT_OF_DOMAIN",
     "ESCALATED",  # Used by vision/escalation nodes
-    "CRM_ERROR_HANDLING",  # Used by payment node
+    # "CRM_ERROR_HANDLING",  # Removed - CRM orders integration disabled
 })
 
 # Map: FSM state -> allowed dialog_phases
@@ -295,7 +295,7 @@ STATE_TO_ALLOWED_PHASES: dict[State, frozenset[str]] = {
     State.STATE_2_VISION: frozenset({"VISION_DONE", "DISCOVERY", "WAITING_FOR_SIZE", "OUT_OF_DOMAIN"}),
     State.STATE_3_SIZE_COLOR: frozenset({"WAITING_FOR_SIZE", "WAITING_FOR_COLOR", "SIZE_COLOR_DONE"}),
     State.STATE_4_OFFER: frozenset({"OFFER_MADE", "WAITING_FOR_DELIVERY_DATA"}),
-    State.STATE_5_PAYMENT_DELIVERY: frozenset({"WAITING_FOR_DELIVERY_DATA", "WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_PAYMENT_PROOF", "UPSELL_OFFERED", "CRM_ERROR_HANDLING"}),
+    State.STATE_5_PAYMENT_DELIVERY: frozenset({"WAITING_FOR_DELIVERY_DATA", "WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_PAYMENT_PROOF", "UPSELL_OFFERED"}),
     State.STATE_6_UPSELL: frozenset({"UPSELL_OFFERED", "COMPLETED"}),
     State.STATE_7_END: frozenset({"COMPLETED"}),
     State.STATE_8_COMPLAINT: frozenset({"COMPLAINT", "COMPLETED", "ESCALATED"}),

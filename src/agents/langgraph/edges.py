@@ -51,7 +51,8 @@ def _route_debug(
 
 # Type aliases for routing destinations
 MasterRoute = Literal[
-    "moderation", "agent", "offer", "payment", "upsell", "escalation", "end", "crm_error"
+    "moderation", "agent", "offer", "payment", "upsell", "escalation", "end"
+    # crm_error removed - CRM orders integration disabled
 ]
 ModerationRoute = Literal["intent", "escalation"]
 IntentRoute = Literal["vision", "agent", "offer", "payment", "escalation"]
@@ -205,16 +206,17 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
         )
         return "escalation"
 
-    # CRM ERROR HANDLING - route to crm_error node
+    # CRM ERROR HANDLING removed - CRM orders integration disabled
+    # If CRM_ERROR_HANDLING phase is set, route to escalation instead
     if dialog_phase == "CRM_ERROR_HANDLING":
         _route_debug(
             session_id=session_id,
             current_phase=dialog_phase,
             detected_intent=detected_intent,
-            destination="crm_error",
-            reason="CRM_ERROR_HANDLING",
+            destination="escalation",
+            reason="CRM_ERROR_HANDLING_fallback_to_escalation",
         )
-        return "crm_error"
+        return "escalation"
 
     # =========================================================================
     # RULE 3: Route based on dialog_phase + intent
@@ -419,7 +421,7 @@ def get_master_routes() -> dict[str, str]:
         "payment": "payment",
         "upsell": "upsell",
         "escalation": "escalation",
-        "crm_error": "crm_error",
+        # "crm_error": "crm_error",  # Removed - CRM orders integration disabled
         "end": "end",
     }
 

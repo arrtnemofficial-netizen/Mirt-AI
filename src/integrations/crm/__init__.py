@@ -1,7 +1,12 @@
-"""CRM integrations package."""
+"""CRM integrations package.
 
-from src.integrations.crm.base import BaseCRMClient, CRMResponse
-from src.integrations.crm.snitkix import SnitkixCRMClient
+Only Sitniks chat status service is available (no orders/webhooks).
+"""
+
+from src.integrations.crm.sitniks_chat_service import (
+    SitniksChatService,
+    get_sitniks_chat_service,
+)
 
 
-__all__ = ["BaseCRMClient", "CRMResponse", "SnitkixCRMClient"]
+__all__ = ["SitniksChatService", "get_sitniks_chat_service"]

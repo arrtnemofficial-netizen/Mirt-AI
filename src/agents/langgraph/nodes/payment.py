@@ -1031,44 +1031,12 @@ async def _persist_order_and_queue_crm(
             logger.error("Failed to save order to Supabase (returned None)")
 
         # =========================================================================
-        # CREATE ORDER IN SNITKIX CRM (Optional; must not block tests/UX)
-        # 
-        # NOTE: Замовлення в PostgreSQL створюється завжди (рядок 1023 вище).
-        # Sitniks CRM integration:
-        # - Якщо API ключа немає: просто пропускає створення замовлення в Sitniks,
-        #   але замовлення в PostgreSQL все одно створюється.
-        # - Статуси чатів оновлюються через update_chat_status(), який також
-        #   перевіряє enabled і не падає без API ключа.
+        # NOTE: Замовлення в PostgreSQL створюється завжди (рядок 1027 вище).
+        # Sitniks CRM integration: ТІЛЬКИ статуси чатів (не створення замовлень).
+        # Статуси чатів оновлюються через sitniks_chat_service.update_chat_status(),
+        # який перевіряє enabled і не падає без API ключа.
         # =========================================================================
-        enable_crm = bool(getattr(settings, "ENABLE_CRM_INTEGRATION", False))
-        if enable_crm:
-            # IDEMPOTENCY: Deterministic external_id based on session + products + price
-            # This prevents duplicate orders on retries
-            import hashlib
-
-            products_str = "|".join(sorted(p.get("name", "") for p in products))
-            idempotency_data = (
-                f"{session_id}|{products_str}|{int(approval_data.get('total_price', 0) * 100)}"
-            )
-            idempotency_hash = hashlib.sha256(idempotency_data.encode()).hexdigest()[:16]
-            deterministic_external_id = f"{session_id}_{idempotency_hash}"
-
-            from src.integrations.crm.crmservice import get_crm_service
-
-            crm_service = get_crm_service()
-            crm_order_result = await crm_service.create_order_with_persistence(
-                session_id=session_id,
-                order_data=order_data,
-                external_id=deterministic_external_id,
-            )
-
-            logger.info(
-                "CRM order creation result for session %s: %s",
-                session_id,
-                crm_order_result.get("status", "unknown"),
-            )
-        else:
-            crm_order_result = {"status": "skipped", "reason": "crm_disabled"}
+        crm_order_result = {"status": "skipped", "reason": "crm_orders_disabled_only_statuses_enabled"}
 
     except Exception as e:
         logger.exception("CRITICAL: Failed to save order to DB or queue CRM: %s", e)
@@ -1176,24 +1144,9 @@ async def _handle_approval_response(
 
         # DIALOG PHASE: UPSELL_OFFERED (STATE_6)
         # - Оплата підтверджена, пропонуємо допродаж
-        if crm_order_result and crm_order_result.get("status") in ["failed", "error"]:
-            # CRM creation failed - route to error handler
-            return Command(
-                update={
-                    "awaiting_human_approval": False,
-                    "approval_type": None,
-                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                    "dialog_phase": "CRM_ERROR_HANDLING",
-                    "crm_order_result": crm_order_result,
-                    "crm_external_id": crm_order_result.get("external_id"),
-                    "crm_retry_count": 0,
-                    "step_number": state.get("step_number", 0) + 1,
-                },
-                goto="crm_error",
-            )
-        else:
-            # CRM creation queued/successful - proceed to upsell
-            return Command(
+        # NOTE: Order is saved in local DB (PostgreSQL) regardless of CRM status
+        # CRM orders integration disabled - only chat statuses are supported
+        return Command(
                 update={
                     "awaiting_human_approval": False,
                     "approval_type": None,
