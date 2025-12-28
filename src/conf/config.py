@@ -482,6 +482,19 @@ class Settings(BaseSettings):
         default=True,
         description="Enable detailed logging with tags (state/intent/tool)",
     )
+    
+    # =========================================================================
+    # MEMORY SYSTEM CONFIGURATION
+    # =========================================================================
+    MEMORY_MIN_IMPORTANCE: float = Field(
+        default=0.6,
+        description="Minimum importance threshold for storing facts in mirt_memories (0.0-1.0)",
+    )
+    MEMORY_MIN_SURPRISE: float = Field(
+        default=0.4,
+        description="Minimum surprise threshold for storing facts in mirt_memories (0.0-1.0)",
+    )
+    
     # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
     # - LangGraph v2 is now the only architecture
     # - PydanticAI handles tool planning automatically

@@ -15,10 +15,11 @@ class StoredMessage:
     session_id: str
     role: str
     content: str
-    user_id: int | None = None
+    user_id: str | None = None  # Changed to str to match PostgreSQL schema (TEXT)
     content_type: str = "text"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] | None = None  # Optional metadata for users table updates (not stored in messages table)
 
 
 class MessageStore(Protocol):

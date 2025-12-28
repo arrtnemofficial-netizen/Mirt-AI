@@ -176,16 +176,27 @@ def create_initial_state(
     Returns:
         Fully initialized ConversationState
     """
+    # CRITICAL: Ensure vision flags are reset for fresh start
+    # This is especially important for /restart command
+    base_metadata = {
+        "session_id": session_id,
+        "channel": "unknown",
+        "language": "uk",
+        "vision_greeted": False,  # CRITICAL: Reset vision greeting flag
+        "has_image": False,  # CRITICAL: Reset image flag
+        "image_url": None,  # CRITICAL: Clear image URL
+        **(metadata or {}),
+    }
+    # Override metadata to ensure vision flags are reset even if passed in
+    base_metadata["vision_greeted"] = False
+    base_metadata["has_image"] = False
+    base_metadata["image_url"] = None
+    
     base_state: ConversationState = {
         # Core
         "messages": messages or [],
         "current_state": State.STATE_0_INIT.value,
-        "metadata": {
-            "session_id": session_id,
-            "channel": "unknown",
-            "language": "uk",
-            **(metadata or {}),
-        },
+        "metadata": base_metadata,
         # Dialog Phase (Turn-Based State Machine)
         "dialog_phase": "INIT",
         # Session
@@ -194,8 +205,8 @@ def create_initial_state(
         "thread_id": session_id,  # Use same ID for LangGraph threading
         # Intent
         "detected_intent": None,
-        "has_image": False,
-        "image_url": None,
+        "has_image": False,  # CRITICAL: Reset at top level too
+        "image_url": None,  # CRITICAL: Clear at top level too
         # Products
         "selected_products": [],
         "offered_products": [],
@@ -216,9 +227,9 @@ def create_initial_state(
         "approval_type": None,
         "approval_data": None,
         "human_approved": None,
-        # Time travel
-        "checkpoint_id": None,
-        "parent_checkpoint_id": None,
+        # Time travel support (prefixed to avoid LangGraph reserved names)
+        "saved_checkpoint_id": None,
+        "saved_parent_checkpoint_id": None,
         "step_number": 0,
         # Memory System (Titans-like)
         "memory_profile": None,

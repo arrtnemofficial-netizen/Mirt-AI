@@ -1,14 +1,14 @@
 #!/usr/bin/env python
-"""Production-ready Celery worker launcher for Railway.
+"""Production-ready Celery Beat scheduler launcher for Railway.
 
 This script:
 - Validates Redis connection before starting
 - Displays startup banner with configuration
-- Lists all registered tasks and queues
-- Runs Celery worker with production settings
+- Lists all scheduled tasks
+- Runs Celery Beat with production settings
 
 Usage on Railway:
-    Start Command: python scripts/run_worker.py
+    Start Command: python scripts/run_beat.py
 """
 
 import logging
@@ -28,7 +28,7 @@ is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT
 setup_logging(
     level=os.getenv("LOG_LEVEL", "INFO"),
     json_format=bool(is_production or is_railway),
-    service_name="mirt-ai-worker",
+    service_name="mirt-ai-beat",
 )
 
 logger = logging.getLogger(__name__)
@@ -38,18 +38,18 @@ def print_banner():
     """Print startup banner."""
     banner = """
 ╔══════════════════════════════════════════════════════════════╗
-║                  MIRT AI - CELERY WORKER                     ║
-║                  Production Worker Service                   ║
+║                  MIRT AI - CELERY BEAT                       ║
+║                  Production Scheduler Service                ║
 ╚══════════════════════════════════════════════════════════════╝
 """
     print(banner)
     logger.info("=" * 60)
-    logger.info("MIRT AI - Celery Worker Starting")
+    logger.info("MIRT AI - Celery Beat Starting")
     logger.info("=" * 60)
 
 
 def check_redis():
-    """Check Redis connection before starting worker."""
+    """Check Redis connection before starting beat."""
     try:
         import redis
         from src.conf.config import settings
@@ -66,44 +66,41 @@ def check_redis():
         return False
     except Exception as e:
         logger.error("✗ Redis connection failed: %s", e)
-        logger.error("  Worker will start but tasks may fail. Check REDIS_URL environment variable.")
+        logger.error("  Beat will start but scheduled tasks may fail. Check REDIS_URL environment variable.")
         return False
 
 
 def log_configuration():
-    """Log worker configuration."""
+    """Log beat configuration."""
     from src.conf.config import settings
-    from src.workers.celery_app import (
-        TASK_QUEUES,
-        WORKER_CONCURRENCY,
-        WORKER_MAX_TASKS,
-        WORKER_PREFETCH,
-    )
 
     logger.info("Configuration:")
     logger.info("  CELERY_ENABLED: %s", settings.CELERY_ENABLED)
     logger.info("  REDIS_URL: %s", "configured" if settings.REDIS_URL else "missing")
-    logger.info("  Worker Concurrency: %s", WORKER_CONCURRENCY)
-    logger.info("  Max Tasks Per Child: %s", WORKER_MAX_TASKS)
-    logger.info("  Prefetch Multiplier: %s", WORKER_PREFETCH)
-    logger.info("  Queues: %s", ", ".join([q.name for q in TASK_QUEUES]))
 
 
-def log_registered_tasks():
-    """Log all registered Celery tasks."""
+def log_scheduled_tasks():
+    """Log all scheduled tasks from beat_schedule."""
     from src.workers.celery_app import celery_app
 
-    logger.info("Registered Tasks:")
-    task_list = sorted([name for name in celery_app.tasks.keys() if not name.startswith("celery.")])
-    if task_list:
-        for task_name in task_list:
-            logger.info("  - %s", task_name)
-    else:
-        logger.warning("  No tasks registered!")
+    beat_schedule = celery_app.conf.beat_schedule
+    if not beat_schedule:
+        logger.warning("No scheduled tasks found in beat_schedule!")
+        return
+
+    logger.info("Scheduled Tasks:")
+    for task_name, task_config in beat_schedule.items():
+        task_path = task_config.get("task", "unknown")
+        schedule = task_config.get("schedule", "unknown")
+        queue = task_config.get("options", {}).get("queue", "default")
+        logger.info("  - %s", task_name)
+        logger.info("    Task: %s", task_path)
+        logger.info("    Schedule: %s", schedule)
+        logger.info("    Queue: %s", queue)
 
 
 def main():
-    """Main entry point for worker."""
+    """Main entry point for beat."""
     print_banner()
     log_configuration()
 
@@ -112,24 +109,14 @@ def main():
     if not redis_ok:
         logger.warning("Redis check failed, but continuing...")
 
-    # Log registered tasks
-    log_registered_tasks()
-
-    # Import configuration
-    from src.workers.celery_app import (
-        WORKER_CONCURRENCY,
-        WORKER_MAX_TASKS,
-        TASK_QUEUES,
-    )
+    # Log scheduled tasks
+    log_scheduled_tasks()
 
     logger.info("=" * 60)
-    logger.info("Starting Celery worker...")
+    logger.info("Starting Celery Beat scheduler...")
     logger.info("=" * 60)
 
-    # Build queues list
-    queue_names = ",".join([q.name for q in TASK_QUEUES])
-
-    # Start worker using subprocess (most reliable for Railway)
+    # Start beat using subprocess (most reliable for Railway)
     import subprocess
 
     cmd = [
@@ -138,12 +125,8 @@ def main():
         "celery",
         "-A",
         "src.workers.celery_app",
-        "worker",
+        "beat",
         "--loglevel=INFO",
-        f"--concurrency={WORKER_CONCURRENCY}",
-        f"--max-tasks-per-child={WORKER_MAX_TASKS}",
-        f"--queues={queue_names}",
-        "--prefetch-multiplier=1",
     ]
 
     logger.info("Executing: %s", " ".join(cmd))
@@ -154,8 +137,9 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        logger.info("Worker shutdown requested")
+        logger.info("Beat shutdown requested")
         sys.exit(0)
     except Exception as e:
-        logger.exception("Fatal error starting worker: %s", e)
+        logger.exception("Fatal error starting beat: %s", e)
         sys.exit(1)
+

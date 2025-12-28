@@ -332,7 +332,7 @@ async def _prepare_payment_and_interrupt(
         
         # Map payment_sub_phase to dialog_phase deterministically
         phase_map = {
-            "REQUEST_DATA": "WAITING_FOR_PAYMENT_PROOF",
+            "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",  # FIXED: No delivery data yet, need to collect
             "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",  # Data collected, need payment method choice
             "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",  # Requisites shown, waiting for screenshot
             "THANK_YOU": "COMPLETED",
@@ -775,6 +775,8 @@ async def _handle_delivery_data(
             has_url=has_url,
         )
         
+        # CRITICAL: Persist order ТІЛЬКИ коли є payment proof (скріншот оплати)
+        # Замовлення створюється тільки після підтвердження оплати, не на delivery confirmation
         # Переходимо до STATE_7_END тільки якщо:
         # 1. LLM визначив що order_ready=True (всі дані зібрані)
         # 2. І є реальний payment proof (скрін/квитанція/URL)
@@ -792,7 +794,8 @@ async def _handle_delivery_data(
                 },
             )
             
-            # Persist order; CRM queueing is optional (should not block UX).
+            # CRITICAL: Persist order ТІЛЬКИ коли є payment proof (скріншот оплати)
+            # Замовлення створюється в PostgreSQL + CRM (якщо увімкнено) тільки після підтвердження оплати
             approval_data = {
                 "total_price": sum(p.get("price", 0) for p in products),
                 "products": [p.get("name", "Товар") for p in products],
@@ -801,6 +804,10 @@ async def _handle_delivery_data(
                 state=state,
                 session_id=session_id,
                 approval_data=approval_data,
+            )
+            logger.info(
+                "[SESSION %s] Order persisted after payment proof confirmation",
+                session_id,
             )
             
             # CRM створено успішно - переходимо до STATE_7_END з THANKS + UPSELL
@@ -892,6 +899,7 @@ async def _handle_delivery_data(
             return cmd
 
         # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
+        # Order will be persisted only when payment proof is received (has_real_proof=True)
         response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
         assistant_messages = [{"role": "assistant", "content": part} for part in response_parts] if response_parts else [{"role": "assistant", "content": response_text}]
 
@@ -991,10 +999,14 @@ async def _persist_order_and_queue_crm(
                 }
             )
 
+        # Get sitniks_chat_id from state if available
+        sitniks_chat_id = state.get("sitniks_chat_id") or state.get("metadata", {}).get("sitniks_chat_id")
+        
         order_data = {
             "external_id": session_id,
             "source_id": deps.user_id,
             "user_nickname": deps.user_nickname,
+            "sitniks_chat_id": sitniks_chat_id,  # For status updates in Sitniks
             "customer": {
                 "full_name": deps.customer_name,
                 "phone": deps.customer_phone,
@@ -1020,6 +1032,13 @@ async def _persist_order_and_queue_crm(
 
         # =========================================================================
         # CREATE ORDER IN SNITKIX CRM (Optional; must not block tests/UX)
+        # 
+        # NOTE: Замовлення в PostgreSQL створюється завжди (рядок 1023 вище).
+        # Sitniks CRM integration:
+        # - Якщо API ключа немає: просто пропускає створення замовлення в Sitniks,
+        #   але замовлення в PostgreSQL все одно створюється.
+        # - Статуси чатів оновлюються через update_chat_status(), який також
+        #   перевіряє enabled і не падає без API ключа.
         # =========================================================================
         enable_crm = bool(getattr(settings, "ENABLE_CRM_INTEGRATION", False))
         if enable_crm:
@@ -1086,7 +1105,68 @@ async def _handle_approval_response(
         track_metric("payment_approved", 1, {"session_id": session_id})
 
         # =========================================================================
-        # SAVE ORDER TO DB (Persistence)
+        # CRITICAL: Payment Proof Guard (HITL flow)
+        # =========================================================================
+        # HITL підтверджує "payment proof валідний", але перевіряємо детерміновано
+        # що proof дійсно є (image/URL) перед створенням order
+        from .utils import extract_user_message
+        from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+        
+        user_message = extract_user_message(state.get("messages", []))
+        has_image = bool(
+            state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+        )
+        has_url = bool(
+            user_message
+            and ("http://" in user_message.lower() or "https://" in user_message.lower())
+        )
+        
+        has_real_proof = detect_payment_proof(
+            user_text=user_message or "",
+            has_image=has_image,
+            has_url=has_url,
+        )
+        
+        if not has_real_proof:
+            # HITL approved, але payment proof не отримано - чекаємо proof
+            logger.warning(
+                "[SESSION %s] HITL approved but no payment proof detected. Waiting for proof.",
+                session_id,
+            )
+            return Command(
+                update={
+                    "awaiting_human_approval": False,
+                    "approval_type": None,
+                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": "Надішліть, будь ласка, скрін або квитанцію оплати 🤍",
+                        }
+                    ],
+                    "agent_response": {
+                        "event": "simple_answer",
+                        "messages": [
+                            {
+                                "type": "text",
+                                "content": "Надішліть, будь ласка, скрін або квитанцію оплати 🤍",
+                            }
+                        ],
+                        "metadata": {
+                            "session_id": session_id,
+                            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                            "intent": "PAYMENT_DELIVERY",
+                            "escalation_level": "NONE",
+                        },
+                    },
+                    "step_number": state.get("step_number", 0) + 1,
+                },
+                goto="end",
+            )
+
+        # =========================================================================
+        # SAVE ORDER TO DB (Persistence) - тільки після підтвердження payment proof
         # =========================================================================
         crm_order_result = await _persist_order_and_queue_crm(
             state=state,

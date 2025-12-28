@@ -361,95 +361,74 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     user_content_early = extract_user_message(state.get("messages", []))
 
     if has_image_early:
-        # CRITICAL: Check for EXPLICIT "new product" trigger FIRST
-        # If user explicitly says "new product" + photo, ALWAYS route to vision (regardless of phase)
-        from src.agents.langgraph.nodes.helpers.policy_snippets import detect_explicit_new_product
+        # CRITICAL: Use unified photo purpose detection (SSOT)
+        from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
         
-        if user_content_early and detect_explicit_new_product(user_content_early, state):
+        photo_purpose, reason = determine_photo_purpose(state, user_content_early)
+        
+        # Map photo purpose to intent
+        if photo_purpose == "product_ident":
+            intent = "PHOTO_IDENT"
+            image_context = "product_identification"
+            if reason == "explicit_new_product_trigger":
+                image_context = "explicit_new_product"
+                metadata["explicit_new_product_trigger"] = True
+            elif reason == "product_addition_intent_in_payment_phase":
+                image_context = "product_addition"
+                metadata["product_addition_context"] = True
+            elif reason == "smart_rerun_no_products_or_asks_identification":
+                image_context = "smart_rerun"
+            
             logger.info(
-                "Intent: PHOTO_IDENT (explicit 'new product' trigger detected, routing to vision regardless of phase)"
+                "Intent: PHOTO_IDENT (photo_purpose=%s, reason=%s)",
+                photo_purpose,
+                reason,
             )
             return {
-                "detected_intent": "PHOTO_IDENT",
+                "detected_intent": intent,
                 "has_image": True,
                 "image_url": metadata.get("image_url"),
                 "metadata": {
                     **metadata,
                     "has_image": True,
-                    "image_context": "explicit_new_product",
-                    "explicit_new_product_trigger": True,
+                    "image_context": image_context,
                 },
                 "step_number": state.get("step_number", 0) + 1,
             }
-        
-        # CRITICAL: Vision should ONLY run for FIRST photo in session
-        # Check if already greeted to determine if this is first photo
-        vision_greeted = bool(metadata.get("vision_greeted", False))
-        dialog_phase = state.get("dialog_phase", "INIT")
-        
-        # Phases where vision is allowed (first photo scenarios)
-        vision_allowed_phases = {"INIT", "DISCOVERY"}
-        
-        # PHASE-AWARE: In transactional phases or ongoing conversation, don't force PHOTO_IDENT
-        from src.conf.config import settings
-        
-        phase_aware_enabled = getattr(settings, "PHASE_AWARE_IMAGE_ROUTING", True)
-        transactional_phases = {
-            "WAITING_FOR_PAYMENT_PROOF",
-            "WAITING_FOR_PAYMENT_METHOD",
-            "WAITING_FOR_DELIVERY_DATA",
-        }
-        
-        # If already greeted OR in transactional phase OR not in INIT/DISCOVERY: 
-        # handle in context, not as PHOTO_IDENT (prevents restart on ANY mid-conversation photo)
-        if phase_aware_enabled and (
-            vision_greeted or dialog_phase in transactional_phases or dialog_phase not in vision_allowed_phases
-        ):
-            if dialog_phase in transactional_phases:
-                # Transactional phases: route to payment
-                logger.info(
-                    "Intent: PAYMENT_DELIVERY (has_image=True in %s, routing to payment)",
-                    dialog_phase,
-                )
-                return {
-                    "detected_intent": "PAYMENT_DELIVERY",
+        elif photo_purpose == "transactional":
+            logger.info(
+                "Intent: PAYMENT_DELIVERY (photo_purpose=%s, reason=%s)",
+                photo_purpose,
+                reason,
+            )
+            return {
+                "detected_intent": "PAYMENT_DELIVERY",
+                "has_image": True,
+                "image_url": metadata.get("image_url"),
+                "metadata": {
+                    **metadata,
                     "has_image": True,
-                    "image_url": metadata.get("image_url"),
-                    "metadata": {
-                        **metadata,
-                        "has_image": True,
-                        "image_context": "payment",
-                    },
-                    "step_number": state.get("step_number", 0) + 1,
-                }
-            else:
-                # Mid-conversation phases (WAITING_FOR_SIZE, WAITING_FOR_COLOR, OFFER_MADE, etc.):
-                # let agent handle in context, NOT as PHOTO_IDENT
-                logger.info(
-                    "Intent: DISCOVERY_OR_QUESTION (has_image=True in %s, handle in context, not PHOTO_IDENT)",
-                    dialog_phase,
-                )
-                return {
-                    "detected_intent": "DISCOVERY_OR_QUESTION",  # Let agent decide based on context
+                    "image_context": "payment",
+                },
+                "step_number": state.get("step_number", 0) + 1,
+            }
+        else:  # context
+            logger.info(
+                "Intent: DISCOVERY_OR_QUESTION (photo_purpose=%s, reason=%s, handle in context)",
+                photo_purpose,
+                reason,
+            )
+            return {
+                "detected_intent": "DISCOVERY_OR_QUESTION",  # Let agent decide based on context
+                "has_image": True,
+                "image_url": metadata.get("image_url"),
+                "metadata": {
+                    **metadata,
                     "has_image": True,
-                    "image_url": metadata.get("image_url"),
-                    "metadata": {
-                        **metadata,
-                        "has_image": True,
-                        "image_context": "ongoing_conversation",
-                    },
-                    "step_number": state.get("step_number", 0) + 1,
-                }
-        
-        # First photo in session (INIT/DISCOVERY, not greeted yet): photo identification
-        logger.info("Intent: PHOTO_IDENT (has_image=True, first photo in session)")
-        return {
-            "detected_intent": "PHOTO_IDENT",
-            "has_image": True,
-            "image_url": metadata.get("image_url"),
-            "metadata": {**metadata, "has_image": True},
-            "step_number": state.get("step_number", 0) + 1,
-        }
+                    "image_context": "ongoing_conversation",
+                },
+                "step_number": state.get("step_number", 0) + 1,
+            }
 
     # Skip if already escalating (only for non-photo messages)
     if state.get("should_escalate"):

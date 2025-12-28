@@ -55,30 +55,60 @@ class PostgresMessageStore:
                         ),
                     )
                     
-                    # Update user interaction timestamp if user_id provided
+                    # Update user interaction timestamp and usernames if user_id provided
                     if message.user_id:
-                        self._update_user_interaction(conn, message.user_id)
+                        # Pass metadata from message for users table updates (usernames, etc.)
+                        self._update_user_interaction(conn, message.user_id, metadata=message.metadata)
                     
                     conn.commit()
         except Exception as e:
             logger.error("Failed to append message to PostgreSQL: %s", e)
             raise
 
-    def _update_user_interaction(self, conn: Any, user_id: int) -> None:
-        """Update last_interaction_at for user (sync)."""
+    def _update_user_interaction(
+        self, conn: Any, user_id: str, metadata: dict[str, Any] | None = None
+    ) -> None:
+        """
+        Update last_interaction_at and usernames for user (sync).
+        
+        Args:
+            conn: PostgreSQL connection
+            user_id: User ID (TEXT, matches schema)
+            metadata: Optional metadata dict containing usernames
+        """
         try:
             with conn.cursor() as cur:
+                # Extract usernames from metadata if available
+                instagram_username = None
+                telegram_username = None
+                username = None
+                
+                if metadata:
+                    instagram_username = metadata.get("instagram_username")
+                    telegram_username = metadata.get("telegram_username") or metadata.get("user_nickname")
+                    username = metadata.get("username") or telegram_username or instagram_username
+                
+                # Upsert user with all available fields
+                users_table = DBTable.USERS
                 cur.execute(
                     f"""
-                    INSERT INTO {DBTable.USERS} (user_id, last_interaction_at)
-                    VALUES (%s, NOW())
+                    INSERT INTO {users_table} (
+                        user_id, last_interaction_at,
+                        instagram_username, telegram_username, username
+                    )
+                    VALUES (%s, NOW(), %s, %s, %s)
                     ON CONFLICT (user_id) 
-                    DO UPDATE SET last_interaction_at = NOW()
+                    DO UPDATE SET
+                        last_interaction_at = NOW(),
+                        instagram_username = COALESCE(EXCLUDED.instagram_username, {users_table}.instagram_username),
+                        telegram_username = COALESCE(EXCLUDED.telegram_username, {users_table}.telegram_username),
+                        username = COALESCE(EXCLUDED.username, {users_table}.username),
+                        updated_at = NOW()
                     """,
-                    (str(user_id),),
+                    (user_id, instagram_username, telegram_username, username),
                 )
         except Exception as e:
-            logger.warning("Failed to update last_interaction_at for user %s: %s", user_id, e)
+            logger.warning("Failed to update user interaction for user %s: %s", user_id, e)
 
     def list(self, session_id: str) -> list[StoredMessage]:
         """Get all messages for a session (sync)."""
@@ -130,7 +160,7 @@ class PostgresMessageStore:
             logger.error("Failed to list messages for session %s: %s", session_id, e)
             return []
 
-    def list_by_user(self, user_id: int) -> list[StoredMessage]:
+    def list_by_user(self, user_id: str) -> list[StoredMessage]:
         """Get all messages for a user (sync)."""
         if psycopg is None:
             logger.error("psycopg not installed")
@@ -147,7 +177,7 @@ class PostgresMessageStore:
                         WHERE user_id = %s
                         ORDER BY created_at
                         """,
-                        (user_id,),
+                        (str(user_id),),
                     )
                     rows = cur.fetchall()
                     
@@ -198,7 +228,7 @@ class PostgresMessageStore:
         except Exception as e:
             logger.error("Failed to delete messages for session %s: %s", session_id, e)
 
-    def delete_by_user(self, user_id: int) -> None:
+    def delete_by_user(self, user_id: str) -> None:
         """Delete all messages for a user (sync)."""
         if psycopg is None:
             logger.error("psycopg not installed")

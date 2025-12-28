@@ -14,6 +14,7 @@ from src.workers.tasks.followups import (
     schedule_followup,
     send_followup,
 )
+from src.workers.tasks.memory import cleanup_expired_memories
 from src.workers.tasks.summarization import (
     check_all_sessions_for_summarization,
     summarize_session,
@@ -31,4 +32,6 @@ __all__ = [
     "schedule_followup",
     "check_all_sessions_for_followups",
     "handle_24h_followup_escalation",
+    # Memory maintenance
+    "cleanup_expired_memories",
 ]

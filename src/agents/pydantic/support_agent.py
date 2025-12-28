@@ -73,20 +73,45 @@ def _get_model() -> OpenAIChatModel:
         # SENIOR-LEVEL: Use AI_MODEL as single source of truth
         model_name = settings.AI_MODEL
         
+        # Check if we're in production/staging
+        env = settings.SENTRY_ENVIRONMENT.lower() if settings.SENTRY_ENVIRONMENT else "development"
+        is_production = env in ("production", "prod", "staging")
+        
         if settings.LLM_PROVIDER == "openai":
             api_key = settings.OPENAI_API_KEY.get_secret_value()
             base_url = "https://api.openai.com/v1"
+            
+            # CRITICAL: In production, fail fast if OpenAI key is missing (no silent fallback)
+            if not api_key:
+                error_msg = (
+                    f"OPENAI_API_KEY is required for OpenAI provider in {env} environment. "
+                    "Set OPENAI_API_KEY environment variable."
+                )
+                logger.error(error_msg)
+                from src.services.observability import track_metric
+                track_metric("llm_config_error", 1, {"error": "missing_openai_key", "env": env})
+                if is_production:
+                    raise ValueError(error_msg)
+                # In development, allow OpenRouter fallback with warning
+                logger.warning("Falling back to OpenRouter in development (not allowed in production)")
+                api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+                base_url = settings.OPENROUTER_BASE_URL
+                if not api_key:
+                    raise ValueError("No API key available (neither OPENAI_API_KEY nor OPENROUTER_API_KEY)")
         else:
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
             base_url = settings.OPENROUTER_BASE_URL
+            if not api_key:
+                raise ValueError(f"OPENROUTER_API_KEY is required for provider {settings.LLM_PROVIDER}")
 
-        if not api_key:
-            # Fallback or error
-            logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
-            # Try OpenRouter as fallback if OpenAI missing
-            if settings.LLM_PROVIDER == "openai":
-                api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-                base_url = settings.OPENROUTER_BASE_URL
+        # Log resolved configuration
+        logger.info(
+            "Support agent model: %s via %s (provider=%s, env=%s)",
+            model_name,
+            base_url[:30],
+            settings.LLM_PROVIDER,
+            env,
+        )
 
         client = AsyncOpenAI(
             base_url=base_url,
@@ -174,34 +199,51 @@ async def _add_memory_context(ctx: RunContext[AgentDeps]) -> str:
 
 
 async def _add_image_context(ctx: RunContext[AgentDeps]) -> str:
-    """Add image analysis instructions if image present."""
+    """
+    Add image context instructions if image present.
+    
+    CRITICAL: This agent is TEXT-ONLY. It does NOT analyze photos.
+    Photo identification is handled by vision_node. This function only
+    provides context about the photo's purpose in the conversation.
+    """
     if not ctx.deps.has_image:
         return ""
 
-    # Check if this is first photo (INIT/DISCOVERY) or ongoing conversation
+    # Get image context from metadata (set by photo_purpose detection)
+    metadata = getattr(ctx.deps, "metadata", {}) or {}
+    image_context = metadata.get("image_context", "unknown")
     current_state = ctx.deps.current_state
-    is_first_photo_phase = current_state in ("STATE_0_INIT", "STATE_1_DISCOVERY")
     
-    if is_first_photo_phase:
-        # First photo: full vision analysis
+    # CRITICAL: Never instruct this agent to analyze photos
+    # Photos are analyzed by vision_node, not this text-only agent
+    
+    if image_context == "product_identification" or image_context == "explicit_new_product":
+        # This should not happen - if photo is for product identification,
+        # it should have been routed to vision_node, not agent_node
+        # But if it did reach here, just acknowledge the photo exists
         return """
---- ФОТО ВІД КЛІЄНТА (ПЕРШЕ ФОТО) ---
-ВАЖЛИВО: Користувач надіслав ФОТО!
-1. Проаналізуй фото та визнач товар з EMBEDDED CATALOG
-2. Якщо знайшов товар - ОДРАЗУ дай ціну та запропонуй розмір
-3. Intent має бути PHOTO_IDENT
-4. Не питай 'що вас цікавить' - відповідай конкретно!
+--- ФОТО ВІД КЛІЄНТА ---
+ВАЖЛИВО: Користувач надіслав ФОТО, але це має оброблятись через vision_node.
+Якщо ти бачиш це повідомлення - це помилка роутингу.
+Продовжуй діалог в контексті поточної фази, але НЕ намагайся аналізувати фото.
+"""
+    elif image_context == "payment":
+        # Photo is payment proof - handled by payment node
+        return """
+--- ФОТО ВІД КЛІЄНТА (ПЛАТЕЖ) ---
+Фото може бути квитанцією оплати. Обробляється в payment_node.
 """
     else:
         # Photo in ongoing conversation: handle in current phase context
         return """
---- ФОТО ВІД КЛІЄНТА (ПРОДОВЖЕННЯ ДІАЛОГУ) ---
+--- ФОТО ВІД КЛІЄНТА (КОНТЕКСТ) ---
 ВАЖЛИВО: Користувач надіслав ФОТО в контексті поточної фази!
-1. Оброби фото в контексті поточної фази (не як нове фото товару!)
-2. Якщо це STATE_3_SIZE_COLOR - фото може бути для уточнення розміру/кольору
-3. Якщо це STATE_5_PAYMENT_DELIVERY - фото може бути квитанцією оплати
-4. НЕ встановлюй intent=PHOTO_IDENT - використовуй intent відповідно до фази
-5. Продовжуй діалог в контексті поточної фази, не починай заново!
+1. Фото НЕ для ідентифікації товару (це має робити vision_node)
+2. Оброби фото в контексті поточної фази (не як нове фото товару!)
+3. Якщо це STATE_3_SIZE_COLOR - фото може бути для уточнення розміру/кольору
+4. Якщо це STATE_5_PAYMENT_DELIVERY - фото може бути квитанцією оплати
+5. НЕ встановлюй intent=PHOTO_IDENT - використовуй intent відповідно до фази
+6. Продовжуй діалог в контексті поточної фази, не починай заново!
 """
 
 

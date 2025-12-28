@@ -692,8 +692,304 @@ def maybe_apply_snippet_policy(
                     "dialog_phase": dialog_phase,
                 }
     
+    # =========================================================================
+    # EXIT CONDITIONS CHECK (before LLM)
+    # =========================================================================
+    # These are deterministic exit conditions that should trigger escalation
+    # without calling LLM
+    
+    # 1. Wholesale/opт/гурт exit
+    if detect_wholesale_exit(user_text):
+        session_id = state.get("session_id", "?")
+        logger.info(
+            "[POLICY] Wholesale/opт detected - silent exit (session=%s)",
+            session_id,
+        )
+        # Track metric for analytics
+        from src.services.observability import track_metric
+        track_metric(
+            "wholesale_exit_triggered",
+            1,
+            {
+                "session_id": session_id,
+                "dialog_phase": state.get("dialog_phase", "UNKNOWN"),
+            },
+        )
+        # CRITICAL: Silent exit - не відповідаємо клієнту, але менеджеру відправляємо Telegram
+        # Це потенційний великий клієнт, менеджер має знати
+        return {
+            "messages": [],  # Empty messages - клієнту нічого не відправляємо
+            "should_escalate": True,  # Менеджеру відправляємо Telegram
+            "escalation_reason": "Замовлення на гурт (опт)",
+            "escalation_level": "L1",
+            "dialog_phase": "ESCALATED",
+            "metadata": {
+                **state.get("metadata", {}),
+                "exit_condition": "wholesale_order",
+                "policy_case": "wholesale_exit",
+                "silent_exit": True,  # Flag для channel layer - не відправляти empty messages
+            },
+        }
+    
+    # 2. Return/exchange action exit
+    if detect_return_exchange_action(user_text):
+        session_id = state.get("session_id", "?")
+        logger.info(
+            "[POLICY] Return/exchange action detected - exiting (session=%s)",
+            session_id,
+        )
+        # Track metric for analytics
+        from src.services.observability import track_metric
+        track_metric(
+            "return_exchange_exit_triggered",
+            1,
+            {
+                "session_id": session_id,
+                "dialog_phase": state.get("dialog_phase", "UNKNOWN"),
+            },
+        )
+        # Bot is forbidden from accepting returns/exchanges
+        return {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "Зрозуміло. Передаю ваш запит менеджеру для обробки обміну/повернення.",
+                }
+            ],
+            "should_escalate": True,
+            "escalation_reason": "Клієнт бажає обміняти чи повернути товар",
+            "escalation_level": "L1",
+            "dialog_phase": "ESCALATED",
+            "metadata": {
+                **state.get("metadata", {}),
+                "exit_condition": "return_exchange_action",
+                "policy_case": "return_exchange_exit",
+            },
+        }
+    
+    # 3. Urgent delivery exit
+    if detect_urgent_delivery_exit(user_text):
+        session_id = state.get("session_id", "?")
+        logger.info(
+            "[POLICY] Urgent delivery request detected - exiting (session=%s)",
+            session_id,
+        )
+        # Track metric for analytics
+        from src.services.observability import track_metric
+        track_metric(
+            "urgent_delivery_exit_triggered",
+            1,
+            {
+                "session_id": session_id,
+                "dialog_phase": state.get("dialog_phase", "UNKNOWN"),
+            },
+        )
+        return {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "Зрозуміло, термінова відправка. Передаю менеджеру для обробки.",
+                }
+            ],
+            "should_escalate": True,
+            "escalation_reason": "Термінова відправка",
+            "escalation_level": "L1",
+            "dialog_phase": "ESCALATED",
+            "metadata": {
+                **state.get("metadata", {}),
+                "exit_condition": "urgent_delivery",
+                "policy_case": "urgent_delivery_exit",
+            },
+        }
+    
+    # 4. Missing product info (handled via escalation_reason from LLM)
+    # This is checked in agent node after LLM call
+    
     # No snippet found - return None to continue with LLM
     return None
+
+
+# =============================================================================
+# EXIT CONDITIONS DETECTION (SSOT)
+# =============================================================================
+
+def detect_wholesale_exit(user_text: str) -> bool:
+    """
+    Detect if user asks about wholesale/opт/гурт/дроп.
+    
+    This is an exit condition - bot should respond with snippet and escalate.
+    
+    Args:
+        user_text: User message text
+        
+    Returns:
+        True if wholesale/opт detected, False otherwise
+    """
+    if not user_text:
+        return False
+    
+    text_lower = user_text.lower()
+    wholesale_keywords = [
+        "опт", "оптом", "оптов", "оптово",
+        "гурт", "гуртом", "гуртов",
+        "дроп", "дропом", "дропшип",
+        "ростовки", "ростовок",
+        "прайс для перепродажу",
+        "wholesale", "bulk",
+    ]
+    
+    return any(keyword in text_lower for keyword in wholesale_keywords)
+
+
+def detect_return_exchange_action(user_text: str) -> bool:
+    """
+    Detect if user wants to RETURN or EXCHANGE (action, not consultation).
+    
+    CRITICAL: This is NOT a consultation question (e.g., "чи можна повернути?").
+    This is an ACTION request (e.g., "хочу повернути", "оформити обмін").
+    
+    Args:
+        user_text: User message text
+        
+    Returns:
+        True if return/exchange action detected, False otherwise
+    """
+    if not user_text:
+        return False
+    
+    text_lower = user_text.lower()
+    
+    # Consultation patterns (NOT exit conditions)
+    consultation_patterns = [
+        "чи можна повернути",
+        "можно ли вернуть",
+        "чи є обмін",
+        "есть ли обмен",
+        "які умови повернення",
+        "какие условия возврата",
+        "чи можна обміняти",
+        "можно ли обменять",
+        "як повернути",
+        "как вернуть",
+        "як обміняти",
+        "как обменять",
+    ]
+    
+    # Check if this is a consultation question first
+    for pattern in consultation_patterns:
+        if pattern in text_lower:
+            return False  # This is a consultation, not an action
+    
+    # Action patterns (exit conditions)
+    action_patterns = [
+        "хочу повернути",
+        "хочу вернуть",
+        "повернути товар",
+        "вернуть товар",
+        "оформити повернення",
+        "оформить возврат",
+        "зробити повернення",
+        "сделать возврат",
+        "хочу обміняти",
+        "хочу обменять",
+        "обміняти товар",
+        "обменять товар",
+        "оформити обмін",
+        "оформить обмен",
+        "зробити обмін",
+        "сделать обмен",
+        "повертаю товар",
+        "возвращаю товар",
+        "обмінюю товар",
+        "обмениваю товар",
+    ]
+    
+    return any(pattern in text_lower for pattern in action_patterns)
+
+
+def detect_urgent_delivery_exit(user_text: str) -> bool:
+    """
+    Detect if user explicitly requests URGENT delivery.
+    
+    CRITICAL: Only exit if user EXPLICITLY requests urgent delivery.
+    Do NOT exit for general questions like "як швидко відправляєте?".
+    
+    Args:
+        user_text: User message text
+        
+    Returns:
+        True if explicit urgent delivery request, False otherwise
+    """
+    if not user_text:
+        return False
+    
+    text_lower = user_text.lower()
+    
+    # General questions (NOT exit conditions)
+    general_questions = [
+        "як швидко ви відправляєте",
+        "как быстро вы отправляете",
+        "коли буде доставка",
+        "когда будет доставка",
+        "коли приблизно отримаю",
+        "когда примерно получу",
+        "скільки часу доставка",
+        "сколько времени доставка",
+        "як довго йде посилка",
+        "как долго идет посылка",
+    ]
+    
+    # Check if this is a general question first
+    for pattern in general_questions:
+        if pattern in text_lower:
+            return False  # This is a general question, not urgent request
+    
+    # Explicit urgent patterns (exit conditions)
+    urgent_patterns = [
+        "мені терміново треба",
+        "мне срочно нужно",
+        "потрібна якнайшвидша доставка",
+        "нужна как можно скорее доставка",
+        "можете сьогодні відправити",
+        "можете сегодня отправить",
+        "терміново",
+        "срочно",
+        "якнайшвидше",
+        "как можно скорее",
+        "дуже терміново",
+        "очень срочно",
+        "потрібно терміново",
+        "нужно срочно",
+    ]
+    
+    return any(pattern in text_lower for pattern in urgent_patterns)
+
+
+def detect_missing_product_info(user_text: str, state: dict[str, Any]) -> bool:
+    """
+    Detect if user asks about product info that's missing from instructions.
+    
+    This is detected when:
+    1. User asks a product question
+    2. LLM would need to answer but info is not in instructions
+    (This is handled via escalation_reason="missing_product_info" from LLM)
+    
+    For now, this is a placeholder - actual detection happens in agent node
+    when LLM sets escalation_reason="missing_product_info".
+    
+    Args:
+        user_text: User message text
+        state: Current conversation state
+        
+    Returns:
+        True if missing info detected, False otherwise
+    """
+    # Check if escalation_reason indicates missing info
+    escalation_reason = state.get("escalation_reason") or state.get("metadata", {}).get("escalation_reason")
+    if escalation_reason == "missing_product_info":
+        return True
+    
+    return False
 
 
 

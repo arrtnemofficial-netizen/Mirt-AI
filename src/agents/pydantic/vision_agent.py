@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -93,8 +94,17 @@ def _build_reference_parts(
     return parts
 
 
-async def _download_image_as_base64(url: str, max_retries: int = 2) -> str | None:
+async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | None:
+    """
+    Download image from private CDN (Instagram/Facebook) and convert to base64.
+    
+    Uses exponential backoff for retries and tracks metrics for observability.
+    """
+    import asyncio
+    from src.services.observability import track_metric
+    
     url = url.rstrip(";").strip()
+    start_time = time.perf_counter()
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -110,8 +120,22 @@ async def _download_image_as_base64(url: str, max_retries: int = 2) -> str | Non
         "Sec-Fetch-Site": "cross-site",
     }
 
+    last_error: str | None = None
+    last_status_code: int | None = None
+    
     for attempt in range(max_retries + 1):
         try:
+            # Exponential backoff: 0.5s, 1s, 2s
+            if attempt > 0:
+                backoff_delay = min(0.5 * (2 ** (attempt - 1)), 2.0)
+                logger.info(
+                    "Retrying image download (attempt %d/%d) after %.1fs delay...",
+                    attempt + 1,
+                    max_retries + 1,
+                    backoff_delay,
+                )
+                await asyncio.sleep(backoff_delay)
+            
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
@@ -121,36 +145,163 @@ async def _download_image_as_base64(url: str, max_retries: int = 2) -> str | Non
                     content_type = content_type.split(";")[0].strip()
 
                 image_data = response.content
+                
+                # Validate image size (prevent huge downloads)
+                max_size = 10 * 1024 * 1024  # 10MB
+                if len(image_data) > max_size:
+                    error_msg = f"Image too large: {len(image_data)} bytes"
+                    logger.error(error_msg)
+                    track_metric(
+                        "vision_download_failed",
+                        1,
+                        {"status": "too_large", "size_bytes": len(image_data)},
+                    )
+                    return None
+                
                 b64_data = base64.b64encode(image_data).decode("utf-8")
                 data_url = f"data:{content_type};base64,{b64_data}"
+                
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
                 logger.info(
-                    "Downloaded image from CDN: %d bytes, type=%s",
+                    "✅ Downloaded image from CDN: %d bytes, type=%s, latency=%.0fms",
                     len(image_data),
                     content_type,
+                    latency_ms,
+                )
+                track_metric(
+                    "vision_download_success",
+                    1,
+                    {
+                        "size_bytes": len(image_data),
+                        "latency_ms": latency_ms,
+                        "attempt": attempt + 1,
+                    },
                 )
                 return data_url
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 403 and attempt < max_retries:
-                logger.warning("HTTP 403, retrying (%d/%d)...", attempt + 1, max_retries)
-                import asyncio
-
-                await asyncio.sleep(0.5)
-                continue
-            logger.error("Failed to download image (HTTP %d): %s", e.response.status_code, url[:80])
+            last_status_code = e.response.status_code
+            last_error = f"HTTP {e.response.status_code}"
+            
+            # Handle specific status codes
+            if e.response.status_code == 403:
+                if attempt < max_retries:
+                    logger.warning(
+                        "HTTP 403 (Forbidden), retrying (%d/%d)...",
+                        attempt + 1,
+                        max_retries,
+                    )
+                    continue
+                track_metric(
+                    "vision_download_failed",
+                    1,
+                    {"status": "403_forbidden", "attempt": attempt + 1},
+                )
+            elif e.response.status_code == 404:
+                logger.error("HTTP 404 (Not Found): %s", url[:80])
+                track_metric(
+                    "vision_download_failed",
+                    1,
+                    {"status": "404_not_found", "attempt": attempt + 1},
+                )
+                return None  # Don't retry 404
+            elif e.response.status_code == 429:
+                # Rate limited - use longer backoff
+                retry_after = int(e.response.headers.get("Retry-After", "5"))
+                if attempt < max_retries:
+                    logger.warning(
+                        "HTTP 429 (Rate Limited), retrying after %ds (%d/%d)...",
+                        retry_after,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+                track_metric(
+                    "vision_download_failed",
+                    1,
+                    {"status": "429_rate_limited", "attempt": attempt + 1},
+                )
+            else:
+                if attempt < max_retries:
+                    logger.warning(
+                        "HTTP %d, retrying (%d/%d)...",
+                        e.response.status_code,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    continue
+                track_metric(
+                    "vision_download_failed",
+                    1,
+                    {"status": f"http_{e.response.status_code}", "attempt": attempt + 1},
+                )
+            
+            logger.error(
+                "Failed to download image (HTTP %d): %s",
+                e.response.status_code,
+                url[:80],
+            )
             return None
-        except Exception as e:
+            
+        except httpx.TimeoutException:
+            last_error = "timeout"
             if attempt < max_retries:
                 logger.warning(
-                    "Download error, retrying (%d/%d): %s", attempt + 1, max_retries, str(e)[:50]
+                    "Download timeout, retrying (%d/%d)...",
+                    attempt + 1,
+                    max_retries,
                 )
-                import asyncio
-
-                await asyncio.sleep(0.5)
                 continue
-            logger.error("Failed to download image: %s - %s", type(e).__name__, str(e)[:100])
+            logger.error("Download timeout after %d attempts", max_retries + 1)
+            track_metric(
+                "vision_download_failed",
+                1,
+                {"status": "timeout", "attempt": attempt + 1},
+            )
+            return None
+            
+        except Exception as e:
+            last_error = type(e).__name__
+            if attempt < max_retries:
+                logger.warning(
+                    "Download error, retrying (%d/%d): %s",
+                    attempt + 1,
+                    max_retries,
+                    str(e)[:50],
+                )
+                continue
+            logger.error(
+                "Failed to download image: %s - %s",
+                type(e).__name__,
+                str(e)[:100],
+            )
+            track_metric(
+                "vision_download_failed",
+                1,
+                {"status": "exception", "error_type": type(e).__name__, "attempt": attempt + 1},
+            )
             return None
 
+    # Final failure after all retries
+    latency_ms = (time.perf_counter() - start_time) * 1000.0
+    logger.error(
+        "Failed to download image after %d attempts (last: %s, latency=%.0fms): %s",
+        max_retries + 1,
+        last_error or "unknown",
+        latency_ms,
+        url[:80],
+    )
+    track_metric(
+        "vision_download_failed",
+        1,
+        {
+            "status": "max_retries_exceeded",
+            "last_error": last_error,
+            "last_status_code": last_status_code,
+            "latency_ms": latency_ms,
+        },
+    )
     return None
 
 
@@ -176,6 +327,10 @@ def _build_model() -> OpenAIChatModel:
     # SENIOR-LEVEL: Use AI_MODEL as single source of truth
     model_name = settings.AI_MODEL
 
+    # Check if we're in production/staging
+    env = settings.SENTRY_ENVIRONMENT.lower() if settings.SENTRY_ENVIRONMENT else "development"
+    is_production = env in ("production", "prod", "staging")
+
     is_openai_model = (
         model_name.startswith("gpt-") or model_name.startswith("o1") or model_name.startswith("o3")
     )
@@ -183,20 +338,39 @@ def _build_model() -> OpenAIChatModel:
     if is_openai_model:
         api_key = settings.OPENAI_API_KEY.get_secret_value()
         base_url = "https://api.openai.com/v1"
+        
+        # CRITICAL: In production, fail fast if OpenAI key is missing (no silent fallback)
         if not api_key:
+            error_msg = (
+                f"OPENAI_API_KEY is required for OpenAI model '{model_name}' in {env} environment. "
+                "Set OPENAI_API_KEY environment variable."
+            )
+            logger.error(error_msg)
+            from src.services.observability import track_metric
+            track_metric("llm_config_error", 1, {"error": "missing_openai_key", "env": env, "model": model_name})
+            if is_production:
+                raise ValueError(error_msg)
+            # In development, allow OpenRouter fallback with warning
+            logger.warning("Falling back to OpenRouter in development (not allowed in production)")
             api_key = settings.OPENROUTER_API_KEY.get_secret_value()
             base_url = settings.OPENROUTER_BASE_URL
+            if not api_key:
+                raise ValueError("No API key available (neither OPENAI_API_KEY nor OPENROUTER_API_KEY)")
             model_name = f"openai/{model_name}"
-            logger.info("Vision using OpenRouter for %s (OPENAI_API_KEY missing)", model_name)
     else:
         api_key = settings.OPENROUTER_API_KEY.get_secret_value()
         base_url = settings.OPENROUTER_BASE_URL
+        if not api_key:
+            raise ValueError(f"OPENROUTER_API_KEY is required for non-OpenAI model '{model_name}'")
 
-    if not api_key:
-        logger.error("No API key for vision model! Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
-        raise ValueError("Vision model requires API key. Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
-
-    logger.info("Vision model: %s (via %s)", model_name, base_url[:30])
+    # Log resolved configuration
+    logger.info(
+        "Vision model: %s via %s (env=%s, is_openai=%s)",
+        model_name,
+        base_url[:30],
+        env,
+        is_openai_model,
+    )
 
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     provider = OpenAIProvider(openai_client=client)

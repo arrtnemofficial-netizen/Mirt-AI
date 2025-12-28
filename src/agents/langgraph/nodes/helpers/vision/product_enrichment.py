@@ -83,11 +83,41 @@ async def enrich_product_from_db(
             scored.sort(key=lambda x: x[0], reverse=True)
             results = [row for _score, row in scored[:5]]
 
-        # Якщо не знайшли з повною назвою - спробуємо базову назву без кольору
-        if not results and "(" in product_name:
-            base_name = product_name.split("(")[0].strip()
-            logger.debug("Retry search with base name: '%s'", base_name)
-            results = await catalog.search_products(query=base_name, limit=5)
+        # Якщо не знайшли з повною назвою - спробуємо варіанти пошуку
+        if not results:
+            # Variant 1: Base name without color
+            if "(" in product_name:
+                base_name = product_name.split("(")[0].strip()
+                logger.debug("Retry search with base name: '%s'", base_name)
+                results = await catalog.search_products(query=base_name, limit=5)
+            
+            # Variant 2: Try without common prefixes/suffixes
+            if not results:
+                # Remove common words that might not be in DB
+                words_to_remove = ["костюм", "сукня", "тренч", "комплект"]
+                cleaned_name = product_name
+                for word in words_to_remove:
+                    cleaned_name = cleaned_name.replace(word, "").strip()
+                if cleaned_name and cleaned_name != product_name:
+                    logger.debug("Retry search with cleaned name: '%s'", cleaned_name)
+                    results = await catalog.search_products(query=cleaned_name, limit=5)
+            
+            # Variant 3: Try category-based search if we can infer category
+            if not results:
+                category = None
+                name_lower = product_name.lower()
+                if "костюм" in name_lower:
+                    category = "костюм"
+                elif "сукня" in name_lower:
+                    category = "сукня"
+                elif "тренч" in name_lower:
+                    category = "тренч"
+                
+                if category:
+                    # Search by category + base name
+                    base_name = product_name.split("(")[0].strip() if "(" in product_name else product_name
+                    logger.debug("Retry search with category '%s' and name '%s'", category, base_name)
+                    results = await catalog.search_products(query=base_name, category=category, limit=5)
 
         def _extract_colors(row: dict[str, Any]) -> list[str]:
             """Extract color options from product row."""

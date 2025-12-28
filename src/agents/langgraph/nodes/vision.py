@@ -508,6 +508,7 @@ async def vision_node(
         catalog_product=catalog_row,
         product_addition_context=is_product_addition,  # Pass context for custom messages
         existing_products_count=len(existing_products) if is_product_addition else 0,
+        enrichment_failed=enrichment_failed,  # Pass enrichment failure flag
     )
 
     available_colors: list[str] = []

@@ -193,9 +193,22 @@ class NotificationService:
         
         return await self._send_telegram_message(message)
 
-    async def _send_telegram_photo(self, photo_url: str, caption: str) -> bool:
-        """Send photo with caption to Telegram."""
+    async def _send_telegram_photo(self, photo_url: str, caption: str, max_retries: int = 2) -> bool:
+        """
+        Send photo with caption to Telegram with retry and backoff.
+        
+        Args:
+            photo_url: URL of the photo to send
+            caption: Caption text (truncated to 1024 chars)
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            True if sent successfully, False otherwise (falls back to text message)
+        """
+        import asyncio
+        
         url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
+        timeout = aiohttp.ClientTimeout(total=15.0)  # 15 second timeout for photo
         
         # Truncate caption to Telegram limit (1024 chars)
         caption_truncated = self._truncate(caption, 1024)
@@ -206,31 +219,89 @@ class NotificationService:
             "caption": caption_truncated,
         }
         
-        try:
-            async with (
-                aiohttp.ClientSession() as session,
-                session.post(url, json=payload) as response,
-            ):
-                if response.status == 200:
-                    logger.info("Manager notification with photo sent successfully")
-                    return True
-                
-                resp_text = await response.text()
-                logger.error(
-                    "Failed to send photo notification: %s %s",
-                    response.status,
-                    resp_text,
-                )
+        # Retry loop with exponential backoff
+        for attempt in range(max_retries):
+            try:
+                async with (
+                    aiohttp.ClientSession(timeout=timeout) as session,
+                    session.post(url, json=payload) as response,
+                ):
+                    if response.status == 200:
+                        logger.info("Manager notification with photo sent successfully")
+                        return True
+                    
+                    resp_text = await response.text()
+                    
+                    # Retry on 5xx errors or rate limits
+                    if (response.status >= 500 or response.status == 429) and attempt < max_retries - 1:
+                        backoff = min(0.5 * (2 ** attempt), 2.0)
+                        logger.warning(
+                            "Telegram photo API error %d, retrying in %.1fs (attempt %d/%d)",
+                            response.status,
+                            backoff,
+                            attempt + 1,
+                            max_retries,
+                        )
+                        await asyncio.sleep(backoff)
+                        continue
+                    
+                    logger.error(
+                        "Failed to send photo notification: %s %s",
+                        response.status,
+                        resp_text[:200],
+                    )
+                    # Fallback to text-only message
+                    return await self._send_telegram_message(caption_truncated)
+                    
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    backoff = min(0.5 * (2 ** attempt), 2.0)
+                    logger.warning(
+                        "Telegram photo request timeout, retrying in %.1fs (attempt %d/%d)",
+                        backoff,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                logger.error("Telegram photo request timeout after %d attempts", max_retries)
                 # Fallback to text-only message
                 return await self._send_telegram_message(caption_truncated)
-        except Exception as e:
-            logger.error("Photo notification error: %s", e)
-            # Fallback to text-only message
-            return await self._send_telegram_message(caption_truncated)
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    backoff = min(0.5 * (2 ** attempt), 2.0)
+                    logger.warning(
+                        "Telegram photo notification error, retrying in %.1fs (attempt %d/%d): %s",
+                        backoff,
+                        attempt + 1,
+                        max_retries,
+                        str(e)[:100],
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+                logger.error("Photo notification error after %d attempts: %s", max_retries, e)
+                # Fallback to text-only message
+                return await self._send_telegram_message(caption_truncated)
+        
+        # Final fallback
+        return await self._send_telegram_message(caption_truncated)
 
-    async def _send_telegram_message(self, text: str) -> bool:
-        """Send raw message to Telegram."""
+    async def _send_telegram_message(self, text: str, max_retries: int = 3) -> bool:
+        """
+        Send raw message to Telegram with retry and backoff.
+        
+        Args:
+            text: Message text to send
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        import asyncio
+        
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        timeout = aiohttp.ClientTimeout(total=10.0)  # 10 second timeout
 
         # Try with Markdown first, fallback to plain text if parsing fails
         for parse_mode in ["Markdown", None]:
@@ -241,32 +312,71 @@ class NotificationService:
             if parse_mode:
                 payload["parse_mode"] = parse_mode
 
-            try:
-                async with (
-                    aiohttp.ClientSession() as session,
-                    session.post(
-                        url,
-                        json=payload,
-                    ) as response,
-                ):
-                    if response.status == 200:
-                        logger.info("Manager notification sent successfully")
-                        return True
+            # Retry loop with exponential backoff
+            for attempt in range(max_retries):
+                try:
+                    async with (
+                        aiohttp.ClientSession(timeout=timeout) as session,
+                        session.post(url, json=payload) as response,
+                    ):
+                        if response.status == 200:
+                            logger.info("Manager notification sent successfully")
+                            return True
 
-                    # If Markdown parsing failed, try without it
-                    resp_text = await response.text()
-                    if parse_mode == "Markdown" and "parse entities" in resp_text:
-                        logger.warning("Markdown parsing failed, retrying without parse_mode")
+                        # If Markdown parsing failed, try without it
+                        resp_text = await response.text()
+                        if parse_mode == "Markdown" and "parse entities" in resp_text:
+                            logger.warning("Markdown parsing failed, retrying without parse_mode")
+                            break  # Break to try without parse_mode
+
+                        # Retry on 5xx errors or rate limits
+                        if response.status >= 500 or response.status == 429:
+                            if attempt < max_retries - 1:
+                                backoff = min(0.5 * (2 ** attempt), 2.0)  # Exponential backoff, max 2s
+                                logger.warning(
+                                    "Telegram API error %d, retrying in %.1fs (attempt %d/%d)",
+                                    response.status,
+                                    backoff,
+                                    attempt + 1,
+                                    max_retries,
+                                )
+                                await asyncio.sleep(backoff)
+                                continue
+
+                        logger.error(
+                            "Failed to send notification: %s %s",
+                            response.status,
+                            resp_text[:200],
+                        )
+                        return False
+                        
+                except asyncio.TimeoutError:
+                    if attempt < max_retries - 1:
+                        backoff = min(0.5 * (2 ** attempt), 2.0)
+                        logger.warning(
+                            "Telegram request timeout, retrying in %.1fs (attempt %d/%d)",
+                            backoff,
+                            attempt + 1,
+                            max_retries,
+                        )
+                        await asyncio.sleep(backoff)
                         continue
-
-                    logger.error(
-                        "Failed to send notification: %s %s",
-                        response.status,
-                        resp_text,
-                    )
+                    logger.error("Telegram request timeout after %d attempts", max_retries)
                     return False
-            except Exception as e:
-                logger.error("Notification error: %s", e)
-                return False
+                    
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        backoff = min(0.5 * (2 ** attempt), 2.0)
+                        logger.warning(
+                            "Telegram notification error, retrying in %.1fs (attempt %d/%d): %s",
+                            backoff,
+                            attempt + 1,
+                            max_retries,
+                            str(e)[:100],
+                        )
+                        await asyncio.sleep(backoff)
+                        continue
+                    logger.error("Telegram notification error after %d attempts: %s", max_retries, e)
+                    return False
 
         return False

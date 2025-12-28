@@ -79,6 +79,7 @@ celery_app = Celery(
     include=[
         "src.workers.tasks.summarization",
         "src.workers.tasks.followups",
+        "src.workers.tasks.memory",  # Memory maintenance tasks
         # NOTE: CRM, health, manychat, messages, llm_usage tasks are no longer in Celery.
         # They run synchronously or via BackgroundTasks.
     ],
@@ -193,6 +194,12 @@ celery_app.conf.beat_schedule = {
         "schedule": 3600.0,  # 1 hour
         "options": {"queue": "summarization"},
     },
+    # Cleanup expired memories daily at 3:00 UTC
+    "memory-cleanup-expired-daily": {
+        "task": "src.workers.tasks.memory.cleanup_expired_memories",
+        "schedule": 86400.0,  # 24 hours (daily)
+        "options": {"queue": "default"},
+    },
     # NOTE: Health, CRM, and LLM usage tasks are no longer scheduled via Celery Beat.
     # They should be handled via external cron or other scheduling mechanisms if needed.
 }
@@ -205,7 +212,28 @@ celery_app.conf.beat_schedule = {
 @signals.worker_init.connect
 def worker_init_handler(sender=None, **kwargs):
     """Called when worker process starts."""
-    logger.info("[CELERY] Worker initialized: %s", sender)
+    banner = """
+╔══════════════════════════════════════════════════════════════╗
+║                  MIRT AI - CELERY WORKER                     ║
+║                  Worker Process Initialized                  ║
+╚══════════════════════════════════════════════════════════════╝
+"""
+    print(banner)
+    logger.info("=" * 60)
+    logger.info("CELERY WORKER INITIALIZED: %s", sender)
+    logger.info("=" * 60)
+    
+    # Log registered tasks
+    task_list = sorted([name for name in celery_app.tasks.keys() if not name.startswith("celery.")])
+    logger.info("Registered Tasks (%d):", len(task_list))
+    for task_name in task_list[:10]:  # Show first 10
+        logger.info("  - %s", task_name)
+    if len(task_list) > 10:
+        logger.info("  ... and %d more", len(task_list) - 10)
+    
+    # Log queues
+    queue_names = [q.name for q in TASK_QUEUES]
+    logger.info("Active Queues: %s", ", ".join(queue_names))
 
 
 @signals.worker_process_init.connect

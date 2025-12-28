@@ -470,6 +470,44 @@ async def agent_node(
                 response.messages = response.messages[1:]
 
         # =====================================================================
+        # RUNTIME GUARD: Prevent "blind" PHOTO_IDENT from text-only agent
+        # =====================================================================
+        # CRITICAL: If photo was NOT processed by vision_node, this agent
+        # must NOT claim it analyzed the photo (intent=PHOTO_IDENT).
+        # Photos are analyzed by vision_node, not this text-only agent.
+        # =====================================================================
+        has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+        intent = response.metadata.intent
+        
+        # Check if photo was processed by vision (check metadata for vision indicators)
+        metadata = state.get("metadata", {}) or {}
+        vision_processed = bool(
+            metadata.get("vision_confidence") is not None
+            or metadata.get("vision_greeted", False)
+            or current_state == State.STATE_2_VISION.value
+        )
+        
+        # If agent claims PHOTO_IDENT but vision didn't process it, suppress it
+        if has_image and intent == "PHOTO_IDENT" and not vision_processed:
+            logger.warning(
+                "🚨 [SESSION %s] Agent node produced PHOTO_IDENT without vision processing. "
+                "Suppressing to DISCOVERY_OR_QUESTION (photo should be handled by vision_node).",
+                session_id,
+            )
+            from src.services.observability import track_metric
+            track_metric(
+                "agent_photo_ident_suppressed",
+                1,
+                {
+                    "session_id": session_id,
+                    "current_state": current_state,
+                    "dialog_phase": state.get("dialog_phase", "UNKNOWN"),
+                },
+            )
+            intent = "DISCOVERY_OR_QUESTION"
+            response.metadata.intent = intent
+        
+        # =====================================================================
         # LLM-FIRST APPROACH: Trust improved prompts for intent classification
         # =====================================================================
         # The STATE_5 prompts now explicitly teach LLM that "да/так/ок" in
@@ -479,7 +517,6 @@ async def agent_node(
         # Previous keyword-override for injecting requisites is REMOVED.
         # If LLM still makes mistakes, improve the prompt, not add patches.
         # =====================================================================
-        intent = response.metadata.intent
 
         # Extract from OUTPUT_CONTRACT structure
         new_state_str = response.metadata.current_state
@@ -832,6 +869,71 @@ async def agent_node(
                 response_preview=preview_text,
             )
 
+        # =====================================================================
+        # MISSING PRODUCT INFO EXIT CONDITION
+        # =====================================================================
+        # Якщо LLM встановив escalation_reason="missing_product_info", це означає
+        # що клієнт запитав про товар, але інформація відсутня в інструкції
+        # Тригеримо exit condition з escalation до менеджера
+        escalation_reason = response.escalation.reason if response.escalation else None
+        if escalation_reason == "missing_product_info":
+            logger.info(
+                "[SESSION %s] Missing product info detected - exiting with escalation",
+                session_id,
+            )
+            from src.services.observability import track_metric
+            track_metric(
+                "missing_product_info_exit",
+                1,
+                {
+                    "session_id": session_id,
+                    "current_state": new_state_str,
+                    "intent": intent,
+                },
+            )
+            # Exit condition: escalation до менеджера
+            return {
+                "current_state": new_state_str,
+                "detected_intent": intent,
+                "dialog_phase": "ESCALATED",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "Передаю ваш запит менеджеру для отримання детальної інформації 🤍",
+                    }
+                ],
+                "metadata": {
+                    **metadata_update,
+                    "exit_condition": "missing_product_info",
+                    "policy_case": "missing_info_exit",
+                },
+                "selected_products": selected_products,
+                "should_escalate": True,
+                "escalation_reason": "Відсутня інформація по товару в інструкції",
+                "escalation_level": "L1",
+                "step_number": state.get("step_number", 0) + 1,
+                "last_error": None,
+                "agent_response": {
+                    "event": "escalation",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "content": "Передаю ваш запит менеджеру для отримання детальної інформації 🤍",
+                        }
+                    ],
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": new_state_str,
+                        "intent": intent,
+                        "escalation_level": "L1",
+                    },
+                    "escalation": {
+                        "reason": "Відсутня інформація по товару в інструкції",
+                        "target": "product_info_manager",
+                    },
+                },
+            }
+
         return {
             "current_state": new_state_str,
             "detected_intent": intent,
@@ -840,7 +942,7 @@ async def agent_node(
             "metadata": metadata_update,
             "selected_products": selected_products,
             "should_escalate": is_escalation,
-            "escalation_reason": response.escalation.reason if response.escalation else None,
+            "escalation_reason": escalation_reason,
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
             "agent_response": agent_response_payload,

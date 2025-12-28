@@ -32,6 +32,7 @@ def build_vision_messages(
     catalog_product: dict[str, Any] | None = None,
     product_addition_context: bool = False,
     existing_products_count: int = 0,
+    enrichment_failed: bool = False,
 ) -> list[dict[str, str]]:
     """
     Build multi-bubble assistant response from VisionResponse.
@@ -219,12 +220,20 @@ def build_vision_messages(
         )
 
     # If we still have no product and no clarification - this is likely NOT our product
-    # Use "Невідомий товар" snippet from snippets.md
-    if (
+    # CRITICAL: Only use "not ours" if vision truly couldn't identify after all attempts
+    # Conditions:
+    # 1. No product identified AND low confidence (< 0.3) - vision gave up
+    # 2. OR enrichment failed (product identified but not in catalog) - competitor/hallucination
+    # This prevents false "not ours" when vision is just uncertain and asking for clarification
+    confidence = response.confidence or 0.0
+    should_show_not_ours = (
         (not response.identified_product)
         and (not response.clarification_question)
         and (not response.needs_clarification)
-    ):
+        and (confidence < 0.3)  # Very low confidence = likely not our product
+    ) or enrichment_failed  # Product identified but not in catalog
+    
+    if should_show_not_ours:
         # Try to get snippet for unknown product
         unknown_snippet = get_snippet_by_header("Невідомий товар (ескалація)")
         if unknown_snippet:

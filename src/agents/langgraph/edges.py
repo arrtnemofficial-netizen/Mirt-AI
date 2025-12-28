@@ -122,249 +122,78 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     # =========================================================================
     # SPECIAL CASES (highest priority)
     # =========================================================================
-    # CRITICAL: Vision should ONLY run for FIRST photo in session (INIT/DISCOVERY)
-    # All subsequent photos must be handled in current phase context to prevent restart
+    # CRITICAL: Use unified photo purpose detection (SSOT)
     if has_image:
-        # CRITICAL: Check for EXPLICIT "new product" trigger FIRST
-        # If user explicitly says "new product" + photo, ALWAYS route to vision (regardless of phase)
-        if user_message:
-            from src.agents.langgraph.nodes.helpers.policy_snippets import detect_explicit_new_product
-            
-            if detect_explicit_new_product(user_message, state):
-                from src.services.observability import track_metric
-                track_metric(
-                    "image_routed_to_vision",
-                    1,
-                    {
-                        "session_id": session_id,
-                        "phase": dialog_phase,
-                        "thread_id": thread_id,
-                        "reason": "explicit_new_product_trigger",
-                    },
-                )
-                _route_debug(
-                    session_id=session_id,
-                    current_phase=dialog_phase,
-                    detected_intent=detected_intent,
-                    destination="moderation",
-                    reason="explicit 'new product' trigger detected, routing to vision",
-                )
-                return "moderation"
-        
-        # Feature flag: allow disabling phase-aware routing for rollback
-        phase_aware_enabled = getattr(settings, "PHASE_AWARE_IMAGE_ROUTING", True)
-        
-        # Check if this is first photo in session
-        vision_greeted = bool(metadata.get("vision_greeted", False))
-        
-        # Phases where vision is allowed (first photo scenarios)
-        vision_allowed_phases = {"INIT", "DISCOVERY"}
-        
-        # Transactional phases where images should be interpreted as payment proof
-        transactional_phases = {
-            "WAITING_FOR_PAYMENT_PROOF",
-            "WAITING_FOR_PAYMENT_METHOD",
-            "WAITING_FOR_DELIVERY_DATA",
-        }
-        
-        if phase_aware_enabled:
-            # CRITICAL: If already greeted, NEVER route to vision (prevents restart)
-            if vision_greeted and dialog_phase not in vision_allowed_phases:
-                # Photo in ongoing conversation - handle in current context
-                from src.services.observability import track_metric
-                
-                if dialog_phase in transactional_phases:
-                    # CRITICAL: Check if this is product addition intent BEFORE routing to payment
-                    # If user wants to add a product, route to agent instead
-                    if user_message and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
-                        from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
-                        from src.agents.langgraph.rules.payment_proof import detect_payment_proof
-                        
-                        # Check for product addition intent
-                        is_product_addition = detect_product_addition_intent(user_message)
-                        # Check if it's actually payment proof
-                        is_payment_proof = detect_payment_proof(
-                            user_text=user_message,
-                            has_image=True,
-                            has_url=False,
-                        )
-                        
-                        if is_product_addition and not is_payment_proof:
-                            # User wants to add product with photo → route to vision for product identification
-                            # CRITICAL: Vision will process photo, identify product, and add to order
-                            track_metric(
-                                "image_routed_to_vision",
-                                1,
-                                {
-                                    "session_id": session_id,
-                                    "phase": dialog_phase,
-                                    "thread_id": thread_id,
-                                    "reason": "product_addition_intent_with_photo",
-                                },
-                            )
-                            _route_debug(
-                                session_id=session_id,
-                                current_phase=dialog_phase,
-                                detected_intent=detected_intent,
-                                destination="moderation",
-                                reason=f"product addition intent with photo detected in {dialog_phase}, routing to vision",
-                            )
-                            # Set metadata to indicate product addition context for vision node
-                            if "metadata" not in state:
-                                state["metadata"] = {}
-                            state["metadata"]["product_addition_context"] = True
-                            state["metadata"]["intent"] = "PRODUCT_ADDITION"
-                            return "moderation"  # Route to moderation → vision
-                    
-                    # Payment/delivery phases: route to payment (default behavior)
-                    track_metric(
-                        "image_routed_to_payment",
-                        1,
-                        {
-                            "session_id": session_id,
-                            "phase": dialog_phase,
-                            "thread_id": thread_id,
-                            "reason": "ongoing_conversation_payment",
-                        },
-                    )
-                    _route_debug(
-                        session_id=session_id,
-                        current_phase=dialog_phase,
-                        detected_intent=detected_intent,
-                        destination="payment",
-                        reason=f"ongoing conversation: image in {dialog_phase} (already greeted)",
-                    )
-                    return "payment"
-                else:
-                    # Other phases: route to agent to handle in context
-                    track_metric(
-                        "image_routed_to_agent",
-                        1,
-                        {
-                            "session_id": session_id,
-                            "phase": dialog_phase,
-                            "thread_id": thread_id,
-                            "reason": "ongoing_conversation",
-                        },
-                    )
-                    _route_debug(
-                        session_id=session_id,
-                        current_phase=dialog_phase,
-                        detected_intent=detected_intent,
-                        destination="agent",
-                        reason=f"ongoing conversation: image in {dialog_phase} (already greeted, handle in context)",
-                    )
-                    return "agent"
-            
-            # Transactional phases: check for product addition before routing to payment
-            if dialog_phase in transactional_phases:
-                from src.services.observability import track_metric
-                
-                # CRITICAL: Check if this is product addition intent BEFORE routing to payment
-                if user_message and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
-                    from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
-                    from src.agents.langgraph.rules.payment_proof import detect_payment_proof
-                    
-                    # Check for product addition intent
-                    is_product_addition = detect_product_addition_intent(user_message)
-                    # Check if it's actually payment proof
-                    is_payment_proof = detect_payment_proof(
-                        user_text=user_message,
-                        has_image=True,
-                        has_url=False,
-                    )
-                    
-                    if is_product_addition and not is_payment_proof:
-                        # User wants to add product with photo → route to vision for product identification
-                        # CRITICAL: Vision will process photo, identify product, and add to order
-                        track_metric(
-                            "image_routed_to_vision",
-                            1,
-                            {
-                                "session_id": session_id,
-                                "phase": dialog_phase,
-                                "thread_id": thread_id,
-                                "reason": "product_addition_intent_with_photo_transactional",
-                            },
-                        )
-                        _route_debug(
-                            session_id=session_id,
-                            current_phase=dialog_phase,
-                            detected_intent=detected_intent,
-                            destination="moderation",
-                            reason=f"product addition intent with photo in transactional phase {dialog_phase}, routing to vision",
-                        )
-                        # Set metadata to indicate product addition context for vision node
-                        if "metadata" not in state:
-                            state["metadata"] = {}
-                        state["metadata"]["product_addition_context"] = True
-                        state["metadata"]["intent"] = "PRODUCT_ADDITION"
-                        return "moderation"  # Route to moderation → vision
-                
-                # Default: route to payment for transactional phases
-                track_metric(
-                    "image_routed_to_payment",
-                    1,
-                    {
-                        "session_id": session_id,
-                        "phase": dialog_phase,
-                        "thread_id": thread_id,
-                        "reason": "transactional_phase",
-                    },
-                )
-                _route_debug(
-                    session_id=session_id,
-                    current_phase=dialog_phase,
-                    detected_intent=detected_intent,
-                    destination="payment",
-                    reason=f"phase-aware routing: image in {dialog_phase}",
-                )
-                return "payment"
-            
-            # CRITICAL: If phase is NOT INIT/DISCOVERY and NOT transactional, 
-            # route to agent (NOT vision) to prevent restart, even if vision_greeted=False
-            # This handles cases like WAITING_FOR_SIZE, WAITING_FOR_COLOR, OFFER_MADE, etc.
-            if dialog_phase not in vision_allowed_phases:
-                from src.services.observability import track_metric
-                track_metric(
-                    "image_routed_to_agent",
-                    1,
-                    {
-                        "session_id": session_id,
-                        "phase": dialog_phase,
-                        "thread_id": thread_id,
-                        "reason": "mid_conversation_phase",
-                    },
-                )
-                _route_debug(
-                    session_id=session_id,
-                    current_phase=dialog_phase,
-                    detected_intent=detected_intent,
-                    destination="agent",
-                    reason=f"photo in {dialog_phase} (not INIT/DISCOVERY, handle in context)",
-                )
-                return "agent"
-        
-        # First photo in session (INIT/DISCOVERY) or phase-aware disabled: route to vision
+        from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
         from src.services.observability import track_metric
-        track_metric(
-            "image_routed_to_vision",
-            1,
-            {
-                "session_id": session_id,
-                "phase": dialog_phase,
-                "thread_id": thread_id,
-                "reason": "first_photo" if not vision_greeted else "phase_aware_disabled",
-            },
-        )
-        _route_debug(
-            session_id=session_id,
-            current_phase=dialog_phase,
-            detected_intent=detected_intent,
-            destination="moderation",
-            reason="first photo in session or phase-aware disabled",
-        )
-        return "moderation"
+        
+        photo_purpose, reason = determine_photo_purpose(state, user_message)
+        
+        # Set metadata for product addition context if needed
+        if photo_purpose == "product_ident" and reason == "product_addition_intent_in_payment_phase":
+            if "metadata" not in state:
+                state["metadata"] = {}
+            state["metadata"]["product_addition_context"] = True
+            state["metadata"]["intent"] = "PRODUCT_ADDITION"
+        
+        # Route based on photo purpose
+        if photo_purpose == "product_ident":
+            track_metric(
+                "image_routed_to_vision",
+                1,
+                {
+                    "session_id": session_id,
+                    "phase": dialog_phase,
+                    "thread_id": thread_id,
+                    "reason": reason,
+                },
+            )
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="moderation",
+                reason=f"photo purpose: {photo_purpose} ({reason})",
+            )
+            return "moderation"
+        elif photo_purpose == "transactional":
+            track_metric(
+                "image_routed_to_payment",
+                1,
+                {
+                    "session_id": session_id,
+                    "phase": dialog_phase,
+                    "thread_id": thread_id,
+                    "reason": reason,
+                },
+            )
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="payment",
+                reason=f"photo purpose: {photo_purpose} ({reason})",
+            )
+            return "payment"
+        else:  # context
+            track_metric(
+                "image_routed_to_agent",
+                1,
+                {
+                    "session_id": session_id,
+                    "phase": dialog_phase,
+                    "thread_id": thread_id,
+                    "reason": reason,
+                },
+            )
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="agent",
+                reason=f"photo purpose: {photo_purpose} ({reason})",
+            )
+            return "agent"
 
     if detected_intent == "COMPLAINT":
         _route_debug(

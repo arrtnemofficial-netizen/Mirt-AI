@@ -73,6 +73,7 @@ def build_followup_message(
         session_id=session_id,
         role="assistant",
         content=content,
+        user_id=session_id,  # session_id = user_id for ManyChat/Instagram consistency
         created_at=created_at,
         tags=[MessageTag.followup_tag(index)],
     )

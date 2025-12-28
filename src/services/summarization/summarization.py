@@ -57,7 +57,7 @@ def summarise_messages(messages: list[StoredMessage]) -> str:
     return " \n".join(parts)
 
 
-def update_user_summary(user_id: int, summary: str) -> None:
+def update_user_summary(user_id: str, summary: str) -> None:
     """Update summary field in users table."""
     if psycopg is None:
         logger.error("psycopg not installed")
@@ -154,10 +154,13 @@ def get_users_needing_summary() -> list[dict[str, Any]]:
         return []
 
 
-def mark_user_summarized(user_id: int) -> None:
+def mark_user_summarized(user_id: str) -> None:
     """Mark user as summarized by updating tags.
 
     Removes 'needs_summary' and adds 'summarized' tag.
+    
+    Args:
+        user_id: User ID (string format for ManyChat/Instagram compatibility)
     """
     if psycopg is None:
         logger.error("psycopg not installed")
@@ -231,6 +234,32 @@ def run_retention(
     # Save summary to users table if we have user_id
     if user_id:
         update_user_summary(user_id, summary_text)
+        
+        # Also save to mirt_memory_summaries table for memory system
+        try:
+            from src.services.memory_service import MemoryService
+            from src.workers.sync_utils import run_sync
+            
+            memory_service = MemoryService()
+            if memory_service.enabled:
+                # Run async save_summary in sync context (for Celery tasks)
+                run_sync(
+                    memory_service.save_summary(
+                        user_id=str(user_id),
+                        summary_text=summary_text,
+                        facts_count=0,  # Can be enhanced later
+                    )
+                )
+                logger.info(
+                    "Saved summary to mirt_memory_summaries for user %s",
+                    user_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to save summary to mirt_memory_summaries for user %s: %s",
+                user_id,
+                e,
+            )
 
     # Delete old messages from messages table
     message_store.delete(session_id)

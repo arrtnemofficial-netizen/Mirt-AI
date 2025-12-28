@@ -111,32 +111,47 @@ class OrderService:
                         order_id = new_order["id"]
                         created_at = new_order["created_at"]
                         updated_at = new_order["updated_at"]
+                        is_new_order = created_at == updated_at
                         
-                        # 3. Insert Order Items (only if this is a new order)
-                        # Check if order was just created or updated
-                        if created_at == updated_at:
-                            items = order_data.get("items", [])
-                            if items:
-                                for item in items:
-                                    cur.execute(
-                                        """
-                                        INSERT INTO order_items (
-                                            order_id, product_id, product_name,
-                                            quantity, price_at_purchase,
-                                            selected_size, selected_color
-                                        )
-                                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                        """,
-                                        (
-                                            order_id,
-                                            item.get("product_id"),
-                                            item.get("name"),
-                                            item.get("quantity", 1),
-                                            item.get("price", 0),
-                                            item.get("size"),
-                                            item.get("color"),
-                                        ),
+                        # 3. Upsert Order Items (sync items with current cart)
+                        # CRITICAL: Always sync items to handle cart changes
+                        # Delete existing items first, then insert new ones
+                        cur.execute(
+                            "DELETE FROM order_items WHERE order_id = %s",
+                            (order_id,),
+                        )
+                        
+                        # Insert current items
+                        items = order_data.get("items", [])
+                        if items:
+                            for item in items:
+                                cur.execute(
+                                    """
+                                    INSERT INTO order_items (
+                                        order_id, product_id, product_name,
+                                        quantity, price_at_purchase,
+                                        selected_size, selected_color
                                     )
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    """,
+                                    (
+                                        order_id,
+                                        item.get("product_id"),
+                                        item.get("name"),
+                                        item.get("quantity", 1),
+                                        item.get("price", 0),
+                                        item.get("size"),
+                                        item.get("color"),
+                                    ),
+                                )
+                            logger.info(
+                                "Order items synced: order_id=%s, items_count=%d, is_new=%s",
+                                order_id,
+                                len(items),
+                                is_new_order,
+                            )
+                        else:
+                            logger.warning("Order %s has no items", order_id)
                         
                         conn.commit()
                         logger.info("Order upserted successfully: ID %s", order_id)

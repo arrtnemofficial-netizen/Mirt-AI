@@ -41,10 +41,19 @@ class ProfilesMixin(MemoryBase):
             return None
 
     async def get_or_create_profile(self, user_id: str):
+        """Get existing profile or create new one if doesn't exist."""
         existing = await self.get_profile(user_id)
         if existing:
             return existing
-        return await self.create_profile(user_id)
+        
+        # Profile doesn't exist - create it
+        new_profile = await self.create_profile(user_id)
+        if new_profile:
+            logger.info(
+                "✅ Created new profile for user %s (mirt_profiles table populated)",
+                user_id,
+            )
+        return new_profile
 
     async def create_profile(self, user_id: str):
         if not self._enabled:

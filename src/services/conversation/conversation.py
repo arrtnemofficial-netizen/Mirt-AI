@@ -553,8 +553,38 @@ class ConversationHandler:
                     metadata=state.get("metadata"),
                 )
 
-            # Persist user message
-            self._persist_user_message(session_id, text)
+            # Persist user message (with user_id from metadata)
+            self._persist_user_message(session_id, text, state.get("metadata"))
+
+            # SITNIKS FIRST TOUCH (on first message, independent of memory gating)
+            # This ensures sitniks_chat_mappings is always populated when usernames are available
+            metadata = state.get("metadata", {})
+            step_number = state.get("step_number", 0)
+            if step_number <= 1:
+                instagram_username = metadata.get("instagram_username")
+                telegram_username = metadata.get("telegram_username") or metadata.get("user_nickname")
+                
+                if instagram_username or telegram_username:
+                    try:
+                        from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+                        sitniks_service = get_sitniks_chat_service()
+                        if sitniks_service.enabled:
+                            sitniks_result = await sitniks_service.handle_first_touch(
+                                user_id=session_id,
+                                instagram_username=instagram_username,
+                                telegram_username=telegram_username,
+                            )
+                            if sitniks_result.get("success"):
+                                logger.info(
+                                    "[SESSION %s] Sitniks first touch completed: chat_id=%s",
+                                    session_id,
+                                    sitniks_result.get("chat_id"),
+                                )
+                                # Store chat_id in state metadata for later use
+                                state["metadata"]["sitniks_chat_id"] = sitniks_result.get("chat_id")
+                                state["metadata"]["sitniks_first_touch_done"] = True
+                    except Exception as e:
+                        logger.warning("[SESSION %s] Sitniks first touch error: %s", session_id, e)
 
             # Invoke the agent
             logger.info(
@@ -598,8 +628,8 @@ class ConversationHandler:
                 preview_text[:200] + "..." if len(preview_text) > 200 else preview_text,
             )
 
-            # Persist assistant response
-            self._persist_assistant_message(session_id, agent_response)
+            # Persist assistant response (with user_id from metadata)
+            self._persist_assistant_message(session_id, agent_response, result_state.get("metadata"))
 
             # Save updated state
             # CRITICAL: Use to_thread() to avoid blocking event loop!
@@ -863,9 +893,24 @@ class ConversationHandler:
             escalation=escalation,
         )
 
-    def _persist_user_message(self, session_id: str, text: str) -> None:
+    def _persist_user_message(
+        self, session_id: str, text: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Store the user message in the message store."""
-        msg = StoredMessage(session_id=session_id, role="user", content=text)
+        # Extract user_id from metadata (fallback to session_id if not available)
+        user_id = None
+        if metadata:
+            user_id = metadata.get("user_id") or metadata.get("session_id") or session_id
+        else:
+            user_id = session_id  # Fallback to session_id
+        
+        msg = StoredMessage(
+            session_id=session_id,
+            role="user",
+            content=text,
+            user_id=user_id,
+            metadata=metadata,  # Pass metadata for users table updates
+        )
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -893,14 +938,25 @@ class ConversationHandler:
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 
-    def _persist_assistant_message(self, session_id: str, response: AgentResponse) -> None:
+    def _persist_assistant_message(
+        self, session_id: str, response: AgentResponse, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Store the assistant response with appropriate tags."""
+        # Extract user_id from metadata (fallback to session_id if not available)
+        user_id = None
+        if metadata:
+            user_id = metadata.get("user_id") or metadata.get("session_id") or session_id
+        else:
+            user_id = session_id  # Fallback to session_id
+        
         tags = [MessageTag.HUMAN_NEEDED] if response.escalation else []
         msg = StoredMessage(
             session_id=session_id,
             role="assistant",
             content=response.model_dump_json(),
+            user_id=user_id,
             tags=tags,
+            metadata=metadata,  # Pass metadata for users table updates
         )
 
         try:
@@ -960,8 +1016,9 @@ class ConversationHandler:
             ),
         )
 
-        # Try to persist the fallback response
-        self._persist_assistant_message(session_id, fallback_response)
+        # Try to persist the fallback response (with user_id from state if available)
+        fallback_metadata = state.get("metadata") if state else None
+        self._persist_assistant_message(session_id, fallback_response, fallback_metadata)
 
         # Build minimal state if we don't have one
         fallback_state: ConversationState = state or ConversationState(

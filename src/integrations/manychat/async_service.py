@@ -132,7 +132,10 @@ class ManyChatAsyncService:
         subscriber_data: dict[str, Any] | None,
         trace_id: str,
     ) -> dict[str, Any]:
-        extra_metadata: dict[str, Any] = {}
+        extra_metadata: dict[str, Any] = {
+            "user_id": user_id,  # CRITICAL: Always include user_id for users table updates
+            "session_id": user_id,  # session_id = user_id for ManyChat/Instagram
+        }
 
         if image_url:
             extra_metadata.update({"has_image": True, "image_url": image_url})
@@ -636,9 +639,15 @@ class ManyChatAsyncService:
         try:
             from src.agents.langgraph.state import create_initial_state
 
+            # CRITICAL: Explicitly reset vision flags on restart
             reset_state = create_initial_state(
                 session_id=user_id,
-                metadata={"channel": channel},
+                metadata={
+                    "channel": channel,
+                    "vision_greeted": False,  # Explicitly reset
+                    "has_image": False,  # Explicitly reset
+                    "image_url": None,  # Explicitly clear
+                },
             )
             _lg_start = _time.time()
             # Use timeout to prevent blocking - checkpointer reset is optional

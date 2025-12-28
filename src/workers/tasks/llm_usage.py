@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 # Pricing per 1M tokens (USD) - update as needed
 MODEL_PRICING: dict[str, dict[str, Decimal]] = {
+    "gpt-5.1": {"input": Decimal("5.00"), "output": Decimal("15.00")},  # Estimated pricing for GPT-5.1
+    "gpt-5.1-mini": {"input": Decimal("0.30"), "output": Decimal("1.20")},  # Estimated pricing for GPT-5.1-mini
+    "gpt-5.1-nano": {"input": Decimal("0.10"), "output": Decimal("0.40")},  # Estimated pricing for GPT-5.1-nano
     "gpt-4o": {"input": Decimal("2.50"), "output": Decimal("10.00")},
     "gpt-4o-mini": {"input": Decimal("0.15"), "output": Decimal("0.60")},
     "gpt-4-turbo": {"input": Decimal("10.00"), "output": Decimal("30.00")},
@@ -83,7 +86,7 @@ def calculate_cost(
 )
 def record_usage(
     self,
-    user_id: int | None,
+    user_id: str | None,  # Changed from int to str (ManyChat/Instagram IDs are strings)
     model: str,
     tokens_input: int,
     tokens_output: int,
@@ -93,7 +96,7 @@ def record_usage(
     """Record LLM usage to database.
 
     Args:
-        user_id: User ID (optional)
+        user_id: User ID (optional, string format for ManyChat/Instagram compatibility)
         model: Model name (e.g., "gpt-4o-mini")
         tokens_input: Input tokens used
         tokens_output: Output tokens used
