@@ -126,3 +126,4 @@ async def test_search_facts_filters_expired_by_ttl():
         
         # After ЗАДАЧА 3, the SQL in search_memories() function should also filter expires_at
 
+

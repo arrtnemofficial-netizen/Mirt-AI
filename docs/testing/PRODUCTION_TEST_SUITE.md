@@ -265,3 +265,4 @@ pytest tests/test_langgraph_integrity_no_crm_error.py -v
 
 **Єдиний "незалізобетонний" момент:** Contract тести для реального Sitniks API (потребує доступу до API).
 
+
