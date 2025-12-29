@@ -36,8 +36,9 @@ Processes LLM requests, CRM updates, and heavy logic.
 Schedules periodic tasks (Follow-ups, Summarization).
 - **Command:**
   ```bash
-  celery -A src.workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
+  celery -A src.workers.celery_app beat --loglevel=info
   ```
+  *(Schedule file path is handled automatically in code)*
 - **Scale:** **MUST be a singleton** (only 1 replica), otherwise tasks will duplicate.
 
 ## 🐳 Docker Compose (Local/VPS)
