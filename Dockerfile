@@ -88,3 +88,8 @@ USER mirt
 
 # Override command for development
 CMD ["uvicorn", "src.server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# -----------------------------------------------------------------------------
+# Stage 4: Final (default to production when no target specified)
+# -----------------------------------------------------------------------------
+FROM production as final
