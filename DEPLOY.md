@@ -36,7 +36,7 @@ Processes LLM requests, CRM updates, and heavy logic.
 Schedules periodic tasks (Follow-ups, Summarization).
 - **Command:**
   ```bash
-  celery -A src.workers.celery_app beat --loglevel=info
+  celery -A src.workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
   ```
 - **Scale:** **MUST be a singleton** (only 1 replica), otherwise tasks will duplicate.
 
