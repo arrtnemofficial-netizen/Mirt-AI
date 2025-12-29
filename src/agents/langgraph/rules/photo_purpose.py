@@ -102,25 +102,28 @@ def determine_photo_purpose(
     # =========================================================================
     # PRIORITY 4: Smart rerun vision (mid-conversation)
     # =========================================================================
-    # If no product selected OR user explicitly asks for price/model
+    # If no product selected AND user asks for price/model → run vision
+    # But if product IS selected → user is asking about THAT product, not a new one
     if phase_aware_enabled and vision_greeted and dialog_phase not in vision_allowed_phases:
         # Check if user asks for price/model identification
         price_model_keywords = [
             "цена", "ціна", "price",
             "что за модель", "що за модель", "яка модель",
             "что это", "що це", "what is this",
-            "модель", "model",
         ]
 
         asks_for_identification = any(
             keyword in user_message_lower for keyword in price_model_keywords
         )
 
-        # Smart rerun: if no products selected OR user asks for identification
-        if not selected_products or asks_for_identification:
+        # Smart rerun ONLY if:
+        # 1. No products selected at all (need to identify) OR
+        # 2. User explicitly asks "what is this" type questions AND no product in context
+        if not selected_products and asks_for_identification:
             return ("product_ident", "smart_rerun_no_products_or_asks_identification")
 
-        # Otherwise: handle in context
+        # If products are already selected, questions about price/size are about THOSE products
+        # Handle in context (agent will answer from product data)
         return ("context", f"mid_conversation_phase_{dialog_phase}")
 
     # =========================================================================

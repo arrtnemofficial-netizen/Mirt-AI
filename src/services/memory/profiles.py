@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from psycopg.rows import dict_row
+from psycopg.types.json import Json
 
 from src.services.memory.base import MemoryBase
 from src.services.memory.constants import TABLE_PROFILES
@@ -84,10 +85,10 @@ class ProfilesMixin(MemoryBase):
                         """,
                         (
                             data["user_id"],
-                            data["child_profile"],
-                            data["style_preferences"],
-                            data["logistics"],
-                            data["commerce"],
+                            Json(data["child_profile"]),
+                            Json(data["style_preferences"]),
+                            Json(data["logistics"]),
+                            Json(data["commerce"]),
                             data["created_at"],
                             data["updated_at"],
                             data["last_seen_at"],
@@ -130,7 +131,7 @@ class ProfilesMixin(MemoryBase):
 
             if child_profile:
                 merged = {**current.child_profile.model_dump(), **child_profile}
-                updates["child_profile"] = merged
+                updates["child_profile"] = Json(merged)
 
             if style_preferences:
                 merged = {**current.style_preferences.model_dump(), **style_preferences}
@@ -145,15 +146,15 @@ class ProfilesMixin(MemoryBase):
                         existing = current.style_preferences.model_dump().get(key, [])
                         new = style_preferences.get(key, [])
                         merged[key] = list(set(existing + new))
-                updates["style_preferences"] = merged
+                updates["style_preferences"] = Json(merged)
 
             if logistics:
                 merged = {**current.logistics.model_dump(), **logistics}
-                updates["logistics"] = merged
+                updates["logistics"] = Json(merged)
 
             if commerce:
                 merged = {**current.commerce.model_dump(), **commerce}
-                updates["commerce"] = merged
+                updates["commerce"] = Json(merged)
 
             set_clause = ", ".join(f"{key} = %s" for key in updates)
             values = list(updates.values()) + [user_id]

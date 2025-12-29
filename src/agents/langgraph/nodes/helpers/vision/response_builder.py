@@ -78,6 +78,17 @@ def build_vision_messages(
         ss = _norm_color(s)
         return ("/" in ss) or (" або " in ss)
 
+    def _is_feminine_product(name: str, catalog: dict[str, Any] | None) -> bool:
+        name_norm = " ".join((name or "").lower().split())
+        category = ""
+        if isinstance(catalog, dict):
+            category = " ".join((catalog.get("category") or "").lower().split())
+        if "????" in name_norm:
+            return True
+        if "????" in category:
+            return True
+        return False
+
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
     # CRITICAL: Use AND (not OR) to prevent repeat greeting when history is trimmed/missing
     if (not vision_greeted) and (not _history_has_greeting(previous_messages)):
@@ -139,6 +150,10 @@ def build_vision_messages(
             prefix = "Це наш"
             if confidence < 0.5:
                 prefix = "Схоже, це наш"
+            is_feminine = _is_feminine_product(product_name, catalog_product)
+            if is_feminine:
+                prefix = prefix.replace("Це наш", "Це наша")
+                prefix = prefix.replace("Схоже, це наш", "Схоже, це наша")
 
             if color_already_in_name:
                 # Color is in name - just use the name

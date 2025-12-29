@@ -165,7 +165,7 @@ class Settings(BaseSettings):
         ),
     )
     MANYCHAT_INSTAGRAM_BUBBLE_DELAY_SECONDS: float = Field(
-        default=5.0,
+        default=1.5,
         description=(
             "Delay in seconds between Instagram bubbles when MANYCHAT_INSTAGRAM_SPLIT_SEND is enabled."
         ),

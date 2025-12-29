@@ -13,6 +13,7 @@ from src.core.constants import AgentState as StateEnum
 if TYPE_CHECKING:
     from src.agents import ConversationState
 
+
 def _serialize_for_json(value: Any) -> Any:
     """Recursively serialize values, converting LangChain Message objects to dicts."""
     if isinstance(value, BaseMessage):
@@ -21,6 +22,13 @@ def _serialize_for_json(value: Any) -> Any:
             "content": value.content,
             "additional_kwargs": getattr(value, "additional_kwargs", {}),
         }
+    # Handle Pydantic BaseModel objects (e.g., UserProfile)
+    elif hasattr(value, "model_dump"):
+        # Pydantic V2
+        return _serialize_for_json(value.model_dump())
+    elif hasattr(value, "dict"):
+        # Pydantic V1 fallback
+        return _serialize_for_json(value.dict())
     elif isinstance(value, dict):
         return {k: _serialize_for_json(v) for k, v in value.items()}
     elif isinstance(value, list):
@@ -64,7 +72,7 @@ class InMemorySessionStore:
     def save(self, session_id: str, state: ConversationState) -> None:
         """Persist the current state for the session."""
 
-        # Serialize state to handle LangChain Message objects
+        # Serialize state to handle LangChain Message objects and Pydantic models
         serialized_state = _serialize_for_json(dict(state))
         self._store[session_id] = deepcopy(serialized_state)
 
