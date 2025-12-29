@@ -27,7 +27,7 @@ import logging
 from typing import Any
 
 from openai import AsyncOpenAI
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, RunUsage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -509,8 +509,9 @@ async def run_support(
         # Try to extract usage from result (if available)
         if hasattr(result, "usage") and result.usage is not None:
             usage = result.usage
-            # Check if usage has actual values (not just default 0s)
-            if usage.has_values():
+            # Check if usage is actually a RunUsage instance (not a function) and has actual values
+            # First check it's not callable (function), then check it's RunUsage, then check has_values
+            if not callable(usage) and isinstance(usage, RunUsage) and hasattr(usage, "has_values") and usage.has_values():
                 if hasattr(usage, "input_tokens"):
                     tokens_input = usage.input_tokens or 0
                 if hasattr(usage, "output_tokens"):
