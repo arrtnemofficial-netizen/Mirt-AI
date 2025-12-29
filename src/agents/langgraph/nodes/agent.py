@@ -495,7 +495,7 @@ async def agent_node(
                 "Suppressing to DISCOVERY_OR_QUESTION (photo should be handled by vision_node).",
                 session_id,
             )
-            from src.services.observability import track_metric
+            # from src.services.observability import track_metric  <-- REMOVE
             track_metric(
                 "agent_photo_ident_suppressed",
                 1,
@@ -882,7 +882,7 @@ async def agent_node(
                 "[SESSION %s] Missing product info detected - exiting with escalation",
                 session_id,
             )
-            from src.services.observability import track_metric
+            # from src.services.observability import track_metric  <-- REMOVE
             track_metric(
                 "missing_product_info_exit",
                 1,

@@ -83,10 +83,23 @@ def build_vision_messages(
         category = ""
         if isinstance(catalog, dict):
             category = " ".join((catalog.get("category") or "").lower().split())
-        if "????" in name_norm:
-            return True
-        if "????" in category:
-            return True
+        feminine_keywords = [
+            "сукн",  # сукня
+            "спідниц",  # спідниця
+            "блуз",  # блуза
+            "сорочк",  # сорочка
+            "футболк",  # футболка
+            "піжам",  # піжама
+            "куртк",  # куртка
+            "парк",  # парка
+            "шуб",  # шуба
+            "жилетк",  # жилетка
+        ]
+        
+        for kw in feminine_keywords:
+            if kw in name_norm or kw in category:
+                return True
+        
         return False
 
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
