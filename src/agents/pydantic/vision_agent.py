@@ -101,8 +101,9 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
     Uses exponential backoff for retries and tracks metrics for observability.
     """
     import asyncio
+
     from src.services.observability import track_metric
-    
+
     url = url.rstrip(";").strip()
     start_time = time.perf_counter()
 
@@ -122,7 +123,7 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
 
     last_error: str | None = None
     last_status_code: int | None = None
-    
+
     for attempt in range(max_retries + 1):
         try:
             # Exponential backoff: 0.5s, 1s, 2s
@@ -135,7 +136,7 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
                     backoff_delay,
                 )
                 await asyncio.sleep(backoff_delay)
-            
+
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
@@ -145,7 +146,7 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
                     content_type = content_type.split(";")[0].strip()
 
                 image_data = response.content
-                
+
                 # Validate image size (prevent huge downloads)
                 max_size = 10 * 1024 * 1024  # 10MB
                 if len(image_data) > max_size:
@@ -157,10 +158,10 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
                         {"status": "too_large", "size_bytes": len(image_data)},
                     )
                     return None
-                
+
                 b64_data = base64.b64encode(image_data).decode("utf-8")
                 data_url = f"data:{content_type};base64,{b64_data}"
-                
+
                 latency_ms = (time.perf_counter() - start_time) * 1000.0
                 logger.info(
                     "✅ Downloaded image from CDN: %d bytes, type=%s, latency=%.0fms",
@@ -182,7 +183,7 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
         except httpx.HTTPStatusError as e:
             last_status_code = e.response.status_code
             last_error = f"HTTP {e.response.status_code}"
-            
+
             # Handle specific status codes
             if e.response.status_code == 403:
                 if attempt < max_retries:
@@ -236,14 +237,14 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
                     1,
                     {"status": f"http_{e.response.status_code}", "attempt": attempt + 1},
                 )
-            
+
             logger.error(
                 "Failed to download image (HTTP %d): %s",
                 e.response.status_code,
                 url[:80],
             )
             return None
-            
+
         except httpx.TimeoutException:
             last_error = "timeout"
             if attempt < max_retries:
@@ -260,7 +261,7 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
                 {"status": "timeout", "attempt": attempt + 1},
             )
             return None
-            
+
         except Exception as e:
             last_error = type(e).__name__
             if attempt < max_retries:
@@ -338,7 +339,7 @@ def _build_model() -> OpenAIChatModel:
     if is_openai_model:
         api_key = settings.OPENAI_API_KEY.get_secret_value()
         base_url = "https://api.openai.com/v1"
-        
+
         # CRITICAL: In production, fail fast if OpenAI key is missing (no silent fallback)
         if not api_key:
             error_msg = (
@@ -656,28 +657,6 @@ def _load_vision_guide_from_json() -> str:
         return ""
 
 
-def _get_base_vision_prompt() -> str:
-    parts = []
-
-    vision_main = registry.get("vision.main").content
-    parts.append(vision_main)
-
-    # Add snippets for beautiful descriptions
-    try:
-        snippets = registry.get("system.snippets").content
-        parts.append("\n---\n# ШАБЛОНИ КРАСИВИХ ОПИСІВ (SNIPPETS)\n")
-        parts.append(snippets)
-    except Exception as e:
-        logger.warning(f"Could not load snippets: {e}")
-
-    model_rules = _load_model_rules_yaml()
-    if model_rules:
-        parts.append("\n---\n# MODEL DATABASE\n")
-        parts.append(model_rules)
-
-    return "\n".join(parts)
-
-
 async def _add_live_catalog_context(ctx: RunContext[AgentDeps]) -> str:
     parts = []
 
@@ -685,100 +664,123 @@ async def _add_live_catalog_context(ctx: RunContext[AgentDeps]) -> str:
     if vision_guide:
         parts.append(f"\n---\n{vision_guide}")
 
-    recognition_tips = _load_recognition_tips_from_json()
-    if recognition_tips:
-        parts.append(f"\n---\n{recognition_tips}")
-
     return "\n".join(parts)
 
 
-def _load_recognition_tips_from_json() -> str:
-    import json
-    from pathlib import Path
-
-    guide_path = (
-        Path(__file__).parent.parent.parent.parent
-        / "data"
-        / "vision"
-        / "generated"
-        / "vision_guide.json"
-    )
+async def _load_vision_guide_from_db() -> str:
+    from src.services.catalog import CatalogService
 
     try:
-        with open(guide_path, encoding="utf-8") as f:
-            guide = json.load(f)
+        catalog = CatalogService()
+        products = await catalog.get_products_for_vision()
 
-        data = guide.get("visual_recognition_guide", {})
-        products = data.get("products", {})
-        detection_rules = data.get("detection_rules", {})
+        if not products:
+            logger.warning("No products from DB")
+            return "No product data available."
 
-        lines = ["# ДЕТАЛЬНІ ОЗНАКИ ДЛЯ РОЗПІЗНАВАННЯ\n"]
+        # Filter active products if needed, but for now take all
+        # Limit context size if strictly necessary, but GPT-5.1 handled large context well
 
-        for _sku, product_data in products.items():
-            name = product_data.get("name", "Unknown")
-            key_features = product_data.get("key_features", {})
-            distinction = product_data.get("distinction", {})
-            recognition_by_angle = product_data.get("recognition_by_angle", {})
+        lines = ["# VISION GUIDE — LIVE DATABASE CONTEXT\n"]
+        lines.append("Використовуй ці дані для ідентифікації. Це ЄДИНЕ джерело правди.\n")
 
+        for product in products:
+            name = product.get("name", "Unknown")
+            sku = product.get("sku") or product.get("id", "N/A")
+
+            # Basic Info
             lines.append(f"## {name}")
+            lines.append(f"- SKU: {sku}")
 
-            fabric = key_features.get("fabric")
+            # Prices
+            price_by_size = product.get("price_by_size")
+            if price_by_size and isinstance(price_by_size, dict):
+                prices = list(price_by_size.values())
+                if prices:
+                    min_p, max_p = min(prices), max(prices)
+                    price_str = f"{int(min_p)} грн" if min_p == max_p else f"{int(min_p)}-{int(max_p)} грн"
+                    lines.append(f"- Ціна: {price_str}")
+            else:
+                price = product.get("price")
+                if price:
+                    lines.append(f"- Ціна: {int(price)} грн")
+
+            # Colors
+            colors = product.get("colors")
+            if colors:
+                if isinstance(colors, list):
+                    lines.append(f"- Кольори: {', '.join(colors)}")
+                elif isinstance(colors, str):
+                     lines.append(f"- Кольори: {colors}")
+
+            # --- DYNAMIC RULES FROM DB (JSONB COLUMNS) ---
+
+            # 1. Visual Rules (visual_rules column)
+            visual = product.get("visual_rules") or {}
+
+            fabric = visual.get("fabric_type")
             if fabric:
-                lines.append(f"- **ТКАНИНА**: {fabric}")
+                lines.append(f"- Тканина: {fabric}")
 
-            markers = key_features.get("markers", [])
-            if markers:
-                lines.append("- **КЛЮЧОВІ ОЗНАКИ**:")
-                for marker in markers:
-                    lines.append(f"  - {marker}")
+            markers = visual.get("key_markers")
+            if markers and isinstance(markers, list):
+                lines.append("- Ключові ознаки:")
+                for m in markers:
+                    lines.append(f"  * {m}")
 
-            if recognition_by_angle:
-                front = recognition_by_angle.get("front")
-                if front:
-                    lines.append(f"- **Вид спереду**: {front}")
-                detail = recognition_by_angle.get("detail")
-                if detail:
-                    lines.append(f"- **Деталь**: {detail}")
-
-            texture = product_data.get("texture_description")
+            texture = visual.get("texture_description")
             if texture:
-                lines.append(f"- **Текстура**: {texture}")
+                lines.append(f"- Текстура: {texture}")
 
-            confused_with = distinction.get("confused_with", [])
-            if confused_with:
-                lines.append(f"- **⚠️ НЕ ПЛУТАЙ З**: {', '.join(confused_with)}")
-                how = distinction.get("how_to_distinguish")
-                if how:
-                    lines.append(f"- **ЯК ВІДРІЗНИТИ**: {how.strip()}")
-                critical = distinction.get("critical_check")
-                if critical:
-                    lines.append(f"- **🔍 КРИТИЧНА ПЕРЕВІРКА**: {critical.strip()}")
+            recognition = visual.get("recognition_by_angle")
+            if recognition and isinstance(recognition, dict):
+                lines.append("- Як впізнати:")
+                for angle, desc in recognition.items():
+                    lines.append(f"  * {angle}: {desc}")
 
-            unique = distinction.get("unique_identifier")
-            if unique:
-                lines.append(f"- **УНІКАЛЬНА ОЗНАКА**: {unique}")
+            # 2. Distinction Rules (distinction_rules column)
+            distinction = product.get("distinction_rules") or {}
+
+            confused = distinction.get("confused_with")
+            if confused:
+                if isinstance(confused, list):
+                    lines.append(f"- ⚠️ Плутається з: {', '.join(confused)}")
+
+            how_to = distinction.get("how_to_distinguish")
+            if how_to:
+                lines.append(f"- 🧠 ЯК ВІДРІЗНИТИ: {how_to}")
+
+            critical = distinction.get("critical_check")
+            if critical:
+                lines.append(f"- 🛑 КРИТИЧНА ПЕРЕВІРКА: {critical}")
 
             lines.append("")
-
-        lines.append("\n# ПРАВИЛА ШВИДКОГО ВИЗНАЧЕННЯ")
-
-        by_closure = detection_rules.get("by_closure", {})
-        if by_closure:
-            lines.append("\n**По застібці:**")
-            for closure_type, models in by_closure.items():
-                lines.append(f"- {closure_type}: {', '.join(models)}")
-
-        by_texture = detection_rules.get("by_texture", {})
-        if by_texture:
-            lines.append("\n**По текстурі:**")
-            for texture, models in by_texture.items():
-                lines.append(f"- {texture}: {', '.join(models)}")
 
         return "\n".join(lines)
 
     except Exception as e:
-        logger.warning("Failed to load recognition tips from JSON: %s", e)
-        return ""
+        logger.error("Failed to load Vision Guide from DB: %s", e)
+        return "Error loading product data."
+
+
+def _get_base_vision_prompt() -> str:
+    parts = []
+
+    # 1. Main Persona & High-Level Instructions
+    vision_main = registry.get("vision.main").content
+    parts.append(vision_main)
+
+    # 2. Style Snippets (Emotional Descriptions)
+    try:
+        snippets = registry.get("snippets.products").content
+        parts.append("\n---\n# СТИЛЬ СПІЛКУВАННЯ (SNIPPETS)\n")
+        parts.append(snippets)
+    except Exception as e:
+        logger.warning(f"Could not load snippets: {e}")
+
+    # NO MODEL_RULES.YAML - WE USE DB CONTEXT ONLY
+
+    return "\n".join(parts)
 
 
 _vision_agent: Agent[AgentDeps, VisionResponse] | None = None
@@ -839,7 +841,7 @@ async def run_vision(
     from src.services.llm_usage_logger import log_llm_usage_best_effort
 
     agent = get_vision_agent()
-    
+
     # Track latency and result for logging
     start_time = time.perf_counter()
     result = None
@@ -1037,10 +1039,7 @@ async def run_vision(
     if reference_parts:
         user_input.append(
             "Порівняй фото клієнта з еталонними фото нижче. "
-            "Ключові відмінності: "
-            "Лагуна vs Мрія — довжина блискавки (повна донизу vs коротка до грудей); "
-            "Ритм vs Каприз — є капюшон (Ритм) чи ні (Каприз) і штани джогери vs palazzo; "
-            "Валері — смужки на блузі."
+            "Використовуй правила відмінності (Distinction Rules) з контексту бази даних для фінального рішення."
         )
         user_input.extend(reference_parts)
         logger.info(
@@ -1062,7 +1061,7 @@ async def run_vision(
             timeout=120,
         )
         response = result.output
-        
+
         # Try to extract usage from result (if available)
         if hasattr(result, "usage"):
             usage = result.usage
@@ -1072,14 +1071,14 @@ async def run_vision(
                 tokens_output = usage.output_tokens or 0
         elif hasattr(result, "model_used"):
             model_name = str(result.model_used)
-        
+
         # Extract model from agent if not in result
         if not model_name and hasattr(agent, "model"):
             if hasattr(agent.model, "model_id"):
                 model_name = agent.model.model_id
             elif hasattr(agent.model, "name"):
                 model_name = agent.model.name
-        
+
         # SENIOR-LEVEL: Fallback to actual vision model from settings, not hardcoded
         if not model_name:
             model_name = vision_model_name
@@ -1103,11 +1102,11 @@ async def run_vision(
             clarification_question="Чи можете надіслати фото ще раз або описати товар?",
         )
         return response
-    
+
     finally:
         # Log usage (best-effort, non-blocking)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        
+
         # Prepare minimal metadata for vision
         metadata: dict[str, Any] = {
             "has_image": True,
@@ -1118,7 +1117,7 @@ async def run_vision(
             if response.identified_product:
                 metadata["detected_product_id"] = response.identified_product.id
                 metadata["detected_product_name"] = response.identified_product.name
-        
+
         # Extract model if not already set
         if not model_name:
             if hasattr(agent, "model"):
@@ -1128,7 +1127,7 @@ async def run_vision(
                     model_name = agent.model.name
             if not model_name:
                 model_name = vision_model_name
-        
+
         # SENIOR-LEVEL: Use actual vision model, not hardcoded fallback
         # Log asynchronously (fire-and-forget)
         asyncio.create_task(

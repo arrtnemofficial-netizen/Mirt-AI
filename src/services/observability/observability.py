@@ -348,8 +348,9 @@ class AsyncTracingService:
 
             # Use PostgreSQL for tracing
             import psycopg
+
             from src.services.storage import get_postgres_url
-            
+
             try:
                 postgres_url = get_postgres_url()
             except ValueError:

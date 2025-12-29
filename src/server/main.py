@@ -7,9 +7,7 @@ instead of global singletons.
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
-from typing import Any
 
 import httpx
 from fastapi import FastAPI
@@ -17,6 +15,7 @@ from fastapi import FastAPI
 from src.conf.config import settings
 from src.core.logging import setup_logging
 from src.server.middleware import setup_middleware
+
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +76,16 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("MIRT AI Webhooks Server Starting")
     logger.info("=" * 60)
-    
+
     from src.server.routers.common import get_build_info
-    
+
     build_info = get_build_info()
     logger.info(
         "Build info: git_sha=%s build_id=%s",
         build_info.get("git_sha"),
         build_info.get("build_id"),
     )
-    
+
     # Log LLM configuration (critical for production verification)
     logger.info("LLM Configuration:")
     logger.info("  Provider: %s", settings.LLM_PROVIDER)
@@ -94,17 +93,17 @@ async def lifespan(app: FastAPI):
     logger.info("  Active Model: %s", settings.active_llm_model)
     logger.info("  Temperature: %s", settings.LLM_TEMPERATURE)
     logger.info("  Max Tokens: %s", settings.LLM_MAX_TOKENS)
-    
+
     # Log Observability status
     logger.info("Observability: %s", "ENABLED" if settings.ENABLE_OBSERVABILITY else "DISABLED")
     if settings.ENABLE_OBSERVABILITY:
         logger.info("  llm_traces table will be populated")
     else:
         logger.warning("  llm_traces table will NOT be populated (ENABLE_OBSERVABILITY=False)")
-    
+
     # Log Memory system status
     try:
-        from src.services.memory_service import MemoryService
+        from src.services.memory import MemoryService
         memory_service = MemoryService()
         if memory_service.enabled:
             logger.info("Memory System: ENABLED")
@@ -113,7 +112,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Memory System: DISABLED (DATABASE_URL not configured)")
     except Exception as e:
         logger.warning("Memory System: Check failed - %s", e)
-    
+
     # Log Celery status
     if settings.CELERY_ENABLED:
         logger.info("Celery: ENABLED")
@@ -121,10 +120,10 @@ async def lifespan(app: FastAPI):
         logger.info("  Beat: Scheduled tasks enabled")
     else:
         logger.warning("Celery: DISABLED - scheduled tasks will NOT run")
-    
+
     # Check external services (non-blocking, with timeouts)
     logger.info("Checking external services...")
-    
+
     async def check_http_reachable(name: str, url: str, timeout: float = 3.0) -> tuple[bool, int | None, str | None]:
         """Check if HTTP service is reachable.
         
@@ -156,36 +155,36 @@ async def lifespan(app: FastAPI):
                     # If HEAD fails for other reasons (network, timeout), try GET
                     response = await client.get(url)
                     status = response.status_code
-                
+
                 is_reachable = 200 <= status < 400
                 return is_reachable, status, None
         except Exception as e:
             return False, None, type(e).__name__
-    
+
     # Check ManyChat API
     if settings.MANYCHAT_API_KEY:
         reachable, status, err = await check_http_reachable("ManyChat API", settings.MANYCHAT_API_URL, timeout=5.0)
         if reachable:
             logger.info("✓ ManyChat API: Reachable (status=%d)", status)
         else:
-            logger.warning("⚠ ManyChat API: %s (status=%s, err=%s)", 
+            logger.warning("⚠ ManyChat API: %s (status=%s, err=%s)",
                           "Unreachable" if err else "Not reachable", status, err)
     else:
         logger.warning("⚠ ManyChat API: Not configured (MANYCHAT_API_KEY not set)")
-    
+
     # Check Sitniks CRM
     if settings.SNITKIX_API_KEY and settings.ENABLE_CRM_INTEGRATION:
         reachable, status, err = await check_http_reachable("Sitniks CRM", settings.SNITKIX_API_URL, timeout=5.0)
         if reachable:
             logger.info("✓ Sitniks CRM: Reachable (status=%d)", status)
         else:
-            logger.warning("⚠ Sitniks CRM: %s (status=%s, err=%s)", 
+            logger.warning("⚠ Sitniks CRM: %s (status=%s, err=%s)",
                           "Unreachable" if err else "Not reachable", status, err)
     elif settings.ENABLE_CRM_INTEGRATION:
         logger.warning("⚠ Sitniks CRM: Not configured (SNITKIX_API_KEY not set but ENABLE_CRM_INTEGRATION=true)")
     else:
         logger.info("Sitniks CRM: Integration disabled")
-    
+
     logger.info("=" * 60)
     logger.info("Server ready! All systems operational.")
     logger.info("=" * 60)
@@ -194,7 +193,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down MIRT AI Webhooks server")
-    
+
     # Gracefully close checkpointer pool
     try:
         from src.agents.langgraph.checkpointer import shutdown_checkpointer_pool
@@ -221,6 +220,7 @@ from src.server.routers import (
     media,
     webhooks_manychat,
 )
+
 
 app.include_router(media.router, tags=["media"])
 app.include_router(health.router, tags=["health"])

@@ -23,8 +23,7 @@ from src.conf.config import settings
 from src.core.fallbacks import FallbackType, get_fallback_response
 from src.core.logging import classify_root_cause, log_event, safe_preview
 from src.core.rate_limiter import check_rate_limit
-from src.services.conversation import create_conversation_handler
-from src.services.conversation import BufferedMessage, MessageDebouncer
+from src.services.conversation import BufferedMessage, MessageDebouncer, create_conversation_handler
 from src.services.storage import MessageStore, create_message_store
 
 from .push_client import ManyChatPushClient, get_manychat_push_client

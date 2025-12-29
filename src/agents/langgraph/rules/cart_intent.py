@@ -59,13 +59,13 @@ def detect_add_to_cart(user_text: str) -> bool:
     """
     if not user_text:
         return False
-    
+
     user_text_lower = user_text.lower().strip()
-    
+
     # Check if any add-to-cart keyword is present
     for keyword in ADD_TO_CART_KEYWORDS:
         if keyword in user_text_lower:
             return True
-    
+
     return False
 

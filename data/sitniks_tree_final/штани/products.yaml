@@ -1,0 +1,140 @@
+- name: штани банани голубі
+  id: 3532011
+  price: 1180
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-22/77650e/ab9b47-1724347617163.jpeg
+- name: штани банани лео рижий
+  id: 3471397
+  price: 1180
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/c9aaa6/556413-1724095965541.jpeg
+- name: штани банани лео сірий
+  id: 3471660
+  price: 1180
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/e7b3c3/17c728-1724099900220.jpeg
+- name: штани банани молочний
+  id: 3471663
+  price: 1180
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/d720b9/7c1da5-1724100123761.jpeg
+- name: штани банани чорні
+  id: 3532106
+  price: 1180
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-22/a10632a/a1d3d7-1724348048611.jpeg
+- name: штани жатка котон
+  id: 3470301
+  price: 560
+  sizes:
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  - '158'
+  - '164'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/102f13e/9ab10b-1724091029975.jpeg
+- name: штани кльош не утеплені
+  id: 3470859
+  price: 725
+  sizes:
+  - '116'
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  - '158'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/31de50/671364-1724095326828.jpeg
+- name: штани плащівка беж
+  id: 3470298
+  price: 850
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 86-92
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/1004b5b/07041f-1724090852080.jpeg
+- name: штани плащівка малина
+  id: 3470230
+  price: 850
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 86-92
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/8fd33c/ad17a5-1724090678720.jpeg
+- name: штани плащівка молочний
+  id: 3470035
+  price: 850
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 86-92
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/ce78af/c51a30-1724087183823.jpeg
+- name: штани плащівка чорний
+  id: 3470042
+  price: 850
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - '170'
+  - 86-92
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/7104b5e/1bfea5-1724090481999.jpeg

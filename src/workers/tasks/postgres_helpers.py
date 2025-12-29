@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -13,6 +14,7 @@ except ImportError:
     dict_row = None  # type: ignore
 
 from src.services.storage import get_postgres_url
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +30,12 @@ def get_postgres_connection():
 def call_summarize_inactive_users() -> list[dict[str, Any]]:
     """Call PostgreSQL function summarize_inactive_users()."""
     try:
-        with get_postgres_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM summarize_inactive_users()")
-                rows = cur.fetchall()
-                # Convert to list of dicts
-                columns = [desc[0] for desc in cur.description] if cur.description else []
-                return [dict(zip(columns, row)) for row in rows]
+        with get_postgres_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT * FROM summarize_inactive_users()")
+            rows = cur.fetchall()
+            # Convert to list of dicts
+            columns = [desc[0] for desc in cur.description] if cur.description else []
+            return [dict(zip(columns, row)) for row in rows]
     except Exception as e:
         logger.error("Failed to call summarize_inactive_users: %s", e)
         return []

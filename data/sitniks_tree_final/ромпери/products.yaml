@@ -1,0 +1,14 @@
+- name: ромпер з капюшоном
+  id: 3456533
+  price: 1750
+  sizes:
+  - '110'
+  - '116'
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  colors:
+  - беж
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-18/ac7ce2/d3e10bf-1724000494535.jpeg

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import time
 from datetime import UTC, datetime, timedelta
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,20 @@ class WebhookDedupeStore:
         data = f"{user_id}|{text}|{image_url}|{bucket}"
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
+    async def check_and_mark_async(
+        self,
+        *,
+        user_id: str,
+        message_id: str | None = None,
+        text: str | None = None,
+        image_url: str | None = None,
+    ) -> bool:
+        """Async API for FastAPI endpoints.
+        
+        Returns True if duplicate, False if first time.
+        """
+        return await self._check_and_mark_postgres(user_id, message_id, text, image_url)
+
     def check_and_mark(
         self,
         *,
@@ -40,11 +54,13 @@ class WebhookDedupeStore:
         text: str | None = None,
         image_url: str | None = None,
     ) -> bool:
-        """Check if webhook was processed and mark as processed.
-
+        """Sync wrapper for Celery workers ONLY.
+        
+        DO NOT use in FastAPI endpoints - use check_and_mark_async() instead.
         Returns True if duplicate, False if first time.
         """
-        return asyncio.run(self._check_and_mark_postgres(user_id, message_id, text, image_url))
+        from src.workers.sync_utils import run_sync
+        return run_sync(self._check_and_mark_postgres(user_id, message_id, text, image_url))
 
     async def _check_and_mark_postgres(
         self,
@@ -67,33 +83,37 @@ class WebhookDedupeStore:
 
         try:
             pool = await get_postgres_pool()
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    try:
-                        await cur.execute(
-                            """
+            async with pool.connection() as conn, conn.cursor() as cur:
+                try:
+                    await cur.execute(
+                        """
                             INSERT INTO webhook_dedupe (dedupe_key, processed_at, expires_at)
                             VALUES (%s, %s, %s)
                             """,
-                            (dedupe_key, now, expires_at),
-                        )
-                        await conn.commit()
-                        logger.debug("Webhook dedupe: marked %s", dedupe_key)
-                        return False
-                    except Exception as e:
-                        await conn.rollback()
-                        # Check if it's a duplicate (unique constraint violation)
-                        if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
-                            logger.info("Webhook dedupe: duplicate %s", dedupe_key)
-                            return True
-                        raise
+                        (dedupe_key, now, expires_at),
+                    )
+                    await conn.commit()
+                    logger.debug("Webhook dedupe: marked %s", dedupe_key)
+                    return False
+                except Exception as e:
+                    await conn.rollback()
+                    # Check if it's a duplicate (unique constraint violation)
+                    if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                        logger.info("Webhook dedupe: duplicate %s", dedupe_key)
+                        return True
+                    raise
         except Exception as e:
             logger.error("Webhook dedupe error: %s", e)
             return False
 
+    async def cleanup_expired_async(self) -> int:
+        """Async API for cleanup. Returns count of cleaned rows."""
+        return await self._cleanup_expired_postgres()
+
     def cleanup_expired(self) -> int:
-        """Remove expired entries. Returns count of cleaned rows."""
-        return asyncio.run(self._cleanup_expired_postgres())
+        """Sync wrapper for Celery workers ONLY. Returns count of cleaned rows."""
+        from src.workers.sync_utils import run_sync
+        return run_sync(self._cleanup_expired_postgres())
 
     async def _cleanup_expired_postgres(self) -> int:
         """PostgreSQL implementation."""
@@ -101,16 +121,15 @@ class WebhookDedupeStore:
 
         try:
             pool = await get_postgres_pool()
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(
-                        "DELETE FROM webhook_dedupe WHERE expires_at < NOW()"
-                    )
-                    await conn.commit()
-                    count = cur.rowcount
-                    if count:
-                        logger.debug("Cleaned up %d expired webhook dedupe entries", count)
-                    return count
+            async with pool.connection() as conn, conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM webhook_dedupe WHERE expires_at < NOW()"
+                )
+                await conn.commit()
+                count = cur.rowcount
+                if count:
+                    logger.debug("Cleaned up %d expired webhook dedupe entries", count)
+                return count
         except Exception as e:
             logger.error("Failed to cleanup webhook dedupe: %s", e)
             return 0

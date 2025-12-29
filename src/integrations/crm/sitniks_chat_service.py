@@ -18,6 +18,8 @@ from typing import Any
 import httpx
 
 from src.conf.config import settings
+
+
 # PostgreSQL only - no Supabase dependency
 
 
@@ -347,7 +349,7 @@ class SitniksChatService:
                     "[SITNIKS] AI manager '%s' not found in CRM",
                     ai_manager_name,
                 )
-        
+
         if ai_manager_id:
             manager_ok = await self.assign_manager(chat_id, ai_manager_id)
             result["manager_assigned"] = manager_ok
@@ -363,7 +365,7 @@ class SitniksChatService:
             return False
 
         return await self.update_chat_status(chat_id, settings.SITNIKS_STATUS_INVOICE_SENT)
-    
+
     async def handle_give_requisites(self, user_id: str) -> bool:
         """Alias for handle_invoice_sent (for API consistency)."""
         return await self.handle_invoice_sent(user_id)
@@ -424,8 +426,9 @@ class SitniksChatService:
         """Save user-to-chat mapping in PostgreSQL."""
         try:
             import psycopg
+
             from src.services.storage import get_postgres_url
-            
+
             try:
                 postgres_url = get_postgres_url()
             except ValueError:
@@ -454,25 +457,25 @@ class SitniksChatService:
         """Get Sitniks chat ID for a MIRT user from PostgreSQL."""
         try:
             import psycopg
+
             from src.services.storage import get_postgres_url
-            
+
             try:
                 postgres_url = get_postgres_url()
             except ValueError:
                 return None
-            with psycopg.connect(postgres_url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
+            with psycopg.connect(postgres_url) as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
                         SELECT sitniks_chat_id
                         FROM sitniks_chat_mappings
                         WHERE user_id = %s
                         LIMIT 1
                         """,
-                        (user_id,),
-                    )
-                    row = cur.fetchone()
-            
+                    (user_id,),
+                )
+                row = cur.fetchone()
+
             if row:
                 return row[0]
             return None

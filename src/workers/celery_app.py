@@ -211,7 +211,7 @@ def worker_init_handler(sender=None, **kwargs):
     logger.info("=" * 60)
     logger.info("CELERY WORKER INITIALIZED: %s", sender)
     logger.info("=" * 60)
-    
+
     # Log registered tasks
     task_list = sorted([name for name in celery_app.tasks.keys() if not name.startswith("celery.")])
     logger.info("Registered Tasks (%d):", len(task_list))
@@ -219,7 +219,7 @@ def worker_init_handler(sender=None, **kwargs):
         logger.info("  - %s", task_name)
     if len(task_list) > 10:
         logger.info("  ... and %d more", len(task_list) - 10)
-    
+
     # Log queues
     queue_names = [q.name for q in TASK_QUEUES]
     logger.info("Active Queues: %s", ", ".join(queue_names))

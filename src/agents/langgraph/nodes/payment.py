@@ -113,7 +113,7 @@ async def payment_node(
     """
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
     dialog_phase = state.get("dialog_phase", "")
-    
+
     # Get payment sub-phase for observability and correct phase mapping
     from src.agents.langgraph.state_prompts import get_payment_sub_phase
     payment_sub_phase = get_payment_sub_phase(state)
@@ -129,7 +129,7 @@ async def payment_node(
                 "payment_sub_phase": payment_sub_phase,
             },
         )
-    
+
     # Observability: Log payment_sub_phase vs dialog_phase for mismatch detection
     logger.info(
         "[SESSION %s] Payment node: dialog_phase=%s, payment_sub_phase=%s",
@@ -137,7 +137,7 @@ async def payment_node(
         dialog_phase,
         payment_sub_phase,
     )
-    
+
     # Detect phase mismatch (potential bug indicator)
     if dialog_phase == "WAITING_FOR_PAYMENT_PROOF" and payment_sub_phase not in ("SHOW_PAYMENT", "THANK_YOU"):
         logger.warning(
@@ -152,30 +152,31 @@ async def payment_node(
     # =========================================================================
     # This handles: "no" responses, payment problems, off-topic questions
     from src.agents.langgraph.nodes.helpers.policy_snippets import maybe_apply_snippet_policy
+
     from .utils import extract_user_message
-    
+
     user_message = extract_user_message(state.get("messages", []))
     detected_intent = state.get("detected_intent")
-    
+
     snippet_response = maybe_apply_snippet_policy(
         state,
         detected_intent=detected_intent,
         user_text=user_message,
     )
-    
+
     if snippet_response:
         # Snippet found - return response without LLM call
         # Check if we need to notify manager
         should_notify = snippet_response.get("agent_response", {}).get("metadata", {}).get("should_notify_manager", False)
-        
+
         if should_notify:
             # Notify manager for "no" in payment proof phase or payment problems
             try:
                 from src.services.notifications import NotificationService
-                
+
                 notifier = NotificationService()
                 reason = "Клієнт сказав 'ні' під час оплати" if "user_says_no" in str(snippet_response.get("metadata", {}).get("policy_case", "")) else "Проблема з оплатою"
-                
+
                 details = {
                     "trace_id": state.get("trace_id"),
                     "dialog_phase": dialog_phase,
@@ -183,14 +184,14 @@ async def payment_node(
                     "intent": detected_intent,
                     **state.get("metadata", {}),
                 }
-                
+
                 # Provide product summary (for manager context)
                 try:
                     products = state.get("selected_products", []) or state.get("offered_products", [])
                     details["products"] = [p if isinstance(p, dict) else p.model_dump() if hasattr(p, "model_dump") else {} for p in products]
                 except Exception:
                     details["products"] = []
-                
+
                 await notifier.send_escalation_alert(
                     session_id=session_id,
                     reason=reason,
@@ -203,7 +204,7 @@ async def payment_node(
                     session_id,
                     str(notify_exc)[:200],
                 )
-        
+
         # Return snippet response (continues dialogue, doesn't break FSM)
         return Command(
             update={
@@ -221,7 +222,7 @@ async def payment_node(
     # User has sent delivery data or payment proof - process and go to upsell
     if dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
         return await _handle_delivery_data(state, runner, session_id)
-    
+
     # Check if we're in WAITING_FOR_PAYMENT_METHOD phase
     # User needs to choose payment method (full payment vs prepayment)
     if dialog_phase == "WAITING_FOR_PAYMENT_METHOD":
@@ -323,13 +324,15 @@ async def _prepare_payment_and_interrupt(
         # Lightweight mode: skip human approval interrupt, but WAIT for delivery data
         # User must provide: ПІБ, телефон, адреса НП
         # THEN we go to upsell (after they send payment proof)
-        
+
         # CRITICAL: Determine correct dialog_phase based on payment_sub_phase
         # This prevents setting WAITING_FOR_PAYMENT_PROOF when we're still collecting data
-        from src.agents.langgraph.state_prompts import get_payment_sub_phase, determine_next_dialog_phase
-        
+        from src.agents.langgraph.state_prompts import (
+            get_payment_sub_phase,
+        )
+
         payment_sub_phase = get_payment_sub_phase(state)
-        
+
         # Map payment_sub_phase to dialog_phase deterministically
         phase_map = {
             "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",  # FIXED: No delivery data yet, need to collect
@@ -338,7 +341,7 @@ async def _prepare_payment_and_interrupt(
             "THANK_YOU": "COMPLETED",
         }
         correct_dialog_phase = phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
-        
+
         # Reset policy counters if dialog phase changed
         old_dialog_phase = state.get("dialog_phase", "")
         if old_dialog_phase != correct_dialog_phase:
@@ -352,19 +355,19 @@ async def _prepare_payment_and_interrupt(
                 correct_dialog_phase,
             )
             state["metadata"] = metadata
-        
+
         logger.info(
             "[SESSION %s] HITL disabled - payment_sub_phase=%s -> dialog_phase=%s",
             session_id,
             payment_sub_phase,
             correct_dialog_phase,
         )
-        
+
         # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
         # Розбиваємо по подвійних переносах рядків (\n\n) для багатобаблових відповідей
         response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
         assistant_messages = [{"role": "assistant", "content": part} for part in response_parts] if response_parts else [{"role": "assistant", "content": response_text}]
-        
+
         cmd = Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -408,7 +411,7 @@ async def _prepare_payment_and_interrupt(
     # PaymentResponse має тільки reply_to_user, розбиваємо на багатобаблові повідомлення
     response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
     assistant_messages = [{"role": "assistant", "content": part} for part in response_parts] if response_parts else [{"role": "assistant", "content": response_text}]
-    
+
     cmd = Command(
         update={
             "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -456,24 +459,23 @@ async def _handle_payment_method_selection(
     We show requisites and transition to WAITING_FOR_PAYMENT_PROOF.
     """
     from .utils import extract_user_message
-    
+
     user_message = extract_user_message(state.get("messages", []))
     products = state.get("selected_products", []) or state.get("offered_products", [])
     products = await _ensure_prices_from_catalog(products, session_id=session_id)
     total_price = sum(p.get("price", 0) for p in products)
-    
+
     # Create deps with payment context
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
     deps.selected_products = products
-    
+
     # Set sub-phase to SHOW_PAYMENT (we're about to show requisites)
     try:
-        from src.agents.langgraph.state_prompts import get_payment_sub_phase
         deps.payment_sub_phase = "SHOW_PAYMENT"
     except Exception:
         deps.payment_sub_phase = "SHOW_PAYMENT"
-    
+
     try:
         # Call payment agent to generate response with requisites
         response = await run_payment(
@@ -482,12 +484,12 @@ async def _handle_payment_method_selection(
             message_history=None,
         )
         response_text = response.reply_to_user or ""
-        
+
         # Mark that payment details were sent
         metadata_update = state.get("metadata", {}).copy()
         metadata_update["payment_details_sent"] = True
         metadata_update["awaiting_payment_confirmation"] = True
-        
+
     except Exception as e:
         logger.error("[SESSION %s] Payment method selection processing error: %s", session_id, e)
         # Fallback: show requisites directly
@@ -497,19 +499,19 @@ async def _handle_payment_method_selection(
         metadata_update = state.get("metadata", {}).copy()
         metadata_update["payment_details_sent"] = True
         metadata_update["awaiting_payment_confirmation"] = True
-    
+
     logger.info(
         "[SESSION %s] Payment method selected: '%s', showing requisites",
         session_id,
         user_message[:50] if user_message else "(empty)",
     )
-    
+
     # Split response into message bubbles
     response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
     if not response_parts:
         response_parts = [response_text]
     assistant_messages = [{"role": "assistant", "content": part} for part in response_parts]
-    
+
     cmd = Command(
         update={
             "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -530,7 +532,7 @@ async def _handle_payment_method_selection(
         },
         goto="end",
     )
-    
+
     if settings.DEBUG_TRACE_LOGS:
         debug_log.node_exit(
             session_id=session_id,
@@ -607,20 +609,20 @@ async def _handle_delivery_data(
     )
 
     dialog_phase = state.get("dialog_phase", "")
-    
+
     # =====================================================
     # SNIPPETS-FIRST POLICY: Check snippets BEFORE keywords
     # =====================================================
     # For product addition WITHOUT photo → snippet response
     if not has_image_now and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
         from src.agents.langgraph.nodes.helpers.policy_snippets import maybe_apply_snippet_policy
-        
+
         snippet_result = maybe_apply_snippet_policy(
             state=state,
             user_text=user_message,
             detected_intent="PRODUCT_ADDITION",
         )
-        
+
         if snippet_result and snippet_result.get("agent_response"):
             logger.info(
                 "[SESSION %s] Snippets-first: product addition snippet applied (no photo)",
@@ -645,17 +647,17 @@ async def _handle_delivery_data(
     if has_image_now and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
         from src.agents.langgraph.rules.payment_proof import detect_payment_proof
         from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
-        
+
         is_payment_proof = detect_payment_proof(
             user_text=user_message or "",
             has_image=True,
             has_url=has_url,
         )
-        
+
         if not is_payment_proof:
             # Image doesn't look like payment proof - check if it's product addition
             is_product_addition = detect_product_addition_intent(user_message or "")
-            
+
             if is_product_addition:
                 # User wants to add a product - route to agent for processing
                 logger.info(
@@ -684,7 +686,7 @@ async def _handle_delivery_data(
                     },
                     goto="agent",  # Route to agent to handle product addition
                 )
-            
+
             # Image doesn't look like payment proof and not product addition - ask for clarification
             # WITHOUT resetting the payment flow
             clarification = (
@@ -721,7 +723,7 @@ async def _handle_delivery_data(
     deps = create_deps_from_state(state)
     deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
     deps.selected_products = products
-    
+
     # LLM-FIRST: Дозволяємо LLM самому визначати sub-phase через промпти
     # Не форсуємо THANK_YOU через detect_payment_proof - LLM сам визначить через контекст
     try:
@@ -764,17 +766,17 @@ async def _handle_delivery_data(
         # - missing_fields: які дані ще потрібні
         # - awaiting_payment_confirmation: чи чекаємо скрін оплати
         # - payment_details_sent: чи надіслано реквізити
-        
+
         # PAYMENT-PROOF GUARD: Перевіряємо детерміновано чи є реальний proof перед переходом до THANKS
         # Це запобігає передчасним "Дякую за оплату" без реального скріну/квитанції
         from src.agents.langgraph.rules.payment_proof import detect_payment_proof
-        
+
         has_real_proof = detect_payment_proof(
             user_text=user_message or "",
             has_image=has_image_now,
             has_url=has_url,
         )
-        
+
         # CRITICAL: Persist order ТІЛЬКИ коли є payment proof (скріншот оплати)
         # Замовлення створюється тільки після підтвердження оплати, не на delivery confirmation
         # Переходимо до STATE_7_END тільки якщо:
@@ -793,7 +795,7 @@ async def _handle_delivery_data(
                     "payment_proof_via": "image" if has_image_now else "text",
                 },
             )
-            
+
             # CRITICAL: Persist order ТІЛЬКИ коли є payment proof (скріншот оплати)
             # Замовлення створюється в PostgreSQL + CRM (якщо увімкнено) тільки після підтвердження оплати
             approval_data = {
@@ -809,7 +811,7 @@ async def _handle_delivery_data(
                 "[SESSION %s] Order persisted after payment proof confirmation",
                 session_id,
             )
-            
+
             # CRM створено успішно - переходимо до STATE_7_END з THANKS + UPSELL
             # БАБЛ 1: Подяка
             thank_you_text = response_text or PAYMENT_TEMPLATES["THANK_YOU"]
@@ -817,7 +819,7 @@ async def _handle_delivery_data(
             thank_you_parts = [p.strip() for p in thank_you_text.split("\n\n") if p.strip()]
             if not thank_you_parts:
                 thank_you_parts = [thank_you_text]
-            
+
             # БАБЛ 2: Upsell про другий колір (якщо є інші кольори)
             upsell_messages = []
             if products:
@@ -825,17 +827,17 @@ async def _handle_delivery_data(
                 first_product = products[0]
                 product_name = first_product.get("name", "")
                 purchased_color = first_product.get("color")
-                
+
                 if product_name:
                     from .helpers.vision.product_colors import get_color_photos_for_upsell
-                    
+
                     color_photos, has_more = get_color_photos_for_upsell(
                         product_name=product_name,
                         exclude_color=purchased_color,
                         max_photos=4,
                         offset=0,
                     )
-                    
+
                     if color_photos:
                         upsell_text = "Хочете ще один колір на зміну? Показати доступні кольори?"
                         upsell_messages.append({"type": "text", "content": upsell_text})
@@ -846,16 +848,16 @@ async def _handle_delivery_data(
                         metadata_update["color_gallery_product"] = product_name
                         metadata_update["color_gallery_exclude"] = purchased_color
                         metadata_update["color_gallery_offset"] = 0
-            
+
             # Формуємо повідомлення: THANKS + UPSELL
             all_messages = []
             for part in thank_you_parts:
                 all_messages.append({"type": "text", "content": part})
             all_messages.extend(upsell_messages)
-            
+
             # Формуємо assistant_messages для state
             assistant_messages = [{"role": "assistant", "content": msg["content"]} for msg in all_messages]
-            
+
             cmd = Command(
                 update={
                     "current_state": State.STATE_7_END.value,
@@ -1001,7 +1003,7 @@ async def _persist_order_and_queue_crm(
 
         # Get sitniks_chat_id from state if available
         sitniks_chat_id = state.get("sitniks_chat_id") or state.get("metadata", {}).get("sitniks_chat_id")
-        
+
         order_data = {
             "external_id": session_id,
             "source_id": deps.user_id,
@@ -1077,9 +1079,10 @@ async def _handle_approval_response(
         # =========================================================================
         # HITL підтверджує "payment proof валідний", але перевіряємо детерміновано
         # що proof дійсно є (image/URL) перед створенням order
-        from .utils import extract_user_message
         from src.agents.langgraph.rules.payment_proof import detect_payment_proof
-        
+
+        from .utils import extract_user_message
+
         user_message = extract_user_message(state.get("messages", []))
         has_image = bool(
             state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
@@ -1088,13 +1091,13 @@ async def _handle_approval_response(
             user_message
             and ("http://" in user_message.lower() or "https://" in user_message.lower())
         )
-        
+
         has_real_proof = detect_payment_proof(
             user_text=user_message or "",
             has_image=has_image,
             has_url=has_url,
         )
-        
+
         if not has_real_proof:
             # HITL approved, але payment proof не отримано - чекаємо proof
             logger.warning(

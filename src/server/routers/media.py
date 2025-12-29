@@ -8,6 +8,7 @@ from starlette.responses import StreamingResponse
 
 from src.conf.config import settings
 
+
 router = APIRouter()
 
 

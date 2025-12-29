@@ -26,8 +26,8 @@ from src.agents.pydantic.support_agent import run_support
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
-from src.services.observability import log_agent_step, log_trace, track_metric
 from src.services.catalog import extract_requested_color
+from src.services.observability import log_agent_step, log_trace, track_metric
 
 # State prompts and transition logic
 from ..state_prompts import (
@@ -62,27 +62,27 @@ def _handle_color_show_request(
             get_current_color_for_exclusion,
             get_product_name_for_color_show,
         )
-        
+
         # Перевіряємо чи це запит на показ кольорів або "показати решту"
         is_color_request = detect_color_show_request(user_message)
         is_show_more = (
             user_message.lower().strip() in ["показати решту", "покажи решту", "так", "да", "ок"]
             and state.get("metadata", {}).get("color_gallery_offset") is not None
         )
-        
+
         if not (is_color_request or is_show_more):
             return None
-        
+
         product_name = get_product_name_for_color_show(state)
         if not product_name:
             return None
-        
+
         from src.agents.langgraph.nodes.helpers.vision.product_colors import (
             get_color_photos_for_upsell,
         )
-        
+
         exclude_color = get_current_color_for_exclusion(state)
-        
+
         # Якщо це "показати решту" - беремо offset з metadata
         if is_show_more:
             metadata = state.get("metadata", {})
@@ -94,31 +94,31 @@ def _handle_color_show_request(
                 exclude_color = metadata.get("color_gallery_exclude")
         else:
             offset = 0
-        
+
         color_photos, has_more = get_color_photos_for_upsell(
             product_name=product_name,
             exclude_color=exclude_color,
             max_photos=4,
             offset=offset,
         )
-        
+
         if not color_photos:
             return None
-        
+
         session_id = state.get(
             "session_id", state.get("metadata", {}).get("session_id", "")
         )
         trace_id = state.get("trace_id", "")
-        
+
         # Формуємо messages: ТІЛЬКИ фото, без зайвого тексту перед ними
         messages = []
-        
+
         # Додаємо фото (до 4) - БЕЗ тексту перед ними
         for color_photo in color_photos:
             photo_url = color_photo.get("photo_url")
             if photo_url:
                 messages.append({"type": "image", "content": photo_url})
-        
+
         # Якщо є ще кольори - додаємо текст "Показати решту?" ПІСЛЯ фото
         metadata_update = state.get("metadata", {}).copy()
         if has_more:
@@ -136,7 +136,7 @@ def _handle_color_show_request(
             metadata_update.pop("color_gallery_offset", None)
             metadata_update.pop("color_gallery_product", None)
             metadata_update.pop("color_gallery_exclude", None)
-        
+
         agent_response_payload = {
             "event": "simple_answer",
             "messages": messages,
@@ -148,10 +148,10 @@ def _handle_color_show_request(
                 "escalation_level": "NONE",
             },
         }
-        
+
         metadata_update["current_state"] = current_state
         metadata_update["intent"] = "COLOR_HELP"
-        
+
         assistant_messages = []
         for msg in messages:
             if msg["type"] == "text":
@@ -165,7 +165,7 @@ def _handle_color_show_request(
                     "type": "image",
                     "content": msg["content"],
                 })
-        
+
         with suppress(Exception):
             log_agent_step(
                 session_id=session_id,
@@ -181,7 +181,7 @@ def _handle_color_show_request(
                     "offset": offset,
                 },
             )
-        
+
         return {
             "current_state": current_state,
             "detected_intent": "COLOR_HELP",
@@ -216,8 +216,9 @@ _OFFER_CONFIRMATION_KEYWORDS = [
 # =============================================================================
 # SIZE EXTRACTION HELPER (delegated to helpers module)
 # =============================================================================
-from .helpers.size_parsing import extract_size_from_response, height_to_size
 from .helpers.intent_instructions import get_instructions_for_intent
+from .helpers.size_parsing import extract_size_from_response, height_to_size
+
 
 # Backward compatibility aliases
 _height_to_size = height_to_size
@@ -264,14 +265,14 @@ async def agent_node(
     # =====================================================================
     # This handles: "no" responses, off-topic questions
     from src.agents.langgraph.nodes.helpers.policy_snippets import maybe_apply_snippet_policy
-    
+
     detected_intent = state.get("detected_intent")
     snippet_response = maybe_apply_snippet_policy(
         state,
         detected_intent=detected_intent,
         user_text=user_message,
     )
-    
+
     if snippet_response:
         # Snippet found - return response without LLM call
         # Note: Manager notifications for "no" in payment phase are handled in payment_node
@@ -290,7 +291,7 @@ async def agent_node(
     color_handler_result = _handle_color_show_request(user_message, state, current_state)
     if color_handler_result is not None:
         return color_handler_result
-    
+
     # =====================================================================
     # STATE_3_SIZE_COLOR: Specific color validation (existing logic)
     # =====================================================================
@@ -478,7 +479,7 @@ async def agent_node(
         # =====================================================================
         has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
         intent = response.metadata.intent
-        
+
         # Check if photo was processed by vision (check metadata for vision indicators)
         metadata = state.get("metadata", {}) or {}
         vision_processed = bool(
@@ -486,7 +487,7 @@ async def agent_node(
             or metadata.get("vision_greeted", False)
             or current_state == State.STATE_2_VISION.value
         )
-        
+
         # If agent claims PHOTO_IDENT but vision didn't process it, suppress it
         if has_image and intent == "PHOTO_IDENT" and not vision_processed:
             logger.warning(
@@ -506,7 +507,7 @@ async def agent_node(
             )
             intent = "DISCOVERY_OR_QUESTION"
             response.metadata.intent = intent
-        
+
         # =====================================================================
         # LLM-FIRST APPROACH: Trust improved prompts for intent classification
         # =====================================================================
@@ -543,20 +544,20 @@ async def agent_node(
                     response.metadata.intent = "PAYMENT_DELIVERY"
 
         selected_products = state.get("selected_products", [])
-        
+
         # CRITICAL: In STATE_5_PAYMENT_DELIVERY, prevent product duplication
         # Only allow adding products if user explicitly requests it (add keywords)
         is_payment_state = current_state == State.STATE_5_PAYMENT_DELIVERY.value
-        
+
         if response.products:
             new_products = [p.model_dump() for p in response.products]
             user_text = user_message if isinstance(user_message, str) else str(user_message)
             user_text_lower = user_text.lower()
             # Use SSOT rules module instead of duplicated keywords
             from src.agents.langgraph.rules.cart_intent import detect_add_to_cart
-            
+
             has_explicit_add_intent = detect_add_to_cart(user_text_lower)
-            
+
             # In payment state, ONLY append if explicit add intent
             # Otherwise, ignore new products (they're likely hallucination/side-effect)
             if is_payment_state:
@@ -626,15 +627,15 @@ async def agent_node(
         # =====================================================================
         fallback_used = False
         fallback_reasons = []
-        
+
         if selected_products and current_state == State.STATE_3_SIZE_COLOR.value:
             first_product = selected_products[0]
             if not first_product.get("size"):
                 user_text = user_message if isinstance(user_message, str) else str(user_message)
-                
+
                 # Try to extract height from user message (e.g., "98" -> height 98 cm)
                 from .utils import extract_height_from_text
-                
+
                 height_cm = extract_height_from_text(user_text)
                 if height_cm:
                     # Convert height to size
@@ -682,7 +683,7 @@ async def agent_node(
                     session_id,
                     first_product["color"],
                 )
-        
+
         # Track fallback usage as metric (for monitoring LLM quality degradation)
         if fallback_used:
             track_metric(
@@ -747,7 +748,7 @@ async def agent_node(
                     if "менеджер соф" in content or ("вітаю" in content and "mirt" in content):
                         greeting_in_response = True
                         break
-            
+
             # Перевірка 2: чи є привітання в історії повідомлень
             greeting_in_history = False
             messages = state.get("messages", [])
@@ -758,7 +759,7 @@ async def agent_node(
                     if role == "assistant" and ("менеджер соф" in content or ("вітаю" in content and "mirt" in content)):
                         greeting_in_history = True
                         break
-            
+
             # Якщо привітання показано або було раніше - встановлюємо vision_greeted
             if greeting_in_response or greeting_in_history:
                 metadata_update["vision_greeted"] = True
@@ -784,7 +785,7 @@ async def agent_node(
             metadata=response.metadata,
             state=state,  # Передаємо state для payment sub-phase detection
         )
-        
+
         # Reset policy counters if dialog phase changed
         if old_dialog_phase != dialog_phase:
             from src.agents.langgraph.nodes.helpers.policy_snippets import _reset_policy_counters
@@ -1004,7 +1005,7 @@ def _determine_dialog_phase(
     has_color = False
     size_value = None
     color_value = None
-    
+
     if selected_products:
         first_product = selected_products[0]
         size_value = first_product.get("size")
@@ -1069,5 +1070,5 @@ def _determine_dialog_phase(
             current_state,
             next_phase,
         )
-    
+
     return next_phase

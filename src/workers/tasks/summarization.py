@@ -13,14 +13,13 @@ from datetime import UTC, datetime, timedelta
 
 from celery import shared_task
 
-from src.conf.config import settings
 from src.services.storage import create_message_store
 from src.services.summarization import (
-    call_summarize_inactive_users,
     get_users_needing_summary,
     mark_user_summarized,
     run_retention,
 )
+
 # PostgreSQL only - no Supabase dependency
 from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
 from src.workers.sync_utils import run_sync
@@ -88,7 +87,7 @@ def summarize_session(
             human_needed_removed = False
             if manychat_subscriber_id:
                 from src.integrations.manychat.api_client import get_manychat_client
-                
+
                 manychat_client = get_manychat_client()
                 if manychat_client.is_configured:
                     try:
@@ -99,11 +98,11 @@ def summarize_session(
                                 "[WORKER:SUMMARIZATION] Removed ai_responded tag for subscriber %s",
                                 manychat_subscriber_id,
                             )
-                        
+
                         # Remove humanNeeded-wd tag if present
                         async def _remove_human_tag():
                             return await manychat_client.remove_tag(manychat_subscriber_id, "humanNeeded-wd")
-                        
+
                         human_needed_removed = run_sync(_remove_human_tag())
                         if human_needed_removed:
                             logger.info(
@@ -164,21 +163,21 @@ def check_all_sessions_for_summarization(self) -> dict:
     try:
         import psycopg
         from psycopg.rows import dict_row
+
         from src.services.storage import get_postgres_url
-        
+
         # Step 1: Call PostgreSQL function to mark inactive users
         try:
             postgres_url = get_postgres_url()
         except ValueError:
             logger.warning("[WORKER:SUMMARIZATION] PostgreSQL not configured, skipping")
             return {"status": "skipped", "reason": "no_postgres"}
-        with psycopg.connect(postgres_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM summarize_inactive_users()")
-                rows = cur.fetchall()
-                columns = [desc[0] for desc in cur.description] if cur.description else []
-                marked_users = [dict(zip(columns, row)) for row in rows]
-        
+        with psycopg.connect(postgres_url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT * FROM summarize_inactive_users()")
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description] if cur.description else []
+            marked_users = [dict(zip(columns, row)) for row in rows]
+
         logger.info(
             "[WORKER:SUMMARIZATION] Marked %d inactive users via PostgreSQL function",
             len(marked_users),
@@ -187,15 +186,15 @@ def check_all_sessions_for_summarization(self) -> dict:
         # Step 1.5: Check for users with humanNeeded-wd tag that need summarization (3+ days after escalation)
         from src.core.constants import DBTable
         from src.integrations.manychat.api_client import get_manychat_client
-        
+
         manychat_client = get_manychat_client()
         escalation_users = []
-        
+
         if manychat_client.is_configured:
             # Get users with last_interaction_at 3+ days ago from users table
             # For ManyChat, session_id = subscriber_id
             cutoff_date = (datetime.now(UTC) - timedelta(days=3)).isoformat()
-            
+
             try:
                 # Get inactive users from PostgreSQL users table
                 with psycopg.connect(postgres_url) as conn:
@@ -210,11 +209,11 @@ def check_all_sessions_for_summarization(self) -> dict:
                             (cutoff_date,),
                         )
                         inactive_users = cur.fetchall()
-                
+
                 if inactive_users:
                     # Get their session_ids from messages table
                     user_ids = [u.get("user_id") for u in inactive_users if u.get("user_id")]
-                    
+
                     if user_ids:
                         # Get sessions for these users from PostgreSQL
                         with psycopg.connect(postgres_url) as conn:
@@ -231,7 +230,7 @@ def check_all_sessions_for_summarization(self) -> dict:
                                     tuple(user_ids),
                                 )
                                 sessions_rows = cur.fetchall()
-                        
+
                         # Group by user_id to get latest session
                         user_sessions: dict[str, str] = {}
                         for row in sessions_rows:
@@ -239,7 +238,7 @@ def check_all_sessions_for_summarization(self) -> dict:
                             sid = row.get("session_id")
                             if uid and sid and uid not in user_sessions:
                                 user_sessions[uid] = sid
-                        
+
                         # Check which subscribers have humanNeeded-wd tag
                         async def _check_tag(subscriber_id: str) -> bool:
                             try:
@@ -256,7 +255,7 @@ def check_all_sessions_for_summarization(self) -> dict:
                                 return False
                             except Exception:
                                 return False
-                        
+
                         # For ManyChat, session_id = subscriber_id
                         for user_id, session_id in user_sessions.items():
                             # Check if this session_id (subscriber_id) has humanNeeded-wd tag
@@ -267,7 +266,7 @@ def check_all_sessions_for_summarization(self) -> dict:
                                     "session_id": session_id,
                                     "manychat_subscriber_id": session_id,  # session_id = subscriber_id for ManyChat
                                 })
-                        
+
                         if escalation_users:
                             logger.info(
                                 "[WORKER:SUMMARIZATION] Found %d users with humanNeeded-wd tag needing summarization",
@@ -281,7 +280,7 @@ def check_all_sessions_for_summarization(self) -> dict:
 
         # Step 2: Get all users with 'needs_summary' tag
         users_to_summarize = get_users_needing_summary()
-        
+
         # Add escalation users to the list
         for esc_user in escalation_users:
             if esc_user["user_id"] not in [u.get("user_id") for u in users_to_summarize]:
@@ -295,7 +294,7 @@ def check_all_sessions_for_summarization(self) -> dict:
             user_id = user.get("user_id")
             session_id = user.get("session_id")
             manychat_subscriber_id = user.get("manychat_subscriber_id")
-            
+
             if user_id:
                 # Queue summarization task for this user's session
                 if session_id:
@@ -359,10 +358,10 @@ def summarize_user_history(
 
         # Get session for this user from PostgreSQL
         message_store = create_message_store()
-        
+
         # Find user's session(s) using message_store
         messages = message_store.list_by_user(int(user_id) if isinstance(user_id, str) and user_id.isdigit() else user_id)
-        
+
         if not messages:
             # No messages, just mark as summarized
             mark_user_summarized(user_id)

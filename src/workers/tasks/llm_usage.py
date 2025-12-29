@@ -25,6 +25,7 @@ from typing import Any
 from celery import shared_task
 
 from src.core.constants import DBTable
+
 # PostgreSQL only - no Supabase dependency
 from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
 
@@ -124,8 +125,9 @@ def record_usage(
     # Use PostgreSQL
     try:
         import psycopg
+
         from src.services.storage import get_postgres_url
-        
+
         # Calculate cost
         cost_usd = calculate_cost(model, tokens_input, tokens_output)
 
@@ -136,7 +138,7 @@ def record_usage(
             logger.warning("[WORKER:LLM_USAGE] PostgreSQL not configured, skipping")
             return {"status": "skipped", "reason": "no_postgres"}
         created_at = datetime.now(UTC).isoformat()
-        
+
         # Prepare metadata JSON if provided
         metadata_json = None
         if metadata:
@@ -145,33 +147,32 @@ def record_usage(
                 metadata_json = json.dumps(metadata)
             except Exception as e:
                 logger.debug("[WORKER:LLM_USAGE] Metadata serialization failed: %s", e)
-        
-        with psycopg.connect(postgres_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+
+        with psycopg.connect(postgres_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
                     INSERT INTO {DBTable.LLM_USAGE}
                     (user_id, session_id, model, tokens_input, tokens_output, cost_usd,
                      latency_ms, success, error_message, metadata, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                     RETURNING id
                     """,
-                    (
-                        user_id,
-                        session_id,
-                        model,
-                        tokens_input,
-                        tokens_output,
-                        float(cost_usd),
-                        None,  # latency_ms - not available in Celery task
-                        True,  # success - assume True for Celery task
-                        None,  # error_message - not available in Celery task
-                        metadata_json,
-                        created_at,
-                    ),
-                )
-                record_id = cur.fetchone()[0]
-                conn.commit()
+                (
+                    user_id,
+                    session_id,
+                    model,
+                    tokens_input,
+                    tokens_output,
+                    float(cost_usd),
+                    None,  # latency_ms - not available in Celery task
+                    True,  # success - assume True for Celery task
+                    None,  # error_message - not available in Celery task
+                    metadata_json,
+                    created_at,
+                ),
+            )
+            record_id = cur.fetchone()[0]
+            conn.commit()
 
         if record_id:
             logger.info(
@@ -224,8 +225,9 @@ def get_user_usage_summary(
     try:
         import psycopg
         from psycopg.rows import dict_row
+
         from src.services.storage import get_postgres_url
-        
+
         # Calculate date cutoff
         cutoff = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff = cutoff.replace(day=cutoff.day - days) if cutoff.day > days else cutoff
@@ -322,8 +324,9 @@ def aggregate_daily_usage(self) -> dict:
     try:
         import psycopg
         from psycopg.rows import dict_row
+
         from src.services.storage import get_postgres_url
-        
+
         # Get today's usage
         today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 

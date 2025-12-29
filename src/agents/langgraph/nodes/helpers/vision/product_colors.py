@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+
 logger = logging.getLogger(__name__)
 
 # Cache для products_master.yaml (завантажується один раз)
@@ -42,7 +43,7 @@ def _load_products_master() -> dict[str, Any]:
     # For this file: 6 levels up from src/agents/langgraph/nodes/helpers/vision/
     project_root = Path(__file__).parent.parent.parent.parent.parent.parent
     yaml_path = project_root / "data" / "vision" / "products_master.yaml"
-    
+
     # Fallback for Docker/production: try /app/data/vision/ (Docker WORKDIR is /app)
     if not yaml_path.exists():
         yaml_path_docker = Path("/app/data/vision/products_master.yaml")
@@ -51,9 +52,9 @@ def _load_products_master() -> dict[str, Any]:
         else:
             # Last fallback: try relative to current working directory
             yaml_path = Path("data/vision/products_master.yaml")
-    
+
     try:
-        with open(yaml_path, "r", encoding="utf-8") as f:
+        with open(yaml_path, encoding="utf-8") as f:
             _PRODUCTS_MASTER_CACHE = yaml.safe_load(f) or {}
         products = _PRODUCTS_MASTER_CACHE.get("products") or {}
         if not isinstance(products, dict):
@@ -86,21 +87,21 @@ def get_product_colors(product_name: str) -> list[dict[str, str]]:
     """
     master = _load_products_master()
     products = master.get("products", {})
-    
+
     # Normalize product name for matching (case-insensitive, remove extra spaces)
     product_name_norm = " ".join(product_name.strip().split()).lower()
-    
+
     # Try to find product by name
     for product_key, product_data in products.items():
         if not isinstance(product_data, dict):
             continue
-        
+
         product_name_in_yaml = product_data.get("name", "").strip().lower()
         if product_name_norm == product_name_in_yaml:
             colors_data = product_data.get("colors", {})
             if not isinstance(colors_data, dict):
                 return []
-            
+
             result = []
             for color_name, color_info in colors_data.items():
                 if isinstance(color_info, dict):
@@ -112,14 +113,14 @@ def get_product_colors(product_name: str) -> list[dict[str, str]]:
                             "photo_url": photo_url,
                             "sku": sku,
                         })
-            
+
             logger.info(
                 "Found %d colors for product '%s'",
                 len(result),
                 product_name,
             )
             return result
-    
+
     logger.warning("Product '%s' not found in products_master.yaml", product_name)
     return []
 
@@ -146,7 +147,7 @@ def get_color_photos_for_upsell(
         - has_more: True if there are more colors available after this batch
     """
     all_colors = get_product_colors(product_name)
-    
+
     # Filter out the color already purchased
     if exclude_color:
         exclude_color_norm = exclude_color.lower().strip()
@@ -156,10 +157,10 @@ def get_color_photos_for_upsell(
         ]
     else:
         filtered = all_colors
-    
+
     # Apply pagination: skip offset items, take max_photos
     paginated = filtered[offset:offset + max_photos]
     has_more = len(filtered) > offset + max_photos
-    
+
     return paginated, has_more
 

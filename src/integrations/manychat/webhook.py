@@ -15,8 +15,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
-from src.services.conversation import create_conversation_handler
-from src.services.conversation import BufferedMessage, MessageDebouncer
+from src.services.conversation import BufferedMessage, MessageDebouncer, create_conversation_handler
 from src.services.storage import MessageStore, create_message_store
 
 from .constants import (  # noqa: F401

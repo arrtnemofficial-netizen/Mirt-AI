@@ -21,8 +21,8 @@ from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.debug_logger import debug_log
 from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
-from src.services.storage import MessageStore, StoredMessage
 from src.services.observability import track_metric
+from src.services.storage import MessageStore, StoredMessage
 
 
 # =============================================================================
@@ -69,7 +69,7 @@ def parse_llm_output(
         for msg in messages_data:
             msg_type = msg.get("type", "text")
             content_value = msg.get("content") or msg.get("text") or msg.get("url", "")
-            
+
             if msg_type == "image" and content_value:
                 # Image message: content should be URL
                 messages.append(Message(type="image", content=content_value))
@@ -563,10 +563,12 @@ class ConversationHandler:
             if step_number <= 1:
                 instagram_username = metadata.get("instagram_username")
                 telegram_username = metadata.get("telegram_username") or metadata.get("user_nickname")
-                
+
                 if instagram_username or telegram_username:
                     try:
-                        from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
+                        from src.integrations.crm.sitniks_chat_service import (
+                            get_sitniks_chat_service,
+                        )
                         sitniks_service = get_sitniks_chat_service()
                         if sitniks_service.enabled:
                             sitniks_result = await sitniks_service.handle_first_touch(
@@ -653,7 +655,7 @@ class ConversationHandler:
             try:
                 # Check if notification was already sent (e.g. by vision_node)
                 notification_already_sent = bool(result_state.get("manager_notification_sent", False))
-                
+
                 is_escalation = bool(
                     agent_response.escalation
                     or (agent_response.metadata.escalation_level not in (None, "", "NONE"))
@@ -903,7 +905,7 @@ class ConversationHandler:
             user_id = metadata.get("user_id") or metadata.get("session_id") or session_id
         else:
             user_id = session_id  # Fallback to session_id
-        
+
         msg = StoredMessage(
             session_id=session_id,
             role="user",
@@ -948,7 +950,7 @@ class ConversationHandler:
             user_id = metadata.get("user_id") or metadata.get("session_id") or session_id
         else:
             user_id = session_id  # Fallback to session_id
-        
+
         tags = [MessageTag.HUMAN_NEEDED] if response.escalation else []
         msg = StoredMessage(
             session_id=session_id,

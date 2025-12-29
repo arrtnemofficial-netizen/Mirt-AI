@@ -17,11 +17,12 @@ import time
 from contextlib import suppress
 from typing import Any
 
-from src.services.common import CatalogUnavailableError
-from src.services.observability import log_tool_execution, track_metric
 # PostgreSQL implementation
 import psycopg
 from psycopg.rows import dict_row
+
+from src.services.common import CatalogUnavailableError
+from src.services.observability import log_tool_execution, track_metric
 from src.services.storage import get_postgres_url
 
 
@@ -59,7 +60,7 @@ class CatalogService:
             self._enabled = False
             self.client = None
             logger.warning("[CATALOG] PostgreSQL not configured, catalog disabled")
-    
+
     def _get_connection(self):
         """Get PostgreSQL connection."""
         postgres_url = get_postgres_url()

@@ -96,9 +96,9 @@ class TestCriticalImports:
 
     def test_integrations_importable(self):
         """Integration modules must import."""
-        from src.integrations.crm.crmservice import CRMService
+        from src.integrations.crm import SitniksChatService
 
-        assert CRMService is not None
+        assert SitniksChatService is not None
 
     def test_server_importable(self):
         """FastAPI server must import."""

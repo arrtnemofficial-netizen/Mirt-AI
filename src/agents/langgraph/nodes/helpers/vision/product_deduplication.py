@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,16 +41,16 @@ def normalize_product_key(product: dict[str, Any]) -> str:
     name = str(product.get("name") or "").strip().lower()
     color = str(product.get("color") or "").strip().lower()
     size = str(product.get("size") or "").strip().lower()
-    
+
     # Normalize whitespace (multiple spaces → single space)
     name = " ".join(name.split())
     color = " ".join(color.split())
     size = " ".join(size.split())
-    
+
     # Create deterministic key: name|color|size
     # Empty fields are represented as empty strings (not omitted)
     key = f"{name}|{color}|{size}"
-    
+
     return key
 
 
@@ -85,12 +86,12 @@ def is_product_duplicate(
     """
     if not existing_products:
         return False
-    
+
     new_key = normalize_product_key(new_product)
-    
+
     for existing in existing_products:
         existing_key = normalize_product_key(existing)
-        
+
         if strict:
             # Exact match required
             if new_key == existing_key:
@@ -104,7 +105,7 @@ def is_product_duplicate(
             # Same name+color, size can differ
             new_parts = new_key.split("|")
             existing_parts = existing_key.split("|")
-            
+
             if len(new_parts) >= 2 and len(existing_parts) >= 2:
                 # Compare name and color (ignore size)
                 if new_parts[0] == existing_parts[0] and new_parts[1] == existing_parts[1]:
@@ -114,7 +115,7 @@ def is_product_duplicate(
                         existing_key,
                     )
                     return True
-    
+
     return False
 
 
@@ -158,19 +159,19 @@ def add_product_safely(
     if not new_product:
         logger.warning("[SESSION %s] Attempted to add empty product", session_id or "?")
         return list(existing_products), False
-    
+
     product_name = str(new_product.get("name") or "").strip()
     if not product_name:
         logger.warning("[SESSION %s] Attempted to add product without name", session_id or "?")
         return list(existing_products), False
-    
+
     # Check for duplicates
     is_duplicate = is_product_duplicate(
         new_product,
         existing_products,
         strict=strict_duplicate_check,
     )
-    
+
     if is_duplicate:
         logger.info(
             "[SESSION %s] Product addition skipped: duplicate detected. "
@@ -180,11 +181,11 @@ def add_product_safely(
             normalize_product_key(new_product),
         )
         return list(existing_products), False
-    
+
     # Add product (create new list to avoid mutation)
     updated_products = list(existing_products)
     updated_products.append(new_product)
-    
+
     logger.info(
         "[SESSION %s] Product added successfully. "
         "Existing=%d, New='%s', Total=%d",
@@ -193,6 +194,6 @@ def add_product_safely(
         product_name,
         len(updated_products),
     )
-    
+
     return updated_products, True
 

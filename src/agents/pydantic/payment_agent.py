@@ -35,7 +35,7 @@ def _build_model() -> OpenAIChatModel:
     """Build OpenAI model."""
     # SENIOR-LEVEL: Use AI_MODEL as single source of truth
     model_name = settings.AI_MODEL
-    
+
     if settings.LLM_PROVIDER == "openai":
         api_key = settings.OPENAI_API_KEY.get_secret_value()
         base_url = "https://api.openai.com/v1"
@@ -240,7 +240,7 @@ async def run_payment(
     from src.services.llm_usage_logger import log_llm_usage_best_effort
 
     agent = get_payment_agent()
-    
+
     # Track latency and result for logging
     start_time = time.perf_counter()
     result = None
@@ -260,7 +260,7 @@ async def run_payment(
             timeout=30,
         )
         response = result.output  # output_type param, result.output attr
-        
+
         # Try to extract usage from result (if available)
         if hasattr(result, "usage"):
             usage = result.usage
@@ -270,18 +270,18 @@ async def run_payment(
                 tokens_output = usage.output_tokens or 0
         elif hasattr(result, "model_used"):
             model_name = str(result.model_used)
-        
+
         # Extract model from agent if not in result
         if not model_name and hasattr(agent, "model"):
             if hasattr(agent.model, "model_id"):
                 model_name = agent.model.model_id
             elif hasattr(agent.model, "name"):
                 model_name = agent.model.name
-        
+
         # SENIOR-LEVEL: Fallback to actual payment model from settings, not hardcoded
         if not model_name:
             model_name = payment_model_name
-        
+
         return response
 
     except Exception as e:
@@ -294,18 +294,18 @@ async def run_payment(
             order_ready=False,
         )
         return response
-    
+
     finally:
         # Log usage (best-effort, non-blocking)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        
+
         # Prepare minimal metadata for payment
         metadata: dict[str, Any] = {}
         if response:
             metadata["order_ready"] = response.order_ready
             if hasattr(deps, "dialog_phase"):
                 metadata["dialog_phase"] = deps.dialog_phase
-        
+
         # Extract model if not already set
         if not model_name:
             if hasattr(agent, "model"):
@@ -315,7 +315,7 @@ async def run_payment(
                     model_name = agent.model.name
             if not model_name:
                 model_name = payment_model_name
-        
+
         # SENIOR-LEVEL: Use actual payment model, not hardcoded fallback
         # Log asynchronously (fire-and-forget)
         asyncio.create_task(

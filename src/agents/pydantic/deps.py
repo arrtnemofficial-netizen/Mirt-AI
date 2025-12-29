@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 from src.services.catalog import CatalogService
-from src.services.memory_service import MemoryService
+from src.services.memory import MemoryService
 from src.services.orders import OrderService
 
 
@@ -245,7 +245,7 @@ def create_deps_from_state(state: dict[str, Any]) -> AgentDeps:
     # Extract has_image and image_url from state or metadata (photo handler writes to metadata)
     has_image = state.get("has_image", False) or metadata.get("has_image", False)
     image_url = state.get("image_url") or metadata.get("image_url")
-    
+
     return AgentDeps(
         session_id=state.get("session_id", metadata.get("session_id", "")),
         trace_id=state.get("trace_id", ""),  # Must be populated by graph

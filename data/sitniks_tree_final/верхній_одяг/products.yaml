@@ -1,0 +1,117 @@
+- name: Тедді коричнева клітинка
+  id: 3532237
+  price: 1660
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-22/cd1e29/d86c4f-1724354363876.jpeg
+- name: Тренч екошкіра капучіно
+  id: 3482676
+  price: 2380
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-20/5b7477/51a8ce-1724128941324.jpeg
+- name: Тренч екошкіра чорний
+  id: 3482682
+  price: 2380
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-20/9813cd/7f7966-1724129723446.jpeg
+- name: піджак джинс голубий
+  id: 3532244
+  price: 1240
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-22/2cd68b/dd0992-1724350880970.jpeg
+- name: піджак джинс лео рижий
+  id: 3471669
+  price: 1240
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/c7d621/9ae4103-1724100758952.jpeg
+- name: піджак джинс лео сірий
+  id: 3471670
+  price: 1240
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/ba28d9/8610211-1724101030126.jpeg
+- name: піджак джинс молочний
+  id: 3471677
+  price: 1240
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/35fdf2/f5def0-1724101259410.jpeg
+- name: піджак джинс чорний
+  id: 3532245
+  price: 1240
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-22/9648bc/5c1068-1724356317274.jpeg
+- name: тренч екошкіра молочний
+  id: 3482679
+  price: 2380
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-20/5ecbfb/f101ad1-1724129289873.jpeg
+- name: тренч котон
+  id: 3482689
+  price: 2380
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-40
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-20/69850e/f7731b-1724130020669.jpeg

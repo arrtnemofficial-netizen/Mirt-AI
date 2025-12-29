@@ -8,10 +8,8 @@ Extracted from vision.py for better testability and maintainability.
 
 import logging
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from src.agents.pydantic.models import ProductMatch
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +88,7 @@ async def enrich_product_from_db(
                 base_name = product_name.split("(")[0].strip()
                 logger.debug("Retry search with base name: '%s'", base_name)
                 results = await catalog.search_products(query=base_name, limit=5)
-            
+
             # Variant 2: Try without common prefixes/suffixes
             if not results:
                 # Remove common words that might not be in DB
@@ -101,7 +99,7 @@ async def enrich_product_from_db(
                 if cleaned_name and cleaned_name != product_name:
                     logger.debug("Retry search with cleaned name: '%s'", cleaned_name)
                     results = await catalog.search_products(query=cleaned_name, limit=5)
-            
+
             # Variant 3: Try category-based search if we can infer category
             if not results:
                 category = None
@@ -112,7 +110,7 @@ async def enrich_product_from_db(
                     category = "сукня"
                 elif "тренч" in name_lower:
                     category = "тренч"
-                
+
                 if category:
                     # Search by category + base name
                     base_name = product_name.split("(")[0].strip() if "(" in product_name else product_name

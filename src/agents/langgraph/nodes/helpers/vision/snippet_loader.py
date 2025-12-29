@@ -6,10 +6,7 @@ Extracted from vision.py for better testability and maintainability.
 """
 
 import logging
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +92,8 @@ def get_product_snippet(product_name: str) -> list[str] | None:
     try:
         from src.core.prompt_registry import registry
 
-        content = registry.get("system.snippets").content
+        # Optimize: Product snippets are only in snippets.products
+        content = registry.get("snippets.products").content
     except Exception:
         return None
 

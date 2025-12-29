@@ -10,6 +10,7 @@ import logging
 import re
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,9 +48,7 @@ def height_to_size(height_cm: int) -> str:
     Returns:
         Size label (e.g., "98-104", "146-152")
     """
-    if height_cm < 80:
-        return "80-92"
-    elif height_cm <= 92:
+    if height_cm < 80 or height_cm <= 92:
         return "80-92"
     elif height_cm <= 104:
         return "98-104"

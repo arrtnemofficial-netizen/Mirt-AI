@@ -20,6 +20,7 @@ from src.core.constants import DBTable
 from src.services.storage import get_postgres_url
 from src.workers.tasks.llm_usage import calculate_cost
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +59,7 @@ async def log_llm_usage_best_effort(
     if not model:
         logger.debug("[LLM_USAGE] Skipping log: model is required")
         return
-    
+
     if tokens_input < 0 or tokens_output < 0:
         logger.debug(
             "[LLM_USAGE] Skipping log: invalid token counts (in=%d, out=%d)",
@@ -66,14 +67,14 @@ async def log_llm_usage_best_effort(
             tokens_output,
         )
         return
-    
+
     # Calculate cost
     try:
         cost_usd = calculate_cost(model, tokens_input, tokens_output)
     except Exception as e:
         logger.debug("[LLM_USAGE] Cost calculation failed: %s", e)
         cost_usd = Decimal("0")
-    
+
     # Prepare metadata (safe, minimal)
     metadata_json = None
     if metadata:
@@ -84,10 +85,10 @@ async def log_llm_usage_best_effort(
         except Exception as e:
             logger.debug("[LLM_USAGE] Metadata serialization failed: %s", e)
             metadata_json = None
-    
+
     # Prepare values for INSERT
     created_at = datetime.now(UTC).isoformat()
-    
+
     # Use asyncio.to_thread for non-blocking DB write
     # This ensures we don't block the event loop even if DB is slow
     try:
@@ -116,7 +117,7 @@ async def log_llm_usage_best_effort(
             tokens_output,
             cost_usd,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.debug("[LLM_USAGE] DB write timeout (non-critical, skipping)")
     except Exception as e:
         # Never let logging errors affect the main flow
@@ -139,7 +140,7 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         Sanitized metadata dict
     """
     safe: dict[str, Any] = {}
-    
+
     # Safe fields to keep
     safe_fields = {
         "dialog_phase",
@@ -151,7 +152,7 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "detected_product_id",
         "detected_product_name",
     }
-    
+
     for key, value in metadata.items():
         if key in safe_fields:
             safe[key] = value
@@ -167,7 +168,7 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         elif key == "image_url_host":
             # Already safe
             safe[key] = value
-    
+
     return safe
 
 
@@ -194,36 +195,35 @@ def _write_to_db(
     except ValueError:
         logger.debug("[LLM_USAGE] PostgreSQL not configured, skipping")
         return
-    
+
     # Use psycopg (sync) in thread to avoid async complexity
     import psycopg
-    
+
     try:
-        with psycopg.connect(postgres_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+        with psycopg.connect(postgres_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
                     INSERT INTO {DBTable.LLM_USAGE}
                     (user_id, session_id, model, tokens_input, tokens_output, cost_usd,
                      latency_ms, success, error_message, metadata, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                     """,
-                    (
-                        user_id,
-                        session_id,
-                        model,
-                        tokens_input,
-                        tokens_output,
-                        cost_usd,
-                        latency_ms,
-                        success,
-                        error_message,
-                        metadata,
-                        created_at,
-                    ),
-                )
-                conn.commit()
-    except Exception as e:
+                (
+                    user_id,
+                    session_id,
+                    model,
+                    tokens_input,
+                    tokens_output,
+                    cost_usd,
+                    latency_ms,
+                    success,
+                    error_message,
+                    metadata,
+                    created_at,
+                ),
+            )
+            conn.commit()
+    except Exception:
         # Re-raise to be caught by caller
         raise
 

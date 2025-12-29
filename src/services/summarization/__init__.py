@@ -7,6 +7,7 @@ from .summarization import (
     update_user_summary,
 )
 
+
 __all__ = [
     "call_summarize_inactive_users",
     "get_users_needing_summary",

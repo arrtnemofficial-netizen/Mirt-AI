@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from src.conf.config import settings
 from src.server.routers.common import get_build_info
 
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -112,16 +113,16 @@ async def health_observability() -> dict[str, Any]:
     enabled = settings.ENABLE_OBSERVABILITY
     status = "ok" if enabled else "disabled"
 
-    # Check if llm_traces table is accessible
+    # Check if llm_traces table is accessible using async pool
     try:
-        from src.services.storage import get_postgres_url
-        import psycopg
+        from src.services.storage import get_postgres_pool
 
-        postgres_url = get_postgres_url()
-        with psycopg.connect(postgres_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'")
-                recent_traces = cur.fetchone()[0]
+        pool = await get_postgres_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'")
+                row = await cur.fetchone()
+                recent_traces = row[0] if row else 0
 
         return {
             "status": status,
@@ -141,9 +142,8 @@ async def health_observability() -> dict[str, Any]:
 async def health_memory() -> dict[str, Any]:
     """Health check for memory system (mirt_profiles, mirt_memories)."""
     try:
-        from src.services.memory_service import MemoryService
-        from src.services.storage import get_postgres_url
-        import psycopg
+        from src.services.memory import MemoryService
+        from src.services.storage import get_postgres_pool
 
         memory_service = MemoryService()
         enabled = memory_service.enabled
@@ -155,15 +155,17 @@ async def health_memory() -> dict[str, Any]:
                 "message": "Memory system disabled (DATABASE_URL not configured)",
             }
 
-        # Check tables
-        postgres_url = get_postgres_url()
-        with psycopg.connect(postgres_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'")
-                recent_profiles = cur.fetchone()[0]
+        # Check tables using async pool
+        pool = await get_postgres_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'")
+                row = await cur.fetchone()
+                recent_profiles = row[0] if row else 0
 
-                cur.execute("SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'")
-                recent_memories = cur.fetchone()[0]
+                await cur.execute("SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'")
+                row = await cur.fetchone()
+                recent_memories = row[0] if row else 0
 
         return {
             "status": "ok",
@@ -191,8 +193,9 @@ async def health_workers() -> dict[str, Any]:
         }
 
     try:
-        from src.workers.celery_app import celery_app
         import redis
+
+        from src.workers.celery_app import celery_app
 
         # Check Redis
         redis_status = "ok"
@@ -263,22 +266,23 @@ async def health_preflight() -> dict[str, Any]:
 
     # 1. PostgreSQL check
     try:
-        from src.services.storage import health_check as postgres_health_check, get_postgres_url
-        import psycopg
+        from src.services.storage import get_postgres_pool
+        from src.services.storage import health_check as postgres_health_check
 
         is_healthy = await postgres_health_check()
         if is_healthy:
-            # Check critical tables exist
-            postgres_url = get_postgres_url()
-            with psycopg.connect(postgres_url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
+            # Check critical tables exist using async pool
+            pool = await get_postgres_pool()
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
                         SELECT table_name 
                         FROM information_schema.tables 
                         WHERE table_schema = 'public' 
                         AND table_name IN ('users', 'messages', 'orders', 'order_items', 'llm_traces', 'mirt_profiles', 'mirt_memories')
                     """)
-                    existing_tables = {row[0] for row in cur.fetchall()}
+                    rows = await cur.fetchall()
+                    existing_tables = {row[0] for row in rows}
 
             checks["postgresql"] = {
                 "status": "ok",
@@ -353,21 +357,22 @@ async def health_preflight() -> dict[str, Any]:
 
     # 4. Memory system check
     try:
-        from src.services.memory_service import MemoryService
-        import psycopg
-        from src.services.storage import get_postgres_url
+        from src.services.memory import MemoryService
+        from src.services.storage import get_postgres_pool
 
         memory_service = MemoryService()
         enabled = memory_service.enabled
 
         if enabled:
-            postgres_url = get_postgres_url()
-            with psycopg.connect(postgres_url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'")
-                    recent_profiles = cur.fetchone()[0]
-                    cur.execute("SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'")
-                    recent_memories = cur.fetchone()[0]
+            pool = await get_postgres_pool()
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'")
+                    row = await cur.fetchone()
+                    recent_profiles = row[0] if row else 0
+                    await cur.execute("SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'")
+                    row = await cur.fetchone()
+                    recent_memories = row[0] if row else 0
 
             checks["memory_system"] = {
                 "status": "ok",
@@ -388,14 +393,14 @@ async def health_preflight() -> dict[str, Any]:
     enabled = settings.ENABLE_OBSERVABILITY
     if enabled:
         try:
-            import psycopg
-            from src.services.storage import get_postgres_url
+            from src.services.storage import get_postgres_pool
 
-            postgres_url = get_postgres_url()
-            with psycopg.connect(postgres_url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'")
-                    recent_traces = cur.fetchone()[0]
+            pool = await get_postgres_pool()
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'")
+                    row = await cur.fetchone()
+                    recent_traces = row[0] if row else 0
 
             checks["observability"] = {
                 "status": "ok",

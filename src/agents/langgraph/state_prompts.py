@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,14 +89,14 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
                 import os
                 env = os.getenv("ENVIRONMENT", "development").lower()
                 is_production = env in ("production", "prod", "staging")
-                
+
                 if is_production or settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
                     raise FileNotFoundError(
                         f"Missing markdown prompt for state.{key}. "
                         f"This is required in {env} environment. "
                         f"Create data/prompts/states/{key}.md"
                     )
-                
+
                 # Development fallback with warning
                 logger.warning(
                     "Using fallback prompt for payment sub-phase state.%s (dev mode only). "
@@ -108,7 +109,19 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
     # PRIORITY 1: Try PromptRegistry (data/prompts/states/*.md)
     try:
         prompt_config = registry.get(f"state.{state_name}")
-        return prompt_config.content
+        content = prompt_config.content
+
+        # Dynamic Injection: Snippets Instruction (Task 11)
+        # We check if we should inject common instructions
+        if state_name.startswith("STATE_"):
+            try:
+                instr = registry.get("common.snippets_instruction").content
+                if instr:
+                    content += "\n\n" + instr
+            except (FileNotFoundError, ValueError):
+                pass
+
+        return content
     except (FileNotFoundError, ValueError):
         pass
 
@@ -117,7 +130,7 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
     import os
     env = os.getenv("ENVIRONMENT", "development").lower()
     is_production = env in ("production", "prod", "staging")
-    
+
     # In production, missing prompt is a critical error
     if is_production or settings.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
         raise FileNotFoundError(
@@ -125,7 +138,7 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
             f"This is required in {env} environment. "
             f"Create data/prompts/states/{state_name}.md"
         )
-    
+
     # Development fallback with warning
     try:
         from src.services.observability import track_metric
@@ -137,7 +150,7 @@ def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
         )
     except Exception:
         pass
-    
+
     logger.warning(
         "Using fallback prompt for state.%s (dev mode only). "
         "Create data/prompts/states/%s.md for production.",
@@ -175,7 +188,7 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
     """
     metadata = state.get("metadata", {})
     dialog_phase = state.get("dialog_phase", "")
-    
+
     # Check user message for payment confirmation keywords
     messages = state.get("messages", [])
     user_message = ""
@@ -187,20 +200,20 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
         elif hasattr(msg, "type") and getattr(msg, "type", "") == "human":
             user_message = getattr(msg, "content", "")
             break
-    
+
     user_message_lower = user_message.lower() if user_message else ""
-    
+
     # Check for image presence
     has_image = bool(
         state.get("has_image", False) or metadata.get("has_image", False)
     )
-    
+
     # CRITICAL: If we're in WAITING_FOR_PAYMENT_PROOF phase and have an image,
     # check if it's actually payment proof or product addition
     if dialog_phase == "WAITING_FOR_PAYMENT_PROOF" and has_image:
         from src.agents.langgraph.rules.payment_proof import detect_payment_proof
         from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
-        
+
         # Check if this is product addition (not payment proof)
         is_product_addition = detect_product_addition_intent(user_message) if user_message else False
         is_payment_proof = detect_payment_proof(
@@ -208,16 +221,18 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
             has_image=True,
             has_url=False,
         )
-        
+
         # If it's NOT payment proof (e.g., product photo), return SHOW_PAYMENT
         # to maintain consistency with dialog_phase (we already showed payment details)
         if not is_payment_proof:
             return "SHOW_PAYMENT"
-    
+
     # Use SSOT rules module - but for sub-phase detection, we want to detect "оплатила" even without image/URL
     # (because user saying "оплатила" means they claim to have paid, even if proof not attached yet)
-    from src.agents.langgraph.rules.payment_proof import PAYMENT_PROOF_KEYWORDS, PAYMENT_PROOF_WEAK_KEYWORDS
-    
+    from src.agents.langgraph.rules.payment_proof import (
+        PAYMENT_PROOF_KEYWORDS,
+    )
+
     # Check if user says they paid - for sub-phase, we accept weak keywords even without image/URL
     # because "оплатила" alone indicates user claims payment happened
     user_says_paid = any(k in user_message_lower for k in PAYMENT_PROOF_KEYWORDS)
@@ -335,13 +350,13 @@ def determine_next_dialog_phase(
             "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",  # Still collecting delivery data
         }
         mapped_phase = phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
-        
+
         # Additional check: if user says "оплатила" but sub-phase wasn't updated yet,
         # force WAITING_FOR_PAYMENT_PROOF
         # (This is a safety net - ideally get_payment_sub_phase should catch this)
         if payment_sub_phase == "SHOW_PAYMENT":
             return "WAITING_FOR_PAYMENT_PROOF"
-        
+
         return mapped_phase
 
     # STATE_6_UPSELL transitions

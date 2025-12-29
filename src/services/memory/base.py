@@ -2,22 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import psycopg
+
 from src.services.storage import get_postgres_url
-
-
-if TYPE_CHECKING:
-    from src.agents.pydantic.memory_models import (
-        Fact,
-        MemoryContext,
-        MemoryDecision,
-        MemorySummary,
-        NewFact,
-        UpdateFact,
-        UserProfile,
-    )
 
 
 logger = logging.getLogger(__name__)

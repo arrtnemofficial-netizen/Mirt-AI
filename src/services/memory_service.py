@@ -14,6 +14,7 @@ from src.services.memory.constants import (
     MIN_SURPRISE_TO_STORE,
 )
 
+
 warnings.warn(
     "src.services.memory_service is deprecated; use src.services.memory.MemoryService",
     DeprecationWarning,

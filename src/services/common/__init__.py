@@ -6,6 +6,7 @@ from .exceptions import (
     ServiceUnavailableError,
 )
 
+
 __all__ = [
     "CatalogUnavailableError",
     "DuplicateOrderError",

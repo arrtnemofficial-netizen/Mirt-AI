@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from src.server.dependencies import MessageStoreDep
 
+
 router = APIRouter()
 
 

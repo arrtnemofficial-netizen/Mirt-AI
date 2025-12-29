@@ -3,33 +3,33 @@
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
-from typing import Optional
+
 
 try:
-    from psycopg_pool import AsyncConnectionPool
     from psycopg import AsyncConnection
+    from psycopg_pool import AsyncConnectionPool
 except ImportError:
     AsyncConnectionPool = None  # type: ignore
     AsyncConnection = None  # type: ignore
 
 from src.conf.config import settings
 
+
 logger = logging.getLogger(__name__)
 
-_pool: Optional[AsyncConnectionPool] = None
+_pool: AsyncConnectionPool | None = None
 
 
 def get_postgres_url() -> str:
     """Get PostgreSQL connection URL from environment."""
     # Priority: DATABASE_URL > POSTGRES_URL
     url = settings.DATABASE_URL or getattr(settings, "POSTGRES_URL", "")
-    
+
     if not url:
         raise ValueError(
             "DATABASE_URL or POSTGRES_URL must be set for PostgreSQL connection"
         )
-    
+
     return url
 
 
@@ -45,22 +45,22 @@ async def get_postgres_pool() -> AsyncConnectionPool:
         RuntimeError: If pool creation fails
     """
     global _pool
-    
+
     if _pool is not None:
         return _pool
-    
+
     if AsyncConnectionPool is None:
         raise ValueError(
             "psycopg_pool is not installed. Install it with: pip install 'psycopg[binary,pool]'"
         )
-    
+
     url = get_postgres_url()
-    
+
     # Pool configuration
     min_size = getattr(settings, "POSTGRES_POOL_MIN_SIZE", 1)
     max_size = getattr(settings, "POSTGRES_POOL_MAX_SIZE", 10)
     max_idle = getattr(settings, "POSTGRES_POOL_MAX_IDLE", 30)
-    
+
     try:
         _pool = AsyncConnectionPool(
             url,
@@ -68,14 +68,14 @@ async def get_postgres_pool() -> AsyncConnectionPool:
             max_size=max_size,
             max_idle=max_idle,
         )
-        
+
         logger.info(
             "PostgreSQL connection pool created: min=%d, max=%d, max_idle=%d",
             min_size,
             max_size,
             max_idle,
         )
-        
+
         return _pool
     except Exception as e:
         logger.error("Failed to create PostgreSQL connection pool: %s", e)
@@ -85,7 +85,7 @@ async def get_postgres_pool() -> AsyncConnectionPool:
 async def close_postgres_pool() -> None:
     """Close PostgreSQL connection pool."""
     global _pool
-    
+
     if _pool is not None:
         await _pool.close()
         _pool = None

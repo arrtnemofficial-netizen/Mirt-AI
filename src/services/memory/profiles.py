@@ -45,7 +45,7 @@ class ProfilesMixin(MemoryBase):
         existing = await self.get_profile(user_id)
         if existing:
             return existing
-        
+
         # Profile doesn't exist - create it
         new_profile = await self.create_profile(user_id)
         if new_profile:
@@ -155,7 +155,7 @@ class ProfilesMixin(MemoryBase):
                 merged = {**current.commerce.model_dump(), **commerce}
                 updates["commerce"] = merged
 
-            set_clause = ", ".join(f"{key} = %s" for key in updates.keys())
+            set_clause = ", ".join(f"{key} = %s" for key in updates)
             values = list(updates.values()) + [user_id]
 
             def _query():

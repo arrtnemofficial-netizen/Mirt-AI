@@ -8,6 +8,7 @@ from .product_matcher import (
     reload_canonical_names,
 )
 
+
 __all__ = [
     "CatalogService",
     "extract_color_from_name",

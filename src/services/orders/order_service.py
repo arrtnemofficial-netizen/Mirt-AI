@@ -7,9 +7,9 @@ Handles order creation and history retrieval.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import Any
+
 
 try:
     import psycopg
@@ -18,8 +18,8 @@ except ImportError:
     psycopg = None  # type: ignore
     dict_row = None  # type: ignore
 
-from src.services.storage import get_postgres_url
 from src.services.common import ServiceUnavailableError
+from src.services.storage import get_postgres_url
 
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class OrderService:
             user_nickname = order_data.get("user_nickname") or customer.get("username")
 
             url = get_postgres_url()
-            
+
             # 2. Upsert Order (handles duplicates atomically) - wrap sync call in thread
             def _create_order_sync():
                 with psycopg.connect(url) as conn:
@@ -102,17 +102,17 @@ class OrderService:
                                 status, total_amount, notes, user_nickname
                             ),
                         )
-                        
+
                         new_order = cur.fetchone()
                         if not new_order:
                             logger.error("Failed to upsert order, no data returned")
                             return None
-                        
+
                         order_id = new_order["id"]
                         created_at = new_order["created_at"]
                         updated_at = new_order["updated_at"]
                         is_new_order = created_at == updated_at
-                        
+
                         # 3. Upsert Order Items (sync items with current cart)
                         # CRITICAL: Always sync items to handle cart changes
                         # Delete existing items first, then insert new ones
@@ -120,7 +120,7 @@ class OrderService:
                             "DELETE FROM order_items WHERE order_id = %s",
                             (order_id,),
                         )
-                        
+
                         # Insert current items
                         items = order_data.get("items", [])
                         if items:
@@ -152,11 +152,11 @@ class OrderService:
                             )
                         else:
                             logger.warning("Order %s has no items", order_id)
-                        
+
                         conn.commit()
                         logger.info("Order upserted successfully: ID %s", order_id)
                         return str(order_id)
-            
+
             return await asyncio.to_thread(_create_order_sync)
 
         except Exception as e:
@@ -171,7 +171,7 @@ class OrderService:
 
         try:
             url = get_postgres_url()
-            
+
             def _get_user_orders_sync():
                 with psycopg.connect(url) as conn:
                     with conn.cursor(row_factory=dict_row) as cur:
@@ -185,7 +185,7 @@ class OrderService:
                             (user_id,),
                         )
                         orders = cur.fetchall()
-                        
+
                         # Fetch order items for each order
                         result = []
                         for order in orders:
@@ -201,9 +201,9 @@ class OrderService:
                             items = cur.fetchall()
                             order_dict["order_items"] = [dict(item) for item in items]
                             result.append(order_dict)
-                        
+
                         return result
-            
+
             return await asyncio.to_thread(_get_user_orders_sync)
         except Exception as e:
             logger.error("Get user orders failed: %s", e)
@@ -217,7 +217,7 @@ class OrderService:
 
         try:
             url = get_postgres_url()
-            
+
             def _get_order_by_id_sync():
                 with psycopg.connect(url) as conn:
                     with conn.cursor(row_factory=dict_row) as cur:
@@ -230,12 +230,12 @@ class OrderService:
                             (order_id,),
                         )
                         order = cur.fetchone()
-                        
+
                         if not order:
                             return None
-                        
+
                         order_dict = dict(order)
-                        
+
                         # Fetch order items
                         cur.execute(
                             """
@@ -247,9 +247,9 @@ class OrderService:
                         )
                         items = cur.fetchall()
                         order_dict["order_items"] = [dict(item) for item in items]
-                        
+
                         return order_dict
-            
+
             return await asyncio.to_thread(_get_order_by_id_sync)
         except Exception as e:
             logger.error("Get order failed: %s", e)

@@ -9,6 +9,7 @@ from langchain_core.messages import BaseMessage
 
 from src.core.constants import AgentState as StateEnum
 
+
 if TYPE_CHECKING:
     from src.agents import ConversationState
 

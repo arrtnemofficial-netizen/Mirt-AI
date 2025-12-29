@@ -5,7 +5,6 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
-from fastapi.responses import JSONResponse
 
 from src.conf.config import settings
 from src.core.logging import log_event
@@ -15,6 +14,7 @@ from src.server.dependencies import (
 )
 from src.server.routers.common import extract_inbound_token, extract_manychat_message_id
 from src.services.webhook import WebhookDedupeStore
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -111,30 +111,23 @@ async def manychat_webhook(
 
             if message_id:
                 # Use PostgreSQL for webhook deduplication
-                dedupe_store = WebhookDedupeStore(db=None, ttl_hours=24, use_postgres=True)
+                dedupe_store = WebhookDedupeStore(ttl_hours=24)
 
-                if dedupe_store:
-                    # Check for duplicates using DB store
-                    is_duplicate = dedupe_store.check_and_mark(
-                        user_id=user_id,
-                        message_id=message_id,
-                        text=text,
-                        image_url=image_url,
-                    )
+                # Check for duplicates using async DB store
+                is_duplicate = await dedupe_store.check_and_mark_async(
+                    user_id=user_id,
+                    message_id=message_id,
+                    text=text,
+                    image_url=image_url,
+                )
 
-                    if is_duplicate:
-                        logger.info(
-                            "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
-                            user_id,
-                            message_id,
-                        )
-                        return {"status": "accepted"}
-                else:
-                    logger.warning(
-                        "[MANYCHAT] Database disabled, skipping dedupe (push mode) user=%s message_id=%s",
+                if is_duplicate:
+                    logger.info(
+                        "[MANYCHAT] Duplicate delivery ignored (push mode) user=%s message_id=%s",
                         user_id,
                         message_id,
                     )
+                    return {"status": "accepted"}
 
             # -----------------------------------------------------------------
             # BACKGROUND PROCESSING (FastAPI BackgroundTasks)

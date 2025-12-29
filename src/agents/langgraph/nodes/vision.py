@@ -27,7 +27,6 @@ from src.services.observability import log_agent_step, log_trace, track_metric
 from .utils import (
     extract_height_from_text,
     get_size_and_price_for_height,
-    image_msg,
     text_msg,
 )
 
@@ -52,15 +51,11 @@ _ACTIVE_ESCALATIONS: set[str] = set()
 
 
 # Import helper functions from vision helpers
-from .helpers.vision.snippet_loader import (
-    get_product_snippet as _get_product_snippet,
-    get_snippet_by_header as _get_snippet_by_header,
+from .helpers.vision.escalation import (
+    build_escalation_state_update,
+    should_escalate_vision,
 )
 from .helpers.vision.product_enrichment import enrich_product_from_db as _enrich_product_from_db
-from .helpers.vision.escalation import (
-    should_escalate_vision,
-    build_escalation_state_update,
-)
 
 
 def _extract_products(
@@ -93,19 +88,19 @@ def _extract_products(
 
     if response.identified_product:
         new_product = response.identified_product.model_dump()
-        
+
         # SENIOR-LEVEL: Use professional deduplication utility
         if is_product_addition and existing:
             # Product addition: use safe add with duplicate checking
             from .helpers.vision.product_deduplication import add_product_safely
-            
+
             products, was_added = add_product_safely(
                 new_product=new_product,
                 existing_products=existing,
                 strict_duplicate_check=True,
                 session_id=session_id,
             )
-            
+
             if was_added:
                 logger.info(
                     "[SESSION %s] Vision identified product for addition: '%s' (confidence=%.0f%%)",
@@ -393,7 +388,7 @@ async def vision_node(
         # Check if this is product addition context for better UX messaging
         metadata = state.get("metadata", {})
         is_product_addition = bool(metadata.get("product_addition_context", False))
-        
+
         logger.warning(
             "🚨 [SESSION %s] ESCALATION: %s! claimed='%s' confidence=%.0f%% catalog_found=%s enrichment_failed=%s product_addition=%s",
             session_id,
@@ -404,7 +399,7 @@ async def vision_node(
             enrichment_failed,
             is_product_addition,
         )
-        
+
         # Do NOT show incomplete/foreign product to customer
         response.identified_product = None
         response.needs_clarification = False  # Escalation, not clarification
@@ -430,11 +425,11 @@ async def vision_node(
             active_escalations=_ACTIVE_ESCALATIONS,
             bg_tasks=_BG_TASKS,
         )
-        
+
         # Enhance metadata with product addition context
         if "metadata" in escalation_update:
             escalation_update["metadata"].update(escalation_metadata)
-        
+
         return escalation_update
 
     # Log response with clear visibility
@@ -476,10 +471,10 @@ async def vision_node(
     # Extract products and build messages using helpers
     metadata = state.get("metadata", {})
     is_product_addition = bool(metadata.get("product_addition_context", False))
-    
+
     # CRITICAL: For product addition, ADD to existing products (don't replace)
     existing_products = state.get("selected_products", []) if is_product_addition else []
-    
+
     # SENIOR-LEVEL: Use professional extraction with deduplication
     selected_products = _extract_products(
         response,
@@ -487,7 +482,7 @@ async def vision_node(
         session_id=session_id,
         is_product_addition=is_product_addition,
     )
-    
+
     # Log product addition summary
     if is_product_addition:
         new_count = len(selected_products) - len(existing_products)
@@ -498,7 +493,7 @@ async def vision_node(
             new_count,
             len(selected_products),
         )
-    
+
     vision_greeted_before = bool(metadata.get("vision_greeted", False))
     assistant_messages = _build_vision_messages(
         response,

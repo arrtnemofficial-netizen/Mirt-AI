@@ -18,11 +18,19 @@ from aiogram.filters import Command, CommandStart
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
 from src.conf.config import settings
-from src.services.conversation import ConversationHandler, create_conversation_handler
-from src.services.conversation import BufferedMessage, MessageDebouncer
-from src.services.storage import MessageStore, create_message_store
+from src.services.conversation import (
+    BufferedMessage,
+    ConversationHandler,
+    MessageDebouncer,
+    create_conversation_handler,
+)
 from src.services.notifications import render_agent_response_text
-from src.services.storage import InMemorySessionStore, SessionStore
+from src.services.storage import (
+    InMemorySessionStore,
+    MessageStore,
+    SessionStore,
+    create_message_store,
+)
 
 
 if TYPE_CHECKING:

@@ -1,0 +1,60 @@
+- name: Сарафан льон
+  id: 3443580
+  price: 1580
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors:
+  - беж
+  - голубий
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-17/29810c6/9e13b8-1723915040131.jpeg
+- name: Сукня Анна
+  id: 3443041
+  price: 2050
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors:
+  - Темно синя
+  - голуба
+  - малина
+  - чорна
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-17/1d23e6/bfd5d1-1723912755763.jpeg
+- name: сукня квіти
+  id: 3443850
+  price: 895
+  sizes:
+  - '100'
+  - '110'
+  - '130'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-17/444607/142434-1723916769005.jpeg
+- name: сукня коричнева з білим воротніком
+  id: 3443846
+  price: 1140
+  sizes:
+  - '110'
+  - '120'
+  - '130'
+  - '140'
+  - '150'
+  - '160'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-17/510608a/f563c8-1723916393791.jpeg
+- name: сукня синя з білим воротніком
+  id: 3443788
+  price: 1140
+  sizes:
+  - '110'
+  - '120'
+  - '160'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-17/d15288/910ac5f-1723916074259.jpeg

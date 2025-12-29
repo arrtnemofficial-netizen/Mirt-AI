@@ -93,13 +93,13 @@ def detect_product_addition_intent(user_text: str) -> bool:
     """
     if not user_text:
         return False
-    
+
     user_text_lower = user_text.lower().strip()
-    
+
     # Check for product addition keywords
     for keyword in PRODUCT_ADDITION_KEYWORDS:
         if keyword in user_text_lower:
             return True
-    
+
     return False
 

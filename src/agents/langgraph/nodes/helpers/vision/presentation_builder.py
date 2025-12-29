@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+
 logger = logging.getLogger(__name__)
 
 from .snippet_loader import get_product_snippet
@@ -43,7 +44,7 @@ def build_presentation_text(
     if snippet_bubbles:
         # Use first snippet bubble as presentation
         return snippet_bubbles[0] if snippet_bubbles else None
-    
+
     # No snippet found - return None (no description bubble)
     return None
 

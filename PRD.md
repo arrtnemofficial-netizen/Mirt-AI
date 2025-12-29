@@ -1,7 +1,7 @@
 # 📋 MIRT AI — Product Requirements Document (PRD)
 
 > **Версія:** 1.0  
-> **Дата:** 9 грудня 2025  
+> **Дата:** 29 грудня 2025  
 > **Статус:** Production Ready
 
 ---

@@ -17,6 +17,8 @@ from src.conf.config import settings
 from src.core.constants import DBTable
 from src.services.conversation import next_followup_due_at, run_followups
 from src.services.storage import create_message_store
+
+
 # PostgreSQL only - no Supabase dependency
 
 
@@ -55,11 +57,9 @@ def send_followup(
 
     try:
         now = datetime.now(UTC)
-        current_hour = now.hour
-        
-        # Night mode: 23:00-07:00 UTC
-        is_night_mode = current_hour >= 23 or current_hour < 7
-        
+
+        # Night mode REMOVED - followups now send 24/7
+
         message_store = create_message_store()
         followup = run_followups(
             session_id=session_id,
@@ -77,23 +77,6 @@ def send_followup(
                 "session_id": session_id,
                 "reason": "not_due",
             }
-
-        # Use night message if in night mode
-        if is_night_mode:
-            from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
-            
-            night_bubbles = get_snippet_by_header("FOLLOWUP_NIGHT")
-            night_content = (
-                "".join(night_bubbles)
-                if night_bubbles
-                else "?????????? ??'??????? ? ???? ?????? ??"
-            )
-            followup.content = night_content
-            logger.info(
-                "[WORKER:FOLLOWUP] Using night mode message for session %s (hour=%d)",
-                session_id,
-                current_hour,
-            )
 
         # Send via appropriate channel
         if channel == "telegram" and chat_id:
@@ -168,8 +151,9 @@ def check_all_sessions_for_followups(self) -> dict:
     try:
         import psycopg
         from psycopg.rows import dict_row
+
         from src.services.storage import get_postgres_url
-        
+
         # Get sessions with their chat info from PostgreSQL
         try:
             postgres_url = get_postgres_url()
@@ -182,7 +166,7 @@ def check_all_sessions_for_followups(self) -> dict:
                     f"SELECT DISTINCT session_id, user_id FROM {DBTable.MESSAGES}"
                 )
                 rows = cur.fetchall()
-        
+
         if not rows:
             return {"status": "ok", "queued": 0}
 
@@ -332,9 +316,9 @@ def handle_24h_followup_escalation(
         # Get user_id from PostgreSQL messages table
         import psycopg
         from psycopg.rows import dict_row
+
         from src.services.storage import get_postgres_url
-        from src.conf.config import settings
-        
+
         try:
             postgres_url = get_postgres_url()
         except ValueError:
@@ -355,7 +339,7 @@ def handle_24h_followup_escalation(
                     (session_id,),
                 )
                 row = cur.fetchone()
-        
+
         user_id = row.get("user_id") if row else None
 
         if not user_id:

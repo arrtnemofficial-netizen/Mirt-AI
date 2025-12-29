@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
 
 try:
     import psycopg
@@ -21,9 +21,11 @@ except ImportError:
     dict_row = None  # type: ignore
     Json = None  # type: ignore
 
-from .session_store import InMemorySessionStore, SessionStore, _serialize_for_json
 from src.conf.config import settings
+
 from .postgres_pool import get_postgres_url
+from .session_store import InMemorySessionStore, SessionStore, _serialize_for_json
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,30 +49,29 @@ class PostgresSessionStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             return None
-        
+
         try:
             try:
                 url = get_postgres_url()
             except ValueError:
                 return None
-            with psycopg.connect(url) as conn:
-                with conn.cursor(row_factory=dict_row) as cur:
-                    cur.execute(
-                        f"SELECT state FROM {self.table_name} WHERE session_id = %s LIMIT 1",
-                        (session_id,),
-                    )
-                    row = cur.fetchone()
-                    
-                    if row and row.get("state"):
-                        state_data = row["state"]
-                        if isinstance(state_data, str):
-                            try:
-                                state_data = json.loads(state_data)
-                            except json.JSONDecodeError:
-                                return None
-                        if isinstance(state_data, dict):
-                            return deepcopy(state_data)
-                    return None
+            with psycopg.connect(url) as conn, conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"SELECT state FROM {self.table_name} WHERE session_id = %s LIMIT 1",
+                    (session_id,),
+                )
+                row = cur.fetchone()
+
+                if row and row.get("state"):
+                    state_data = row["state"]
+                    if isinstance(state_data, str):
+                        try:
+                            state_data = json.loads(state_data)
+                        except json.JSONDecodeError:
+                            return None
+                    if isinstance(state_data, dict):
+                        return deepcopy(state_data)
+                return None
         except Exception as e:
             logger.error("Failed to fetch session %s from PostgreSQL: %s", session_id, e)
             return None
@@ -119,29 +120,28 @@ class PostgresSessionStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             return False
-        
+
         try:
             # Serialize state to handle LangChain objects
             serialized_state = _serialize_for_json(dict(state))
             state_param = Json(serialized_state) if Json else json.dumps(serialized_state)
-            
+
             try:
                 url = get_postgres_url()
             except ValueError:
                 return False
-            with psycopg.connect(url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"""
+            with psycopg.connect(url) as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"""
                         INSERT INTO {self.table_name} (session_id, state, updated_at)
                         VALUES (%s, %s, NOW())
                         ON CONFLICT (session_id) 
                         DO UPDATE SET state = %s, updated_at = NOW()
                         """,
-                        (session_id, state_param, state_param),
-                    )
-                    conn.commit()
-                    return True
+                    (session_id, state_param, state_param),
+                )
+                conn.commit()
+                return True
         except Exception as e:
             logger.error("Failed to save session %s to PostgreSQL: %s", session_id, e)
             return False
@@ -185,26 +185,25 @@ class PostgresSessionStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             return existed_in_fallback
-        
+
         try:
             try:
                 url = get_postgres_url()
             except ValueError:
                 return existed_in_fallback
-            with psycopg.connect(url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"DELETE FROM {self.table_name} WHERE session_id = %s",
-                        (session_id,),
-                    )
-                    conn.commit()
-                    deleted = cur.rowcount > 0
-                    logger.info(
-                        "Deleted session %s from PostgreSQL (existed=%s)",
-                        session_id,
-                        deleted,
-                    )
-                    return existed_in_fallback or deleted
+            with psycopg.connect(url) as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {self.table_name} WHERE session_id = %s",
+                    (session_id,),
+                )
+                conn.commit()
+                deleted = cur.rowcount > 0
+                logger.info(
+                    "Deleted session %s from PostgreSQL (existed=%s)",
+                    session_id,
+                    deleted,
+                )
+                return existed_in_fallback or deleted
         except Exception as e:
             logger.error("Failed to delete session %s from PostgreSQL: %s", session_id, e)
             return existed_in_fallback
@@ -212,9 +211,9 @@ class PostgresSessionStore:
     def _create_empty_state(self, session_id: str) -> ConversationState:
         """Create a fresh empty state."""
         # Import here to avoid circular dependency
-        from src.core.constants import AgentState as StateEnum
         from src.agents import ConversationState
-        
+        from src.core.constants import AgentState as StateEnum
+
         return ConversationState(
             messages=[],
             metadata={"session_id": session_id},

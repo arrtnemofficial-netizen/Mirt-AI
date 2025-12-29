@@ -48,12 +48,12 @@ def worker_health_check(self) -> dict:
     # Check PostgreSQL
     try:
         import psycopg
+
         from src.services.storage import get_postgres_url
-        
+
         postgres_url = get_postgres_url()
-        with psycopg.connect(postgres_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT id FROM {DBTable.MESSAGES} LIMIT 1")
+        with psycopg.connect(postgres_url) as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT id FROM {DBTable.MESSAGES} LIMIT 1")
         health["checks"]["postgresql"] = {"status": "ok"}
     except Exception as e:
         health["checks"]["postgresql"] = {"status": "error", "error": str(e)}

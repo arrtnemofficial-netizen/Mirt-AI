@@ -18,10 +18,11 @@ from ...utils import (
     text_msg,
 )
 
+
 if TYPE_CHECKING:
     from src.agents.pydantic.models import VisionResponse
 
-from .snippet_loader import get_product_snippet, get_snippet_by_header
+from .snippet_loader import get_snippet_by_header
 
 
 def build_vision_messages(
@@ -122,7 +123,7 @@ def build_vision_messages(
             else:
                 message_text = f"Зафіксували {product_name} 🫶"
             messages.append(text_msg(message_text))
-            
+
             # Second bubble: Add to order message with proper pluralization
             total_count = existing_products_count + 1
             if total_count == 1:
@@ -154,7 +155,7 @@ def build_vision_messages(
         # Try to get beautiful presentation text using presentation builder
         # Priority: snippets.md → YAML (visual) → Supabase description (formatted nicely)
         from .presentation_builder import build_presentation_text
-        
+
         # Try to load YAML product data if available
         yaml_product = None
         try:
@@ -170,14 +171,14 @@ def build_vision_messages(
                         break
         except Exception:
             pass  # YAML loading failed, continue without it
-        
+
         presentation_text = build_presentation_text(
             product_name=product_name,
             product_color=product.color,
             catalog_product=catalog_product,
             yaml_product=yaml_product,
         )
-        
+
         # Show description bubble ONLY if snippet exists
         # If no snippet, skip description bubble entirely
         if presentation_text:
@@ -232,7 +233,7 @@ def build_vision_messages(
         and (not response.needs_clarification)
         and (confidence < 0.3)  # Very low confidence = likely not our product
     ) or enrichment_failed  # Product identified but not in catalog
-    
+
     if should_show_not_ours:
         # Try to get snippet for unknown product
         unknown_snippet = get_snippet_by_header("Невідомий товар (ескалація)")

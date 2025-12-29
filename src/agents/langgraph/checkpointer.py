@@ -168,14 +168,14 @@ def _log_if_slow(
 ) -> None:
     elapsed = time.perf_counter() - started_at
     elapsed_ms = elapsed * 1000.0
-    
+
     # Track checkpointer latency metric (always, not just when slow)
     try:
         from src.services.observability import track_metric
         track_metric("checkpointer_latency_ms", elapsed_ms, {"operation": op})
     except Exception:
         pass  # Don't fail if observability is unavailable
-    
+
     if elapsed < slow_threshold_s:
         return
     thread_id = _extract_thread_id(config)
@@ -197,12 +197,12 @@ async def _open_pool_on_demand(pool: Any | None) -> None:
     global _pool_opened
     if pool is None or not hasattr(pool, "open"):
         return
-    
+
     # Use lock to prevent race conditions in async context
     async with _pool_open_lock:
         if _pool_opened:
             return  # Already opened
-        
+
         try:
             try:
                 await pool.open(wait=True)
@@ -307,18 +307,18 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
     # Try to get database URL from environment
     # Priority: DATABASE_URL_POOLER > DATABASE_URL > POSTGRES_URL
     database_url = (
-        os.getenv("DATABASE_URL_POOLER") 
-        or os.getenv("DATABASE_URL") 
+        os.getenv("DATABASE_URL_POOLER")
+        or os.getenv("DATABASE_URL")
         or os.getenv("POSTGRES_URL")
     )
 
     # Import settings at function start to ensure it's always available
     from src.conf.config import settings
-    
+
     # Determine environment
     env = os.getenv("ENVIRONMENT", "development").lower()
     is_production = env in ("production", "prod", "staging")
-    
+
     if not database_url:
         if is_production:
             # In production/staging, require explicit DATABASE_URL
@@ -435,7 +435,7 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             async def _ensure_pool_open(self) -> None:
                 pool = getattr(self, "pool", None) or getattr(self, "conn", None)
                 await _open_pool_on_demand(pool)
-            
+
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
@@ -536,11 +536,11 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                     _log_if_slow(
                         "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
                     )
-            
+
         # Store pool reference for graceful shutdown
         global _pool_instance
         _pool_instance = pool
-        
+
         checkpointer = InstrumentedAsyncPostgresSaver(pool)
 
         logger.info("AsyncPostgresSaver checkpointer initialized successfully")
@@ -761,7 +761,7 @@ async def warmup_checkpointer_pool() -> bool:
                 logger.debug("[CHECKPOINTER] pool already open, continuing with preflight")
             else:
                 raise
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(
             "[CHECKPOINTER] pool warmup timed out after %.2fs (pool may open lazily)",
             time.perf_counter() - _t0,
@@ -784,7 +784,7 @@ async def warmup_checkpointer_pool() -> bool:
     _t1 = time.perf_counter()
     try:
         await asyncio.wait_for(_preflight(), timeout=timeout_s)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(
             "[CHECKPOINTER] pool preflight timed out after %.2fs",
             time.perf_counter() - _t1,
@@ -816,10 +816,10 @@ async def shutdown_checkpointer_pool() -> None:
     global _pool_instance
     if _pool_instance is None:
         return
-    
+
     pool = _pool_instance
     _pool_instance = None
-    
+
     try:
         if hasattr(pool, "close"):
             # Give active connections time to finish (max 5 seconds)
@@ -829,7 +829,7 @@ async def shutdown_checkpointer_pool() -> None:
             # Some pool implementations use wait() instead
             await asyncio.wait_for(pool.wait(), timeout=5.0)
             logger.info("[CHECKPOINTER] Pool closed gracefully")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("[CHECKPOINTER] Pool close timed out, forcing shutdown")
     except Exception as e:
         logger.warning("[CHECKPOINTER] Error closing pool: %s", e)

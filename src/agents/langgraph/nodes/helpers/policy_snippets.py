@@ -12,6 +12,7 @@ from typing import Any
 
 from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,9 +28,9 @@ def _is_clarification_context(text: str) -> bool:
     """
     if not text:
         return False
-    
+
     text_lower = text.lower().strip()
-    
+
     # Clarification patterns: "ні" + уточнення (розмір, колір, тощо)
     clarification_patterns = [
         "ні, не підходить",
@@ -55,12 +56,12 @@ def _is_clarification_context(text: str) -> bool:
         "ні, не підходить цей",
         "нет, не подходит этот",
     ]
-    
+
     # Check if text contains clarification pattern
     for pattern in clarification_patterns:
         if pattern in text_lower:
             return True
-    
+
     return False
 
 
@@ -81,14 +82,14 @@ def detect_user_says_no(text: str, state: dict[str, Any] | None = None) -> tuple
     """
     if not text:
         return False, "none"
-    
+
     # CRITICAL: Check if this is a clarification first
     if _is_clarification_context(text):
         logger.debug("Context check: '%s' is a clarification, not a refusal", text[:50])
         return False, "clarification"
-    
+
     text_lower = text.lower().strip()
-    
+
     # Explicit refusal patterns (standalone "no" or clear refusal)
     # These are patterns that indicate actual refusal, not clarification
     refusal_patterns = [
@@ -112,7 +113,7 @@ def detect_user_says_no(text: str, state: dict[str, Any] | None = None) -> tuple
         "не буду брати",
         "не буду купувати",
     ]
-    
+
     # Check for exact matches or patterns
     for pattern in refusal_patterns:
         if pattern in text_lower:
@@ -127,7 +128,7 @@ def detect_user_says_no(text: str, state: dict[str, Any] | None = None) -> tuple
                         return False, "clarification"
             logger.debug("Refusal detected: '%s' matches pattern '%s'", text[:50], pattern)
             return True, "refusal"
-    
+
     return False, "none"
 
 
@@ -144,7 +145,7 @@ def _is_color_request_context(text: str, state: dict[str, Any] | None) -> bool:
     """
     if not text or not state:
         return False
-    
+
     text_lower = text.lower()
     color_keywords = [
         "колір",
@@ -158,10 +159,10 @@ def _is_color_request_context(text: str, state: dict[str, Any] | None) -> bool:
         "які кольори",
         "какие цвета",
     ]
-    
+
     # Перевіряємо чи є ключові слова про колір
     has_color_keyword = any(kw in text_lower for kw in color_keywords)
-    
+
     # Перевіряємо чи в state є selected_products або offered_products (контекст поточного товару)
     # Check for product context in state or metadata (stable SSOT).
     metadata = state.get("metadata", {}) if isinstance(state, dict) else {}
@@ -171,7 +172,7 @@ def _is_color_request_context(text: str, state: dict[str, Any] | None) -> bool:
         or metadata.get("current_product_name")
         or metadata.get("color_gallery_product")
     )
-    
+
     # Якщо є ключові слова про колір І є контекст поточного товару → це запит про колір
     return has_color_keyword and has_product_context
 
@@ -191,14 +192,14 @@ def detect_explicit_new_product(text: str, state: dict[str, Any] | None = None) 
     """
     if not text:
         return False
-    
+
     # CRITICAL: Check context first - if this is a color request, it's NOT a new product
     if _is_color_request_context(text, state):
         logger.debug("Context check: '%s' is a color request, not new product", text[:50])
         return False
-    
+
     text_lower = text.lower().strip()
-    
+
     # Expanded explicit new product patterns
     new_product_patterns = [
         # Original patterns
@@ -236,13 +237,13 @@ def detect_explicit_new_product(text: str, state: dict[str, Any] | None = None) 
         "хочу подивитись інший товар",
         "хочу посмотреть другой товар",
     ]
-    
+
     # Check for patterns
     for pattern in new_product_patterns:
         if pattern in text_lower:
             logger.debug("Explicit new product trigger detected: '%s' matches pattern '%s'", text[:50], pattern)
             return True
-    
+
     return False
 
 
@@ -356,9 +357,9 @@ def detect_payment_problem(text: str) -> bool:
     """
     if not text:
         return False
-    
+
     text_lower = text.lower().strip()
-    
+
     # Payment problem patterns
     problem_patterns = [
         "не отримується",
@@ -376,12 +377,12 @@ def detect_payment_problem(text: str) -> bool:
         "не працює оплата",
         "не работает оплата",
     ]
-    
+
     # Check for patterns
     for pattern in problem_patterns:
         if pattern in text_lower:
             return True
-    
+
     return False
 
 
@@ -409,19 +410,19 @@ def maybe_apply_snippet_policy(
         # Try to extract from state
         from src.agents.langgraph.nodes.utils import extract_user_message
         user_text = extract_user_message(state.get("messages", []))
-    
+
     if not user_text:
         return None
-    
+
     dialog_phase = state.get("dialog_phase", "INIT")
     metadata = state.get("metadata", {}) or {}
     session_id = state.get("session_id") or metadata.get("session_id") or "?"
-    
+
     # Check for product addition intent WITHOUT photo (snippet response)
     has_image = bool(state.get("has_image", False) or metadata.get("has_image", False))
     if not has_image and dialog_phase in {"WAITING_FOR_PAYMENT_PROOF", "WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_DELIVERY_DATA"}:
         from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
-        
+
         if detect_product_addition_intent(user_text):
             logger.info(
                 "[SESSION %s] Snippets-first: product addition intent detected without photo, returning snippet",
@@ -446,15 +447,15 @@ def maybe_apply_snippet_policy(
                 "dialog_phase": dialog_phase,  # Stay in same phase
                 "metadata": metadata,
             }
-    
+
     # Check for "user says no" scenarios
     is_refusal, refusal_reason = detect_user_says_no(user_text, state)
-    
+
     # Only process if it's an actual refusal (not clarification)
     if is_refusal and refusal_reason == "refusal":
         # Check "no" counter
         no_count = _get_no_count(metadata)
-        
+
         next_no_count = no_count + 1
 
         # If 3+ "no" responses in a row → escalate
@@ -492,10 +493,10 @@ def maybe_apply_snippet_policy(
                 },
                 "dialog_phase": dialog_phase,
             }
-        
+
         # Normal handling: respond with snippet + increment counter
         snippet_header = None
-        
+
         # Determine snippet header based on phase
         if dialog_phase in {
             "WAITING_FOR_PAYMENT_PROOF",
@@ -507,7 +508,7 @@ def maybe_apply_snippet_policy(
             snippet_header = "Відмова (ні) після пропозиції (OFFER_MADE)"
         elif dialog_phase in {"WAITING_FOR_SIZE", "WAITING_FOR_COLOR"}:
             snippet_header = "Відмова (ні) на етапі підбору (WAITING_FOR_SIZE/WAITING_FOR_COLOR)"
-        
+
         if snippet_header:
             bubbles = get_snippet_by_header(snippet_header)
             if bubbles:
@@ -517,16 +518,16 @@ def maybe_apply_snippet_policy(
                     dialog_phase,
                     no_count,
                 )
-                
+
                 # Increment "no" counter
                 updated_metadata = _increment_no_count(metadata.copy())
-                
+
                 # Build response messages
                 messages = [{"role": "assistant", "content": bubble} for bubble in bubbles]
-                
+
                 # Determine if we need to notify manager (for payment phase)
                 should_notify = dialog_phase == "WAITING_FOR_PAYMENT_PROOF"
-                
+
                 return {
                     "messages": messages,
                     "agent_response": {
@@ -548,7 +549,7 @@ def maybe_apply_snippet_policy(
                     # Keep dialog_phase unchanged (don't break FSM)
                     "dialog_phase": dialog_phase,
                 }
-    
+
     # Check for payment problems (in payment phases)
     if dialog_phase in {
         "WAITING_FOR_PAYMENT_PROOF",
@@ -562,7 +563,7 @@ def maybe_apply_snippet_policy(
                 session_id,
                 dialog_phase,
             )
-            
+
             # Return state update with notification flag
             return {
                 "agent_response": {
@@ -590,7 +591,7 @@ def maybe_apply_snippet_policy(
                 },
                 "dialog_phase": dialog_phase,  # Stay in payment phase
             }
-    
+
     # Check for off-topic in payment phase
     if dialog_phase in {
         "WAITING_FOR_PAYMENT_PROOF",
@@ -603,12 +604,12 @@ def maybe_apply_snippet_policy(
             "REQUEST_PHOTO",
             "DISCOVERY_OR_QUESTION",
         }
-        
+
         if detected_intent in off_topic_intents:
             # Check off-topic counter
             offtopic_count = _get_offtopic_count(metadata)
             next_offtopic_count = offtopic_count + 1
-            
+
             # If 3+ off-topic questions in a row → escalate
             if next_offtopic_count >= 3:
                 logger.warning(
@@ -643,34 +644,34 @@ def maybe_apply_snippet_policy(
                     },
                     "dialog_phase": dialog_phase,
                 }
-            
+
             # Normal handling: respond with snippet + increment counter
             snippet_header = "Оффтоп під час оплати (коротко + повернення до оплати)"
             bubbles = get_snippet_by_header(snippet_header)
-            
+
             if bubbles:
                 logger.info(
                     "[SESSION %s] Snippets-first: found snippet for off-topic in payment phase (count: %d)",
                     session_id,
                     offtopic_count,
                 )
-                
+
                 # Increment off-topic counter
                 updated_metadata = _increment_offtopic_count(metadata.copy())
-                
+
                 # Get payment reminder by phase
                 payment_reminder = _get_payment_reminder_by_phase(dialog_phase)
-                
+
                 # Build response messages (snippet bubbles + payment reminder)
                 messages = [{"role": "assistant", "content": bubble} for bubble in bubbles]
                 if payment_reminder:
                     messages.append({"role": "assistant", "content": payment_reminder})
-                
+
                 # Prepare bubbles for agent_response (include reminder)
                 response_bubbles = [bubble for bubble in bubbles]
                 if payment_reminder:
                     response_bubbles.append(payment_reminder)
-                
+
                 return {
                     "messages": messages,
                     "agent_response": {
@@ -691,13 +692,13 @@ def maybe_apply_snippet_policy(
                     # Keep dialog_phase unchanged (return to payment)
                     "dialog_phase": dialog_phase,
                 }
-    
+
     # =========================================================================
     # EXIT CONDITIONS CHECK (before LLM)
     # =========================================================================
     # These are deterministic exit conditions that should trigger escalation
     # without calling LLM
-    
+
     # 1. Wholesale/opт/гурт exit
     if detect_wholesale_exit(user_text):
         session_id = state.get("session_id", "?")
@@ -730,7 +731,7 @@ def maybe_apply_snippet_policy(
                 "silent_exit": True,  # Flag для channel layer - не відправляти empty messages
             },
         }
-    
+
     # 2. Return/exchange action exit
     if detect_return_exchange_action(user_text):
         session_id = state.get("session_id", "?")
@@ -766,7 +767,7 @@ def maybe_apply_snippet_policy(
                 "policy_case": "return_exchange_exit",
             },
         }
-    
+
     # 3. Urgent delivery exit
     if detect_urgent_delivery_exit(user_text):
         session_id = state.get("session_id", "?")
@@ -801,10 +802,10 @@ def maybe_apply_snippet_policy(
                 "policy_case": "urgent_delivery_exit",
             },
         }
-    
+
     # 4. Missing product info (handled via escalation_reason from LLM)
     # This is checked in agent node after LLM call
-    
+
     # No snippet found - return None to continue with LLM
     return None
 
@@ -827,7 +828,7 @@ def detect_wholesale_exit(user_text: str) -> bool:
     """
     if not user_text:
         return False
-    
+
     text_lower = user_text.lower()
     wholesale_keywords = [
         "опт", "оптом", "оптов", "оптово",
@@ -837,7 +838,7 @@ def detect_wholesale_exit(user_text: str) -> bool:
         "прайс для перепродажу",
         "wholesale", "bulk",
     ]
-    
+
     return any(keyword in text_lower for keyword in wholesale_keywords)
 
 
@@ -856,9 +857,9 @@ def detect_return_exchange_action(user_text: str) -> bool:
     """
     if not user_text:
         return False
-    
+
     text_lower = user_text.lower()
-    
+
     # Consultation patterns (NOT exit conditions)
     consultation_patterns = [
         "чи можна повернути",
@@ -874,12 +875,12 @@ def detect_return_exchange_action(user_text: str) -> bool:
         "як обміняти",
         "как обменять",
     ]
-    
+
     # Check if this is a consultation question first
     for pattern in consultation_patterns:
         if pattern in text_lower:
             return False  # This is a consultation, not an action
-    
+
     # Action patterns (exit conditions)
     action_patterns = [
         "хочу повернути",
@@ -903,7 +904,7 @@ def detect_return_exchange_action(user_text: str) -> bool:
         "обмінюю товар",
         "обмениваю товар",
     ]
-    
+
     return any(pattern in text_lower for pattern in action_patterns)
 
 
@@ -922,9 +923,9 @@ def detect_urgent_delivery_exit(user_text: str) -> bool:
     """
     if not user_text:
         return False
-    
+
     text_lower = user_text.lower()
-    
+
     # General questions (NOT exit conditions)
     general_questions = [
         "як швидко ви відправляєте",
@@ -938,12 +939,12 @@ def detect_urgent_delivery_exit(user_text: str) -> bool:
         "як довго йде посилка",
         "как долго идет посылка",
     ]
-    
+
     # Check if this is a general question first
     for pattern in general_questions:
         if pattern in text_lower:
             return False  # This is a general question, not urgent request
-    
+
     # Explicit urgent patterns (exit conditions)
     urgent_patterns = [
         "мені терміново треба",
@@ -961,7 +962,7 @@ def detect_urgent_delivery_exit(user_text: str) -> bool:
         "потрібно терміново",
         "нужно срочно",
     ]
-    
+
     return any(pattern in text_lower for pattern in urgent_patterns)
 
 
@@ -988,7 +989,7 @@ def detect_missing_product_info(user_text: str, state: dict[str, Any]) -> bool:
     escalation_reason = state.get("escalation_reason") or state.get("metadata", {}).get("escalation_reason")
     if escalation_reason == "missing_product_info":
         return True
-    
+
     return False
 
 

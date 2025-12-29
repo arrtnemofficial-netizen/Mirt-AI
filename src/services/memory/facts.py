@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from psycopg.rows import dict_row
 
@@ -169,7 +169,7 @@ class FactsMixin(MemoryBase):
         if embedding is not None:
             data["embedding"] = embedding
 
-        set_clause = ", ".join(f"{key} = %s" for key in data.keys())
+        set_clause = ", ".join(f"{key} = %s" for key in data)
         values = list(data.values()) + [str(update.fact_id)]
 
         def _query():
@@ -210,9 +210,11 @@ class FactsMixin(MemoryBase):
             return []
 
         params: list[Any] = [user_id, min_importance]
+        # TTL enforcement: filter out expired facts even if cleanup hasn't run
         sql = (
             f"SELECT * FROM {TABLE_MEMORIES} "
-            "WHERE user_id = %s AND is_active = TRUE AND importance >= %s"
+            "WHERE user_id = %s AND is_active = TRUE AND importance >= %s "
+            "AND (expires_at IS NULL OR expires_at > NOW())"
         )
         if categories:
             sql += " AND category = ANY(%s)"

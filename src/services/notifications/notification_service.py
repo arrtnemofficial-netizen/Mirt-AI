@@ -126,17 +126,17 @@ class NotificationService:
         if ctx:
             lines.append("Останнє від клієнта:")
             lines.append(ctx)
-        
+
         # Add image URL if available (for vision escalations)
         image_url = str(details.get("image_url") or "").strip()
         if image_url:
             lines.append(f"Фото: {self._truncate(image_url, 200)}")
-        
+
         # Add vision-specific details if available
         vision_identified = str(details.get("vision_identified") or "").strip()
         if vision_identified:
             lines.append(f"Vision визначив: {self._truncate(vision_identified, 100)}")
-        
+
         confidence = details.get("confidence")
         if confidence is not None:
             lines.append(f"Confidence: {confidence:.0f}%")
@@ -181,7 +181,7 @@ class NotificationService:
                 or "ig_messaging_cdn" in image_url_str
                 or "fbcdn.net" in image_url_str
             )
-            
+
             if is_private_cdn:
                 # Private CDN → Telegram can't fetch, send text with URL instead
                 logger.info("Skipping sendPhoto for private CDN URL, sending text with URL")
@@ -190,7 +190,7 @@ class NotificationService:
             else:
                 # Public URL → try sendPhoto
                 return await self._send_telegram_photo(image_url, message)
-        
+
         return await self._send_telegram_message(message)
 
     async def _send_telegram_photo(self, photo_url: str, caption: str, max_retries: int = 2) -> bool:
@@ -206,19 +206,19 @@ class NotificationService:
             True if sent successfully, False otherwise (falls back to text message)
         """
         import asyncio
-        
+
         url = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
         timeout = aiohttp.ClientTimeout(total=15.0)  # 15 second timeout for photo
-        
+
         # Truncate caption to Telegram limit (1024 chars)
         caption_truncated = self._truncate(caption, 1024)
-        
+
         payload = {
             "chat_id": self.chat_id,
             "photo": photo_url,
             "caption": caption_truncated,
         }
-        
+
         # Retry loop with exponential backoff
         for attempt in range(max_retries):
             try:
@@ -229,9 +229,9 @@ class NotificationService:
                     if response.status == 200:
                         logger.info("Manager notification with photo sent successfully")
                         return True
-                    
+
                     resp_text = await response.text()
-                    
+
                     # Retry on 5xx errors or rate limits
                     if (response.status >= 500 or response.status == 429) and attempt < max_retries - 1:
                         backoff = min(0.5 * (2 ** attempt), 2.0)
@@ -244,7 +244,7 @@ class NotificationService:
                         )
                         await asyncio.sleep(backoff)
                         continue
-                    
+
                     logger.error(
                         "Failed to send photo notification: %s %s",
                         response.status,
@@ -252,8 +252,8 @@ class NotificationService:
                     )
                     # Fallback to text-only message
                     return await self._send_telegram_message(caption_truncated)
-                    
-            except asyncio.TimeoutError:
+
+            except TimeoutError:
                 if attempt < max_retries - 1:
                     backoff = min(0.5 * (2 ** attempt), 2.0)
                     logger.warning(
@@ -267,7 +267,7 @@ class NotificationService:
                 logger.error("Telegram photo request timeout after %d attempts", max_retries)
                 # Fallback to text-only message
                 return await self._send_telegram_message(caption_truncated)
-                
+
             except Exception as e:
                 if attempt < max_retries - 1:
                     backoff = min(0.5 * (2 ** attempt), 2.0)
@@ -283,7 +283,7 @@ class NotificationService:
                 logger.error("Photo notification error after %d attempts: %s", max_retries, e)
                 # Fallback to text-only message
                 return await self._send_telegram_message(caption_truncated)
-        
+
         # Final fallback
         return await self._send_telegram_message(caption_truncated)
 
@@ -299,7 +299,7 @@ class NotificationService:
             True if sent successfully, False otherwise
         """
         import asyncio
-        
+
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         timeout = aiohttp.ClientTimeout(total=10.0)  # 10 second timeout
 
@@ -349,8 +349,8 @@ class NotificationService:
                             resp_text[:200],
                         )
                         return False
-                        
-                except asyncio.TimeoutError:
+
+                except TimeoutError:
                     if attempt < max_retries - 1:
                         backoff = min(0.5 * (2 ** attempt), 2.0)
                         logger.warning(
@@ -363,7 +363,7 @@ class NotificationService:
                         continue
                     logger.error("Telegram request timeout after %d attempts", max_retries)
                     return False
-                    
+
                 except Exception as e:
                     if attempt < max_retries - 1:
                         backoff = min(0.5 * (2 ** attempt), 2.0)

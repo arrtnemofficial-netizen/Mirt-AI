@@ -84,18 +84,18 @@ def detect_payment_proof(
     # Empty text without image/URL → not proof
     if not user_text and not has_image and not has_url:
         return False
-    
+
     user_text_lower = user_text.lower().strip() if user_text else ""
-    
+
     # CRITICAL: Check for product addition intent FIRST
     # If user wants to add a product, this is NOT payment proof
     if user_text and detect_product_addition_intent(user_text):
         return False
-    
+
     # URL presence → proof (likely screenshot link)
     if has_url or (user_text_lower and ("http://" in user_text_lower or "https://" in user_text_lower)):
         return True
-    
+
     # Strong keywords → always proof (check before image check)
     if user_text_lower:
         for keyword in PAYMENT_PROOF_KEYWORDS:
@@ -109,7 +109,7 @@ def detect_payment_proof(
                 else:
                     # Strong keyword → always proof
                     return True
-    
+
     # Image presence → proof (likely screenshot)
     # BUT: Only if text doesn't indicate product addition (already checked above)
     if has_image:
@@ -118,6 +118,6 @@ def detect_payment_proof(
             return True
         # If text exists but no product addition detected, assume payment proof
         return True
-    
+
     return False
 

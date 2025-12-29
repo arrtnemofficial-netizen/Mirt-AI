@@ -11,12 +11,14 @@ from pathlib import Path
 
 import uvicorn
 
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Setup logging before importing anything else
 from src.core.logging import setup_logging
+
 
 is_production = os.getenv("PUBLIC_BASE_URL", "").strip() != "http://localhost:8000"
 is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"))
@@ -49,7 +51,7 @@ def log_configuration():
 
     port = int(os.environ.get("PORT", "8000"))
     env = settings.SENTRY_ENVIRONMENT.lower() if settings.SENTRY_ENVIRONMENT else "development"
-    
+
     logger.info("Configuration:")
     logger.info("  Port: %s", port)
     logger.info("  Environment: %s", env)
@@ -58,13 +60,13 @@ def log_configuration():
     logger.info("  Redis: %s", "configured" if settings.REDIS_URL else "missing")
     logger.info("  Celery: %s", "enabled" if settings.CELERY_ENABLED else "disabled")
     logger.info("  Observability: %s", "enabled" if settings.ENABLE_OBSERVABILITY else "disabled")
-    
+
     # Check Telegram usage
     has_telegram_bot = bool(settings.TELEGRAM_BOT_TOKEN.get_secret_value())
     has_manager_bot = bool(settings.MANAGER_BOT_TOKEN.get_secret_value())
     logger.info("  Telegram Bot: %s", "configured" if has_telegram_bot else "not configured")
     logger.info("  Manager Bot: %s", "configured" if has_manager_bot else "not configured")
-    
+
     if has_telegram_bot and not has_manager_bot:
         logger.warning("  ⚠ Telegram bot configured but manager bot not configured - notifications may fail")
 

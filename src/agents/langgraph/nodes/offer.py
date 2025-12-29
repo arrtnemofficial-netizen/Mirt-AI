@@ -236,20 +236,20 @@ async def offer_node(
         # =====================================================
         # Determine phase based on response content and intent
         dialog_phase = "OFFER_MADE"  # Default
-        
+
         # Check if response asks for delivery data (місто, відділення, ПІБ, телефон)
         # SAFETY: Convert None to empty string to prevent TypeError in join()
         response_text = " ".join([str(m.get("content", "") or "") for m in assistant_messages]).lower()
-        
+
         # Use SSOT rules module instead of duplicated keywords
         from src.agents.langgraph.rules.offer_transition import detect_delivery_request
-        
+
         asks_for_delivery = detect_delivery_request(response_text)
-        
+
         # Check intent from LLM response
         response_intent = response.metadata.intent if hasattr(response.metadata, "intent") else ""
         user_confirmed = response_intent == "PAYMENT_DELIVERY" or asks_for_delivery
-        
+
         # If LLM asks for delivery data OR intent is PAYMENT_DELIVERY → transition to payment phase
         # NOTE: user_confirmed already includes asks_for_delivery, so no need to check both
         if user_confirmed:
@@ -261,7 +261,7 @@ async def offer_node(
                 asks_for_delivery,
                 dialog_phase,
             )
-        
+
         if settings.DEBUG_TRACE_LOGS:
             preview_text = assistant_messages[0].get("content", "") if assistant_messages else ""
             debug_log.node_exit(
@@ -271,7 +271,7 @@ async def offer_node(
                 new_phase=dialog_phase,
                 response_preview=preview_text,
             )
-        
+
         # If transitioning to payment, also update state
         new_state = State.STATE_4_OFFER.value
         if dialog_phase == "WAITING_FOR_DELIVERY_DATA":
@@ -283,7 +283,7 @@ async def offer_node(
                 new_state,
                 dialog_phase,
             )
-        
+
         return {
             "current_state": new_state,
             "messages": assistant_messages,

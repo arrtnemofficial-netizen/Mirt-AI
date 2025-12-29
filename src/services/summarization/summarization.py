@@ -11,6 +11,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -20,8 +21,7 @@ except ImportError:
 
 from src.conf.config import settings
 from src.core.constants import DBTable, MessageTag
-from src.services.storage import MessageStore, StoredMessage
-from src.services.storage import get_postgres_url
+from src.services.storage import MessageStore, StoredMessage, get_postgres_url
 
 
 logger = logging.getLogger(__name__)
@@ -65,18 +65,17 @@ def update_user_summary(user_id: str, summary: str) -> None:
 
     try:
         url = get_postgres_url()
-        with psycopg.connect(url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+        with psycopg.connect(url) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
                     INSERT INTO {DBTable.USERS} (user_id, summary, updated_at)
                     VALUES (%s, %s, NOW())
                     ON CONFLICT (user_id)
                     DO UPDATE SET summary = EXCLUDED.summary, updated_at = NOW()
                     """,
-                    (str(user_id), summary),
-                )
-                conn.commit()
+                (str(user_id), summary),
+            )
+            conn.commit()
     except Exception as e:
         logger.error("Failed to update summary for user %s: %s", user_id, e)
 
@@ -105,19 +104,18 @@ def call_summarize_inactive_users() -> list[dict[str, Any]]:
 
     try:
         url = get_postgres_url()
-        with psycopg.connect(url) as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute("SELECT * FROM summarize_inactive_users()")
-                rows = cur.fetchall()
-                columns = [desc[0] for desc in cur.description] if cur.description else []
-                result = [dict(zip(columns, row)) for row in rows]
-                
-                if result:
-                    logger.info(
-                        "summarize_inactive_users: marked %d users for summarization",
-                        len(result),
-                    )
-                return result
+        with psycopg.connect(url) as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("SELECT * FROM summarize_inactive_users()")
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description] if cur.description else []
+            result = [dict(zip(columns, row)) for row in rows]
+
+            if result:
+                logger.info(
+                    "summarize_inactive_users: marked %d users for summarization",
+                    len(result),
+                )
+            return result
 
     except Exception as e:
         logger.error("Failed to call summarize_inactive_users: %s", e)
@@ -136,18 +134,17 @@ def get_users_needing_summary() -> list[dict[str, Any]]:
 
     try:
         url = get_postgres_url()
-        with psycopg.connect(url) as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    f"""
+        with psycopg.connect(url) as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                f"""
                     SELECT user_id, username, last_interaction_at
                     FROM {DBTable.USERS}
                     WHERE tags @> %s::jsonb
                     """,
-                    ('["needs_summary"]',),
-                )
-                rows = cur.fetchall()
-                return [dict(row) for row in rows]
+                ('["needs_summary"]',),
+            )
+            rows = cur.fetchall()
+            return [dict(row) for row in rows]
 
     except Exception as e:
         logger.error("Failed to get users needing summary: %s", e)
@@ -168,41 +165,40 @@ def mark_user_summarized(user_id: str) -> None:
 
     try:
         url = get_postgres_url()
-        with psycopg.connect(url) as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                # Get current tags
-                cur.execute(
-                    f"""
+        with psycopg.connect(url) as conn, conn.cursor(row_factory=dict_row) as cur:
+            # Get current tags
+            cur.execute(
+                f"""
                     SELECT tags FROM {DBTable.USERS}
                     WHERE user_id = %s
                     """,
-                    (str(user_id),),
-                )
-                row = cur.fetchone()
-                
-                if not row:
-                    logger.warning("User %s not found", user_id)
-                    return
-                
-                current_tags = row.get("tags") or []
-                
-                # Update tags
-                new_tags = [t for t in current_tags if t != "needs_summary"]
-                if "summarized" not in new_tags:
-                    new_tags.append("summarized")
-                
-                # Update tags
-                import json
-                cur.execute(
-                    f"""
+                (str(user_id),),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                logger.warning("User %s not found", user_id)
+                return
+
+            current_tags = row.get("tags") or []
+
+            # Update tags
+            new_tags = [t for t in current_tags if t != "needs_summary"]
+            if "summarized" not in new_tags:
+                new_tags.append("summarized")
+
+            # Update tags
+            import json
+            cur.execute(
+                f"""
                     UPDATE {DBTable.USERS}
                     SET tags = %s::jsonb, updated_at = NOW()
                     WHERE user_id = %s
                     """,
-                    (json.dumps(new_tags), str(user_id)),
-                )
-                conn.commit()
-                logger.info("Marked user %s as summarized", user_id)
+                (json.dumps(new_tags), str(user_id)),
+            )
+            conn.commit()
+            logger.info("Marked user %s as summarized", user_id)
 
     except Exception as e:
         logger.error("Failed to mark user %s as summarized: %s", user_id, e)
@@ -234,12 +230,12 @@ def run_retention(
     # Save summary to users table if we have user_id
     if user_id:
         update_user_summary(user_id, summary_text)
-        
+
         # Also save to mirt_memory_summaries table for memory system
         try:
-            from src.services.memory_service import MemoryService
+            from src.services.memory import MemoryService
             from src.workers.sync_utils import run_sync
-            
+
             memory_service = MemoryService()
             if memory_service.enabled:
                 # Run async save_summary in sync context (for Celery tasks)

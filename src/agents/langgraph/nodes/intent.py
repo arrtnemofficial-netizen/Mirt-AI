@@ -280,23 +280,23 @@ def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -
         # In payment state, most inputs are payment-related (size, address, phone, etc.)
         # BUT: Allow off-topic intents (PRODUCT_CATEGORY, REQUEST_PHOTO) to be handled
         # by agent node with snippets-first policy, then return to payment
-        
+
         # Explicit complaints: let keyword matching handle
         for keyword in INTENT_PATTERNS["COMPLAINT"]:
             if keyword in text_lower:
                 return None  # Let keyword matching handle complaints
-        
+
         # Off-topic intents: allow them (will be handled by agent with snippets-first)
         for keyword in INTENT_PATTERNS["PRODUCT_CATEGORY"]:
             if keyword in text_lower:
                 logger.info("Intent: PRODUCT_CATEGORY (in payment state, allowing off-topic)")
                 return "PRODUCT_CATEGORY"
-        
+
         for keyword in INTENT_PATTERNS["REQUEST_PHOTO"]:
             if keyword in text_lower:
                 logger.info("Intent: REQUEST_PHOTO (in payment state, allowing off-topic)")
                 return "REQUEST_PHOTO"
-        
+
         # Everything else in payment state stays in payment
         logger.info("Intent: PAYMENT_DELIVERY (in payment state, continuing flow)")
         return "PAYMENT_DELIVERY"
@@ -355,7 +355,7 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     metadata = state.get("metadata", {})
     has_image_early = state.get("has_image", False) or metadata.get("has_image", False)
     dialog_phase = state.get("dialog_phase", "INIT")
-    
+
     # Get user message for explicit "new product" detection
     from .utils import extract_user_message
     user_content_early = extract_user_message(state.get("messages", []))
@@ -363,9 +363,9 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     if has_image_early:
         # CRITICAL: Use unified photo purpose detection (SSOT)
         from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
-        
+
         photo_purpose, reason = determine_photo_purpose(state, user_content_early)
-        
+
         # Map photo purpose to intent
         if photo_purpose == "product_ident":
             intent = "PHOTO_IDENT"
@@ -378,7 +378,7 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
                 metadata["product_addition_context"] = True
             elif reason == "smart_rerun_no_products_or_asks_identification":
                 image_context = "smart_rerun"
-            
+
             logger.info(
                 "Intent: PHOTO_IDENT (photo_purpose=%s, reason=%s)",
                 photo_purpose,

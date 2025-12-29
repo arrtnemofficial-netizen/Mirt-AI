@@ -28,9 +28,9 @@ def detect_color_show_request(text: str) -> bool:
     """
     if not text:
         return False
-    
+
     text_lower = text.lower().strip()
-    
+
     # Patterns that indicate user wants to see colors
     show_patterns = [
         r"покажи.*кольор",
@@ -52,7 +52,7 @@ def detect_color_show_request(text: str) -> bool:
         r"показати.*кольор",
         r"показати.*інш",
     ]
-    
+
     # Check for explicit "yes" to color upsell question
     yes_patterns = [
         r"^так$",
@@ -65,19 +65,19 @@ def detect_color_show_request(text: str) -> bool:
         r"так.*покажи",
         r"да.*покажи",
     ]
-    
+
     # Check if this is a response to color upsell question
     # (context-dependent, but we can check for short affirmative responses)
     if len(text_lower.split()) <= 3:
         for pattern in yes_patterns:
             if re.search(pattern, text_lower):
                 return True
-    
+
     # Check for explicit color show requests
     for pattern in show_patterns:
         if re.search(pattern, text_lower):
             return True
-    
+
     return False
 
 
@@ -105,7 +105,7 @@ def get_product_name_for_color_show(state: dict[str, Any]) -> str | None:
             product_name = first_product.get("name")
             if product_name:
                 return str(product_name).strip()
-    
+
     # Try offered_products
     offered = state.get("offered_products", [])
     if offered and isinstance(offered, list) and len(offered) > 0:
@@ -114,19 +114,19 @@ def get_product_name_for_color_show(state: dict[str, Any]) -> str | None:
             product_name = first_product.get("name")
             if product_name:
                 return str(product_name).strip()
-    
+
     # Try metadata.upsell_product_name (from payment upsell)
     metadata = state.get("metadata", {})
     if isinstance(metadata, dict):
         upsell_name = metadata.get("upsell_product_name")
         if upsell_name:
             return str(upsell_name).strip()
-        
+
         # Fallback to last_product_name
         last_name = metadata.get("last_product_name")
         if last_name:
             return str(last_name).strip()
-    
+
     return None
 
 
@@ -148,7 +148,7 @@ def get_current_color_for_exclusion(state: dict[str, Any]) -> str | None:
             color = first_product.get("color")
             if color:
                 return str(color).strip()
-    
+
     # Try offered_products
     offered = state.get("offered_products", [])
     if offered and isinstance(offered, list) and len(offered) > 0:
@@ -157,6 +157,6 @@ def get_current_color_for_exclusion(state: dict[str, Any]) -> str | None:
             color = first_product.get("color")
             if color:
                 return str(color).strip()
-    
+
     return None
 

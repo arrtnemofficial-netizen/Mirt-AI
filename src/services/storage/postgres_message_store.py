@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -13,10 +14,12 @@ except ImportError:
     psycopg = None  # type: ignore
     dict_row = None  # type: ignore
 
-from .message_store import MessageStore, StoredMessage
 from src.conf.config import settings
 from src.core.constants import DBTable
+
+from .message_store import MessageStore, StoredMessage
 from .postgres_pool import get_postgres_url
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,34 +36,33 @@ class PostgresMessageStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             raise RuntimeError("psycopg not installed")
-        
+
         try:
             url = get_postgres_url()
-            with psycopg.connect(url) as conn:
-                with conn.cursor() as cur:
-                    # Insert message
-                    cur.execute(
-                        f"""
+            with psycopg.connect(url) as conn, conn.cursor() as cur:
+                # Insert message
+                cur.execute(
+                    f"""
                         INSERT INTO {self.table}
                         (session_id, role, content, content_type, user_id, created_at)
                         VALUES (%s, %s, %s, %s, %s, %s)
                         """,
-                        (
-                            message.session_id,
-                            message.role,
-                            message.content,
-                            message.content_type,
-                            message.user_id,
-                            message.created_at.isoformat(),
-                        ),
-                    )
-                    
-                    # Update user interaction timestamp and usernames if user_id provided
-                    if message.user_id:
-                        # Pass metadata from message for users table updates (usernames, etc.)
-                        self._update_user_interaction(conn, message.user_id, metadata=message.metadata)
-                    
-                    conn.commit()
+                    (
+                        message.session_id,
+                        message.role,
+                        message.content,
+                        message.content_type,
+                        message.user_id,
+                        message.created_at.isoformat(),
+                    ),
+                )
+
+                # Update user interaction timestamp and usernames if user_id provided
+                if message.user_id:
+                    # Pass metadata from message for users table updates (usernames, etc.)
+                    self._update_user_interaction(conn, message.user_id, metadata=message.metadata)
+
+                conn.commit()
         except Exception as e:
             logger.error("Failed to append message to PostgreSQL: %s", e)
             raise
@@ -82,12 +84,12 @@ class PostgresMessageStore:
                 instagram_username = None
                 telegram_username = None
                 username = None
-                
+
                 if metadata:
                     instagram_username = metadata.get("instagram_username")
                     telegram_username = metadata.get("telegram_username") or metadata.get("user_nickname")
                     username = metadata.get("username") or telegram_username or instagram_username
-                
+
                 # Upsert user with all available fields
                 users_table = DBTable.USERS
                 cur.execute(
@@ -115,47 +117,46 @@ class PostgresMessageStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             return []
-        
+
         try:
             url = get_postgres_url()
-            with psycopg.connect(url) as conn:
-                with conn.cursor(row_factory=dict_row) as cur:
-                    cur.execute(
-                        f"""
+            with psycopg.connect(url) as conn, conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"""
                         SELECT user_id, session_id, role, content, content_type, created_at
                         FROM {self.table}
                         WHERE session_id = %s
                         ORDER BY created_at
                         """,
-                        (session_id,),
-                    )
-                    rows = cur.fetchall()
-                    
-                    messages = []
-                    for row in rows:
-                        created_at = row.get("created_at")
-                        try:
-                            if isinstance(created_at, str):
-                                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                            elif isinstance(created_at, datetime):
-                                dt = created_at
-                            else:
-                                dt = datetime.now(UTC)
-                        except (ValueError, TypeError):
+                    (session_id,),
+                )
+                rows = cur.fetchall()
+
+                messages = []
+                for row in rows:
+                    created_at = row.get("created_at")
+                    try:
+                        if isinstance(created_at, str):
+                            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        elif isinstance(created_at, datetime):
+                            dt = created_at
+                        else:
                             dt = datetime.now(UTC)
-                        
-                        messages.append(
-                            StoredMessage(
-                                session_id=row.get("session_id", ""),
-                                role=row.get("role", "assistant"),
-                                content=row.get("content", ""),
-                                user_id=row.get("user_id"),
-                                content_type=row.get("content_type", "text"),
-                                created_at=dt,
-                                tags=[],
-                            )
+                    except (ValueError, TypeError):
+                        dt = datetime.now(UTC)
+
+                    messages.append(
+                        StoredMessage(
+                            session_id=row.get("session_id", ""),
+                            role=row.get("role", "assistant"),
+                            content=row.get("content", ""),
+                            user_id=row.get("user_id"),
+                            content_type=row.get("content_type", "text"),
+                            created_at=dt,
+                            tags=[],
                         )
-                    return messages
+                    )
+                return messages
         except Exception as e:
             logger.error("Failed to list messages for session %s: %s", session_id, e)
             return []
@@ -165,47 +166,46 @@ class PostgresMessageStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             return []
-        
+
         try:
             url = get_postgres_url()
-            with psycopg.connect(url) as conn:
-                with conn.cursor(row_factory=dict_row) as cur:
-                    cur.execute(
-                        f"""
+            with psycopg.connect(url) as conn, conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f"""
                         SELECT user_id, session_id, role, content, content_type, created_at
                         FROM {self.table}
                         WHERE user_id = %s
                         ORDER BY created_at
                         """,
-                        (str(user_id),),
-                    )
-                    rows = cur.fetchall()
-                    
-                    messages = []
-                    for row in rows:
-                        created_at = row.get("created_at")
-                        try:
-                            if isinstance(created_at, str):
-                                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                            elif isinstance(created_at, datetime):
-                                dt = created_at
-                            else:
-                                dt = datetime.now(UTC)
-                        except (ValueError, TypeError):
+                    (str(user_id),),
+                )
+                rows = cur.fetchall()
+
+                messages = []
+                for row in rows:
+                    created_at = row.get("created_at")
+                    try:
+                        if isinstance(created_at, str):
+                            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        elif isinstance(created_at, datetime):
+                            dt = created_at
+                        else:
                             dt = datetime.now(UTC)
-                        
-                        messages.append(
-                            StoredMessage(
-                                session_id=row.get("session_id", ""),
-                                role=row.get("role", "assistant"),
-                                content=row.get("content", ""),
-                                user_id=row.get("user_id"),
-                                content_type=row.get("content_type", "text"),
-                                created_at=dt,
-                                tags=[],
-                            )
+                    except (ValueError, TypeError):
+                        dt = datetime.now(UTC)
+
+                    messages.append(
+                        StoredMessage(
+                            session_id=row.get("session_id", ""),
+                            role=row.get("role", "assistant"),
+                            content=row.get("content", ""),
+                            user_id=row.get("user_id"),
+                            content_type=row.get("content_type", "text"),
+                            created_at=dt,
+                            tags=[],
                         )
-                    return messages
+                    )
+                return messages
         except Exception as e:
             logger.error("Failed to list messages for user %s: %s", user_id, e)
             return []
@@ -215,16 +215,15 @@ class PostgresMessageStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             return
-        
+
         try:
             url = get_postgres_url()
-            with psycopg.connect(url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"DELETE FROM {self.table} WHERE session_id = %s",
-                        (session_id,),
-                    )
-                    conn.commit()
+            with psycopg.connect(url) as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {self.table} WHERE session_id = %s",
+                    (session_id,),
+                )
+                conn.commit()
         except Exception as e:
             logger.error("Failed to delete messages for session %s: %s", session_id, e)
 
@@ -233,16 +232,15 @@ class PostgresMessageStore:
         if psycopg is None:
             logger.error("psycopg not installed")
             return
-        
+
         try:
             url = get_postgres_url()
-            with psycopg.connect(url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"DELETE FROM {self.table} WHERE user_id = %s",
-                        (str(user_id),),
-                    )
-                    conn.commit()
+            with psycopg.connect(url) as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {self.table} WHERE user_id = %s",
+                    (str(user_id),),
+                )
+                conn.commit()
         except Exception as e:
             logger.error("Failed to delete messages for user %s: %s", user_id, e)
 

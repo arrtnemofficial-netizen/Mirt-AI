@@ -1,0 +1,48 @@
+- name: топ білий
+  id: 3469455
+  price: 535
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/6c69f2/8a53610-1724086612426.jpeg
+- name: топ чорний
+  id: 3469453
+  price: 535
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/169d6c/aa6c54-1724086343794.jpeg
+- name: футболка біла
+  id: 3469464
+  price: 650
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-22/a7519e/26d24f-1724312281133.jpeg
+- name: футболка малина
+  id: 3531303
+  price: 650
+  sizes:
+  - 110-116
+  - 122-128
+  - 134-140
+  - 146-152
+  - 158-164
+  - 98-104
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-22/438439/f49749-1724312526806.jpeg

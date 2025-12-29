@@ -111,7 +111,7 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     # 3. Validate response structure (strict schema validation)
     structure_errors = _validate_response_structure(assistant_response)
     errors.extend(structure_errors)
-    
+
     # 4. STRICT SCHEMA VALIDATION: Try to parse as Pydantic SupportResponse
     # This ensures LLM output matches the exact contract
     schema_errors = _validate_pydantic_schema(assistant_response)
@@ -170,7 +170,7 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     if detect_state_loop(state, previous_phases=phase_history, loop_threshold=3):
         output_metadata["loop_detected"] = True
         output_metadata["loop_phase"] = state.get("dialog_phase")
-    
+
     return {
         "validation_errors": errors,
         "retry_count": retry_count,
@@ -311,10 +311,10 @@ def _validate_pydantic_schema(response: dict[str, Any]) -> list[str]:
     Returns list of validation errors (empty if valid).
     """
     errors = []
-    
+
     try:
         from src.agents.pydantic.models import SupportResponse
-        
+
         # Try to parse response as SupportResponse
         # This will catch type mismatches, missing required fields, etc.
         try:
@@ -323,12 +323,12 @@ def _validate_pydantic_schema(response: dict[str, Any]) -> list[str]:
             # Additional checks can be added here if needed
         except Exception as e:
             # Pydantic validation error - schema mismatch
-            errors.append(f"Schema validation failed: {str(e)}")
+            errors.append(f"Schema validation failed: {e!s}")
             logger.warning("Pydantic schema validation failed: %s", e)
     except ImportError:
         # SupportResponse not available - skip strict validation
         logger.debug("SupportResponse not available, skipping strict schema validation")
-    
+
     return errors
 
 

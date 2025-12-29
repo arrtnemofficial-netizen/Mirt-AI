@@ -1,10 +1,7 @@
-import builtins
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
-
-from src.core.constants import DBTable
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +51,6 @@ def create_message_store() -> MessageStore:
             return postgres_store
     except Exception as e:
         logger.warning("PostgreSQL message store not available: %s", e)
-    
+
     # Fallback to in-memory
     return InMemoryMessageStore()

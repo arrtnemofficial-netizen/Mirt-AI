@@ -108,7 +108,7 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
     # Get thread_id for observability
     thread_id = metadata.get("thread_id", session_id)
-    
+
     logger.info(
         " [SESSION %s] Master router: trace_id=%s phase=%s has_image=%s intent=%s msg='%s' thread_id=%s",
         session_id,
@@ -127,16 +127,16 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     if has_image:
         from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
         from src.services.observability import track_metric
-        
+
         photo_purpose, reason = determine_photo_purpose(state, user_message)
-        
+
         # Set metadata for product addition context if needed
         if photo_purpose == "product_ident" and reason == "product_addition_intent_in_payment_phase":
             if "metadata" not in state:
                 state["metadata"] = {}
             state["metadata"]["product_addition_context"] = True
             state["metadata"]["intent"] = "PRODUCT_ADDITION"
-        
+
         # Route based on photo purpose
         if photo_purpose == "product_ident":
             track_metric(

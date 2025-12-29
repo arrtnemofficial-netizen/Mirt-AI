@@ -18,6 +18,7 @@ from .offer_transition import detect_delivery_request
 from .payment_proof import detect_payment_proof
 from .product_addition import detect_product_addition_intent
 
+
 __all__ = [
     "detect_payment_proof",
     "detect_product_addition_intent",

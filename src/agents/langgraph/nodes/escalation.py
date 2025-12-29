@@ -96,7 +96,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
     notification_sent = False
     metadata = state.get("metadata", {})
     escalation_reason = metadata.get("escalation_reason")
-    
+
     # Check if notification was already sent (e.g. by vision_node)
     if state.get("manager_notification_sent", False):
         logger.info(
@@ -156,7 +156,7 @@ async def escalation_node(state: dict[str, Any]) -> dict[str, Any]:
             )
     except Exception as e:
         logger.warning("[SESSION %s] Sitniks escalation error: %s", session_id, e)
-    
+
     # NOTE: Night time message removed - managers receive notifications at any time
 
     # =====================================================

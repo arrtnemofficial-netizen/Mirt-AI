@@ -19,6 +19,7 @@ from src.core.state_machine import State
 
 from ...utils import text_msg
 
+
 if TYPE_CHECKING:
     from src.agents.pydantic.models import VisionResponse
 

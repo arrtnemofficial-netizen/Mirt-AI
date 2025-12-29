@@ -9,6 +9,7 @@ Memory System (Titans-like):
 """
 
 from .agent import agent_node
+
 # crm_error_node removed - CRM orders integration disabled
 from .escalation import escalation_node
 from .intent import intent_detection_node

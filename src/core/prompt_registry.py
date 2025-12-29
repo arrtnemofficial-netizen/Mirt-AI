@@ -66,6 +66,10 @@ class PromptRegistry:
         if key in self._cache:
             return self._cache[key]
 
+        # VIRTUAL KEY: system.snippets (concatenated from data/prompts/snippets/*.md)
+        if key == "system.snippets":
+            return self._load_virtual_snippets()
+
         parts = key.split(".")
         if len(parts) < 2:
             raise ValueError(f"Invalid prompt key format: {key}. Expected 'category.name'")
@@ -105,6 +109,31 @@ class PromptRegistry:
 
         self._cache[key] = config
         logger.debug("Loaded prompt %s@v%s from %s", key, version, path.name)
+        return config
+
+    def _load_virtual_snippets(self) -> PromptConfig:
+        """Load and concatenate all snippet files for legacy compatibility."""
+        snippets_dir = self.base_dir / "snippets"
+        contents = []
+        if snippets_dir.exists():
+            # Sort explicitly to ensure deterministic order
+            for path in sorted(snippets_dir.glob("*.md")):
+                 try:
+                     with open(path, encoding="utf-8") as f:
+                         contents.append(f.read())
+                 except Exception:
+                     pass
+
+        content = "\n\n".join(contents)
+
+        config = PromptConfig(
+            key="system.snippets",
+            content=content,
+            path=snippets_dir,
+            version="virtual",
+            metadata={"source": "virtual_concatenation"},
+        )
+        self._cache["system.snippets"] = config
         return config
 
     def _load_file(self, path: Path) -> str:

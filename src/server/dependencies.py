@@ -6,6 +6,7 @@ replacing global singletons with proper DI pattern.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Annotated
 
@@ -15,10 +16,14 @@ from fastapi import Depends
 from src.bot.telegram_bot import build_bot, build_dispatcher
 from src.conf.config import Settings, get_settings
 from src.integrations.manychat.webhook import ManychatWebhook
-from src.services.storage import MessageStore, create_message_store
-from src.services.storage import InMemorySessionStore, SessionStore
-from src.services.storage import create_postgres_store
-import logging
+from src.services.storage import (
+    InMemorySessionStore,
+    MessageStore,
+    SessionStore,
+    create_message_store,
+    create_postgres_store,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +42,7 @@ def get_session_store() -> SessionStore:
             return postgres_store
     except Exception as e:
         logger.warning("PostgreSQL store not available, using in-memory: %s", e)
-    
+
     # Fallback to in-memory only
     return InMemorySessionStore()
 

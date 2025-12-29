@@ -72,15 +72,15 @@ def _get_model() -> OpenAIChatModel:
     if _model is None:
         # SENIOR-LEVEL: Use AI_MODEL as single source of truth
         model_name = settings.AI_MODEL
-        
+
         # Check if we're in production/staging
         env = settings.SENTRY_ENVIRONMENT.lower() if settings.SENTRY_ENVIRONMENT else "development"
         is_production = env in ("production", "prod", "staging")
-        
+
         if settings.LLM_PROVIDER == "openai":
             api_key = settings.OPENAI_API_KEY.get_secret_value()
             base_url = "https://api.openai.com/v1"
-            
+
             # CRITICAL: In production, fail fast if OpenAI key is missing (no silent fallback)
             if not api_key:
                 error_msg = (
@@ -213,10 +213,10 @@ async def _add_image_context(ctx: RunContext[AgentDeps]) -> str:
     metadata = getattr(ctx.deps, "metadata", {}) or {}
     image_context = metadata.get("image_context", "unknown")
     current_state = ctx.deps.current_state
-    
+
     # CRITICAL: Never instruct this agent to analyze photos
     # Photos are analyzed by vision_node, not this text-only agent
-    
+
     if image_context == "product_identification" or image_context == "explicit_new_product":
         # This should not happen - if photo is for product identification,
         # it should have been routed to vision_node, not agent_node
@@ -302,8 +302,8 @@ async def _get_size_recommendation(
     - 144-155 см включно → 146-152
     - 156-168 см включно → 158-164
     """
-    from src.agents.langgraph.nodes.utils import get_size_recommendation_text
     from src.agents.langgraph.nodes.helpers.size_parsing import height_to_size
+    from src.agents.langgraph.nodes.utils import get_size_recommendation_text
 
     # Edge cases
     if height_cm < 80:
@@ -478,7 +478,7 @@ async def run_support(
     from src.services.llm_usage_logger import log_llm_usage_best_effort
 
     agent = get_support_agent()
-    
+
     # Track latency and result for logging
     start_time = time.perf_counter()
     result = None
@@ -505,7 +505,7 @@ async def run_support(
         # result.output is the typed output (SupportResponse)
         # Note: output_type param (not result_type) but result.output (not result.response)
         response = result.output
-        
+
         # Try to extract usage from result (if available)
         if hasattr(result, "usage"):
             usage = result.usage
@@ -515,18 +515,18 @@ async def run_support(
                 tokens_output = usage.output_tokens or 0
         elif hasattr(result, "model_used"):
             model_name = str(result.model_used)
-        
+
         # Extract model from agent if not in result
         if not model_name and hasattr(agent, "model"):
             if hasattr(agent.model, "model_id"):
                 model_name = agent.model.model_id
             elif hasattr(agent.model, "name"):
                 model_name = agent.model.name
-        
+
         # SENIOR-LEVEL: Fallback to actual support model from settings, not hardcoded
         if not model_name:
             model_name = support_model_name
-        
+
         return response
 
     except TimeoutError:
@@ -562,11 +562,11 @@ async def run_support(
             escalation=EscalationInfo(reason=error_message),
         )
         return response
-    
+
     finally:
         # Log usage (best-effort, non-blocking)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        
+
         # Prepare minimal metadata
         metadata: dict[str, Any] = {}
         if response:
@@ -576,7 +576,7 @@ async def run_support(
             metadata["has_image"] = bool(deps.has_image if hasattr(deps, "has_image") else False)
             if deps.has_image and hasattr(deps, "image_url") and deps.image_url:
                 metadata["image_url"] = deps.image_url
-        
+
         # Log asynchronously (fire-and-forget)
         asyncio.create_task(
             log_llm_usage_best_effort(

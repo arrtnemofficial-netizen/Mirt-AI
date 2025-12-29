@@ -1,0 +1,137 @@
+- name: вишиванка Бандера
+  id: 3469448
+  price: 1080
+  sizes:
+  - '116'
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  - '158'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2025-03-21/5d56bf/e281052-1742533111651.jpeg
+- name: вишиванка Жарптиця
+  id: 3468346
+  price: 740
+  sizes:
+  - '146'
+  - '152'
+  - '158'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/3f72c1/941087a-1724078801151.jpeg
+- name: вишиванка Жоржина
+  id: 3468353
+  price: 740
+  sizes:
+  - '140'
+  - '146'
+  - '152'
+  - '158'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/52c7c1/7c855f-1724079268082.jpeg
+- name: вишиванка Маки дитяча
+  id: 3463176
+  price: 2060
+  sizes:
+  - '104'
+  - '110'
+  - '116'
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  - '98'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/26d5dc/101ecd8-1724045747939.jpeg
+- name: вишиванка Маки доросла
+  id: 3463179
+  price: 2800
+  sizes:
+  - '42'
+  - '44'
+  - '46'
+  - '48'
+  - '50'
+  - '52'
+  - '56'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/52859a/32df65-1724046339865.jpeg
+- name: вишиванка Марія
+  id: 3468625
+  price: 1080
+  sizes:
+  - '116'
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  - '158'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/13d23a/07e983-1724080284437.jpeg
+- name: вишиванка Орнамент
+  id: 3468621
+  price: 675
+  sizes:
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  - '158'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/1ce721/e9f735-1724080033284.jpeg
+- name: вишиванка Папороть
+  id: 3469423
+  price: 1010
+  sizes:
+  - '116'
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2025-03-21/48bbf5/57fb7b-1742531648204.jpeg
+- name: вишиванка Папороть розмір - 158
+  id: 3494823
+  price: 1010
+  sizes: []
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2025-03-21/9af861/3b824a-1742532023616.jpeg
+- name: вишиванка Папороть розмір - 164
+  id: 3494824
+  price: 1010
+  sizes: []
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2025-03-21/23dffa/28bc9c-1742532056327.jpeg
+- name: вишиванка Фіалки
+  id: 3468418
+  base_price: 675
+  price_per_size:
+    '122': 675
+    '128': 675
+    '134': 0
+    '140': 0
+    '146': 0
+    '152': 0
+    '158': 0
+    '164': 0
+  sizes:
+  - '122'
+  - '128'
+  - '134'
+  - '140'
+  - '146'
+  - '152'
+  - '158'
+  - '164'
+  colors: []
+  image: https://cdn.sitniks.com/cmp-2065/products/2024-08-19/438edc/bddd77-1724079726874.jpeg

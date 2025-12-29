@@ -11,8 +11,8 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# Start command - using python script to handle PORT expansion safely
-startCommand = "python src/run.py"
+# Start command removed to allow Procfile/UI overrides
+# startCommand = "python src/run.py"
 
 
 # Restart policy

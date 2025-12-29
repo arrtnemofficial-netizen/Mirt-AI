@@ -13,10 +13,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
 
 from src.conf.config import settings
-from src.workers.idempotency import webhook_task_id
 
 
 logger = logging.getLogger(__name__)

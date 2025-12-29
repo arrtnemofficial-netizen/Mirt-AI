@@ -22,6 +22,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -29,7 +30,7 @@ except ImportError:
     psycopg = None  # type: ignore
     dict_row = None  # type: ignore
 
-from src.services.memory_service import MemoryService
+from src.services.memory import MemoryService
 from src.services.storage import get_postgres_url
 
 
@@ -195,16 +196,15 @@ async def generate_summaries_for_active_users(days: int = 7) -> dict[str, any]:
         cutoff = datetime.now(UTC) - timedelta(days=days)
 
         url = get_postgres_url()
-        with psycopg.connect(url) as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
+        with psycopg.connect(url) as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
                     SELECT user_id FROM mirt_profiles
                     WHERE last_seen_at >= %s
                     """,
-                    (cutoff,),
-                )
-                rows = cur.fetchall()
+                (cutoff,),
+            )
+            rows = cur.fetchall()
 
         if not rows:
             logger.info("No active users found")

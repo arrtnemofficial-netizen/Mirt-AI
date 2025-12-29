@@ -191,7 +191,7 @@ def create_initial_state(
     base_metadata["vision_greeted"] = False
     base_metadata["has_image"] = False
     base_metadata["image_url"] = None
-    
+
     base_state: ConversationState = {
         # Core
         "messages": messages or [],
@@ -384,17 +384,17 @@ def detect_state_loop(
     current_phase = state.get("dialog_phase", "")
     if not current_phase:
         return False
-    
+
     # Try to get phase history from metadata
     metadata = state.get("metadata", {})
     phase_history = previous_phases or metadata.get("dialog_phase_history", [])
-    
+
     # Check if current phase repeats N times
     if len(phase_history) >= loop_threshold - 1:
         recent_phases = phase_history[-(loop_threshold - 1):] + [current_phase]
         if len(set(recent_phases)) == 1:
             return True
-    
+
     return False
 
 
@@ -415,7 +415,7 @@ def validate_state_transition(
         (is_valid, error_message)
     """
     from src.core.state_machine import TRANSITIONS, Intent
-    
+
     # Check if transition exists in TRANSITIONS table
     for transition in TRANSITIONS:
         if transition.from_state == from_state and transition.to_state == to_state:
@@ -430,7 +430,7 @@ def validate_state_transition(
             else:
                 # Transition exists, but intent check skipped
                 return True, None
-    
+
     # Transition not found
     return False, (
         f"Illegal transition: {from_state.value} → {to_state.value}. "

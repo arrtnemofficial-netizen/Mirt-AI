@@ -122,19 +122,19 @@ class ResponseMetadata(BaseModel):
         """
         if not v or v == "":
             return "NONE"
-        
+
         v_str = str(v).upper().strip()
-        
+
         # Map legacy UX modes to escalation levels
         if v_str in ("SOFT", "SOFT_ESCALATION"):
             return "L1"
         if v_str in ("HARD", "HARD_ESCALATION"):
             return "L2"
-        
+
         # Validate against allowed values
         if v_str in ("NONE", "L1", "L2", "L3"):
             return v_str
-        
+
         # Unknown value → default to NONE (don't crash in production)
         return "NONE"
 

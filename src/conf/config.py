@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Self
 
 from pydantic import Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -216,7 +216,7 @@ class Settings(BaseSettings):
     # Sitniks CRM integration (chat statuses only, no orders)
     SNITKIX_API_URL: str = Field(default="", description="Sitniks CRM API base URL.")
     SNITKIX_API_KEY: SecretStr = Field(default=SecretStr(""), description="Sitniks CRM API key.")
-    
+
     # Sitniks chat status names (must match exact strings from Sitniks UI)
     SITNIKS_STATUS_FIRST_TOUCH: str = Field(
         default="Взято в роботу",
@@ -230,7 +230,7 @@ class Settings(BaseSettings):
         default="AI Увага",
         description="Sitniks chat status for escalation (needs human manager).",
     )
-    
+
     # Manager configuration
     SITNIKS_AI_MANAGER_NAME: str = Field(
         default="Павло",
@@ -502,7 +502,7 @@ class Settings(BaseSettings):
         default=True,
         description="Enable detailed logging with tags (state/intent/tool)",
     )
-    
+
     # =========================================================================
     # MEMORY SYSTEM CONFIGURATION
     # =========================================================================
@@ -514,7 +514,7 @@ class Settings(BaseSettings):
         default=0.4,
         description="Minimum surprise threshold for storing facts in mirt_memories (0.0-1.0)",
     )
-    
+
     # NOTE: Legacy feature flags removed (USE_GRAPH_V2, USE_TOOL_PLANNER, etc.)
     # - LangGraph v2 is now the only architecture
     # - PydanticAI handles tool planning automatically
@@ -556,7 +556,7 @@ class Settings(BaseSettings):
         # Use SENTRY_ENVIRONMENT as indicator of deployment environment
         env = self.SENTRY_ENVIRONMENT.lower() if self.SENTRY_ENVIRONMENT else "development"
         is_production = env in ("production", "prod", "staging")
-        
+
         if is_production:
             # In production/staging, enforce prompt fallback disable for safety
             if not self.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
@@ -569,13 +569,15 @@ class Settings(BaseSettings):
                 )
                 # Auto-enable for production safety
                 self.DISABLE_CODE_STATE_PROMPTS_FALLBACK = True
-        
+
         return self
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 @lru_cache(maxsize=1)

@@ -3,9 +3,14 @@
 AI-стиліст для бренду дитячого одягу **MIRT**.
 Побудований на **LangGraph**, **Pydantic AI**, **Prompt Registry** та **Celery**.
 
-[![Tests](https://img.shields.io/badge/tests-passed-brightgreen.svg)]()
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Architecture](https://img.shields.io/badge/architecture-v4.0-orange.svg)]()
+[![Tests](https://img.shields.io/badge/tests-39%2F39_passed-brightgreen.svg)]()
+[![Readiness](https://img.shields.io/badge/production_ready-95%25-brightgreen.svg)]()
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+
+## 🚀 Quick Links
+- **[DEPLOY.md](DEPLOY.md)** - Інструкції запуску (Railway/Docker) 🆕
+- **[DOCUMENTATION.md](DOCUMENTATION.md)** - Повна документація
+- **[PRD.md](PRD.md)** - Вимоги та Roadmap
 
 ## 🏗 Архітектура v4.0 (Agentic System)
 

@@ -6,12 +6,12 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
 
 from src.conf.config import settings
 from src.core.logging import log_event, safe_preview
 from src.server.routers.common import extract_inbound_token
 from src.server.routers.schemas import ApiV1MessageRequest, SitniksUpdateRequest
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

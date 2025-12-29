@@ -12,7 +12,7 @@ import logging
 from celery import shared_task
 
 from src.services.memory.tasks import cleanup_expired
-from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
+from src.workers.exceptions import DatabaseError
 from src.workers.sync_utils import run_sync
 
 
@@ -36,23 +36,23 @@ def cleanup_expired_memories(self) -> dict:
         dict with cleaned count and status
     """
     logger.info("[WORKER:MEMORY] Starting expired memories cleanup...")
-    
+
     try:
         result = run_sync(cleanup_expired())
-        
+
         if result.get("error"):
             logger.error(
                 "[WORKER:MEMORY] Cleanup failed: %s",
                 result.get("error"),
             )
             return result
-        
+
         cleaned = result.get("cleaned", 0)
         logger.info(
             "[WORKER:MEMORY] Cleanup complete: %d expired memories deactivated",
             cleaned,
         )
-        
+
         return result
     except Exception as e:
         logger.exception("[WORKER:MEMORY] Error in cleanup_expired_memories: %s", e)

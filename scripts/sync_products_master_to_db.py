@@ -35,6 +35,8 @@ class ProductRow:
     sizes: list[str]
     photo_url: str
     price_by_size: dict[str, int]
+    visual_rules: dict[str, Any]
+    distinction_rules: dict[str, Any]
 
 
 def _get_database_url() -> str:
@@ -71,6 +73,11 @@ def _build_rows(catalog: dict[str, Any]) -> list[ProductRow]:
             raise ValueError(f"Missing prices_by_size for product: {product_name}")
 
         base_sizes = list(prices_by_size.keys())
+        
+        # EXTRACT LOGIC FROM YAML
+        visual_rules = product.get("visual") or {}
+        distinction_rules = product.get("distinction") or {}
+
         colors = product.get("colors") or {}
         for color_name, color_info in colors.items():
             color_info = color_info or {}
@@ -100,6 +107,8 @@ def _build_rows(catalog: dict[str, Any]) -> list[ProductRow]:
                     sizes=[str(s) for s in sizes],
                     photo_url=photo_url,
                     price_by_size=filtered_prices,
+                    visual_rules=visual_rules,
+                    distinction_rules=distinction_rules
                 )
             )
 
@@ -112,6 +121,9 @@ def _sync_rows(rows: list[ProductRow], drop_price: bool, insert_missing: bool) -
     with psycopg.connect(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute("ALTER TABLE public.products ADD COLUMN IF NOT EXISTS price_by_size jsonb")
+            cur.execute("ALTER TABLE public.products ADD COLUMN IF NOT EXISTS visual_rules jsonb")
+            cur.execute("ALTER TABLE public.products ADD COLUMN IF NOT EXISTS distinction_rules jsonb")
+
             if drop_price:
                 cur.execute("ALTER TABLE public.products DROP COLUMN IF EXISTS price")
 
@@ -121,6 +133,9 @@ def _sync_rows(rows: list[ProductRow], drop_price: bool, insert_missing: bool) -
             missing: list[str] = []
             for row in rows:
                 price_json = json.dumps(row.price_by_size, ensure_ascii=False)
+                visual_json = json.dumps(row.visual_rules, ensure_ascii=False)
+                distinction_json = json.dumps(row.distinction_rules, ensure_ascii=False)
+
                 if row.sku in existing:
                     cur.execute(
                         """
@@ -129,10 +144,20 @@ def _sync_rows(rows: list[ProductRow], drop_price: bool, insert_missing: bool) -
                             colors = %s,
                             photo_url = %s,
                             price_by_size = %s::jsonb,
+                            visual_rules = %s::jsonb,
+                            distinction_rules = %s::jsonb,
                             updated_at = NOW()
                         WHERE sku = %s
                         """,
-                        (row.sizes, row.colors, row.photo_url, price_json, row.sku),
+                        (
+                            row.sizes, 
+                            row.colors, 
+                            row.photo_url, 
+                            price_json, 
+                            visual_json, 
+                            distinction_json, 
+                            row.sku
+                        ),
                     )
                 else:
                     if not insert_missing:
@@ -141,9 +166,9 @@ def _sync_rows(rows: list[ProductRow], drop_price: bool, insert_missing: bool) -
                     cur.execute(
                         """
                         INSERT INTO public.products
-                            (name, description, category, subcategory, sizes, colors, photo_url, sku, price_by_size)
+                            (name, description, category, subcategory, sizes, colors, photo_url, sku, price_by_size, visual_rules, distinction_rules)
                         VALUES
-                            (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                            (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
                         """,
                         (
                             row.name,
@@ -155,6 +180,8 @@ def _sync_rows(rows: list[ProductRow], drop_price: bool, insert_missing: bool) -
                             row.photo_url,
                             row.sku,
                             price_json,
+                            visual_json,
+                            distinction_json
                         ),
                     )
 

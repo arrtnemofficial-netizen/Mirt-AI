@@ -6,6 +6,7 @@ import re
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+
 # Regex to detect image URLs in message text
 # Supports:
 # - Direct image URLs (.jpg, .png, etc.)

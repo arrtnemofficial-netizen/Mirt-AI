@@ -64,13 +64,13 @@ def detect_delivery_request(text: str) -> bool:
     """
     if not text:
         return False
-    
+
     text_lower = text.lower().strip()
-    
+
     # Check if any delivery keyword is present
     for keyword in DELIVERY_REQUEST_KEYWORDS:
         if keyword in text_lower:
             return True
-    
+
     return False
 
