@@ -37,6 +37,7 @@ CELERY_EAGER = os.getenv("CELERY_EAGER", "false").lower() == "true"  # For testi
 WORKER_CONCURRENCY = int(os.getenv("CELERY_CONCURRENCY", "4"))
 WORKER_MAX_TASKS = int(os.getenv("CELERY_MAX_TASKS_PER_CHILD", "100"))
 WORKER_PREFETCH = int(os.getenv("CELERY_PREFETCH", "1"))
+BEAT_SCHEDULE_FILENAME = os.getenv("CELERY_BEAT_SCHEDULE_FILENAME", "/tmp/celerybeat-schedule")
 
 # =============================================================================
 # QUEUE DEFINITIONS
@@ -142,6 +143,8 @@ celery_app.conf.update(
     # -------------------------------------------------------------------------
     broker_transport_options=broker_options,
     broker_connection_retry_on_startup=True,
+    # Beat schedule file location (must be writable in containers)
+    beat_schedule_filename=BEAT_SCHEDULE_FILENAME,
 )
 
 # =============================================================================

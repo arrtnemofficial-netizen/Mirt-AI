@@ -119,6 +119,7 @@ def main():
     # Start beat using subprocess (most reliable for Railway)
     import subprocess
 
+    schedule_file = os.getenv("CELERY_BEAT_SCHEDULE_FILENAME", "/tmp/celerybeat-schedule")
     cmd = [
         sys.executable,
         "-m",
@@ -127,6 +128,8 @@ def main():
         "src.workers.celery_app",
         "beat",
         "--loglevel=INFO",
+        "--schedule",
+        schedule_file,
     ]
 
     logger.info("Executing: %s", " ".join(cmd))
