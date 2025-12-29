@@ -507,12 +507,27 @@ async def run_support(
         response = result.output
 
         # Try to extract usage from result (if available)
-        if hasattr(result, "usage"):
+        if hasattr(result, "usage") and result.usage is not None:
             usage = result.usage
-            if hasattr(usage, "input_tokens"):
-                tokens_input = usage.input_tokens or 0
-            if hasattr(usage, "output_tokens"):
-                tokens_output = usage.output_tokens or 0
+            # Check if usage has actual values (not just default 0s)
+            if usage.has_values():
+                if hasattr(usage, "input_tokens"):
+                    tokens_input = usage.input_tokens or 0
+                if hasattr(usage, "output_tokens"):
+                    tokens_output = usage.output_tokens or 0
+                # Fallback: if individual tokens are 0 but total_tokens exists, estimate
+                if tokens_input == 0 and tokens_output == 0 and hasattr(usage, "total_tokens"):
+                    total = usage.total_tokens or 0
+                    if total > 0:
+                        # Rough estimate: 70% input, 30% output (typical for chat)
+                        tokens_input = int(total * 0.7)
+                        tokens_output = int(total * 0.3)
+                        logger.debug(
+                            "[TOKEN_EXTRACTION] Estimated tokens from total: in=%d out=%d (total=%d)",
+                            tokens_input, tokens_output, total
+                        )
+            else:
+                logger.debug("[TOKEN_EXTRACTION] Usage object exists but has no values")
         elif hasattr(result, "model_used"):
             model_name = str(result.model_used)
 

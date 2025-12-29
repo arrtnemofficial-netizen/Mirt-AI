@@ -88,7 +88,16 @@ class PostgresMessageStore:
                 if metadata:
                     instagram_username = metadata.get("instagram_username")
                     telegram_username = metadata.get("telegram_username") or metadata.get("user_nickname")
-                    username = metadata.get("username") or telegram_username or instagram_username
+                    # CRITICAL: Always set username if we have any identifier
+                    # Priority: explicit username > instagram_username > telegram_username
+                    username = (
+                        metadata.get("username") 
+                        or instagram_username 
+                        or telegram_username
+                    )
+                    # If we have instagram_username but no username, use it
+                    if not username and instagram_username:
+                        username = instagram_username
 
                 # Upsert user with all available fields
                 users_table = DBTable.USERS
