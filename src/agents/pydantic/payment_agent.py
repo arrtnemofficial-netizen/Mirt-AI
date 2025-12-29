@@ -19,8 +19,15 @@ from src.conf.config import settings
 from src.conf.payment_config import format_requisites_multiline
 from src.core.human_responses import get_human_response
 
+from .alerting import record_agent_error
+from .circuit_breaker import get_payment_circuit_breaker
 from .deps import AgentDeps
+from .exceptions import AgentError, AgentLLMError, AgentNetworkError, AgentTimeoutError
+from .metrics import track_agent_metrics
 from .models import PaymentResponse
+from .retry import retry_agent_call
+from .tracing import trace_agent_call
+from .validation import validate_agent_deps, validate_message
 
 
 logger = logging.getLogger(__name__)
@@ -218,6 +225,7 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
 # =============================================================================
 
 
+@trace_agent_call(agent_name="payment")
 async def run_payment(
     message: str,
     deps: AgentDeps,
@@ -239,6 +247,10 @@ async def run_payment(
 
     from src.services.llm_usage_logger import log_llm_usage_best_effort
 
+    # Validate inputs
+    validate_agent_deps(deps, "payment")
+    message = validate_message(message)
+
     agent = get_payment_agent()
 
     # Track latency and result for logging
@@ -255,8 +267,40 @@ async def run_payment(
     payment_model_name = settings.AI_MODEL
 
     try:
+        # Wrap agent.run() to convert exceptions to specific types for retry logic
+        async def _run_with_error_conversion():
+            try:
+                return await agent.run(message, deps=deps, message_history=message_history)
+            except Exception as e:
+                # Convert OpenAI/network errors to specific exceptions for retry logic
+                error_str = str(e).lower()
+                if "timeout" in error_str or "timed out" in error_str:
+                    raise AgentTimeoutError(f"LLM timeout: {e}") from e
+                elif "rate limit" in error_str or "429" in error_str:
+                    raise AgentLLMError(f"Rate limit: {e}") from e
+                elif "network" in error_str or "connection" in error_str:
+                    raise AgentNetworkError(f"Network error: {e}") from e
+                elif hasattr(e, "status_code"):
+                    # HTTP errors
+                    if e.status_code == 429:  # type: ignore
+                        raise AgentLLMError(f"Rate limit (429): {e}") from e
+                    elif e.status_code >= 500:  # type: ignore
+                        raise AgentNetworkError(f"Server error ({e.status_code}): {e}") from e  # type: ignore
+                    else:
+                        raise AgentLLMError(f"API error: {e}") from e
+                else:
+                    # Re-raise as-is for other exceptions
+                    raise
+
+        # Apply retry logic to _run_with_error_conversion
+        @retry_agent_call(max_retries=3, retry_on=(AgentNetworkError, AgentLLMError))
+        async def _run_with_retry():
+            return await _run_with_error_conversion()
+
+        # Apply circuit breaker
+        circuit_breaker = get_payment_circuit_breaker()
         result = await asyncio.wait_for(
-            agent.run(message, deps=deps, message_history=message_history),
+            circuit_breaker.call(_run_with_retry),
             timeout=30,
         )
         response = result.output  # output_type param, result.output attr
@@ -300,10 +344,57 @@ async def run_payment(
 
         return response
 
+    except (TimeoutError, AgentTimeoutError) as e:
+        success = False
+        error_message = "PAYMENT_TIMEOUT"
+        logger.error("Payment agent timeout: %s", e)
+        record_agent_error("payment", "timeout")
+        response = PaymentResponse(
+            reply_to_user=get_human_response("payment_error"),
+            missing_fields=["name", "phone", "city", "nova_poshta"],
+            order_ready=False,
+        )
+        return response
+
+    except AgentLLMError as e:
+        success = False
+        error_message = f"PAYMENT_LLM_ERROR: {str(e)[:100]}"
+        logger.error("Payment agent LLM error: %s", e)
+        record_agent_error("payment", "llm_error")
+        response = PaymentResponse(
+            reply_to_user=get_human_response("payment_error"),
+            missing_fields=["name", "phone", "city", "nova_poshta"],
+            order_ready=False,
+        )
+        return response
+
+    except AgentNetworkError as e:
+        success = False
+        error_message = f"PAYMENT_NETWORK_ERROR: {str(e)[:100]}"
+        logger.error("Payment agent network error: %s", e)
+        record_agent_error("payment", "network_error")
+        response = PaymentResponse(
+            reply_to_user=get_human_response("payment_error"),
+            missing_fields=["name", "phone", "city", "nova_poshta"],
+            order_ready=False,
+        )
+        return response
+
+    except AgentError as e:
+        success = False
+        error_message = f"PAYMENT_AGENT_ERROR: {str(e)[:100]}"
+        logger.error("Payment agent error: %s", e)
+        response = PaymentResponse(
+            reply_to_user=get_human_response("payment_error"),
+            missing_fields=["name", "phone", "city", "nova_poshta"],
+            order_ready=False,
+        )
+        return response
+
     except Exception as e:
         success = False
-        error_message = f"PAYMENT_ERROR: {str(e)[:100]}"
-        logger.exception("Payment agent error: %s", e)
+        error_message = f"PAYMENT_UNKNOWN_ERROR: {str(e)[:100]}"
+        logger.exception("Payment agent unknown error: %s", e)
         response = PaymentResponse(
             reply_to_user=get_human_response("payment_error"),
             missing_fields=["name", "phone", "city", "nova_poshta"],
@@ -314,6 +405,16 @@ async def run_payment(
     finally:
         # Log usage (best-effort, non-blocking)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+        # Track metrics
+        track_agent_metrics(
+            agent_name="payment",
+            success=success,
+            latency_ms=latency_ms,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            error_type=error_message,
+        )
 
         # Prepare minimal metadata for payment
         metadata: dict[str, Any] = {}

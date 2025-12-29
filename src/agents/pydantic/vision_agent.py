@@ -24,8 +24,15 @@ from src.conf.config import settings
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry
 
+from .alerting import record_agent_error
+from .circuit_breaker import get_vision_circuit_breaker
 from .deps import AgentDeps
+from .exceptions import AgentError, AgentLLMError, AgentNetworkError, AgentTimeoutError
+from .metrics import track_agent_metrics
 from .models import VisionResponse
+from .retry import retry_agent_call
+from .tracing import trace_agent_call
+from .validation import validate_agent_deps, validate_image_url, validate_message
 
 
 logger = logging.getLogger(__name__)
@@ -405,107 +412,8 @@ async def _search_products(
     return "\n".join(lines)
 
 
-async def _load_vision_guide_from_db() -> str:
-    from src.services.catalog import CatalogService
-
-    try:
-        catalog = CatalogService()
-        products = await catalog.get_products_for_vision()
-
-        if not products:
-            logger.warning("No products from DB, falling back to JSON")
-            return _load_vision_guide_from_json()
-
-        product_names = [p.get("name", "?") for p in products[:10]]
-        logger.info("Loaded %d products from DB: %s...", len(products), product_names)
-
-        lines = ["# VISION GUIDE — Товари з каталогу (LIVE DATA)\n"]
-
-        for product in products:
-            name = product.get("name", "Unknown")
-            sku = product.get("sku") or product.get("id", "N/A")
-            color = product.get("colors") or product.get("color", "")
-
-            lines.append(f"## {name}")
-            lines.append(f"- **SKU**: {sku}")
-            if color:
-                lines.append(f"- **Колір**: {color}")
-
-            fabric = product.get("fabric_type")
-            if fabric:
-                lines.append(f"- **Тканина**: {fabric}")
-
-            closure = product.get("closure_type")
-            if closure:
-                closure_map = {
-                    "half_zip": "half-zip (коротка блискавка)",
-                    "full_zip": "повна блискавка",
-                    "no_zip": "без блискавки",
-                    "buttons": "гудзики",
-                }
-                lines.append(f"- **Застібка**: {closure_map.get(closure, closure)}")
-
-            if product.get("has_hood"):
-                lines.append("- **Капюшон**: ТАК")
-            elif product.get("has_hood") is False:
-                lines.append("- **Капюшон**: НІ")
-
-            pants = product.get("pants_style")
-            if pants:
-                pants_map = {
-                    "joggers": "джогери (звужені)",
-                    "palazzo": "palazzo (широкі)",
-                    "classic": "класичні",
-                }
-                lines.append(f"- **Штани**: {pants_map.get(pants, pants)}")
-
-            back_view = product.get("back_view_description")
-            if back_view:
-                lines.append(f"- **Вид ззаду**: {back_view}")
-
-            tips = product.get("recognition_tips", [])
-            if tips:
-                lines.append("- **Як розпізнати**:")
-                for tip in tips[:3]:
-                    lines.append(f"  - {tip}")
-
-            confused = product.get("confused_with", [])
-            if confused:
-                lines.append(f"- **Не плутай з**: {', '.join(confused)}")
-
-            description = product.get("description")
-            if description:
-                lines.append(f"- **Опис**: {description}")
-
-            price_by_size = product.get("price_by_size")
-            if price_by_size and isinstance(price_by_size, dict):
-                prices = list(price_by_size.values())
-                if prices:
-                    min_p, max_p = min(prices), max(prices)
-                    if min_p == max_p:
-                        lines.append(f"- **Ціна**: {int(min_p)} грн")
-                    else:
-                        lines.append(
-                            f"- **Ціна**: від {int(min_p)} до {int(max_p)} грн (залежить від розміру)"
-                        )
-                    size_prices = ", ".join(
-                        [f"{sz}: {int(pr)} грн" for sz, pr in price_by_size.items()]
-                    )
-                    lines.append(f"- **Ціни по розмірах**: {size_prices}")
-            else:
-                price = product.get("price")
-                if price:
-                    lines.append(f"- **Ціна**: {price} грн")
-
-            lines.append("")
-
-        lines.append(_build_detection_rules_from_products(products))
-
-        return "\n".join(lines)
-
-    except Exception as e:
-        logger.warning("Failed to load from DB: %s, falling back to JSON", e)
-        return _load_vision_guide_from_json()
+# NOTE: _load_vision_guide_from_db is defined below (after _add_live_catalog_context)
+# with full JSONB columns support for visual_rules and distinction_rules
 
 
 def _build_detection_rules_from_products(products: list[dict]) -> str:
@@ -829,6 +737,7 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
 # =============================================================================
 
 
+@trace_agent_call(agent_name="vision")
 async def run_vision(
     message: str,
     deps: AgentDeps,
@@ -839,6 +748,12 @@ async def run_vision(
     from urllib.parse import urlparse
 
     from src.services.llm_usage_logger import log_llm_usage_best_effort
+
+    # Validate inputs
+    validate_agent_deps(deps, "vision")
+    message = validate_message(message)
+    if deps.image_url:
+        deps.image_url = validate_image_url(deps.image_url)
 
     agent = get_vision_agent()
 
@@ -1056,8 +971,40 @@ async def run_vision(
     )
 
     try:
+        # Wrap agent.run() to convert exceptions to specific types for retry logic
+        async def _run_with_error_conversion():
+            try:
+                return await agent.run(user_input, deps=deps, message_history=message_history)
+            except Exception as e:
+                # Convert OpenAI/network errors to specific exceptions for retry logic
+                error_str = str(e).lower()
+                if "timeout" in error_str or "timed out" in error_str:
+                    raise AgentTimeoutError(f"LLM timeout: {e}") from e
+                elif "rate limit" in error_str or "429" in error_str:
+                    raise AgentLLMError(f"Rate limit: {e}") from e
+                elif "network" in error_str or "connection" in error_str:
+                    raise AgentNetworkError(f"Network error: {e}") from e
+                elif hasattr(e, "status_code"):
+                    # HTTP errors
+                    if e.status_code == 429:  # type: ignore
+                        raise AgentLLMError(f"Rate limit (429): {e}") from e
+                    elif e.status_code >= 500:  # type: ignore
+                        raise AgentNetworkError(f"Server error ({e.status_code}): {e}") from e  # type: ignore
+                    else:
+                        raise AgentLLMError(f"API error: {e}") from e
+                else:
+                    # Re-raise as-is for other exceptions
+                    raise
+
+        # Apply retry logic to _run_with_error_conversion
+        @retry_agent_call(max_retries=3, retry_on=(AgentNetworkError, AgentLLMError))
+        async def _run_with_retry():
+            return await _run_with_error_conversion()
+
+        # Apply circuit breaker
+        circuit_breaker = get_vision_circuit_breaker()
         result = await asyncio.wait_for(
-            agent.run(user_input, deps=deps, message_history=message_history),
+            circuit_breaker.call(_run_with_retry),
             timeout=120,
         )
         response = result.output
@@ -1107,10 +1054,62 @@ async def run_vision(
         )
         return response
 
+    except (TimeoutError, AgentTimeoutError) as e:
+        success = False
+        error_message = "VISION_TIMEOUT"
+        logger.error("👁️ Vision agent timeout: %s", e)
+        record_agent_error("vision", "timeout")
+        response = VisionResponse(
+            reply_to_user=get_human_response("photo_analysis_error"),
+            confidence=0.0,
+            needs_clarification=True,
+            clarification_question="Чи можете надіслати фото ще раз або описати товар?",
+        )
+        return response
+
+    except AgentLLMError as e:
+        success = False
+        error_message = f"VISION_LLM_ERROR: {str(e)[:100]}"
+        logger.error("👁️ Vision agent LLM error: %s", e)
+        record_agent_error("vision", "llm_error")
+        response = VisionResponse(
+            reply_to_user=get_human_response("photo_analysis_error"),
+            confidence=0.0,
+            needs_clarification=True,
+            clarification_question="Чи можете надіслати фото ще раз або описати товар?",
+        )
+        return response
+
+    except AgentNetworkError as e:
+        success = False
+        error_message = f"VISION_NETWORK_ERROR: {str(e)[:100]}"
+        logger.error("👁️ Vision agent network error: %s", e)
+        record_agent_error("vision", "network_error")
+        response = VisionResponse(
+            reply_to_user=get_human_response("photo_analysis_error"),
+            confidence=0.0,
+            needs_clarification=True,
+            clarification_question="Чи можете надіслати фото ще раз або описати товар?",
+        )
+        return response
+
+    except AgentError as e:
+        success = False
+        error_message = f"VISION_AGENT_ERROR: {str(e)[:100]}"
+        logger.error("👁️ Vision agent error: %s", e)
+        record_agent_error("vision", "agent_error")
+        response = VisionResponse(
+            reply_to_user=get_human_response("photo_analysis_error"),
+            confidence=0.0,
+            needs_clarification=True,
+            clarification_question="Чи можете надіслати фото ще раз або описати товар?",
+        )
+        return response
+
     except Exception as e:
         success = False
-        error_message = f"VISION_ERROR: {str(e)[:100]}"
-        logger.exception("👁️ Vision agent error: %s", e)
+        error_message = f"VISION_UNKNOWN_ERROR: {str(e)[:100]}"
+        logger.exception("👁️ Vision agent unknown error: %s", e)
         response = VisionResponse(
             reply_to_user=get_human_response("photo_analysis_error"),
             confidence=0.0,
@@ -1122,6 +1121,16 @@ async def run_vision(
     finally:
         # Log usage (best-effort, non-blocking)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+        # Track metrics
+        track_agent_metrics(
+            agent_name="vision",
+            success=success,
+            latency_ms=latency_ms,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            error_type=error_message,
+        )
 
         # Prepare minimal metadata for vision
         metadata: dict[str, Any] = {

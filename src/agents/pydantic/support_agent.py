@@ -36,13 +36,20 @@ from src.conf.payment_config import format_requisites_multiline
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry
 
+from .alerting import record_agent_error
+from .circuit_breaker import get_support_circuit_breaker
 from .deps import AgentDeps
+from .exceptions import AgentError, AgentLLMError, AgentNetworkError, AgentTimeoutError
+from .metrics import track_agent_metrics
 from .models import (
     EscalationInfo,
     MessageItem,
     ResponseMetadata,
     SupportResponse,
 )
+from .retry import retry_agent_call
+from .tracing import trace_agent_call
+from .validation import validate_agent_deps, validate_message
 
 
 logger = logging.getLogger(__name__)
@@ -454,6 +461,7 @@ def get_support_agent() -> Agent[AgentDeps, SupportResponse]:
 # =============================================================================
 
 
+@trace_agent_call(agent_name="support")
 async def run_support(
     message: str,
     deps: AgentDeps,
@@ -477,6 +485,10 @@ async def run_support(
 
     from src.services.llm_usage_logger import log_llm_usage_best_effort
 
+    # Validate inputs
+    validate_agent_deps(deps, "support")
+    message = validate_message(message)
+
     agent = get_support_agent()
 
     # Track latency and result for logging
@@ -493,12 +505,44 @@ async def run_support(
     support_model_name = settings.AI_MODEL
 
     try:
+        # Wrap agent.run() to convert exceptions to specific types for retry logic
+        async def _run_with_error_conversion():
+            try:
+                return await agent.run(
+                    message,
+                    deps=deps,
+                    message_history=message_history,
+                )
+            except Exception as e:
+                # Convert OpenAI/network errors to specific exceptions for retry logic
+                error_str = str(e).lower()
+                if "timeout" in error_str or "timed out" in error_str:
+                    raise AgentTimeoutError(f"LLM timeout: {e}") from e
+                elif "rate limit" in error_str or "429" in error_str:
+                    raise AgentLLMError(f"Rate limit: {e}") from e
+                elif "network" in error_str or "connection" in error_str:
+                    raise AgentNetworkError(f"Network error: {e}") from e
+                elif hasattr(e, "status_code"):
+                    # HTTP errors
+                    if e.status_code == 429:  # type: ignore
+                        raise AgentLLMError(f"Rate limit (429): {e}") from e
+                    elif e.status_code >= 500:  # type: ignore
+                        raise AgentNetworkError(f"Server error ({e.status_code}): {e}") from e  # type: ignore
+                    else:
+                        raise AgentLLMError(f"API error: {e}") from e
+                else:
+                    # Re-raise as-is for other exceptions
+                    raise
+
+        # Apply retry logic to _run_with_error_conversion
+        @retry_agent_call(max_retries=3, retry_on=(AgentNetworkError, AgentLLMError))
+        async def _run_with_retry():
+            return await _run_with_error_conversion()
+
+        # Apply circuit breaker
+        circuit_breaker = get_support_circuit_breaker()
         result = await asyncio.wait_for(
-            agent.run(
-                message,
-                deps=deps,
-                message_history=message_history,
-            ),
+            circuit_breaker.call(_run_with_retry),
             timeout=45,  # Reduced to cap max response time
         )
 
@@ -545,10 +589,11 @@ async def run_support(
 
         return response
 
-    except TimeoutError:
+    except (TimeoutError, AgentTimeoutError) as e:
         success = False
         error_message = "LLM_TIMEOUT"
-        logger.error("Support agent timeout for session %s", deps.session_id)
+        logger.error("Support agent timeout for session %s: %s", deps.session_id, e)
+        record_agent_error("support", "timeout")
         response = SupportResponse(
             event="escalation",
             messages=[MessageItem(content=_get_timeout_response())],
@@ -562,10 +607,11 @@ async def run_support(
         )
         return response
 
-    except Exception as e:
+    except AgentLLMError as e:
         success = False
-        error_message = f"AGENT_ERROR: {str(e)[:100]}"
-        logger.exception("Support agent error: %s", e)
+        error_message = f"LLM_ERROR: {str(e)[:100]}"
+        logger.error("Support agent LLM error for session %s: %s", deps.session_id, e)
+        record_agent_error("support", "llm_error")
         response = SupportResponse(
             event="escalation",
             messages=[MessageItem(content=_get_error_response())],
@@ -579,9 +625,71 @@ async def run_support(
         )
         return response
 
+    except AgentNetworkError as e:
+        success = False
+        error_message = f"NETWORK_ERROR: {str(e)[:100]}"
+        logger.error("Support agent network error for session %s: %s", deps.session_id, e)
+        record_agent_error("support", "network_error")
+        response = SupportResponse(
+            event="escalation",
+            messages=[MessageItem(content=_get_error_response())],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id or "",
+                current_state=deps.current_state or "STATE_0_INIT",
+                intent="UNKNOWN_OR_EMPTY",
+                escalation_level="L2",
+            ),
+            escalation=EscalationInfo(reason=error_message),
+        )
+        return response
+
+    except AgentError as e:
+        success = False
+        error_message = f"AGENT_ERROR: {str(e)[:100]}"
+        logger.error("Support agent error for session %s: %s", deps.session_id, e)
+        response = SupportResponse(
+            event="escalation",
+            messages=[MessageItem(content=_get_error_response())],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id or "",
+                current_state=deps.current_state or "STATE_0_INIT",
+                intent="UNKNOWN_OR_EMPTY",
+                escalation_level="L2",
+            ),
+            escalation=EscalationInfo(reason=error_message),
+        )
+        return response
+
+    except Exception as e:
+        success = False
+        error_message = f"UNKNOWN_ERROR: {str(e)[:100]}"
+        logger.exception("Support agent unknown error for session %s: %s", deps.session_id, e)
+        response = SupportResponse(
+            event="escalation",
+            messages=[MessageItem(content=_get_error_response())],
+            metadata=ResponseMetadata(
+                session_id=deps.session_id or "",
+                current_state=deps.current_state or "STATE_0_INIT",
+                intent="UNKNOWN_OR_EMPTY",
+                escalation_level="L3",
+            ),
+            escalation=EscalationInfo(reason=error_message),
+        )
+        return response
+
     finally:
         # Log usage (best-effort, non-blocking)
         latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+        # Track metrics
+        track_agent_metrics(
+            agent_name="support",
+            success=success,
+            latency_ms=latency_ms,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            error_type=error_message,
+        )
 
         # Prepare minimal metadata
         metadata: dict[str, Any] = {}
