@@ -82,36 +82,26 @@ class WebhookDedupeStore:
         expires_at = now + timedelta(hours=self.ttl_hours)
 
         try:
-            # FAIL-OPEN: Wrap DB operation in timeout to prevent 502 Bad Gateway
-            # if DB is unreachable.
-            async def _do_check():
-                pool = await get_postgres_pool()
-                async with pool.connection() as conn, conn.cursor() as cur:
-                    try:
-                        await cur.execute(
-                            """
-                                INSERT INTO webhook_dedupe (dedupe_key, processed_at, expires_at)
-                                VALUES (%s, %s, %s)
-                                """,
-                            (dedupe_key, now, expires_at),
-                        )
-                        await conn.commit()
-                        logger.debug("Webhook dedupe: marked %s", dedupe_key)
-                        return False
-                    except Exception as e:
-                        await conn.rollback()
-                        # Check if it's a duplicate (unique constraint violation)
-                        if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
-                            logger.info("Webhook dedupe: duplicate %s", dedupe_key)
-                            return True
-                        raise
-
-            import asyncio
-            return await asyncio.wait_for(_do_check(), timeout=2.0)
-
-        except asyncio.TimeoutError:
-            logger.error("Webhook dedupe DB timeout (fail-open): %s", dedupe_key)
-            return False
+            pool = await get_postgres_pool()
+            async with pool.connection() as conn, conn.cursor() as cur:
+                try:
+                    await cur.execute(
+                        """
+                            INSERT INTO webhook_dedupe (dedupe_key, processed_at, expires_at)
+                            VALUES (%s, %s, %s)
+                            """,
+                        (dedupe_key, now, expires_at),
+                    )
+                    await conn.commit()
+                    logger.debug("Webhook dedupe: marked %s", dedupe_key)
+                    return False
+                except Exception as e:
+                    await conn.rollback()
+                    # Check if it's a duplicate (unique constraint violation)
+                    if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                        logger.info("Webhook dedupe: duplicate %s", dedupe_key)
+                        return True
+                    raise
         except Exception as e:
             logger.error("Webhook dedupe error: %s", e)
             return False

@@ -38,7 +38,6 @@ Schedules periodic tasks (Follow-ups, Summarization).
   ```bash
   celery -A src.workers.celery_app beat --loglevel=info
   ```
-  *(Schedule file path is handled automatically in code)*
 - **Scale:** **MUST be a singleton** (only 1 replica), otherwise tasks will duplicate.
 
 ## 🐳 Docker Compose (Local/VPS)

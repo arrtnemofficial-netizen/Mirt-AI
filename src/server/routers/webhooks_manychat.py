@@ -13,6 +13,7 @@ from src.server.dependencies import (
     MessageStoreDep,
 )
 from src.server.routers.common import extract_inbound_token, extract_manychat_message_id
+from src.server.routers.schemas import IMAGE_URL_PATTERN
 from src.services.webhook import WebhookDedupeStore
 
 
@@ -47,6 +48,44 @@ def _generate_followup_text(current_state: str, last_product: str = "") -> str |
     return followup_templates.get(current_state, "Чим можу допомогти? 🤍")
 
 
+def _strip_manychat_prefix(text: str) -> str:
+    """Strip ManyChat/n8n '.;' prefix that can repeat."""
+    msg = (text or "").strip()
+    while msg.startswith(".;"):
+        msg = msg[2:].lstrip()
+    return msg
+
+
+def _extract_text_and_image(message: Any) -> tuple[str, str | None]:
+    """Extract message text and image URL from webhook/external request payloads."""
+    text = ""
+    image_url = None
+
+    if isinstance(message, dict):
+        text = message.get("text") or message.get("content") or ""
+        for attachment in message.get("attachments", []):
+            if attachment.get("type") == "image":
+                image_url = attachment.get("payload", {}).get("url")
+                break
+        if not image_url:
+            image_url = message.get("image") or message.get("image_url")
+    elif isinstance(message, str):
+        text = message
+
+    text = _strip_manychat_prefix(text)
+
+    if not image_url and text:
+        match = IMAGE_URL_PATTERN.search(text)
+        if match:
+            image_url = match.group(0)
+
+    if image_url and text:
+        text = text.replace(image_url, "").strip()
+        text = _strip_manychat_prefix(text)
+
+    return text, image_url
+
+
 @router.post("/webhooks/manychat")
 async def manychat_webhook(
     payload: dict[str, Any],
@@ -66,8 +105,11 @@ async def manychat_webhook(
     if verify_token and verify_token != inbound_token:
         raise HTTPException(status_code=401, detail="Invalid ManyChat token")
 
-    # Push mode: return immediately, process in background
-    if settings.MANYCHAT_PUSH_MODE:
+    # Push mode (or external request): return immediately, process in background
+    is_external_request = isinstance(payload.get("message"), str) and (
+        payload.get("sessionId") or payload.get("session_id") or payload.get("clientId") or payload.get("client_id")
+    )
+    if settings.MANYCHAT_PUSH_MODE or is_external_request:
         from src.integrations.manychat.async_service import get_manychat_async_service
         from src.server.dependencies import get_session_store
 
@@ -78,19 +120,16 @@ async def manychat_webhook(
             subscriber = payload.get("subscriber") or payload.get("user") or {}
             message = payload.get("message") or payload.get("data", {}).get("message") or {}
 
-            user_id = str(subscriber.get("id") or subscriber.get("user_id") or "unknown")
-            text = ""
-            image_url = None
-
-            if isinstance(message, dict):
-                text = message.get("text") or message.get("content") or ""
-                # Extract image from attachments
-                for attachment in message.get("attachments", []):
-                    if attachment.get("type") == "image":
-                        image_url = attachment.get("payload", {}).get("url")
-                        break
-                if not image_url:
-                    image_url = message.get("image") or message.get("image_url")
+            user_id = str(
+                subscriber.get("id")
+                or subscriber.get("user_id")
+                or payload.get("sessionId")
+                or payload.get("session_id")
+                or payload.get("clientId")
+                or payload.get("client_id")
+                or "unknown"
+            )
+            text, image_url = _extract_text_and_image(message)
 
             # Also check data.image_url
             if not image_url:
