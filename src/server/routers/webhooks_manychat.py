@@ -1,6 +1,7 @@
 """ManyChat webhook endpoints."""
 
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -110,11 +111,17 @@ async def manychat_webhook(
         payload.get("sessionId") or payload.get("session_id") or payload.get("clientId") or payload.get("client_id")
     )
     if settings.MANYCHAT_PUSH_MODE or is_external_request:
-        from src.integrations.manychat.async_service import get_manychat_async_service
-        from src.server.dependencies import get_session_store
-
         try:
             trace_id = str(uuid.uuid4())
+            start_time = time.monotonic()
+            log_event(
+                logger,
+                event="manychat_webhook_received",
+                trace_id=trace_id,
+                has_string_message=isinstance(payload.get("message"), str),
+                has_subscriber=bool(payload.get("subscriber") or payload.get("user")),
+                is_external_request=is_external_request,
+            )
 
             # Extract user info from payload
             subscriber = payload.get("subscriber") or payload.get("user") or {}
@@ -173,17 +180,23 @@ async def manychat_webhook(
             # -----------------------------------------------------------------
             # Note: Celery is only used for followups and summarization.
             # ManyChat message processing uses BackgroundTasks for simplicity.
-            store = get_session_store()
-            service = get_manychat_async_service(store)
+            async def _process_message() -> None:
+                from src.integrations.manychat.async_service import get_manychat_async_service
+                from src.server.dependencies import get_session_store
+
+                store = get_session_store()
+                service = get_manychat_async_service(store)
+                await service.process_message_async(
+                    user_id=user_id,
+                    text=text or "",
+                    image_url=image_url,
+                    channel=channel,
+                    subscriber_data=subscriber,  # Pass subscriber data for username
+                    trace_id=trace_id,
+                )
 
             background_tasks.add_task(
-                service.process_message_async,
-                user_id=user_id,
-                text=text or "",
-                image_url=image_url,
-                channel=channel,
-                subscriber_data=subscriber,  # Pass subscriber data for username
-                trace_id=trace_id,
+                _process_message,
             )
 
             log_event(
@@ -193,6 +206,7 @@ async def manychat_webhook(
                 user_id=user_id,
                 channel=channel,
                 status="background_tasks",
+                latency_ms=round((time.monotonic() - start_time) * 1000, 2),
             )
 
             log_event(
