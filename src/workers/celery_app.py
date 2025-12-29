@@ -80,6 +80,9 @@ celery_app = Celery(
     ],
 )
 
+# Alias for standard Celery discovery (looks for 'app' or 'celery')
+app = celery_app
+
 # =============================================================================
 # CELERY CONFIGURATION
 # =============================================================================
