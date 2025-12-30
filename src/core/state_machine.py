@@ -243,17 +243,14 @@ TRANSITIONS: list[Transition] = [
         "клієнт відмовився",
     ),
     # From STATE_5_PAYMENT_DELIVERY
+    # КРИТИЧНО: STATE_5 остается в STATE_5 до получения payment proof
+    # Переход в STATE_6/STATE_7 происходит ТОЛЬКО через detect_payment_proof в delivery.py
+    # (не через intent PAYMENT_DELIVERY, который означает "продолжаем оплату")
     Transition(
         State.STATE_5_PAYMENT_DELIVERY,
-        State.STATE_6_UPSELL,
+        State.STATE_5_PAYMENT_DELIVERY,  # Остаемся в STATE_5
         frozenset({Intent.PAYMENT_DELIVERY}),
-        "оплата підтверджена, upsell доречний",
-    ),
-    Transition(
-        State.STATE_5_PAYMENT_DELIVERY,
-        State.STATE_7_END,
-        frozenset({Intent.PAYMENT_DELIVERY, Intent.THANKYOU_SMALLTALK}),
-        "оплата підтверджена, upsell недоречний",
+        "продолжаем сбор данных/оплату (остаемся в STATE_5 до payment proof)",
     ),
     Transition(
         State.STATE_5_PAYMENT_DELIVERY, State.STATE_9_OOD, frozenset({Intent.OUT_OF_DOMAIN})

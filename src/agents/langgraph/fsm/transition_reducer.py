@@ -204,6 +204,15 @@ def compute_transition(
         
         # Track snippet policy decision
         if response_policy.snippet_name:
+            already_sent = metadata.get(response_policy.snippet_sent_flag, False) if response_policy.snippet_sent_flag else False
+            logger.info(
+                "[SESSION %s] 🎯 Response Policy Decision: snippet='%s', flag=%s, use_llm=%s, already_sent=%s",
+                session_id,
+                response_policy.snippet_name,
+                response_policy.snippet_sent_flag or "N/A",
+                response_policy.use_llm,
+                already_sent,
+            )
             track_metric(
                 "snippet_policy_decision",
                 1,
@@ -211,9 +220,15 @@ def compute_transition(
                     "snippet_name": response_policy.snippet_name,
                     "snippet_sent_flag": response_policy.snippet_sent_flag or "N/A",
                     "use_llm": response_policy.use_llm,
-                    "already_sent": metadata.get(response_policy.snippet_sent_flag, False) if response_policy.snippet_sent_flag else False,
+                    "already_sent": already_sent,
                     "session_id": session_id,
                 },
+            )
+        else:
+            logger.info(
+                "[SESSION %s] 🎯 Response Policy Decision: NO snippet, use_llm=True (next_state=%s)",
+                session_id,
+                next_state_str,
             )
     except Exception as e:
         logger.debug("Failed to track transition metrics: %s", e)

@@ -139,3 +139,80 @@ class TestFSMContract:
         if transition2.payment_sub_phase == "REQUEST_DATA":
             assert transition2.response_policy.snippet_name is None or transition2.response_policy.use_llm is True
 
+    def test_state5_stays_in_state5_without_proof(self):
+        """
+        КРИТИЧЕСКИЙ ТЕСТ: STATE_5 + PAYMENT_DELIVERY должен оставаться в STATE_5
+        до получения payment proof (не переходить в STATE_6/STATE_7).
+        """
+        state = {
+            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {},
+            "session_id": "test",
+        }
+        
+        transition = compute_transition(
+            state=state,
+            intent=Intent.PAYMENT_DELIVERY.value,
+            has_image=False,
+            user_message="Київ, НП 25",
+        )
+        
+        # Должен остаться в STATE_5 (не переходить в STATE_6/STATE_7)
+        assert transition.next_state == State.STATE_5_PAYMENT_DELIVERY.value, (
+            f"STATE_5 + PAYMENT_DELIVERY should stay in STATE_5 without proof, "
+            f"got {transition.next_state}"
+        )
+
+    def test_confirmation_priority_over_questions(self):
+        """
+        Тест: Подтверждение ("Так") должно иметь приоритет над вопросами ("Ціна?").
+        Даже если debouncer объединил сообщения, подтверждение должно быть детектировано.
+        """
+        from src.agents.langgraph.fsm.facts import user_confirmed
+        
+        state = {
+            "current_state": State.STATE_4_OFFER.value,
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {},
+            "session_id": "test",
+        }
+        
+        # Симулируем "грязный" ввод: "Ціна? Так"
+        confirmed = user_confirmed(
+            current_state=State.STATE_4_OFFER.value,
+            intent="SIZE_HELP",  # Intent может быть неправильным из-за "Ціна?"
+            user_message="Ціна? Так",
+            metadata={},
+        )
+        
+        # Подтверждение должно быть детектировано
+        assert confirmed is True, (
+            "Confirmation 'Так' should be detected even if mixed with questions"
+        )
+
+    def test_snippet_only_response_no_price_repetition(self):
+        """
+        Тест: При подтверждении в STATE_4_OFFER должен быть snippet-only ответ
+        (без повторения цены через LLM).
+        """
+        state = {
+            "current_state": State.STATE_4_OFFER.value,
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {},
+            "session_id": "test",
+        }
+        
+        transition = compute_transition(
+            state=state,
+            intent=Intent.PAYMENT_DELIVERY.value,
+            has_image=False,
+            user_message="Ціна? Так",  # Смешанный ввод
+        )
+        
+        # Должен быть snippet-only ответ (use_llm=False)
+        assert transition.response_policy.snippet_name == "Підтвердження замовлення"
+        assert transition.response_policy.use_llm is False, (
+            "Snippet-only response should not use LLM (prevents price repetition)"
+        )
+

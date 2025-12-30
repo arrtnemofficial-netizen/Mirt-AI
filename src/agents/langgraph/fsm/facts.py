@@ -98,7 +98,12 @@ def _detect_user_confirmation(
         return True
     
     # Проверяем keywords подтверждения
+    # КРИТИЧНО: Если найдено подтверждение - возвращаем True ВНЕ ЗАВИСИМОСТИ от других слов
+    # Это гарантирует, что "Так" перебивает "Ціна?" при детекции подтверждения
     if user_message:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
         
         user_text_lower = user_message.lower()
@@ -117,7 +122,13 @@ def _detect_user_confirmation(
         
         all_confirmation_keywords = confirmation_keywords + offer_confirmation_keywords + product_names
         
-        if any(keyword in user_text_lower for keyword in all_confirmation_keywords):
+        # Проверяем наличие подтверждения
+        found_keywords = [kw for kw in all_confirmation_keywords if kw in user_text_lower]
+        if found_keywords:
+            logger.info(
+                "[FACTS] User confirmation detected in STATE_4_OFFER: keywords=%s (ignoring other intents like SIZE_HELP)",
+                found_keywords[:3],  # Логируем первые 3 для краткости
+            )
             return True
     
     return False

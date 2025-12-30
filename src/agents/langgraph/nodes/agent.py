@@ -282,6 +282,73 @@ async def agent_node(
         }
 
     # =====================================================================
+    # SSOT RESPONSE POLICY CHECK: Если должен быть snippet - НЕ вызываем LLM
+    # =====================================================================
+    # КРИТИЧНО: Проверяем response_policy ПЕРЕД вызовом LLM
+    # Это предотвращает повтор цены после согласия и гарантирует snippet-only ответ
+    from src.agents.langgraph.fsm.transition_reducer import compute_transition
+    from src.agents.langgraph.fsm.policy import determine_response_policy
+    
+    # Вычисляем transition для определения response_policy
+    transition = compute_transition(
+        state=state,
+        intent=detected_intent or "DISCOVERY_OR_QUESTION",
+        has_image=state.get("has_image", False) or state.get("metadata", {}).get("has_image", False),
+        user_message=user_message,
+    )
+    
+    # Проверяем response_policy
+    response_policy = determine_response_policy(
+        next_state=transition.next_state,
+        payment_sub_phase=transition.payment_sub_phase,
+        metadata=state.get("metadata", {}),
+        session_id=session_id,
+    )
+    
+    # КРИТИЧНО: Если должен быть snippet - НЕ вызываем LLM, возвращаем snippet
+    if response_policy.snippet_name and not response_policy.use_llm:
+        from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
+        
+        snippets = get_snippet_by_header(response_policy.snippet_name)
+        if snippets:
+            snippet_text = "\n\n".join(snippets)
+            
+            # Устанавливаем флаг idempotency
+            metadata_update = state.get("metadata", {}).copy()
+            if response_policy.snippet_sent_flag:
+                metadata_update[response_policy.snippet_sent_flag] = True
+            
+            logger.info(
+                "[SESSION %s] 🎯 Snippet-only response (no LLM): snippet=%s, flag=%s, next_state=%s",
+                session_id,
+                response_policy.snippet_name,
+                response_policy.snippet_sent_flag,
+                transition.next_state,
+            )
+            
+            return {
+                "current_state": transition.next_state,
+                "dialog_phase": transition.dialog_phase,
+                "metadata": metadata_update,
+                "agent_response": {
+                    "event": "simple_answer",
+                    "messages": [{"type": "text", "content": snippet_text}],
+                    "metadata": {
+                        "session_id": session_id,
+                        "current_state": transition.next_state,
+                        "intent": "PAYMENT_DELIVERY" if transition.next_state == State.STATE_5_PAYMENT_DELIVERY.value else detected_intent,
+                    },
+                },
+                "step_number": state.get("step_number", 0) + 1,
+            }
+        else:
+            logger.warning(
+                "[SESSION %s] ⚠️ Snippet '%s' not found, falling back to LLM",
+                session_id,
+                response_policy.snippet_name,
+            )
+    
+    # =====================================================================
     # UNIVERSAL COLOR SHOW REQUEST HANDLER (any state)
     # =====================================================================
     # Якщо клієнт просить показати кольори (в будь-якому стані) - показуємо фото
