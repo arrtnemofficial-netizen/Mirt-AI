@@ -152,7 +152,10 @@ async def payment_node(
     # SHOW_PAYMENT, THANK_YOU → handle_delivery_data
     if payment_sub_phase in ("SHOW_PAYMENT", "THANK_YOU"):
         logger.info("[SESSION %s] Routing to handle_delivery_data (sub_phase=%s)", session_id, payment_sub_phase)
-        return await handle_delivery_data(state, runner, session_id)
+        # КРИТИЧНО: Передаем payment_sub_phase из transition (SSOT) в state для использования в handle_delivery_data
+        # Это избегает повторного вызова get_payment_sub_phase
+        state_with_sub_phase = {**state, "_temp_context": {"payment_sub_phase": payment_sub_phase}}
+        return await handle_delivery_data(state_with_sub_phase, runner, session_id)
 
     # Fallback: якщо payment_sub_phase не визначено, використовуємо computed_dialog_phase
     logger.warning(

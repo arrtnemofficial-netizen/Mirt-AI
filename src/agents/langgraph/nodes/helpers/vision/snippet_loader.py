@@ -105,10 +105,26 @@ def get_product_snippet(product_name: str) -> list[str] | None:
     if not pn_lower:
         return None
 
+    # КРИТИЧНО: Удаляем цвет в скобках и другие дополнения
+    # "Сукня Анна (лео рожева)" -> "Сукня Анна"
+    # "Костюм Лагуна (синий)" -> "Костюм Лагуна"
+    import re
+    # Удаляем все в скобках: (лео рожева), (синий), etc.
+    pn_clean = re.sub(r'\([^)]*\)', '', pn_lower).strip()
+    # Удаляем лишние пробелы
+    pn_clean = ' '.join(pn_clean.split())
+    
     # Extract key words (e.g., "сукня анна" -> ["сукня", "анна"])
-    keywords = [w for w in pn_lower.split() if len(w) > 2]
+    keywords = [w for w in pn_clean.split() if len(w) > 2]
     if not keywords:
         return None
+    
+    logger.debug(
+        "🔍 Searching snippet for product: original='%s', cleaned='%s', keywords=%s",
+        product_name,
+        pn_clean,
+        keywords,
+    )
 
     # Parse snippets.md - find sections matching product
     lines = content.split("\n")

@@ -475,11 +475,13 @@ async def agent_node(
     state_prompt = get_state_prompt(current_state)
 
     # Для payment додаємо sub-phase prompt
+    # КРИТИЧНО: Используем payment_sub_phase из transition (SSOT), а не вызываем get_payment_sub_phase напрямую
     if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
-        payment_sub = get_payment_sub_phase(state)
+        # Используем payment_sub_phase из transition (вычислен выше в response_policy check)
+        payment_sub = transition.payment_sub_phase or "REQUEST_DATA"
         state_prompt = get_state_prompt(current_state, payment_sub)
         logger.info(
-            "💰 [SESSION %s] Payment sub-phase: %s",
+            "💰 [SESSION %s] Payment sub-phase: %s (from SSOT transition)",
             session_id,
             payment_sub,
         )
@@ -502,13 +504,63 @@ async def agent_node(
 
     try:
         # Call PydanticAI agent with proper DI
-        # Returns STRUCTURED SupportResponse (OUTPUT_CONTRACT format)
+        # КРИТИЧНО: Для STATE_5 используем payment_agent (имеет tool extract_customer_data)
+        # Для остальных состояний используем support_agent
         llm_start_time = time.perf_counter()
-        response: SupportResponse = await run_support(
-            message=user_message,
-            deps=deps,
-            message_history=None,
-        )
+        
+        if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
+            # Используем payment_agent для извлечения данных доставки
+            from src.agents.pydantic.payment_agent import run_payment
+            from src.agents.pydantic.models import PaymentResponse, SupportResponse, MessageItem, ResponseMetadata
+            
+            payment_response: PaymentResponse = await run_payment(
+                message=user_message,
+                deps=deps,
+                message_history=None,
+            )
+            
+            # Конвертируем PaymentResponse в SupportResponse для совместимости
+            # PaymentResponse.reply_to_user -> SupportResponse.messages
+            # PaymentResponse.customer_data -> сохраняем в metadata
+            messages = [MessageItem(type="text", content=payment_response.reply_to_user)]
+            
+            # Сохраняем customer_data в metadata для обновления state
+            metadata_dict = deps.metadata.model_dump() if hasattr(deps, 'metadata') else {}
+            if payment_response.customer_data:
+                # Обновляем metadata с данными клиента
+                if payment_response.customer_data.name:
+                    metadata_dict["customer_name"] = payment_response.customer_data.name
+                if payment_response.customer_data.phone:
+                    metadata_dict["customer_phone"] = payment_response.customer_data.phone
+                if payment_response.customer_data.city:
+                    metadata_dict["customer_city"] = payment_response.customer_data.city
+                if payment_response.customer_data.nova_poshta:
+                    metadata_dict["customer_nova_poshta"] = payment_response.customer_data.nova_poshta
+            
+            metadata = ResponseMetadata(
+                session_id=metadata_dict.get("session_id", session_id),
+                current_state=State.STATE_5_PAYMENT_DELIVERY.value,
+                intent="PAYMENT_DELIVERY",
+                escalation_level="NONE",
+            )
+            
+            response = SupportResponse(
+                event="clarifying_question" if payment_response.missing_fields else "simple_answer",
+                messages=messages,
+                products=[],
+                metadata=metadata,
+            )
+            # КРИТИЧНО: Сохраняем customer_data из PaymentResponse для последующего обновления state
+            # Добавляем как атрибут для совместимости с кодом ниже (строка 867)
+            response.customer_data = payment_response.customer_data
+        else:
+            # Для остальных состояний используем support_agent
+            response: SupportResponse = await run_support(
+                message=user_message,
+                deps=deps,
+                message_history=None,
+            )
+        
         llm_latency_ms = (time.perf_counter() - llm_start_time) * 1000.0
         # Track LLM latency metric
         track_metric("llm_latency_ms", llm_latency_ms, {"state": current_state, "intent": response.metadata.intent or "unknown"})
@@ -817,7 +869,8 @@ async def agent_node(
             if first_name:
                 metadata_update["current_product_name"] = first_name
 
-        if response.customer_data:
+        # Обновляем customer_data из PaymentResponse (если был вызван payment_agent)
+        if hasattr(response, 'customer_data') and response.customer_data:
             if response.customer_data.name:
                 metadata_update["customer_name"] = response.customer_data.name
             if response.customer_data.phone:

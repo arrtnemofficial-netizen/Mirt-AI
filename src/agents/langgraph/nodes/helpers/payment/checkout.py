@@ -229,16 +229,17 @@ async def prepare_payment_and_interrupt(
             )
             state["metadata"] = metadata
 
-        # ІНВАРІАНТ: Якщо response_text порожній (snippet вже відправлено), не створюємо повідомлення
-        # Це гарантує "one-turn-one-response" - не відправляємо порожні повідомлення
+        # ІНВАРІАНТ: Якщо response_text порожній (snippet вже відправлено), делегуємо в agent для извлечения данных
+        # КРИТИЧНО: Когда snippet уже отправлен, нужно вызвать LLM для извлечения данных доставки из сообщения пользователя
         metadata_update = state.get("metadata", {}).copy()
         if not response_text:
             logger.info(
-                "[SESSION %s] Response text is empty (snippet already sent or LLM will handle). "
-                "Not creating empty message (one-turn-one-response invariant).",
+                "[SESSION %s] Response text is empty (snippet already sent). "
+                "Delegating to agent node to extract customer data from user message.",
                 session_id,
             )
-            # Повертаємо команду без повідомлень (LLM обробить через інший handler)
+            # КРИТИЧНО: Делегируем в agent node для извлечения данных доставки
+            # Agent node вызовет payment_agent с tool extract_customer_data
             return Command(
                 update={
                     "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -246,7 +247,7 @@ async def prepare_payment_and_interrupt(
                     "metadata": metadata_update,
                     "step_number": state.get("step_number", 0) + 1,
                 },
-                goto="end",
+                goto="agent",  # Делегируем в agent для извлечения данных
             )
 
         # ІНВАРІАНТ: Встановлюємо флаг snippet_sent якщо відправляємо snippet

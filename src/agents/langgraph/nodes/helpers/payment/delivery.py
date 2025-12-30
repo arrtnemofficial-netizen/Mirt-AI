@@ -279,11 +279,28 @@ async def _delegate_to_llm(
     deps.selected_products = products
 
     # Get current sub-phase for prompt selection
-    try:
-        from src.agents.langgraph.state_prompts import get_payment_sub_phase
-        deps.payment_sub_phase = get_payment_sub_phase(state)
-    except Exception:
-        deps.payment_sub_phase = None
+    # КРИТИЧНО: Используем payment_sub_phase из transition (SSOT), если передан
+    # Иначе вычисляем через get_payment_sub_phase (fallback для обратной совместимости)
+    if "payment_sub_phase" in state.get("_temp_context", {}):
+        # Используем payment_sub_phase из transition (передан из payment_node)
+        deps.payment_sub_phase = state["_temp_context"]["payment_sub_phase"]
+        logger.debug(
+            "[SESSION %s] Using payment_sub_phase from transition (SSOT): %s",
+            session_id,
+            deps.payment_sub_phase,
+        )
+    else:
+        # Fallback: вычисляем напрямую (для обратной совместимости)
+        try:
+            from src.agents.langgraph.state_prompts import get_payment_sub_phase
+            deps.payment_sub_phase = get_payment_sub_phase(state)
+            logger.debug(
+                "[SESSION %s] Computed payment_sub_phase directly (fallback): %s",
+                session_id,
+                deps.payment_sub_phase,
+            )
+        except Exception:
+            deps.payment_sub_phase = None
 
     logger.debug(
         "[SESSION %s] Delegating to LLM with sub_phase=%s",
