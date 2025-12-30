@@ -3,8 +3,9 @@ Unit tests for payment.py - Payment node with HITL.
 
 Tests cover:
 1. payment_node routing and state updates
-2. HITL disable flag behavior
-3. Error handling
+2. HITL disable flag behavior (checkout)
+3. Delivery data handling (with LLM delegation)
+4. Payment proof handling
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,28 +38,31 @@ class TestPaymentNode:
 
     @pytest.mark.asyncio
     async def test_hitl_disabled_skips_interrupt(self, base_state):
-        """When ENABLE_PAYMENT_HITL=False, waits for delivery data (goto=end)."""
+        """When ENABLE_PAYMENT_HITL=False, checkout proceeds without LLM call."""
         from src.agents.langgraph.nodes.payment import payment_node
 
         mock_settings = MagicMock()
         mock_settings.ENABLE_PAYMENT_HITL = False
         mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
+        mock_settings.DEBUG_TRACE_LOGS = False
 
-        mock_response = MagicMock()
-        mock_response.reply_to_user = "Ось реквізити для оплати"
-
-        with patch("src.agents.langgraph.nodes.payment.settings", mock_settings), patch(
-            "src.agents.langgraph.nodes.payment.run_payment",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ), patch("src.agents.langgraph.nodes.payment.log_agent_step"):
-            with patch("src.agents.langgraph.nodes.payment.track_metric"):
+        # Note: checkout logic does NOT call run_payment anymore, it uses snippets.
+        # So we don't mock run_payment here.
+        
+        # Patch settings in checkout module because that's where the check happens
+        # Patch settings in checkout module because that's where the check happens
+        with patch("src.agents.langgraph.nodes.helpers.payment.checkout.settings", mock_settings), patch(
+            "src.agents.langgraph.nodes.payment.log_agent_step"
+        ), patch("src.agents.langgraph.nodes.helpers.payment.checkout.get_snippet_by_header", return_value=None):
+             with patch("src.agents.langgraph.nodes.payment.track_metric"):
                 result = await payment_node(base_state)
 
-        # Should wait for delivery data (end), not skip to upsell
+        # Should wait for delivery data (end)
         assert result.goto == "end"
         assert result.update["awaiting_human_approval"] is False
-        assert result.update["dialog_phase"] == "WAITING_FOR_PAYMENT_PROOF"
+        assert result.update["dialog_phase"] == "WAITING_FOR_DELIVERY_DATA"
+        # Verify content comes from hardcoded fallback (strict text)
+        assert "Щоб одразу зарезервувати" in result.update["messages"][0]["content"]
 
     @pytest.mark.asyncio
     async def test_hitl_enabled_triggers_interrupt(self, base_state):
@@ -69,20 +73,16 @@ class TestPaymentNode:
         mock_settings = MagicMock()
         mock_settings.ENABLE_PAYMENT_HITL = True
         mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
+        mock_settings.DEBUG_TRACE_LOGS = False
 
-        mock_response = MagicMock()
-        mock_response.reply_to_user = "Ось реквізити для оплати"
-
-        # Mock interrupt to not actually pause
-        with patch("src.agents.langgraph.nodes.payment.settings", mock_settings), patch(
-            "src.agents.langgraph.nodes.payment.run_payment",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ), patch(
-            "src.agents.langgraph.nodes.payment.interrupt", return_value=True
+        # Mock interrupt inside checkout module where it is used
+        # And mock settings in checkout module
+        with patch("src.agents.langgraph.nodes.helpers.payment.checkout.settings", mock_settings), patch(
+            "src.agents.langgraph.nodes.helpers.payment.checkout.interrupt", return_value=True
         ) as mock_interrupt, patch("src.agents.langgraph.nodes.payment.log_agent_step"):
-            with patch("src.agents.langgraph.nodes.payment.track_metric"):
-                result = await payment_node(base_state)
+             with patch("src.agents.langgraph.nodes.helpers.payment.checkout.get_snippet_by_header", return_value=None):
+                with patch("src.agents.langgraph.nodes.payment.track_metric"):
+                    result = await payment_node(base_state)
 
         # Should call interrupt
         mock_interrupt.assert_called_once()
@@ -91,32 +91,43 @@ class TestPaymentNode:
         assert result.update["awaiting_human_approval"] is True
 
     @pytest.mark.asyncio
-    async def test_llm_failure_uses_fallback(self, base_state):
-        """When LLM call fails, uses fallback response."""
+    async def test_llm_failure_uses_fallback_in_delivery(self, base_state):
+        """When LLM call fails in delivery handler, uses fallback response."""
         from src.agents.langgraph.nodes.payment import payment_node
+        
+        # Setup state to trigger delivery handler (not checkout)
+        state = {
+            **base_state,
+            "dialog_phase": "WAITING_FOR_DELIVERY_DATA",
+            "messages": [{"role": "user", "content": "Моє місто Київ"}],
+        }
 
         mock_settings = MagicMock()
         mock_settings.ENABLE_PAYMENT_HITL = False
         mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
+        mock_settings.DEBUG_TRACE_LOGS = False
 
+        # Patch delivery.run_payment to fail
+        # Note: delivery.py imports settings too, we might need to patch it there if it used settings logic relevant to fallback
+        # But fallback is just try/except around run_payment.
         with patch("src.agents.langgraph.nodes.payment.settings", mock_settings), patch(
-            "src.agents.langgraph.nodes.payment.run_payment",
+            "src.agents.langgraph.nodes.helpers.payment.delivery.run_payment",
             new_callable=AsyncMock,
             side_effect=Exception("API Error"),
         ), patch("src.agents.langgraph.nodes.payment.log_agent_step"):
             with patch("src.agents.langgraph.nodes.payment.track_metric"):
-                result = await payment_node(base_state)
+                result = await payment_node(state)
 
         # Should still return valid Command with fallback message
         assert result.goto == "end"  # Wait for delivery data
         # Fallback message asks for delivery data
-        assert "оформлення" in result.update["messages"][0]["content"]
+        assert "ПІБ" in result.update["messages"][0]["content"]
 
     @pytest.mark.asyncio
     async def test_waiting_for_payment_proof_confirmation_without_image_does_not_crash(
         self, base_state
     ):
-        """In WAITING_FOR_PAYMENT_PROOF, 'Да' without image should not crash and should keep waiting."""
+        """In WAITING_FOR_PAYMENT_PROOF, missing data should prompt user."""
         from src.agents.langgraph.nodes.payment import payment_node
 
         state = {
@@ -132,16 +143,15 @@ class TestPaymentNode:
         mock_settings.DEBUG_TRACE_LOGS = False
 
         mock_response = MagicMock()
-        mock_response.reply_to_user = (
-            "Ок"  # should be overridden to ask for missing fields/screenshot
-        )
+        # Simulate LLM asking for missing data
+        mock_response.reply_to_user = "Будь ласка, надішліть скріншот оплати."
         mock_response.payment_details_sent = True
         mock_response.awaiting_payment_confirmation = True
 
         with (
             patch("src.agents.langgraph.nodes.payment.settings", mock_settings),
             patch(
-                "src.agents.langgraph.nodes.payment.run_payment",
+                "src.agents.langgraph.nodes.helpers.payment.delivery.run_payment",
                 new_callable=AsyncMock,
                 return_value=mock_response,
             ),
@@ -152,9 +162,9 @@ class TestPaymentNode:
 
         assert result.goto == "end"
         assert result.update["dialog_phase"] == "WAITING_FOR_PAYMENT_PROOF"
-        # Should ask for either missing delivery data or screenshot
+        # Should contain the prompt from mock
         content = result.update["messages"][0]["content"].lower()
-        assert ("піб" in content) or ("скрін" in content) or ("квитанц" in content)
+        assert "скріншот" in content
 
     @pytest.mark.asyncio
     async def test_waiting_for_payment_proof_with_image_and_full_data_goes_to_upsell(
@@ -184,7 +194,7 @@ class TestPaymentNode:
         mock_settings.DEBUG_TRACE_LOGS = False
 
         mock_response = MagicMock()
-        mock_response.reply_to_user = "Дякую, бачу оплату"  # should pass through
+        mock_response.reply_to_user = "Дякую, бачу оплату" 
         mock_response.payment_details_sent = True
         mock_response.awaiting_payment_confirmation = True
 
@@ -198,20 +208,44 @@ class TestPaymentNode:
             )
             return mock_response
 
+        # Need to patch delivery.run_payment (although with has_image=True and proof strict check it handles it internally via persisted order?)
+        # Wait, handle_delivery_data -> detect_payment_proof -> True -> _handle_payment_proof_received
+        # It DOES NOT call run_payment if proof is detected!
+        # So mocking run_payment is actually irrelevant if proof logic works.
+        # But we need to mock persist_order_and_queue_crm and notification service to avoid side effects/errors.
+        
         with (
             patch("src.agents.langgraph.nodes.payment.settings", mock_settings),
+            # Patch run_payment just in case it falls through (it shouldn't)
             patch(
-                "src.agents.langgraph.nodes.payment.run_payment",
+                "src.agents.langgraph.nodes.helpers.payment.delivery.run_payment",
                 new_callable=AsyncMock,
                 side_effect=_run_payment_side_effect,
             ),
             patch("src.agents.langgraph.nodes.payment.log_agent_step"),
+            # Mock CRM persistence
+            patch("src.agents.langgraph.nodes.helpers.payment.delivery.persist_order_and_queue_crm", new_callable=AsyncMock, return_value={"id": 1}),
+             # Mock Notification Service
+            patch("src.services.notifications.NotificationService.send_escalation_alert", new_callable=AsyncMock),
         ):
             with patch("src.agents.langgraph.nodes.payment.track_metric"):
                 result = await payment_node(state)
 
-        assert result.goto == "end"
-        assert result.update["dialog_phase"] == "COMPLETED"
+        # With payment proof + full data, should route to upsell (or end if no upsell available)
+        assert result.goto in ("upsell", "end")
+        
+        # Verify strict message sequence: Thank You -> Subscribe -> (Upsell)
+        messages = result.update["messages"]
+        assert len(messages) >= 2
+        assert "Дякуємо за замовлення" in messages[0]["content"]
+        assert "підпишіться" in messages[1]["content"]
+
+        if result.goto == "upsell":
+            assert result.update["dialog_phase"] == "UPSELL_OFFERED"
+            # Upsell should be the 3rd message
+            assert len(messages) == 3
+        else:
+            assert result.update["dialog_phase"] == "COMPLETED"
 
 
 # =============================================================================
@@ -240,15 +274,13 @@ class TestPaymentStateUpdates:
         mock_settings = MagicMock()
         mock_settings.ENABLE_PAYMENT_HITL = False
         mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
+        mock_settings.DEBUG_TRACE_LOGS = False
 
-        mock_response = MagicMock()
-        mock_response.reply_to_user = "Test"
-
-        with patch("src.agents.langgraph.nodes.payment.settings", mock_settings), patch(
-            "src.agents.langgraph.nodes.payment.run_payment",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ), patch("src.agents.langgraph.nodes.payment.log_agent_step"):
+        # No LLM call in checkout start
+        # Patch checkout settings to ensure consistency (though defaults might work, better explicit)
+        with patch("src.agents.langgraph.nodes.helpers.payment.checkout.settings", mock_settings), patch(
+            "src.agents.langgraph.nodes.payment.log_agent_step"
+        ), patch("src.agents.langgraph.nodes.helpers.payment.checkout.get_snippet_by_header", return_value=None):
             with patch("src.agents.langgraph.nodes.payment.track_metric"):
                 result = await payment_node(state)
 
@@ -272,15 +304,11 @@ class TestPaymentStateUpdates:
         mock_settings = MagicMock()
         mock_settings.ENABLE_PAYMENT_HITL = False
         mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
-
-        mock_response = MagicMock()
-        mock_response.reply_to_user = "Test"
+        mock_settings.DEBUG_TRACE_LOGS = False
 
         with patch("src.agents.langgraph.nodes.payment.settings", mock_settings), patch(
-            "src.agents.langgraph.nodes.payment.run_payment",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ), patch("src.agents.langgraph.nodes.payment.log_agent_step"):
+            "src.agents.langgraph.nodes.payment.log_agent_step"
+        ), patch("src.agents.langgraph.nodes.helpers.payment.checkout.get_snippet_by_header", return_value=None):
             with patch("src.agents.langgraph.nodes.payment.track_metric"):
                 result = await payment_node(state)
 

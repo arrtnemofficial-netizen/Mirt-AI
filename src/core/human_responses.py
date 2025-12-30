@@ -74,6 +74,12 @@ NOT_FOUND_RESPONSES = [
     "Не знаходжу зараз. Опишіть, будь ласка, іншими словами (колір, фасон, принт).",
 ]
 
+VISION_SOFT_ESCALATION_RESPONSES = [
+    "Зараз уточню наявність цієї моделі у колег та відпишу! 🏃",
+    "Секунду, запитаю на складі стосовно цієї моделі та повернусь із відповіддю.",
+    "Уточню актуальну наявність по цій позиції і дам знати! 👩‍💻",
+]
+
 # Typing indicators (shown before response)
 TYPING_PHRASES = [
     "...",
@@ -96,6 +102,7 @@ ResponseType = Literal[
     "payment_error",
     "escalation",
     "not_found",
+    "vision_soft_escalation",
 ]
 
 _RESPONSE_MAP: dict[ResponseType, list[str]] = {
@@ -106,6 +113,7 @@ _RESPONSE_MAP: dict[ResponseType, list[str]] = {
     "payment_error": PAYMENT_ERROR_RESPONSES,
     "escalation": ESCALATION_RESPONSES,
     "not_found": NOT_FOUND_RESPONSES,
+    "vision_soft_escalation": VISION_SOFT_ESCALATION_RESPONSES,
 }
 
 

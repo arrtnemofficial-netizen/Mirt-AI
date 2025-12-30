@@ -73,7 +73,7 @@ def format_requisites_with_receipt_request(price: int | None = None) -> list[str
         f"Отримувач: {BANK_REQUISITES.fop_name}\nIBAN: {BANK_REQUISITES.iban}\nІПН/ЄДРПОУ: {BANK_REQUISITES.tax_id}",
         f"Призначення платежу: {BANK_REQUISITES.payment_purpose}",
         f"До оплати - {price_text}",
-        "І все, і жди скріншоту",
+        "Очікую на скріншот або квитанцію про оплату 📸",
     ]
 
 

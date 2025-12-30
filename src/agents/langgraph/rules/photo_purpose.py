@@ -76,19 +76,20 @@ def determine_photo_purpose(
     phase_aware_enabled = getattr(settings, "PHASE_AWARE_IMAGE_ROUTING", True)
 
     if phase_aware_enabled and dialog_phase in transactional_phases:
-        if user_message and dialog_phase == "WAITING_FOR_PAYMENT_PROOF":
-            from src.agents.langgraph.rules.payment_proof import detect_payment_proof
-            from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
+        # Check for product addition intent across ALL transactional phases
+        from src.agents.langgraph.rules.payment_proof import detect_payment_proof
+        from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
 
-            is_product_addition = detect_product_addition_intent(user_message)
-            is_payment_proof = detect_payment_proof(
-                user_text=user_message,
-                has_image=True,
-                has_url=False,
-            )
+        is_product_addition = detect_product_addition_intent(user_message)
+        is_payment_proof = detect_payment_proof(
+            user_text=user_message,
+            has_image=True,
+            has_url=False,
+        )
 
-            if is_product_addition and not is_payment_proof:
-                return ("product_ident", "product_addition_intent_in_payment_phase")
+        # If it looks like product addition and NOT explicitly payment proof (strong keywords), route to vision
+        if is_product_addition and not is_payment_proof:
+            return ("product_ident", "product_addition_intent_in_payment_phase")
 
         # Default for transactional phases: payment proof
         return ("transactional", f"transactional_phase_{dialog_phase}")

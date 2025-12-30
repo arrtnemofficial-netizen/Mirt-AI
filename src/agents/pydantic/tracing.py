@@ -51,7 +51,7 @@ def trace_agent_call(agent_name: str):
             if LOGFIRE_AVAILABLE:
                 try:
                     span = logfire.span(
-                        msg_template=f"agent.{agent_name}",
+                        f"agent.{agent_name}",
                         attributes={
                             "agent_name": agent_name,
                             "session_id": session_id,

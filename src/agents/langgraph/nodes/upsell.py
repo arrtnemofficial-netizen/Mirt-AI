@@ -17,6 +17,8 @@ from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
+from src.services.notifications import NotificationService
+import re
 
 
 if TYPE_CHECKING:
@@ -113,93 +115,147 @@ async def upsell_node(
 
     logger.info("Upsell node for session %s", session_id)
 
-    try:
-        # Call support agent with upsell context
-        response: SupportResponse = await run_support(
-            message=user_message,
-            deps=deps,
-            message_history=None,
-        )
+    # REJECTION DETECTION (Regex)
+    # Check for simple refusal phrases to show Thanks + Subscribe immediately
+    # Regex covers: "ні", "не", "не треба", "дякую", "ні дякую", "все"
+    rejection_pattern = r"^(ні|нi|не|не треба|не хочу|дякую|спасибі|тільки це|все)\W*$"
+    is_refusal = bool(re.match(rejection_pattern, user_message.strip().lower()))
 
-        updated_cart = ordered_products
-        if response.products:
-            merged: list[dict[str, Any]] = []
-            seen: set[str] = set()
-            for item in [*ordered_products, *[p.model_dump() for p in response.products]]:
-                if not isinstance(item, dict):
-                    continue
-                pid = item.get("id")
-                name = str(item.get("name") or "").strip().lower()
-                size = str(item.get("size") or "").strip().lower()
-                color = str(item.get("color") or "").strip().lower()
-                key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
-                if key in seen:
-                    continue
-                seen.add(key)
-                merged.append(item)
-            updated_cart = merged
+    notifier = NotificationService()
 
-        latency_ms = (time.perf_counter() - start_time) * 1000
+    if is_refusal:
+        # HUMAN REFUSED UPSELL -> THANKS + SUBSCRIBE + COMPLETED
+        thank_you_text = "Дякуємо за замовлення ⭐️\nГарного вам вечора та мирного неба 🕊️"
+        subscribe_text = "Зараз великі магазини, такі як наш, конкуренти часто намагаються зламувати. Щоб ви нас не втратили, підпишіться, будь ласка, також на нашу другу офіційну сторінку. @mirt_original"
+        
+        assistant_content = f"{thank_you_text}\n\n{subscribe_text}"
+        msgs = [{"role": "assistant", "content": m} for m in [thank_you_text, subscribe_text]]
 
-        log_agent_step(
-            session_id=session_id,
-            state=State.STATE_6_UPSELL.value,
-            intent=response.metadata.intent,
-            event=response.event,
-            latency_ms=latency_ms,
-            extra={"trace_id": trace_id},
-        )
-        track_metric("upsell_node_latency_ms", latency_ms)
-        track_metric("upsell_offered", 1, {"session_id": session_id})
-
-        # Build assistant message from response
-        assistant_content = "\n".join(m.content for m in response.messages)
-
-        # Prepend CRM status message if available
-        if crm_status_message:
-            assistant_content = f"{crm_status_message}\n\n{assistant_content}"
-
-        # =====================================================
-        # DIALOG PHASE (Turn-Based State Machine)
-        # =====================================================
-        # STATE_6_UPSELL → STATE_7_END
-        #
-        # Після upsell встановлюємо COMPLETED
-        # - Діалог завершено, подяка за замовлення
-        # =====================================================
-        if settings.DEBUG_TRACE_LOGS:
-            debug_log.node_exit(
+        # Send notification (Silent info)
+        try:
+            await notifier.send_escalation_alert(
                 session_id=session_id,
-                node_name="upsell",
-                goto="memory_update",
-                new_phase="COMPLETED",
-                response_preview=assistant_content,
+                reason="Замовлення оформлено (Upsell Refused)",
+                user_context=f"Refused Upsell: {user_message}",
+                details={"status": "confirmed_no_upsell"},
             )
+        except Exception:
+            pass
+
         return {
             "current_state": State.STATE_7_END.value,
-            "messages": [{"role": "assistant", "content": assistant_content}],
-            "metadata": response.metadata.model_dump(),
-            "agent_response": response.model_dump(),
-            "selected_products": updated_cart,
-            "offered_products": updated_cart,
+            "messages": msgs,
+            "agent_response": {
+                "event": "order_confirmed",
+                "messages": [{"type": "text", "content": m} for m in [thank_you_text, subscribe_text]],
+                "metadata": {"session_id": session_id, "intent": "UPSELL_REFUSED", "escalation_level": "NONE"},
+            },
+            "selected_products": ordered_products,
+            "offered_products": ordered_products,
             "dialog_phase": "COMPLETED",
             "step_number": state.get("step_number", 0) + 1,
             "last_error": None,
         }
 
-    except Exception as e:
-        logger.exception("Upsell node failed for session %s: %s", session_id, e)
-
-        if settings.DEBUG_TRACE_LOGS:
-            debug_log.error(
+    else:
+        # USER INTERESTED -> RUN SUPPORT + NOTIFY + KEEP ACTIVE
+        # Send Notification about active connection
+        try:
+            await notifier.send_escalation_alert(
                 session_id=session_id,
-                error_type=type(e).__name__,
-                message=str(e) or type(e).__name__,
+                reason="Клієнт зацікавився Upsell! (Потрібна увага)",
+                user_context=f"Upsell Response: {user_message}",
+                details={"status": "upsell_active"},
+            )
+        except Exception:
+            pass
+
+        try:
+            # Call support agent with upsell context
+            response: SupportResponse = await run_support(
+                message=user_message,
+                deps=deps,
+                message_history=None,
             )
 
-        # Non-critical - just skip upsell on error
-        return {
-            "current_state": State.STATE_7_END.value,
-            "dialog_phase": "COMPLETED",
-            "step_number": state.get("step_number", 0) + 1,
-        }
+            updated_cart = ordered_products
+            if response.products:
+                merged: list[dict[str, Any]] = []
+                seen: set[str] = set()
+                for item in [*ordered_products, *[p.model_dump() for p in response.products]]:
+                    if not isinstance(item, dict):
+                        continue
+                    pid = item.get("id")
+                    name = str(item.get("name") or "").strip().lower()
+                    size = str(item.get("size") or "").strip().lower()
+                    color = str(item.get("color") or "").strip().lower()
+                    key = f"{pid}:{size}:{color}" if pid else f"{name}:{size}:{color}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(item)
+                updated_cart = merged
+
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            log_agent_step(
+                session_id=session_id,
+                state=State.STATE_6_UPSELL.value,
+                intent=response.metadata.intent,
+                event=response.event,
+                latency_ms=latency_ms,
+                extra={"trace_id": trace_id},
+            )
+            track_metric("upsell_node_latency_ms", latency_ms)
+            track_metric("upsell_offered", 1, {"session_id": session_id})
+
+            # Build assistant message from response
+            assistant_content = "\n".join(m.content for m in response.messages)
+
+            # Prepend CRM status message if available
+            if crm_status_message:
+                assistant_content = f"{crm_status_message}\n\n{assistant_content}"
+
+            # =====================================================
+            # DIALOG PHASE: ACTIVE (NOT COMPLETED)
+            # =====================================================
+            # User is engaged, keep bot running.
+            # State remains STATE_6 or moves to STATE_7 but Phase is ACTIVE.
+            # Using STATE_6_UPSELL to keep context.
+            # =====================================================
+            if settings.DEBUG_TRACE_LOGS:
+                debug_log.node_exit(
+                    session_id=session_id,
+                    node_name="upsell",
+                    goto="memory_update",
+                    new_phase="ACTIVE",
+                    response_preview=assistant_content,
+                )
+            return {
+                "current_state": State.STATE_6_UPSELL.value, # Stay in Upsell/Active state
+                "messages": [{"role": "assistant", "content": assistant_content}],
+                "metadata": response.metadata.model_dump(),
+                "agent_response": response.model_dump(),
+                "selected_products": updated_cart,
+                "offered_products": updated_cart,
+                "dialog_phase": "ACTIVE", # Keep bot alive
+                "step_number": state.get("step_number", 0) + 1,
+                "last_error": None,
+            }
+
+        except Exception as e:
+            logger.exception("Upsell node failed for session %s: %s", session_id, e)
+
+            if settings.DEBUG_TRACE_LOGS:
+                debug_log.error(
+                    session_id=session_id,
+                    error_type=type(e).__name__,
+                    message=str(e) or type(e).__name__,
+                )
+
+            # Non-critical - just skip upsell on error
+            return {
+                "current_state": State.STATE_7_END.value,
+                "dialog_phase": "COMPLETED",
+                "step_number": state.get("step_number", 0) + 1,
+            }

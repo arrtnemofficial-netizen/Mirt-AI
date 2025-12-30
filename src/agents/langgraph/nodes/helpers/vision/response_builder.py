@@ -17,6 +17,7 @@ from ...utils import (
     image_msg,
     text_msg,
 )
+from src.core.human_responses import get_human_response
 
 
 if TYPE_CHECKING:
@@ -244,9 +245,9 @@ def build_vision_messages(
     elif response.clarification_question:
         messages.append(text_msg(response.clarification_question.strip()))
     elif response.needs_clarification:
-        messages.append(
-            text_msg("Не можу точно визначити модель. Підкажіть, будь ласка, що це за товар? 🤍")
-        )
+        # HUMAN TOUCH: If vision is unsure, don't ask users to do work.
+        # Use Soft Escalation ("I'll check with manager")
+        messages.append(text_msg(get_human_response("vision_soft_escalation")))
 
     # If we still have no product and no clarification - this is likely NOT our product
     # CRITICAL: Only use "not ours" if vision truly couldn't identify after all attempts
@@ -263,28 +264,13 @@ def build_vision_messages(
     ) or enrichment_failed  # Product identified but not in catalog
 
     if should_show_not_ours:
-        # Try to get snippet for unknown product
-        unknown_snippet = get_snippet_by_header("Невідомий товар (ескалація)")
-        if unknown_snippet:
-            for bubble in unknown_snippet[:3]:  # Max 3 bubbles
-                messages.append(text_msg(bubble))
-        else:
-            # Fallback if snippet not found
-            messages.append(text_msg("Це не наша модель 🤍"))
-            messages.append(text_msg("Але стиль дуже схожий на наші костюми/сукні!"))
-            messages.append(
-                text_msg("Показати наші варіанти? Підкажіть, що шукаєте і на який зріст 🌸")
-            )
+        # HUMAN TOUCH: Even if likely not ours or DB error - Escalation is better than rejection.
+        # "I'll check availability" keeps the lead alive.
+        messages.append(text_msg(get_human_response("vision_soft_escalation")))
 
-    # 5. Fallback - use "Помилка розпізнавання фото" snippet
+    # 5. Fallback - use Soft Escalation instead of "Photo Error"
     if not messages:
-        error_snippet = get_snippet_by_header("Помилка розпізнавання фото")
-        if error_snippet:
-            for bubble in error_snippet:
-                messages.append(text_msg(bubble))
-        else:
-            messages.append(text_msg("Не впізнала модель на фото 🤍"))
-            messages.append(text_msg("Передаю менеджеру, щоб допоміг вам особисто!"))
+        messages.append(text_msg(get_human_response("vision_soft_escalation")))
 
     return messages
 
