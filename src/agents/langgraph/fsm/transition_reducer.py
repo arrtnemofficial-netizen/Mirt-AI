@@ -102,21 +102,34 @@ def compute_transition(
     
     # SSOT: next_state ВСЕГДА из core.state_machine
     current_state = State.from_string(current_state_str)
-    intent_enum = Intent.from_string(intent)
+    
+    # Вычисляем факты ПЕРЕД определением next_state (нужно для user_confirmed)
+    facts = compute_facts(state, intent, user_message)
+    user_confirmed = facts["user_confirmed"]
+    
+    # КРИТИЧНО: Если user_confirmed=True в STATE_4_OFFER, принудительно используем PAYMENT_DELIVERY intent
+    # Это гарантирует переход STATE_4 → STATE_5 даже если intent был SIZE_HELP или другой
+    if current_state == State.STATE_4_OFFER and user_confirmed:
+        logger.info(
+            "[SESSION %s] 🎯 User confirmed in STATE_4_OFFER: overriding intent from '%s' to PAYMENT_DELIVERY",
+            session_id,
+            intent,
+        )
+        intent_enum = Intent.PAYMENT_DELIVERY
+    else:
+        intent_enum = Intent.from_string(intent)
+    
     next_state = get_next_state(current_state, intent_enum)
     next_state_str = next_state.value
     
     logger.debug(
-        "[SESSION %s] SSOT Transition: %s + %s → %s (from core.state_machine)",
+        "[SESSION %s] SSOT Transition: %s + %s → %s (from core.state_machine, user_confirmed=%s)",
         session_id,
         current_state_str,
-        intent,
+        intent_enum.value,
         next_state_str,
+        user_confirmed,
     )
-    
-    # Вычисляем факты (вынесено в отдельный модуль)
-    facts = compute_facts(state, intent, user_message)
-    user_confirmed = facts["user_confirmed"]
     has_products = facts["has_products"]
     has_size = facts["has_size"]
     has_color = facts["has_color"]
