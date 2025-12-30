@@ -691,6 +691,35 @@ def _get_base_vision_prompt() -> str:
     return "\n".join(parts)
 
 
+async def _add_state_specific_instructions(ctx: RunContext[AgentDeps]) -> str:
+    """
+    Додає state-specific інструкції на основі current_state.
+    КРИТИЧНО: Для STATE_5_PAYMENT_DELIVERY додаємо інструкції для product addition.
+    """
+    current_state = ctx.deps.current_state
+    
+    if current_state == "STATE_5_PAYMENT_DELIVERY":
+        # Додаємо інструкції для product addition в STATE_5
+        try:
+            state_prompt = registry.get("state.STATE_2_VISION").content
+            # Використовуємо тільки секцію про product addition в STATE_5
+            if "PRODUCT ADDITION В STATE_5" in state_prompt:
+                # Витягуємо секцію про product addition
+                import re
+                match = re.search(
+                    r"## ⚠️ КРИТИЧНО: PRODUCT ADDITION В STATE_5.*?## TRANSITIONS",
+                    state_prompt,
+                    re.DOTALL,
+                )
+                if match:
+                    product_addition_section = match.group(0)
+                    return f"\n---\n# ІНСТРУКЦІЇ ДЛЯ PRODUCT ADDITION В STATE_5\n{product_addition_section}\n"
+        except Exception as e:
+            logger.warning(f"Could not load STATE_2_VISION prompt for product addition: {e}")
+    
+    return ""
+
+
 _vision_agent: Agent[AgentDeps, VisionResponse] | None = None
 
 
@@ -719,6 +748,7 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
         )
         _vision_agent.system_prompt(_add_live_catalog_context)
         _vision_agent.system_prompt(_add_image_url)
+        _vision_agent.system_prompt(_add_state_specific_instructions)
 
         _vision_agent.tool(name="search_products")(_search_products)
 

@@ -870,6 +870,7 @@ async def agent_node(
                 metadata_update["current_product_name"] = first_name
 
         # Обновляем customer_data из PaymentResponse (если был вызван payment_agent)
+        # КРИТИЧНО: После обновления customer_data нужно пересчитать payment_sub_phase
         if hasattr(response, 'customer_data') and response.customer_data:
             if response.customer_data.name:
                 metadata_update["customer_name"] = response.customer_data.name
@@ -879,6 +880,40 @@ async def agent_node(
                 metadata_update["customer_city"] = response.customer_data.city
             if response.customer_data.nova_poshta:
                 metadata_update["customer_nova_poshta"] = response.customer_data.nova_poshta
+            
+            # КРИТИЧНО: После обновления customer_data пересчитываем payment_sub_phase
+            # Это гарантирует переход из REQUEST_DATA в CONFIRM_DATA или SHOW_PAYMENT
+            if new_state_str == State.STATE_5_PAYMENT_DELIVERY.value:
+                from src.agents.langgraph.state_prompts import get_payment_sub_phase
+                try:
+                    # Создаем временный state с обновленными metadata для пересчета
+                    temp_state = {**state, "metadata": metadata_update}
+                    new_payment_sub_phase = get_payment_sub_phase(temp_state)
+                    logger.info(
+                        "[SESSION %s] Payment sub-phase updated after data extraction: REQUEST_DATA → %s",
+                        session_id,
+                        new_payment_sub_phase,
+                    )
+                    # Обновляем dialog_phase на основе нового payment_sub_phase
+                    from src.agents.langgraph.fsm.transition_reducer import derive_dialog_phase
+                    new_dialog_phase = derive_dialog_phase(
+                        current_state=new_state_str,
+                        intent=intent,
+                        has_products=len(selected_products) > 0,
+                        has_size=False,
+                        has_color=False,
+                        user_confirmed=False,
+                        payment_sub_phase=new_payment_sub_phase,
+                    )
+                    # Обновляем dialog_phase в metadata для следующего шага
+                    metadata_update["_computed_payment_sub_phase"] = new_payment_sub_phase
+                    metadata_update["_computed_dialog_phase"] = new_dialog_phase
+                except Exception as e:
+                    logger.warning(
+                        "[SESSION %s] Failed to recalculate payment_sub_phase after data extraction: %s",
+                        session_id,
+                        e,
+                    )
 
         # =====================================================================
         # CRITICAL: Set vision_greeted if greeting was shown

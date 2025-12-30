@@ -72,6 +72,25 @@ async def handle_delivery_data(
     # =========================================================================
     # PAYMENT PROOF DETECTION (Deterministic, cannot be in prompt)
     # =========================================================================
+    # КРИТИЧНО: Проверяем product addition intent ПЕРЕД payment proof
+    # Если это фото товара - НЕ детектируем как payment proof
+    from src.agents.langgraph.rules.product_addition import detect_product_addition_intent
+    
+    is_product_addition = detect_product_addition_intent(user_message) if user_message else False
+    
+    if is_product_addition:
+        logger.info(
+            "[SESSION %s] Product addition detected (not payment proof), delegating to LLM",
+            session_id,
+        )
+        # Это фото товара, не payment proof - делегируем в LLM
+        return await _delegate_to_llm(
+            state=state,
+            runner=runner,
+            user_message=user_message,
+            products=products,
+        )
+    
     has_real_proof = detect_payment_proof(
         user_text=user_message or "",
         has_image=has_image,

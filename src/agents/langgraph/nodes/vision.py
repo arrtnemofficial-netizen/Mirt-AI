@@ -189,7 +189,22 @@ async def vision_node(
     deps = create_deps_from_state(state)
     deps.has_image = True
     deps.image_url = state.get("image_url") or state.get("metadata", {}).get("image_url")
-    deps.current_state = State.STATE_2_VISION.value
+    # КРИТИЧНО: Передаємо реальний current_state, щоб vision_agent знав контекст
+    # Якщо це product addition в STATE_5 - залишаємо STATE_5, інакше STATE_2_VISION
+    metadata = state.get("metadata", {}) or {}
+    is_product_addition = bool(metadata.get("product_addition_context", False))
+    current_state_from_state = state.get("current_state", State.STATE_2_VISION.value)
+    
+    if is_product_addition and current_state_from_state == State.STATE_5_PAYMENT_DELIVERY.value:
+        # Product addition в STATE_5 - залишаємо STATE_5 для правильного prompt
+        deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
+        logger.info(
+            "[SESSION %s] Vision called from STATE_5 (product addition), using STATE_5 prompt",
+            session_id,
+        )
+    else:
+        # Звичайний виклик vision - використовуємо STATE_2_VISION
+        deps.current_state = State.STATE_2_VISION.value
 
     def _build_vision_error_escalation(error_msg: str) -> dict[str, Any]:
         escalation_messages = [

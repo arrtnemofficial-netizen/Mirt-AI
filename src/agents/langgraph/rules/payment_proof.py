@@ -112,12 +112,36 @@ def detect_payment_proof(
 
     # Image presence → proof (likely screenshot)
     # BUT: Only if text doesn't indicate product addition (already checked above)
+    # КРИТИЧНО: Если текст содержит данные доставки (ПІБ, телефон, місто, НП) - это НЕ payment proof!
+    # Это фото товара, которое пользователь отправил вместе с данными
     if has_image:
-        # If text is empty or doesn't contain product addition patterns, assume payment proof
+        # Проверяем наличие данных доставки в тексте
+        delivery_data_keywords = [
+            "немченко", "юрий", "володимирович",  # ПІБ
+            "+380", "095", "050",  # Телефон
+            "киев", "київ", "харьков", "одесса",  # Місто
+            "нп", "відділення", "поштомат", "123", "58",  # НП
+        ]
+        has_delivery_data = any(kw in user_text_lower for kw in delivery_data_keywords)
+        
+        # Если есть данные доставки - это НЕ payment proof, это фото товара
+        if has_delivery_data:
+            return False
+        
+        # Если текст пустой или не содержит данных доставки - проверяем дальше
         if not user_text_lower:
+            # Пустой текст + фото - возможно payment proof, но нужно проверить контекст
+            # В STATE_5 если нет данных доставки - это скорее всего фото товара
+            return False  # Без текста не детектируем как payment proof в STATE_5
+        
+        # Если текст есть, но нет данных доставки и нет product addition - возможно payment proof
+        # Но только если есть keywords оплаты
+        has_payment_keywords = any(kw in user_text_lower for kw in PAYMENT_PROOF_KEYWORDS)
+        if has_payment_keywords:
             return True
-        # If text exists but no product addition detected, assume payment proof
-        return True
+        
+        # Если нет keywords оплаты - не детектируем как payment proof
+        return False
 
     return False
 

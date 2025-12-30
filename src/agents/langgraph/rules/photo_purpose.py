@@ -87,11 +87,36 @@ def determine_photo_purpose(
             has_url=False,
         )
 
-        # If it looks like product addition and NOT explicitly payment proof (strong keywords), route to vision
+        # КРИТИЧНО: Якщо це явний product addition intent - route to vision
         if is_product_addition and not is_payment_proof:
             return ("product_ident", "product_addition_intent_in_payment_phase")
 
-        # Default for transactional phases: payment proof
+        # КРИТИЧНО: Якщо фото БЕЗ тексту або з мінімальним текстом БЕЗ даних доставки - це новий товар!
+        # Перевіряємо, чи є в тексті дані доставки (ПІБ, телефон, місто, НП)
+        has_delivery_data = False
+        if user_message:
+            delivery_keywords = [
+                "+380", "095", "050",  # Телефон
+                "киев", "київ", "харьков", "одесса",  # Місто
+                "нп", "відділення", "поштомат",  # НП
+            ]
+            # Перевіряємо наявність ПІБ (ім'я з великої літери або кілька слів)
+            import re
+            # ПІБ зазвичай містить 2-3 слова з великої літери
+            has_name = bool(re.search(r'\b[А-ЯІЇЄЁ][а-яіїєё]+(?:\s+[А-ЯІЇЄЁ][а-яіїєё]+){1,2}\b', user_message))
+            has_delivery_keywords = any(kw in user_message_lower for kw in delivery_keywords)
+            has_delivery_data = has_name or has_delivery_keywords
+
+        # Якщо фото БЕЗ даних доставки та БЕЗ keywords оплати - це новий товар!
+        if not has_delivery_data and not is_payment_proof:
+            # Це фото нового товара - треба розпізнати через vision і спитати "оформляємо?"
+            logger.info(
+                "Photo in STATE_5 without delivery data or payment keywords - treating as new product (route to vision)"
+            )
+            return ("product_ident", "new_product_photo_in_payment_phase")
+
+        # Якщо є дані доставки або keywords оплати - це transactional (payment proof або контекст)
+        # Default for transactional phases: payment proof or context
         return ("transactional", f"transactional_phase_{dialog_phase}")
 
     # =========================================================================
