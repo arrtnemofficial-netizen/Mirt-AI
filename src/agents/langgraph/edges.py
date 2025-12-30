@@ -352,17 +352,33 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
         logger.info("🔀 [SESSION %s] → agent (OFFER_MADE, clarifying)", session_id)
         return "agent"
 
-    # STATE_5: Collecting delivery data → use AGENT to extract name/phone/city
-    # Payment node uses interrupt() for HITL which blocks - only use it after data is collected
+    # STATE_5: Collecting delivery data
+    # КРИТИЧНО: Если это ПЕРВЫЙ раз (payment_request_data_sent=False) → payment node для snippet
+    # Если snippet уже отправлен → agent для сбора данных
     if dialog_phase == "WAITING_FOR_DELIVERY_DATA":
-        _route_debug(
-            session_id=session_id,
-            current_phase=dialog_phase,
-            detected_intent=detected_intent,
-            destination="agent",
-            reason="WAITING_FOR_DELIVERY_DATA (collecting data)",
-        )
-        return "agent"
+        metadata = state.get("metadata", {}) or {}
+        payment_request_sent = metadata.get("payment_request_data_sent", False)
+        
+        if not payment_request_sent:
+            # Первый раз → payment node отправит snippet
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="payment",
+                reason="WAITING_FOR_DELIVERY_DATA (first time - send snippet)",
+            )
+            return "payment"
+        else:
+            # Snippet уже отправлен → agent для сбора данных
+            _route_debug(
+                session_id=session_id,
+                current_phase=dialog_phase,
+                detected_intent=detected_intent,
+                destination="agent",
+                reason="WAITING_FOR_DELIVERY_DATA (collecting data)",
+            )
+            return "agent"
 
     # STATE_5: Waiting for payment method
     if dialog_phase == "WAITING_FOR_PAYMENT_METHOD":

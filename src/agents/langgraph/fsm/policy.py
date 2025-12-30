@@ -33,7 +33,9 @@ def load_manifest() -> dict[str, Any]:
     if _manifest_cache is not None:
         return _manifest_cache
     
-    manifest_path = Path(__file__).parent.parent.parent.parent / "data" / "prompts" / "snippets" / "manifest.json"
+    # Находим корень проекта: от policy.py (src/agents/langgraph/fsm/policy.py) 
+    # нужно подняться на 5 уровней: fsm -> langgraph -> agents -> src -> корень
+    manifest_path = Path(__file__).parent.parent.parent.parent.parent / "data" / "prompts" / "snippets" / "manifest.json"
     
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
