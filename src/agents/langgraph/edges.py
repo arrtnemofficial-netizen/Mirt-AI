@@ -91,11 +91,13 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     Master router - checks dialog_phase to determine where to continue.
 
     QUALITY IMPLEMENTATION:
-    - Враховує dialog_phase
+    - Враховує dialog_phase (може бути застарілим, тому використовуємо SSOT reducer для перевірки)
     - Аналізує intent з повідомлення користувача
     - Правильно маршрутизує на основі контексту
     """
-    dialog_phase = state.get("dialog_phase", "INIT")
+    # SSOT: Використовуємо reducer для обчислення dialog_phase (не зберігаємо як джерело правди)
+    from src.agents.langgraph.fsm.transition_reducer import compute_transition
+    
     metadata = state.get("metadata", {}) or {}
     session_id = state.get("session_id") or metadata.get("session_id") or "?"
     trace_id = state.get("trace_id") or metadata.get("trace_id") or ""
@@ -105,6 +107,29 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     # QUALITY: Отримуємо останнє повідомлення для аналізу intent
     user_message = extract_user_message(state.get("messages", []))
     detected_intent = detect_simple_intent(user_message) if user_message else None
+    
+    # SSOT: Обчислюємо dialog_phase через reducer
+    stored_dialog_phase = state.get("dialog_phase", "INIT")
+    if detected_intent:
+        transition = compute_transition(
+            state=state,
+            intent=detected_intent,
+            has_image=has_image,
+            user_message=user_message,
+        )
+        dialog_phase = transition.dialog_phase
+        
+        # Перевіряємо інваріант: якщо stored_dialog_phase відрізняється від computed - логуємо
+        if stored_dialog_phase != dialog_phase and stored_dialog_phase != "INIT":
+            logger.warning(
+                "[SESSION %s] ⚠️ Dialog phase mismatch in routing: stored=%s, computed=%s. Using computed (SSOT).",
+                session_id,
+                stored_dialog_phase,
+                dialog_phase,
+            )
+    else:
+        # Якщо intent не визначено, використовуємо stored (для backward compatibility)
+        dialog_phase = stored_dialog_phase
 
     # Get thread_id for observability
     thread_id = metadata.get("thread_id", session_id)

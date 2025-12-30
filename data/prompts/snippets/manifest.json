@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "description": "SSOT manifest для snippet selection - без хардкода строк в коде",
+  "actions": {
+    "PAYMENT_REQUEST_DATA": {
+      "snippet_header": "Підтвердження замовлення",
+      "idempotency_key": "payment_request_data_sent",
+      "description": "Запрос данных доставки и выбора оплаты (отправляется ровно один раз при переходе в STATE_5 REQUEST_DATA)"
+    }
+  },
+  "rules": [
+    {
+      "condition": {
+        "state": "STATE_5_PAYMENT_DELIVERY",
+        "payment_sub_phase": "REQUEST_DATA"
+      },
+      "action": "PAYMENT_REQUEST_DATA"
+    }
+  ]
+}
+

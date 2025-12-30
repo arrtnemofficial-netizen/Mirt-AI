@@ -5,7 +5,7 @@ print("--- Testing Snippet Loading ---")
 snippets_checkout = get_snippet_by_header("Підтвердження замовлення")
 if snippets_checkout:
     print("✅ Checkout snippet found (length:", len(snippets_checkout), ")")
-    print("Preview:", snippets_checkout[0][:50] + "...")
+    print("Preview:", snippets_checkout[0][:100] + "...")
 else:
     print("❌ Checkout snippet NOT found!")
 

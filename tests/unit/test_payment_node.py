@@ -6,6 +6,7 @@ Tests cover:
 2. HITL disable flag behavior (checkout)
 3. Delivery data handling (with LLM delegation)
 4. Payment proof handling
+5. SSOT invariants: snippet sent exactly once
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -48,6 +49,55 @@ class TestPaymentNode:
 
         # Note: checkout logic does NOT call run_payment anymore, it uses snippets.
         # So we don't mock run_payment here.
+
+    @pytest.mark.asyncio
+    async def test_request_data_snippet_sent_exactly_once(self, base_state):
+        """INVARIANT: Snippet 'Підтвердження замовлення' must be sent exactly once."""
+        from src.agents.langgraph.nodes.helpers.payment.checkout import prepare_payment_and_interrupt
+        from src.conf.config import settings
+
+        # Первый вызов: snippet должен быть отправлен
+        state1 = {
+            **base_state,
+            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            "dialog_phase": "WAITING_FOR_DELIVERY_DATA",
+            "metadata": {},  # Флаг НЕ установлен
+        }
+
+        with patch.object(settings, "ENABLE_PAYMENT_HITL", False):
+            result1 = await prepare_payment_and_interrupt(state1, None, "sess_123")
+
+        # Проверяем, что snippet был отправлен
+        messages1 = result1.update.get("agent_response", {}).get("messages", [])
+        assert len(messages1) > 0, "Snippet must be sent on first call"
+        assert "Підтвердження замовлення" in str(messages1[0].get("content", "")).lower() or any(
+            "місто та відділення" in str(m.get("content", "")).lower() for m in messages1
+        ), "First message must contain delivery request"
+
+        # Проверяем, что флаг установлен
+        metadata1 = result1.update.get("metadata", {})
+        assert metadata1.get("payment_request_data_sent") is True, "Flag must be set after sending snippet"
+
+        # Второй вызов: флаг установлен → snippet НЕ должен быть отправлен
+        state2 = {
+            **base_state,
+            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            "dialog_phase": "WAITING_FOR_DELIVERY_DATA",
+            "metadata": {"payment_request_data_sent": True},  # Флаг установлен
+        }
+
+        with patch.object(settings, "ENABLE_PAYMENT_HITL", False):
+            result2 = await prepare_payment_and_interrupt(state2, None, "sess_123")
+
+        # Проверяем, что snippet НЕ был отправлен повторно
+        messages2 = result2.update.get("agent_response", {}).get("messages", [])
+        # Либо пустой ответ, либо не содержит delivery request
+        if messages2:
+            content = " ".join(str(m.get("content", "")) for m in messages2).lower()
+            # Не должно быть полного текста запроса данных (может быть частичный, но не полный snippet)
+            assert "місто та відділення нової пошти" not in content or "піб та номер телефону" not in content, (
+                "Snippet must NOT be sent twice"
+            )
         
         # Patch settings in checkout module because that's where the check happens
         # Patch settings in checkout module because that's where the check happens

@@ -524,24 +524,51 @@ async def agent_node(
         is_escalation = response.event == "escalation"
 
         # =====================================================================
-        # PAYMENT START OVERRIDE (STATE_4 → STATE_5)
+        # SSOT: USE TRANSITION REDUCER FOR STATE TRANSITION
         # =====================================================================
-        # Якщо ми в STATE_4_OFFER з фазою OFFER_MADE і юзер підтверджує
-        # коротким "беру/да/ок" то примусово переходимо в STATE_5_PAYMENT_DELIVERY
-        # навіть якщо LLM залишив current_state=STATE_4.
-        if current_state == State.STATE_4_OFFER.value and dialog_phase == "OFFER_MADE":
-            user_text = user_message if isinstance(user_message, str) else str(user_message)
-            user_text_lower = user_text.lower()
-            confirm_words = _OFFER_CONFIRMATION_KEYWORDS
-            if any(w in user_text_lower for w in confirm_words):
-                # Якщо LLM ще не перевів стан у STATE_5, робимо це явно
-                if new_state_str == State.STATE_4_OFFER.value:
-                    new_state_str = State.STATE_5_PAYMENT_DELIVERY.value
-                    response.metadata.current_state = new_state_str
+        # Використовуємо SSOT reducer для гарантії правильного переходу
+        # КРИТИЧНО: Override застосовується ТІЛЬКИ якщо це не глобальні приоритети
+        # (COMPLAINT, PHOTO_IDENT завжди мають пріоритет)
+        from src.agents.langgraph.fsm.transition_reducer import compute_transition
+        
+        user_text = user_message if isinstance(user_message, str) else str(user_message)
+        has_image_state = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+        
+        # Глобальні приоритети - НЕ перетираємо
+        global_priority_intents = {"COMPLAINT", "PHOTO_IDENT"}
+        if intent in global_priority_intents:
+            # Для глобальних приоритетів довіряємо LLM/reducer без override
+            logger.debug(
+                "[SESSION %s] Global priority intent %s - skipping SSOT override",
+                session_id,
+                intent,
+            )
+        else:
+            # Викликаємо SSOT reducer
+            transition = compute_transition(
+                state=state,
+                intent=intent or "DISCOVERY_OR_QUESTION",
+                has_image=has_image_state,
+                user_message=user_text,
+            )
+            
+            # Якщо reducer визначив інший стан, ніж LLM - використовуємо рішення reducer (SSOT)
+            # Але ТІЛЬКИ якщо це не глобальний приоритет
+            if transition.next_state != new_state_str:
+                logger.info(
+                    "[SESSION %s] SSOT Override: LLM state=%s, SSOT state=%s. Using SSOT.",
+                    session_id,
+                    new_state_str,
+                    transition.next_state,
+                )
+                new_state_str = transition.next_state
+                response.metadata.current_state = new_state_str
+                
                 # Гарантуємо правильний intent для подальших переходів
-                if intent != "PAYMENT_DELIVERY":
-                    intent = "PAYMENT_DELIVERY"
-                    response.metadata.intent = "PAYMENT_DELIVERY"
+                if transition.next_state == State.STATE_5_PAYMENT_DELIVERY.value:
+                    if intent != "PAYMENT_DELIVERY":
+                        intent = "PAYMENT_DELIVERY"
+                        response.metadata.intent = "PAYMENT_DELIVERY"
 
         selected_products = state.get("selected_products", [])
 

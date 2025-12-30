@@ -340,3 +340,161 @@ class TestInitStateTransitions:
         """Discovery question in INIT should go to agent."""
         route = _resolve_intent_route("DISCOVERY_OR_QUESTION", "STATE_0_INIT", {})
         assert route == "agent"
+
+
+# =============================================================================
+# SSOT INVARIANTS (NEW)
+# =============================================================================
+
+
+class TestSSOTInvariants:
+    """SSOT invariants: dialog_phase is derived, not stored as source of truth."""
+
+    def test_dialog_phase_is_derived_from_payment_sub_phase(self):
+        """dialog_phase for STATE_5 must be derived from payment_sub_phase."""
+        from src.agents.langgraph.fsm.transition_reducer import derive_dialog_phase
+
+        # REQUEST_DATA → WAITING_FOR_DELIVERY_DATA
+        phase = derive_dialog_phase(
+            current_state="STATE_5_PAYMENT_DELIVERY",
+            intent="PAYMENT_DELIVERY",
+            has_products=True,
+            has_size=False,
+            has_color=False,
+            user_confirmed=False,
+            payment_sub_phase="REQUEST_DATA",
+        )
+        assert phase == "WAITING_FOR_DELIVERY_DATA", f"Expected WAITING_FOR_DELIVERY_DATA, got {phase}"
+
+        # CONFIRM_DATA → WAITING_FOR_PAYMENT_METHOD
+        phase = derive_dialog_phase(
+            current_state="STATE_5_PAYMENT_DELIVERY",
+            intent="PAYMENT_DELIVERY",
+            has_products=True,
+            has_size=False,
+            has_color=False,
+            user_confirmed=False,
+            payment_sub_phase="CONFIRM_DATA",
+        )
+        assert phase == "WAITING_FOR_PAYMENT_METHOD", f"Expected WAITING_FOR_PAYMENT_METHOD, got {phase}"
+
+        # SHOW_PAYMENT → WAITING_FOR_PAYMENT_PROOF
+        phase = derive_dialog_phase(
+            current_state="STATE_5_PAYMENT_DELIVERY",
+            intent="PAYMENT_DELIVERY",
+            has_products=True,
+            has_size=False,
+            has_color=False,
+            user_confirmed=False,
+            payment_sub_phase="SHOW_PAYMENT",
+        )
+        assert phase == "WAITING_FOR_PAYMENT_PROOF", f"Expected WAITING_FOR_PAYMENT_PROOF, got {phase}"
+
+    def test_transition_reducer_determines_state_correctly(self):
+        """compute_transition must correctly determine next_state."""
+        from src.agents.langgraph.fsm.transition_reducer import compute_transition
+
+        # STATE_4_OFFER + user_confirmed → STATE_5_PAYMENT_DELIVERY
+        state = {
+            "current_state": "STATE_4_OFFER",
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {},
+            "session_id": "test",
+        }
+        transition = compute_transition(
+            state=state,
+            intent="PAYMENT_DELIVERY",
+            has_image=False,
+            user_message="Так",
+        )
+        assert transition.next_state == "STATE_5_PAYMENT_DELIVERY"
+        assert transition.payment_sub_phase == "REQUEST_DATA"
+        assert transition.dialog_phase == "WAITING_FOR_DELIVERY_DATA"
+
+    def test_response_policy_for_request_data(self):
+        """Response policy for REQUEST_DATA must specify snippet."""
+        from src.agents.langgraph.fsm.transition_reducer import compute_transition
+
+        state = {
+            "current_state": "STATE_4_OFFER",
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {},
+            "session_id": "test",
+        }
+        transition = compute_transition(
+            state=state,
+            intent="PAYMENT_DELIVERY",
+            has_image=False,
+            user_message="Так",
+        )
+        
+        # Переход в STATE_5 с REQUEST_DATA → должен быть snippet
+        assert transition.next_state == "STATE_5_PAYMENT_DELIVERY"
+        assert transition.payment_sub_phase == "REQUEST_DATA"
+        assert transition.response_policy.snippet_name == "Підтвердження замовлення"
+        assert transition.response_policy.snippet_sent_flag == "payment_request_data_sent"
+        assert transition.response_policy.use_llm is False
+
+    def test_snippet_not_sent_twice(self):
+        """Snippet 'Підтвердження замовлення' must not be sent twice."""
+        from src.agents.langgraph.fsm.transition_reducer import compute_transition
+
+        # Первый раз: snippet должен быть отправлен
+        state1 = {
+            "current_state": "STATE_4_OFFER",
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {},
+            "session_id": "test",
+        }
+        transition1 = compute_transition(
+            state=state1,
+            intent="PAYMENT_DELIVERY",
+            has_image=False,
+            user_message="Так",
+        )
+        assert transition1.response_policy.snippet_name == "Підтвердження замовлення"
+        assert transition1.response_policy.use_llm is False
+
+        # Второй раз: флаг установлен → snippet НЕ должен быть отправлен
+        state2 = {
+            "current_state": "STATE_5_PAYMENT_DELIVERY",
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {"payment_request_data_sent": True},  # Флаг установлен
+            "session_id": "test",
+        }
+        transition2 = compute_transition(
+            state=state2,
+            intent="PAYMENT_DELIVERY",
+            has_image=False,
+            user_message="Київ, НП 25",
+        )
+        # Даже если payment_sub_phase = REQUEST_DATA, snippet не должен быть отправлен
+        if transition2.payment_sub_phase == "REQUEST_DATA":
+            assert transition2.response_policy.snippet_name is None or transition2.response_policy.use_llm is True
+
+    def test_no_conflict_between_sub_phase_and_dialog_phase(self):
+        """payment_sub_phase and dialog_phase must never conflict."""
+        from src.agents.langgraph.fsm.transition_reducer import derive_dialog_phase
+
+        # Для каждого payment_sub_phase проверяем, что dialog_phase вычисляется правильно
+        test_cases = [
+            ("REQUEST_DATA", "WAITING_FOR_DELIVERY_DATA"),
+            ("CONFIRM_DATA", "WAITING_FOR_PAYMENT_METHOD"),
+            ("SHOW_PAYMENT", "WAITING_FOR_PAYMENT_PROOF"),
+            ("THANK_YOU", "UPSELL_OFFERED"),
+        ]
+
+        for sub_phase, expected_dialog_phase in test_cases:
+            computed_phase = derive_dialog_phase(
+                current_state="STATE_5_PAYMENT_DELIVERY",
+                intent="PAYMENT_DELIVERY",
+                has_products=True,
+                has_size=False,
+                has_color=False,
+                user_confirmed=False,
+                payment_sub_phase=sub_phase,
+            )
+            assert computed_phase == expected_dialog_phase, (
+                f"payment_sub_phase={sub_phase} must map to dialog_phase={expected_dialog_phase}, "
+                f"got {computed_phase}"
+            )

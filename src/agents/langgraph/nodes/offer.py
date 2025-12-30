@@ -230,37 +230,36 @@ async def offer_node(
             validated_products = [p.model_dump() for p in response.products]
 
         # =====================================================
-        # DIALOG PHASE (Turn-Based State Machine)
-        # CRITICAL: Phase must match actual UX - if response asks for delivery data,
-        # phase must be WAITING_FOR_DELIVERY_DATA, not OFFER_MADE
+        # SSOT: USE TRANSITION REDUCER FOR STATE TRANSITION
         # =====================================================
-        # Determine phase based on response content and intent
-        dialog_phase = "OFFER_MADE"  # Default
-
-        # Check if response asks for delivery data (місто, відділення, ПІБ, телефон)
-        # SAFETY: Convert None to empty string to prevent TypeError in join()
-        response_text = " ".join([str(m.get("content", "") or "") for m in assistant_messages]).lower()
-
-        # Use SSOT rules module instead of duplicated keywords
-        from src.agents.langgraph.rules.offer_transition import detect_delivery_request
-
-        asks_for_delivery = detect_delivery_request(response_text)
-
-        # Check intent from LLM response
+        # Використовуємо SSOT reducer для визначення переходу та dialog_phase
+        from src.agents.langgraph.fsm.transition_reducer import compute_transition
+        from src.agents.langgraph.nodes.utils import extract_user_message
+        
+        user_message = extract_user_message(state.get("messages", []))
         response_intent = response.metadata.intent if hasattr(response.metadata, "intent") else ""
-        user_confirmed = response_intent == "PAYMENT_DELIVERY" or asks_for_delivery
-
-        # If LLM asks for delivery data OR intent is PAYMENT_DELIVERY → transition to payment phase
-        # NOTE: user_confirmed already includes asks_for_delivery, so no need to check both
-        if user_confirmed:
-            dialog_phase = "WAITING_FOR_DELIVERY_DATA"
-            logger.info(
-                "🔄 [SESSION %s] Offer → Payment transition: intent=%s, asks_delivery=%s → phase=%s",
-                session_id,
-                response_intent,
-                asks_for_delivery,
-                dialog_phase,
-            )
+        detected_intent = response_intent or state.get("detected_intent", "")
+        has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+        
+        # Викликаємо SSOT reducer
+        transition = compute_transition(
+            state=state,
+            intent=detected_intent,
+            has_image=has_image,
+            user_message=user_message,
+        )
+        
+        new_state = transition.next_state
+        dialog_phase = transition.dialog_phase
+        
+        logger.info(
+            "🔄 [SESSION %s] Offer → SSOT Transition: %s → %s (dialog_phase=%s, reason=%s)",
+            session_id,
+            current_state,
+            new_state,
+            dialog_phase,
+            transition.reason,
+        )
 
         if settings.DEBUG_TRACE_LOGS:
             preview_text = assistant_messages[0].get("content", "") if assistant_messages else ""
@@ -270,18 +269,6 @@ async def offer_node(
                 goto="memory_update",
                 new_phase=dialog_phase,
                 response_preview=preview_text,
-            )
-
-        # If transitioning to payment, also update state
-        new_state = State.STATE_4_OFFER.value
-        if dialog_phase == "WAITING_FOR_DELIVERY_DATA":
-            new_state = State.STATE_5_PAYMENT_DELIVERY.value
-            logger.info(
-                "🔄 [SESSION %s] Offer node: state transition %s → %s (phase=%s)",
-                session_id,
-                State.STATE_4_OFFER.value,
-                new_state,
-                dialog_phase,
             )
 
         return {
