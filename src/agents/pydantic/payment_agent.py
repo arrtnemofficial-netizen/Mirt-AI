@@ -159,21 +159,99 @@ async def _extract_customer_data(
     city: str | None = None,
     nova_poshta: str | None = None,
 ) -> str:
-    """Зберегти дані клієнта витягнуті з повідомлення."""
+    """
+    Зберегти дані клієнта витягнуті з повідомлення.
+    
+    КРИТИЧНО: Нормалізує дані до української форми:
+    - Міста: Киев → Київ, Харьков → Харків
+    - НП: "відділення 123" → "123" (тільки номер)
+    - Телефон: нормалізує до +380...
+    - Імена: юрий → Юрій, владимирович → Володимирович
+    """
+    import re
+    
     saved = []
+    
+    # Нормалізація ПІБ (рос → укр)
     if name:
-        ctx.deps.customer_name = name
-        saved.append(f"ПІБ: {name}")
+        name_normalized = name.strip()
+        # Базові заміни імен
+        name_replacements = {
+            "юрий": "Юрій",
+            "владимирович": "Володимирович",
+            "александр": "Олександр",
+            "иван": "Іван",
+            "сергей": "Сергій",
+            "андрей": "Андрій",
+            "дмитрий": "Дмитро",
+            "николай": "Микола",
+            "михаил": "Михайло",
+            "евгений": "Євген",
+        }
+        name_lower = name_normalized.lower()
+        for ru, uk in name_replacements.items():
+            if ru in name_lower:
+                # Замінюємо з урахуванням регістру
+                name_normalized = re.sub(rf"\b{re.escape(ru)}\b", uk, name_normalized, flags=re.IGNORECASE)
+        ctx.deps.customer_name = name_normalized
+        saved.append(f"ПІБ: {name_normalized}")
+    
+    # Нормалізація телефону
     if phone:
-        ctx.deps.customer_phone = phone
-        saved.append(f"Телефон: {phone}")
+        phone_normalized = phone.strip()
+        # Видаляємо всі нецифрові символи, крім +
+        digits = re.sub(r"[^\d+]", "", phone_normalized)
+        if digits.startswith("+380"):
+            phone_normalized = digits
+        elif digits.startswith("380") and len(digits) == 12:
+            phone_normalized = f"+{digits}"
+        elif digits.startswith("0") and len(digits) == 10:
+            phone_normalized = f"+38{digits}"
+        elif len(digits) == 9:
+            phone_normalized = f"+380{digits}"
+        else:
+            phone_normalized = phone.strip()  # Залишаємо як є, якщо формат невідомий
+        ctx.deps.customer_phone = phone_normalized
+        saved.append(f"Телефон: {phone_normalized}")
+    
+    # Нормалізація міста (рос → укр)
     if city:
-        ctx.deps.customer_city = city
-        saved.append(f"Місто: {city}")
+        city_normalized = city.strip()
+        city_replacements = {
+            "киев": "Київ",
+            "харьков": "Харків",
+            "одесса": "Одеса",
+            "днепр": "Дніпро",
+            "львов": "Львів",
+        }
+        city_lower = city_normalized.lower()
+        for ru, uk in city_replacements.items():
+            if ru in city_lower:
+                city_normalized = uk
+                break
+        ctx.deps.customer_city = city_normalized
+        saved.append(f"Місто: {city_normalized}")
+    
+    # Нормалізація НП (витягуємо тільки номер)
     if nova_poshta:
-        ctx.deps.customer_nova_poshta = nova_poshta
-        saved.append(f"Відділення НП: {nova_poshta}")
+        np_text = str(nova_poshta).strip()
+        # Видаляємо "відділення", "нп", "поштомат" і залишаємо тільки номер
+        np_match = re.search(r"(\d{1,4})", np_text)
+        if np_match:
+            np_normalized = np_match.group(1)
+        else:
+            np_normalized = np_text  # Якщо не знайдено номер, залишаємо як є
+        ctx.deps.customer_nova_poshta = np_normalized
+        saved.append(f"Відділення НП: {np_normalized}")
+    
     if saved:
+        logger.info(
+            "[PAYMENT] Customer data extracted and normalized: name=%s, phone=%s, city=%s, np=%s",
+            ctx.deps.customer_name if name else None,
+            ctx.deps.customer_phone if phone else None,
+            ctx.deps.customer_city if city else None,
+            ctx.deps.customer_nova_poshta if nova_poshta else None,
+        )
         return f"Збережено: {', '.join(saved)}"
     return "Нові дані не надано"
 

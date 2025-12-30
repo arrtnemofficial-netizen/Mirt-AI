@@ -123,7 +123,19 @@ def _detect_user_confirmation(
         all_confirmation_keywords = confirmation_keywords + offer_confirmation_keywords + product_names
         
         # Проверяем наличие подтверждения
-        found_keywords = [kw for kw in all_confirmation_keywords if kw in user_text_lower]
+        # КРИТИЧНО: Исключаем однобуквенные/одноцифровые keywords, чтобы не детектировать рост "129" как подтверждение
+        # Проверяем только keywords длиной >= 2 символов
+        # КРИТИЧНО: Используем word boundaries (regex) для точного совпадения, чтобы "ок" не детектировалось в "129"
+        import re
+        found_keywords = []
+        for kw in all_confirmation_keywords:
+            if len(kw) >= 2:
+                # Используем word boundary для точного совпадения слова
+                # Это гарантирует, что "ок" не детектируется в "129" или "окей"
+                pattern = r'\b' + re.escape(kw) + r'\b'
+                if re.search(pattern, user_text_lower):
+                    found_keywords.append(kw)
+        
         if found_keywords:
             logger.info(
                 "[FACTS] User confirmation detected in STATE_4_OFFER: keywords=%s (ignoring other intents like SIZE_HELP)",
