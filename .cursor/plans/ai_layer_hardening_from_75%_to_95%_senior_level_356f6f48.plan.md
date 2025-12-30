@@ -495,9 +495,7 @@ def validate_message(message: str | None) -> str:
 
 ### Задача 4.3: Перевірка image_url для vision agent
 
-**Файл**: `src/agents/pydantic/validation.py` (оновлений)
-
-**Додати валідацію image_url**:
+**Файл**: `src/agents/pydantic/validation.py` (оновлений)**Додати валідацію image_url**:
 
 ```python
 def validate_image_url(image_url: str | None) -> str:
@@ -603,23 +601,23 @@ def validate_image_url(image_url: str | None) -> str:
 
 1. **Регресії в існуючому коді**
 
-   - Мітигація: запускати всі існуючі тести після кожної зміни
-   - Мітигація: покрокове впровадження з можливістю rollback
+- Мітигація: запускати всі існуючі тести після кожної зміни
+- Мітигація: покрокове впровадження з можливістю rollback
 
 2. **Збільшення latency**
 
-   - Мітигація: використовувати async операції для observability
-   - Мітигація: обмежити retry attempts та backoff
+- Мітигація: використовувати async операції для observability
+- Мітигація: обмежити retry attempts та backoff
 
 3. **Складність підтримки**
 
-   - Мітигація: додати детальну документацію
-   - Мітигація: використовувати стандартні паттерни (retry, circuit breaker)
+- Мітигація: додати детальну документацію
+- Мітигація: використовувати стандартні паттерни (retry, circuit breaker)
 
 4. **False positives в alerts**
 
-   - Мітигація: налаштувати thresholds на основі історичних даних
-   - Мітигація: додати rate limiting для alerts
+- Мітигація: налаштувати thresholds на основі історичних даних
+- Мітигація: додати rate limiting для alerts
 
 ### Документація
 
@@ -647,5 +645,3 @@ def validate_image_url(image_url: str | None) -> str:
 - ✅ Більш спостережуваною (легше дебажити)
 - ✅ Більш тестованою (легше рефакторити)
 - ✅ Більш production-ready (готово до масштабування)
-
-**Орієнтовний час виконання: 4-7 тижнів** (залежить від пріоритетів та ресурсів)

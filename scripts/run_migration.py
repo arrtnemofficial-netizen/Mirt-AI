@@ -1,6 +1,9 @@
 import os
 import sys
 import psycopg
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def run_migration(sql_file_path):
     url = os.getenv("DATABASE_URL")

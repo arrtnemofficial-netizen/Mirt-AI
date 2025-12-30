@@ -68,11 +68,17 @@ async def persist_order_and_queue_crm(
             "source": "telegram" if "telegram" in str(deps.user_id) else "manychat",
         }
 
-        order_id = await deps.db.create_order(order_data)
-        if order_id:
-            logger.info("Order successfully saved to Supabase: ID %s", order_id)
+        # [USER-OVERRIDE] Disabled local order persistence
+        # "НЕТ Я ЖЕ ОТКОЗАЛСЯ ОТ ОРДЕРС!! МИ ПРОСТО ОБНОВЛЯЕМ СТАТУСИ В СИТНИКС СРМ БЕЗ ОРДЕРОВ !!"
+        if False:  # Force skip
+            order_id = await deps.db.create_order(order_data)
+            if order_id:
+                logger.info("Order successfully saved to Supabase: ID %s", order_id)
+            else:
+                logger.error("Failed to save order to Supabase (returned None)")
         else:
-            logger.error("Failed to save order to Supabase (returned None)")
+            logger.info("Local order persistence SKIPPED (configured by user override)")
+            order_id = "skipped"
 
         # =========================================================================
         # NOTE: Замовлення в PostgreSQL створюється завжди.
