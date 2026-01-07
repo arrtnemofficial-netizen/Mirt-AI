@@ -240,12 +240,18 @@ async def prepare_payment_and_interrupt(
             )
             # КРИТИЧНО: Делегируем в agent node для извлечения данных доставки
             # Agent node вызовет payment_agent с tool extract_customer_data
+            # ГАРАНТИРУЕМ: current_state остается STATE_5_PAYMENT_DELIVERY (избегаем цикла)
             return Command(
                 update={
-                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "current_state": State.STATE_5_PAYMENT_DELIVERY.value,  # ПРИНУДИТЕЛЬНО
                     "dialog_phase": correct_dialog_phase,
                     "metadata": metadata_update,
                     "step_number": state.get("step_number", 0) + 1,
+                    # ВАЖНО: Передаем контекст, чтобы agent node знал о payment фазе
+                    "_payment_context": {
+                        "preserve_state": True,
+                        "extract_customer_data": True,
+                    },
                 },
                 goto="agent",  # Делегируем в agent для извлечения данных
             )

@@ -638,8 +638,23 @@ async def agent_node(
         # If LLM still makes mistakes, improve the prompt, not add patches.
         # =====================================================================
 
-        # Extract from OUTPUT_CONTRACT structure
-        new_state_str = response.metadata.current_state
+        # =====================================================================
+        # PAYMENT CONTEXT: Preserve STATE_5_PAYMENT_DELIVERY when delegated
+        # =====================================================================
+        # КРИТИЧНО: Если payment_node передал контекст сохранения состояния - НЕ изменяем current_state
+        payment_context = state.get("_payment_context", {})
+        preserve_payment_state = payment_context.get("preserve_state", False)
+        
+        if preserve_payment_state and current_state == State.STATE_5_PAYMENT_DELIVERY.value:
+            # Принудительно сохраняем STATE_5_PAYMENT_DELIVERY
+            new_state_str = State.STATE_5_PAYMENT_DELIVERY.value
+            logger.info(
+                "[SESSION %s] 🛡️ Payment state preserved: STATE_5_PAYMENT_DELIVERY (preserve_state=True)",
+                session_id,
+            )
+        else:
+            # Extract from OUTPUT_CONTRACT structure
+            new_state_str = response.metadata.current_state
         is_escalation = response.event == "escalation"
 
         # =====================================================================
@@ -671,23 +686,30 @@ async def agent_node(
                 user_message=user_text,
             )
             
-            # Якщо reducer визначив інший стан, ніж LLM - використовуємо рішення reducer (SSOT)
-            # Але ТІЛЬКИ якщо це не глобальний приоритет
-            if transition.next_state != new_state_str:
+            # КРИТИЧНО: Якщо preserve_payment_state=True - НЕ перетираємо стан!
+            if not (preserve_payment_state and current_state == State.STATE_5_PAYMENT_DELIVERY.value):
+                # Якщо reducer визначив інший стан, ніж LLM - використовуємо рішення reducer (SSOT)
+                # Але ТІЛЬКИ якщо це не глобальний приоритет
+                if transition.next_state != new_state_str:
+                    logger.info(
+                        "[SESSION %s] SSOT Override: LLM state=%s, SSOT state=%s. Using SSOT.",
+                        session_id,
+                        new_state_str,
+                        transition.next_state,
+                    )
+                    new_state_str = transition.next_state
+                    response.metadata.current_state = new_state_str
+                    
+                    # Гарантуємо правильний intent для подальших переходів
+                    if transition.next_state == State.STATE_5_PAYMENT_DELIVERY.value:
+                        if intent != "PAYMENT_DELIVERY":
+                            intent = "PAYMENT_DELIVERY"
+                            response.metadata.intent = "PAYMENT_DELIVERY"
+            else:
                 logger.info(
-                    "[SESSION %s] SSOT Override: LLM state=%s, SSOT state=%s. Using SSOT.",
+                    "[SESSION %s] 🛡️ State preserved: SSOT override blocked (preserve_payment_state=True)",
                     session_id,
-                    new_state_str,
-                    transition.next_state,
                 )
-                new_state_str = transition.next_state
-                response.metadata.current_state = new_state_str
-                
-                # Гарантуємо правильний intent для подальших переходів
-                if transition.next_state == State.STATE_5_PAYMENT_DELIVERY.value:
-                    if intent != "PAYMENT_DELIVERY":
-                        intent = "PAYMENT_DELIVERY"
-                        response.metadata.intent = "PAYMENT_DELIVERY"
 
         selected_products = state.get("selected_products", [])
 
@@ -998,6 +1020,15 @@ async def agent_node(
 
         # Persist structured response for downstream consumers (Telegram, ManyChat, etc.)
         agent_response_payload = response.model_dump()
+
+        # КРИТИЧНИЙ ЛОГ: Верифікація фінального стану
+        logger.info(
+            "[SESSION %s] 🎯 FINAL STATE: current_state=%s, new_state_str=%s, preserve_payment_state=%s",
+            session_id,
+            current_state,
+            new_state_str,
+            preserve_payment_state,
+        )
 
         # Async Trace Logging (Success)
         await log_trace(
