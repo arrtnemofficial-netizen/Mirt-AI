@@ -9,14 +9,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext, RunUsage
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
+
+from .shared.model_factory import build_pydantic_model, get_ironclad_model_settings
+from .shared.payment_prompts import add_payment_requisites
 
 from src.agents.langgraph.state_prompts import get_state_prompt
 from src.conf.config import settings
-from src.conf.payment_config import format_requisites_multiline
 from src.core.human_responses import get_human_response
 
 from .alerting import record_agent_error
@@ -33,32 +32,6 @@ from .validation import validate_agent_deps, validate_message
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# MODEL SETUP
-# =============================================================================
-
-
-def _build_model() -> OpenAIChatModel:
-    """Build OpenAI model."""
-    # SENIOR-LEVEL: Use AI_MODEL as single source of truth
-    model_name = settings.AI_MODEL
-
-    if settings.LLM_PROVIDER == "openai":
-        api_key = settings.OPENAI_API_KEY.get_secret_value()
-        base_url = "https://api.openai.com/v1"
-    else:
-        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-        base_url = settings.OPENROUTER_BASE_URL
-
-    if not api_key:
-        logger.warning("API Key missing for provider %s", settings.LLM_PROVIDER)
-        if settings.LLM_PROVIDER == "openai":
-            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-            base_url = settings.OPENROUTER_BASE_URL
-
-    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-    provider = OpenAIProvider(openai_client=client)
-    return OpenAIChatModel(model_name, provider=provider)
 
 
 # =============================================================================
@@ -136,10 +109,6 @@ async def _add_order_context(ctx: RunContext[AgentDeps]) -> str:
     return "\n".join(lines)
 
 
-async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
-    """Inject canonical payment requisites to avoid hallucinations."""
-    # НЕ показуй технічні заголовки клієнту - просто реквізити
-    return format_requisites_multiline()
 
 
 async def _add_payment_subphase_prompt(ctx: RunContext[AgentDeps]) -> str:
@@ -279,15 +248,19 @@ def get_payment_agent() -> Agent[AgentDeps, PaymentResponse]:
     """Get or create payment agent (lazy initialization)."""
     global _payment_agent
     if _payment_agent is None:
+        # ЗАЛІЗОБЕТОННО: Use ironclad model settings
+        model_settings = get_ironclad_model_settings()
+        
         _payment_agent = Agent(  # type: ignore[call-overload]
-            _build_model(),
+            build_pydantic_model(agent_name="payment"),
             deps_type=AgentDeps,
             output_type=PaymentResponse,  # Changed from result_type (PydanticAI 1.23+)
             system_prompt=_get_payment_prompt(),
             retries=2,
+            model_settings=model_settings,
         )
         _payment_agent.system_prompt(_add_order_context)
-        _payment_agent.system_prompt(_add_payment_requisites)
+        _payment_agent.system_prompt(add_payment_requisites)  # From shared module
         _payment_agent.system_prompt(_add_payment_subphase_prompt)
         # Register tools - use decorator syntax
         _payment_agent.tool(name="extract_customer_data")(_extract_customer_data)
@@ -323,7 +296,7 @@ async def run_payment(
     import asyncio
     import time
 
-    from src.services.llm_usage_logger import log_llm_usage_best_effort
+    from src.services.observability.llm_usage_logger import log_llm_usage_best_effort
 
     # Validate inputs
     validate_agent_deps(deps, "payment")

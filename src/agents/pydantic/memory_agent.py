@@ -19,10 +19,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
+
+from .shared.model_factory import build_pydantic_model, get_ironclad_model_settings
 
 from src.agents.pydantic.memory_models import (
     Fact,
@@ -167,58 +166,26 @@ async def _add_messages_to_analyze(ctx: RunContext[MemoryDeps]) -> str:
 
 
 # =============================================================================
-# MODEL SETUP (Lazy initialization)
-# =============================================================================
-
-_memory_model: OpenAIChatModel | None = None
-_memory_agent: Agent[MemoryDeps, MemoryDecision] | None = None
-
-
-def _get_memory_model() -> OpenAIChatModel:
-    """Get or create model for memory agent."""
-    global _memory_model
-    if _memory_model is None:
-        # Use same model config as support_agent
-        if settings.LLM_PROVIDER == "openai":
-            api_key = settings.OPENAI_API_KEY.get_secret_value()
-            base_url = "https://api.openai.com/v1"
-            model_name = settings.LLM_MODEL_GPT
-        else:
-            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-            base_url = settings.OPENROUTER_BASE_URL
-            model_name = (
-                settings.LLM_MODEL_GROK
-                if settings.LLM_PROVIDER == "openrouter"
-                else settings.AI_MODEL
-            )
-
-        if not api_key:
-            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-            base_url = settings.OPENROUTER_BASE_URL
-            model_name = settings.AI_MODEL
-
-        client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-        provider = OpenAIProvider(openai_client=client)
-        _memory_model = OpenAIChatModel(model_name, provider=provider)
-
-    return _memory_model
-
-
-# =============================================================================
 # AGENT FACTORY
 # =============================================================================
+
+_memory_agent: Agent[MemoryDeps, MemoryDecision] | None = None
 
 
 def get_memory_agent() -> Agent[MemoryDeps, MemoryDecision]:
     """Get or create the memory agent (lazy initialization)."""
     global _memory_agent
     if _memory_agent is None:
+        # ЗАЛІЗОБЕТОННО: Use ironclad model settings (gpt-5.1, temp 0.2, medium)
+        model_settings = get_ironclad_model_settings()
+        
         _memory_agent = Agent(  # type: ignore[call-overload]
-            _get_memory_model(),
+            build_pydantic_model(agent_name="memory"),
             deps_type=MemoryDeps,
             output_type=MemoryDecision,  # PydanticAI 1.23+
             system_prompt=_get_memory_prompt(),
             retries=1,  # Memory is not critical, don't retry much
+            model_settings=model_settings,
         )
 
         # Register dynamic prompts

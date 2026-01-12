@@ -166,17 +166,32 @@ async def _handle_payment_proof_received(
         pass
 
     from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
+    from src.agents.langgraph.fsm.policy import determine_response_policy, load_manifest
     
-    # 1. Thank You message
-    thank_you_snippets = get_snippet_by_header("Подяка за замовлення")
+    manifest = load_manifest()
+    actions = manifest.get("actions", {})
+    
+    # 1. Thank You message (via manifest)
+    thank_you_action = actions.get("PAYMENT_THANK_YOU", {})
+    thank_you_header = thank_you_action.get("snippet_header", "Подяка за замовлення")
+    thank_you_idempotency_key = thank_you_action.get("idempotency_key", "payment_thank_you_sent")
+    
+    thank_you_snippets = get_snippet_by_header(thank_you_header)
     if thank_you_snippets:
         thank_you = "\n".join(thank_you_snippets)
     else:
         # Fallback
         thank_you = "Дякуємо за замовлення ⭐️\nГарного вам вечора та мирного неба 🕊️"
+    
+    # Mark as sent (idempotency)
+    metadata_update[thank_you_idempotency_key] = True
 
-    # 2. Subscribe message
-    subscribe_snippets = get_snippet_by_header("Прохання підписатись (безпека)")
+    # 2. Subscribe message (via manifest, requires thank_you_sent)
+    subscribe_action = actions.get("PAYMENT_SUBSCRIBE_REQUEST", {})
+    subscribe_header = subscribe_action.get("snippet_header", "Прохання підписатись (безпека)")
+    subscribe_idempotency_key = subscribe_action.get("idempotency_key", "payment_subscribe_sent")
+    
+    subscribe_snippets = get_snippet_by_header(subscribe_header)
     if subscribe_snippets:
         subscribe = "\n".join(subscribe_snippets)
     else:
@@ -185,6 +200,9 @@ async def _handle_payment_proof_received(
             "Зараз великі магазини, такі як наш, конкуренти часто намагаються зламувати. "
             "Щоб ви нас не втратили, підпишіться, будь ласка, також на нашу другу офіційну сторінку. @mirt_original"
         )
+    
+    # Mark as sent (idempotency)
+    metadata_update[subscribe_idempotency_key] = True
 
     # Build sequence of messages
     messages_to_send = [

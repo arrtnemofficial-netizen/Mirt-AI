@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from src.agents import ConversationState
+    from src.core.models import BaseConversationState as ConversationState
 
 
 def _serialize_for_json(value: Any) -> Any:
@@ -140,7 +140,7 @@ class InMemorySessionStore:
         existing = self._store.get(session_id)
         if existing:
             return deepcopy(existing)
-        from src.agents import ConversationState
+        from src.core.models import BaseConversationState as ConversationState
 
         return ConversationState(messages=[], metadata={}, current_state=StateEnum.default())
 
@@ -162,7 +162,7 @@ class InMemorySessionStore:
 def state_from_text(text: str, session_id: str) -> ConversationState:
     """Helper to bootstrap state from a single user message."""
 
-    from src.agents import ConversationState
+    from src.core.models import BaseConversationState as ConversationState
 
     return ConversationState(
         messages=[{"role": "user", "content": text}],

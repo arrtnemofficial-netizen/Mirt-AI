@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
+from src.core.models import BaseConversationState
 from src.core.state_machine import State
 
 
@@ -61,96 +62,31 @@ def add_messages_capped(current: list, new: list) -> list:
 # =============================================================================
 
 
-class ConversationState(TypedDict, total=False):
+class ConversationState(BaseConversationState, total=False):
     """
     Production conversation state.
 
     Every field has a proper reducer for LangGraph's state management.
     """
 
-    # Core conversation data
+    # Core conversation data (Overrides with Annotated reducers)
     messages: Annotated[list[dict[str, Any]], add_messages_capped]
     current_state: str  # FSM state (STATE_0_INIT, etc.)
     metadata: Annotated[dict[str, Any], merge_dict]
 
-    # ==========================================================================
-    # DIALOG PHASE (Turn-Based State Machine)
-    # ==========================================================================
-    # This is the KEY field for turn-based conversation!
-    # Master router checks this to know where to continue the dialog.
-    #
-    # ПОВНИЙ СПИСОК ФАЗ (відповідає n8n state machine):
-    #
-    #   INIT                      - STATE_0: Новий діалог, потрібен intent detection
-    #   DISCOVERY                 - STATE_1: Збір контексту (зріст, тип речі, подія)
-    #   VISION_DONE               - STATE_2: Vision впізнав товар, чекаємо уточнення
-    #   WAITING_FOR_SIZE          - STATE_3: Потрібен розмір (зріст дитини)
-    #   WAITING_FOR_COLOR         - STATE_3: Потрібен вибір кольору
-    #   SIZE_COLOR_DONE           - STATE_3→4: Є розмір і колір, готові до offer
-    #   OFFER_MADE                - STATE_4: Пропозиція зроблена, чекаємо "Беру"
-    #   WAITING_FOR_DELIVERY_DATA - STATE_5: Чекаємо ПІБ, телефон, НП
-    #   WAITING_FOR_PAYMENT_METHOD- STATE_5: Чекаємо вибір способу оплати
-    #   WAITING_FOR_PAYMENT_PROOF - STATE_5: Чекаємо скрін оплати
-    #   UPSELL_OFFERED            - STATE_6: Запропонували допродаж
-    #   COMPLETED                 - STATE_7: Діалог завершено
-    #   COMPLAINT                 - STATE_8: Скарга, ескалація
-    #   OUT_OF_DOMAIN             - STATE_9: Поза доменом
-    # ==========================================================================
-    dialog_phase: str
+    # Other fields are inherited from BaseConversationState!
+    # Only re-declare if adding Annotated reducers.
 
-    # Session identification
-    session_id: str
-    trace_id: str  # UUID for the current interaction chain
-    thread_id: str  # LangGraph thread for persistence
-
-    # Intent & routing
-    detected_intent: str | None
-    has_image: bool
-    image_url: str | None
-
-    # Products & offers
-    selected_products: list[dict[str, Any]]
-    offered_products: list[dict[str, Any]]
-
-    # Moderation
-    moderation_result: dict[str, Any] | None
-    should_escalate: bool
-    escalation_reason: str | None
-    escalation_level: str | None  # NONE, L1, L2, L3 (contract-compliant)
-    # Prevent duplicate manager notifications (e.g., vision dual-track escalation)
-    manager_notification_sent: bool
-
-    # Tool execution
-    tool_plan_result: dict[str, Any] | None
-    tool_errors: list[str]
-
-    # Latest structured agent response (PydanticAI output)
+    # agent_response needs reducer?
     agent_response: Annotated[dict[str, Any], replace_value]
-
-    # Validation & self-correction
-    validation_errors: list[str]
-    retry_count: int
-    max_retries: int
-    last_error: str | None
-
-    # Payment flow (human-in-the-loop)
-    awaiting_human_approval: bool
-    approval_type: Literal["payment", "refund", "discount", None]
-    approval_data: dict[str, Any] | None
-    human_approved: bool | None
-
-    # Time travel support (prefixed to avoid LangGraph reserved names)
-    saved_checkpoint_id: str | None
-    saved_parent_checkpoint_id: str | None
+     
+    # step_number needs reducer?
     step_number: Annotated[int, replace_value]
+    
+    # We can omit re-declaring non-Annotated fields as they come from BaseConversationState
 
-    # ==========================================================================
-    # MEMORY SYSTEM (Titans-like)
-    # ==========================================================================
-    # Populated by memory_context_node, consumed by AgentDeps
-    memory_profile: Any  # UserProfile from memory_models
-    memory_facts: list[Any]  # list[Fact] from memory_models
-    memory_context_prompt: str | None  # Pre-formatted prompt block
+
+
 
 
 # =============================================================================

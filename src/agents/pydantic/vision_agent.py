@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
 from pydantic_ai import Agent, ImageUrl, RunContext, RunUsage
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
+
+from .shared.model_factory import build_pydantic_model, get_ironclad_model_settings
+from .shared.catalog_tools import search_products_tool
 
 from src.conf.config import settings
 from src.core.human_responses import get_human_response
@@ -331,85 +331,9 @@ def _is_private_cdn_url(url: str) -> bool:
 # =============================================================================
 
 
-def _build_model() -> OpenAIChatModel:
-    # SENIOR-LEVEL: Use AI_MODEL as single source of truth
-    model_name = settings.AI_MODEL
-
-    # Check if we're in production/staging
-    env = settings.SENTRY_ENVIRONMENT.lower() if settings.SENTRY_ENVIRONMENT else "development"
-    is_production = env in ("production", "prod", "staging")
-
-    is_openai_model = (
-        model_name.startswith("gpt-") or model_name.startswith("o1") or model_name.startswith("o3")
-    )
-
-    if is_openai_model:
-        api_key = settings.OPENAI_API_KEY.get_secret_value()
-        base_url = "https://api.openai.com/v1"
-
-        # CRITICAL: In production, fail fast if OpenAI key is missing (no silent fallback)
-        if not api_key:
-            error_msg = (
-                f"OPENAI_API_KEY is required for OpenAI model '{model_name}' in {env} environment. "
-                "Set OPENAI_API_KEY environment variable."
-            )
-            logger.error(error_msg)
-            from src.services.observability import track_metric
-            track_metric("llm_config_error", 1, {"error": "missing_openai_key", "env": env, "model": model_name})
-            if is_production:
-                raise ValueError(error_msg)
-            # In development, allow OpenRouter fallback with warning
-            logger.warning("Falling back to OpenRouter in development (not allowed in production)")
-            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-            base_url = settings.OPENROUTER_BASE_URL
-            if not api_key:
-                raise ValueError("No API key available (neither OPENAI_API_KEY nor OPENROUTER_API_KEY)")
-            model_name = f"openai/{model_name}"
-    else:
-        api_key = settings.OPENROUTER_API_KEY.get_secret_value()
-        base_url = settings.OPENROUTER_BASE_URL
-        if not api_key:
-            raise ValueError(f"OPENROUTER_API_KEY is required for non-OpenAI model '{model_name}'")
-
-    # Log resolved configuration
-    logger.info(
-        "Vision model: %s via %s (env=%s, is_openai=%s)",
-        model_name,
-        base_url[:30],
-        env,
-        is_openai_model,
-    )
-
-    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-    provider = OpenAIProvider(openai_client=client)
-    return OpenAIChatModel(model_name, provider=provider)
-
-
 # =============================================================================
 # VISION AGENT PROMPT
 # =============================================================================
-
-
-async def _search_products(
-    ctx: RunContext[AgentDeps],
-    query: str,
-    category: str | None = None,
-) -> str:
-    products = await ctx.deps.catalog.search_products(query, category)
-
-    if not products:
-        return get_human_response("not_found")
-
-    lines = ["Знайдені товари:"]
-    for p in products:
-        name = p.get("name")
-        price = p.get("price")
-        sizes = ", ".join(p.get("sizes", []))
-        colors = ", ".join(p.get("colors", []))
-        sku = p.get("sku", "N/A")
-        lines.append(f"- {name} (SKU: {sku}, {price} грн). Розміри: {sizes}. Кольори: {colors}")
-
-    return "\n".join(lines)
 
 
 # NOTE: _load_vision_guide_from_db is defined below (after _add_live_catalog_context)
@@ -732,14 +656,11 @@ async def _add_image_url(ctx: RunContext[AgentDeps]) -> str:
 def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
     global _vision_agent
     if _vision_agent is None:
-        model_settings = {
-            "temperature": 0.3,
-        }
-        if settings.LLM_REASONING_EFFORT and settings.LLM_REASONING_EFFORT != "none":
-            model_settings["reasoning_effort"] = settings.LLM_REASONING_EFFORT
+        # ЗАЛІЗОБЕТОННО: Use ironclad model settings
+        model_settings = get_ironclad_model_settings()
 
         _vision_agent = Agent(
-            _build_model(),
+            build_pydantic_model(agent_name="vision"),
             deps_type=AgentDeps,
             output_type=VisionResponse,
             system_prompt=_get_base_vision_prompt(),
@@ -750,13 +671,13 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
         _vision_agent.system_prompt(_add_image_url)
         _vision_agent.system_prompt(_add_state_specific_instructions)
 
-        _vision_agent.tool(name="search_products")(_search_products)
+        # Use shared search_products_tool with SKU enabled for vision
+        async def _search_products_with_sku(ctx: RunContext[AgentDeps], query: str, category: str | None = None) -> str:
+            return await search_products_tool(ctx, query, category, include_sku=True)
+        _vision_agent.tool(name="search_products")(_search_products_with_sku)
 
         logger.info(
-            "Vision agent initialized: model=%s, temperature=%.1f, reasoning=%s",
-            settings.active_llm_model,
-            model_settings.get("temperature", 0.3),
-            model_settings.get("reasoning_effort", "none"),
+            "Vision agent initialized: model=gpt-5.1, temp=0.2, reasoning=medium (IRONCLAD)",
         )
 
     return _vision_agent
@@ -777,7 +698,7 @@ async def run_vision(
     import time
     from urllib.parse import urlparse
 
-    from src.services.llm_usage_logger import log_llm_usage_best_effort
+    from src.services.observability.llm_usage_logger import log_llm_usage_best_effort
 
     # Validate inputs
     validate_agent_deps(deps, "vision")

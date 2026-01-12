@@ -13,7 +13,74 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from typing_extensions import TypedDict
+
 from src.core.state_machine import Intent, State
+
+
+class BaseConversationState(TypedDict, total=False):
+    """
+    Base conversation state contract (Framework-agnostic).
+    
+    Shared by Services and Agents.
+    """
+    # Core conversation data
+    messages: list[dict[str, Any]]
+    current_state: str
+    metadata: dict[str, Any]
+
+    # Dialog Phase
+    dialog_phase: str
+
+    # Session identification
+    session_id: str
+    trace_id: str
+    thread_id: str
+
+    # Intent & routing
+    detected_intent: str | None
+    has_image: bool
+    image_url: str | None
+
+    # Products & offers
+    selected_products: list[dict[str, Any]]
+    offered_products: list[dict[str, Any]]
+
+    # Moderation
+    moderation_result: dict[str, Any] | None
+    should_escalate: bool
+    escalation_reason: str | None
+    escalation_level: str | None
+    manager_notification_sent: bool
+
+    # Tool execution
+    tool_plan_result: dict[str, Any] | None
+    tool_errors: list[str]
+
+    # Agent response (PydanticAI output)
+    agent_response: dict[str, Any]
+
+    # Validation & self-correction
+    validation_errors: list[str]
+    retry_count: int
+    max_retries: int
+    last_error: str | None
+
+    # Payment flow (human-in-the-loop)
+    awaiting_human_approval: bool
+    approval_type: Literal["payment", "refund", "discount", None]
+    approval_data: dict[str, Any] | None
+    human_approved: bool | None
+
+    # Time travel support
+    saved_checkpoint_id: str | None
+    saved_parent_checkpoint_id: str | None
+    step_number: int
+
+    # Memory System (Titans-like)
+    memory_profile: Any
+    memory_facts: list[Any]
+    memory_context_prompt: str | None
 
 
 class Product(BaseModel):

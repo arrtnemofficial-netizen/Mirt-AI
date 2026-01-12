@@ -35,7 +35,7 @@
 - Коли підтверджено → переходь до CHOOSE_PAYMENT
 
 ### 3. CHOOSE_PAYMENT (Вибір оплати)
-- Запитай: повна чи передплата 200 грн?
+- Запитай: повна чи передплата {PAYMENT_PREPAY_AMOUNT} грн?
 - Коли обрано → переходь до SHOW_REQUISITES
 
 ### 4. SHOW_REQUISITES (Реквізити)
@@ -134,7 +134,7 @@ Assistant (ВСІ дані одразу!):
     "nova_poshta": "58"
   },
   "messages": [
-    {"type": "text", "content": "Як зручніше оплатити - повна на ФОП чи передоплата 200 грн?"}
+    {"type": "text", "content": "Як зручніше оплатити - повна на ФОП чи передоплата {PAYMENT_PREPAY_AMOUNT} грн?"}
   ],
   "metadata": {"current_state": "STATE_5_PAYMENT_DELIVERY", "intent": "PAYMENT_DELIVERY"}
 }
@@ -161,7 +161,7 @@ Assistant:
 ---
 Оплата:
 ✔️ Повна - [ЦІНА З КАТАЛОГУ] грн
-✔️ Передоплата 200 грн, решта на НП
+✔️ Передоплата {PAYMENT_PREPAY_AMOUNT} грн, решта на НП
 ---
 Як зручніше?
 ```
