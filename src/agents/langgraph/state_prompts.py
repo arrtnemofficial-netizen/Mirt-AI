@@ -396,7 +396,7 @@ def _get_intent_patterns() -> dict:
     """Lazy load INTENT_PATTERNS to avoid circular imports."""
     global _INTENT_PATTERNS_CACHE
     if _INTENT_PATTERNS_CACHE is None:
-        from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
+        from src.core.intents import INTENT_PATTERNS
 
         _INTENT_PATTERNS_CACHE = INTENT_PATTERNS
     return _INTENT_PATTERNS_CACHE

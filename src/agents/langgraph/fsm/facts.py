@@ -104,7 +104,7 @@ def _detect_user_confirmation(
         import logging
         logger = logging.getLogger(__name__)
         
-        from src.agents.langgraph.nodes.intent import INTENT_PATTERNS
+        from src.core.intents import INTENT_PATTERNS
         
         user_text_lower = user_message.lower()
         confirmation_keywords = INTENT_PATTERNS.get("CONFIRMATION", [])
