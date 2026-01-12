@@ -5,7 +5,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.server.main import _generate_followup_text, app
+from src.server.main import app
+from src.server.routers.webhooks_manychat import _generate_followup_text
 
 
 # Mock settings to disable token verification in tests
