@@ -56,7 +56,7 @@ async def prepare_payment_and_interrupt(
     from src.agents.langgraph.fsm.transition_reducer import compute_transition
     
     # Визначаємо intent для reducer
-    detected_intent = state.get("detected_intent", "PAYMENT_DELIVERY")
+    detected_intent = state.get("detected_intent") or "PAYMENT_DELIVERY"
     has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
     
     # Викликаємо SSOT reducer
