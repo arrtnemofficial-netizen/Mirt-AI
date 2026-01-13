@@ -39,7 +39,8 @@ class TestPaymentFlowV2:
         state["has_image"] = True # Top-level flag
 
         # 2. Mock Photo Purpose (Critical: This drives the router)
-        with patch("src.agents.langgraph.rules.photo_purpose.determine_photo_purpose") as mock_purpose:
+        # Patch where it is IMPORTED in master.py
+        with patch("src.agents.langgraph.routers.master.determine_photo_purpose") as mock_purpose:
             mock_purpose.return_value = ("transactional", "looks like a receipt")
 
             # 3. Test Router
