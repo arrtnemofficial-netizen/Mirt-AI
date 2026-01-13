@@ -92,7 +92,7 @@ async def payment_node(
     from src.agents.langgraph.nodes.utils import extract_user_message
     
     user_message = extract_user_message(state.get("messages", []))
-    detected_intent = state.get("detected_intent", "PAYMENT_DELIVERY")
+    detected_intent = state.get("detected_intent") or "PAYMENT_DELIVERY"
     has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
     
     # Викликаємо SSOT reducer
