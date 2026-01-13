@@ -30,7 +30,8 @@ INTENT_PATTERNS = {
         "оплачу",
         "доставк",
         "нова пошта",
-        "хочу куп",  # explicit purchase intent
+        "чек",
+        "квитанці",
     ],
     # Confirmation words that mean "yes" in OFFER state
     "CONFIRMATION": [
@@ -113,7 +114,8 @@ INTENT_PATTERNS = {
         "років",
         "рік",
         "міс",
-        "скільки",
+        "скільки років",
+        "скільки см",
         "який розмір",
         "підбери",
         "підійде",
@@ -155,6 +157,7 @@ INTENT_PATTERNS = {
         "скарга",
         "проблем",
         "повернен",
+        "поверн",
         "брак",
         "жалоба",
         "обман",
@@ -333,11 +336,14 @@ def _match_keywords(text_lower: str, text_len: int) -> str:
             if keyword in text_lower:
                 return intent
 
-    # Greeting (only if short message)
-    if text_len < 30:
+    # Greeting and Smalltalk (only if short message)
+    if text_len < 50:
         for keyword in INTENT_PATTERNS["GREETING_ONLY"]:
             if keyword in text_lower:
                 return "GREETING_ONLY"
+        for keyword in INTENT_PATTERNS["THANKYOU_SMALLTALK"]:
+            if keyword in text_lower:
+                return "THANKYOU_SMALLTALK"
 
     # Discovery/questions
     for keyword in INTENT_PATTERNS["DISCOVERY_OR_QUESTION"]:

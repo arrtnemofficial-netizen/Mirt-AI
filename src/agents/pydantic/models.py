@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 # Import Unified Models from Core (Single Source of Truth)
 from src.core.models import (
+    Product,
     ProductMatch,
     MessageItem,
     ResponseMetadata,
@@ -30,6 +31,9 @@ from src.core.models import (
     Intent,
     State,
 )
+
+# Export Alias for backward compatibility
+Message = MessageItem
 
 
 # =============================================================================

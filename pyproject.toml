@@ -94,6 +94,7 @@ markers = [
     "smoke: smoke tests",
     "manychat: ManyChat-related tests",
     "telegram: Telegram-related tests",
+    "evals: quality evaluation tests",
 ]
 
 [tool.ruff]
