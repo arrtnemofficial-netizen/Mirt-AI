@@ -41,6 +41,7 @@ from .edges import (
 )
 from .nodes import (
     agent_node,
+    # crm_error_node removed - CRM orders integration disabled
     escalation_node,
     intent_detection_node,
     memory_context_node,
@@ -122,6 +123,10 @@ def build_production_graph(
     async def _validation(state: dict[str, Any]) -> dict[str, Any]:
         return await validation_node(state)
 
+    # crm_error node removed - CRM orders integration disabled
+    # async def _crm_error(state: dict[str, Any]) -> dict[str, Any]:
+    #     return await crm_error_node(state)
+
     async def _end(state: dict[str, Any]) -> dict[str, Any]:
         """Terminal node - just returns empty update."""
         return {"step_number": state.get("step_number", 0) + 1}
@@ -153,6 +158,7 @@ def build_production_graph(
     graph.add_node("upsell", _upsell)
     graph.add_node("escalation", _escalation)
     graph.add_node("validation", _validation)
+    # crm_error node removed - CRM orders integration disabled
     graph.add_node("memory_update", _memory_update)  # Memory: update after key states
     graph.add_node("end", _end)
 

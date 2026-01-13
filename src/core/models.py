@@ -5,8 +5,6 @@ This module defines the unified data contracts for:
 - Messages
 - Metadata
 - AgentResponse (OUTPUT_CONTRACT)
-
-UNIFIED with src/agents/pydantic/models.py to prevent Split Brain.
 """
 
 from __future__ import annotations
@@ -14,186 +12,17 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
 from typing_extensions import TypedDict
 
 from src.core.state_machine import Intent, State
-
-# =============================================================================
-# UNIFIED BASE MODELS (Moved from src/agents/pydantic/models.py)
-# =============================================================================
-
-# Type aliases for Pydantic compatibility
-IntentType = Literal[*tuple(Intent.__members__.keys())]
-StateType = Literal[*tuple(State.__members__.keys())]
-
-EventType = Literal[
-    "simple_answer",
-    "clarifying_question",
-    "multi_option",
-    "escalation",
-    "end_smalltalk",
-]
-
-EscalationLevel = Literal["NONE", "L1", "L2", "L3"]
-
-
-class ProductMatch(BaseModel):
-    """
-    Product from CATALOG.
-
-    Relaxed validation for Vision agent - only name is required.
-    Price/color can be filled later from DB lookup.
-    """
-
-    id: int = Field(default=0, description="Product ID (0 if unknown, will lookup by name)")
-    name: str = Field(description="Назва товару точно як в CATALOG")
-    price: float = Field(
-        default=0.0, ge=0, description="Ціна в грн (0 = варіативна, дізнатись з DB)"
-    )
-    size: str | None = Field(default=None, description="Розмір (якщо клієнт вказав)")
-    color: str = Field(default="", description="Колір (може бути порожнім)")
-    photo_url: str = Field(default="", description="URL фото з CATALOG (може бути порожнім)")
-
-    @field_validator("photo_url")
-    @classmethod
-    def validate_photo_url(cls, v: str) -> str:
-        if v and not v.startswith("https://"):
-            raise ValueError("photo_url MUST start with 'https://'")
-        return v
-
-
-class MessageItem(BaseModel):
-    """
-    Single message item.
-    BLOCK 10: messages[].type = "text", content = "string (plain text, NO markdown)"
-    """
-
-    type: Literal["text"] = "text"
-    content: str = Field(
-        max_length=900,
-        description="Plain text, NO markdown (**, ##), max 900 chars",
-    )
-
-
-class ResponseMetadata(BaseModel):
-    """
-    OUTPUT_CONTRACT.metadata - required fields.
-    """
-
-    session_id: str = Field(default="", description="Copy from input as-is. NEVER generate!")
-    current_state: StateType = Field(default="STATE_0_INIT")
-    intent: IntentType = Field(default="UNKNOWN_OR_EMPTY")
-    escalation_level: EscalationLevel = Field(default="NONE")
-
-    @field_validator("escalation_level", mode="before")
-    @classmethod
-    def normalize_escalation_level(cls, v: Any) -> str:
-        if not v or v == "":
-            return "NONE"
-        v_str = str(v).upper().strip()
-        if v_str in ("SOFT", "SOFT_ESCALATION"):
-            return "L1"
-        if v_str in ("HARD", "HARD_ESCALATION"):
-            return "L2"
-        if v_str in ("NONE", "L1", "L2", "L3"):
-            return v_str
-        return "NONE"
-
-
-# =============================================================================
-# CORE EXTENSIONS (Business Logic)
-# =============================================================================
-
-class Product(ProductMatch):
-    """
-    Core Product model.
-    Inherits from ProductMatch but adds business fields.
-    """
-    sku: str | None = None
-    category: str | None = None
-
-    @property
-    def product_id(self) -> int:
-        return self.id
-
-    @classmethod
-    def from_legacy(cls, data: dict[str, Any]) -> Product:
-        if "product_id" in data and "id" not in data:
-            data = data.copy()
-            data["id"] = data.pop("product_id")
-        return cls(**data)
-
-
-# Alias Message to MessageItem
-Message = MessageItem
-
-
-class Metadata(ResponseMetadata):
-    """
-    Technical metadata about the conversation step.
-    Extends ResponseMetadata with internal fields.
-    """
-    timestamp: str = ""
-    event_trigger: str = ""
-    notes: str = ""
-    moderation_flags: list[str] = Field(default_factory=list)
-
-    @property
-    def state_enum(self) -> State:
-        return State.from_string(self.current_state)
-
-    @property
-    def intent_enum(self) -> Intent:
-        return Intent.from_string(self.intent)
-
-    def is_escalation_state(self) -> bool:
-        return self.state_enum.requires_escalation
-
-    # Re-implement validators to ensure they work on subclass if needed
-    # (Pydantic inherits validators usually, but mode='before' needs care)
-    @field_validator("current_state", mode="before")
-    @classmethod
-    def normalize_state(cls, v: Any) -> str:
-        if isinstance(v, State):
-            return v.value
-        if isinstance(v, str) and v:
-            return State.from_string(v).value
-        return "STATE_0_INIT"
-
-    @field_validator("intent", mode="before")
-    @classmethod
-    def normalize_intent(cls, v: Any) -> str:
-        if isinstance(v, Intent):
-            return v.value
-        if isinstance(v, str) and v:
-            return Intent.from_string(v).value
-        return "UNKNOWN_OR_EMPTY"
-
-
-class Escalation(BaseModel):
-    level: Literal["L1", "L2", "L3"]
-    reason: str
-    target: str
-
-
-class DebugInfo(BaseModel):
-    state: str | None = None
-    intent: str | None = None
-
-
-class AgentResponse(BaseModel):
-    """Unified output contract for the AI agent."""
-    event: str
-    messages: list[Message]
-    products: list[Product] = Field(default_factory=list)
-    metadata: Metadata
-    escalation: Escalation | None = None
-    debug: DebugInfo | None = None
 
 
 class BaseConversationState(TypedDict, total=False):
     """
     Base conversation state contract (Framework-agnostic).
+    
+    Shared by Services and Agents.
     """
     # Core conversation data
     messages: list[dict[str, Any]]
@@ -252,3 +81,175 @@ class BaseConversationState(TypedDict, total=False):
     memory_profile: Any
     memory_facts: list[Any]
     memory_context_prompt: str | None
+
+
+class Product(BaseModel):
+    """
+    Product as returned from the catalog tool and exposed to clients.
+
+    Uses `id` as the canonical field (matches OUTPUT_CONTRACT).
+    The `product_id` alias is provided for backward compatibility.
+    """
+
+    id: int = Field(..., gt=0, description="Product ID")
+    name: str
+    size: str = ""
+    color: str = ""
+    price: float = Field(..., gt=0)
+    photo_url: str
+    sku: str | None = None
+    category: str | None = None
+
+    @property
+    def product_id(self) -> int:
+        """Backward compatibility alias for id."""
+        return self.id
+
+    @field_validator("photo_url")
+    @classmethod
+    def validate_photo_url(cls, v: str) -> str:
+        if v and not v.startswith("https://"):
+            raise ValueError("photo_url must start with https://")
+        return v
+
+    @classmethod
+    def from_legacy(cls, data: dict[str, Any]) -> Product:
+        """Create from legacy format with product_id."""
+        if "product_id" in data and "id" not in data:
+            data = data.copy()
+            data["id"] = data.pop("product_id")
+        return cls(**data)
+
+
+class Message(BaseModel):
+    """Single message chunk to the end user."""
+
+    type: Literal["text", "image"] = "text"
+    content: str
+
+
+class Metadata(BaseModel):
+    """
+    Technical metadata about the conversation step.
+
+    Note on types:
+        current_state and intent are stored as str for JSON serialization compatibility,
+        but are validated and normalized to known enum values via field_validators.
+        Use state_enum/intent_enum properties for type-safe access.
+
+    Example:
+        metadata = Metadata(current_state="STATE_0_INIT", intent="GREETING_ONLY")
+        state: State = metadata.state_enum  # Type-safe enum access
+        intent: Intent = metadata.intent_enum
+    """
+
+    session_id: str = ""
+    timestamp: str = ""
+    current_state: str = Field(
+        default="STATE_0_INIT", description="Current FSM state (validated against State enum)"
+    )
+    intent: str = Field(
+        default="UNKNOWN_OR_EMPTY", description="Classified intent (validated against Intent enum)"
+    )
+    event_trigger: str = ""
+    escalation_level: Literal["NONE", "L1", "L2", "L3"] = "NONE"
+    notes: str = ""
+    moderation_flags: list[str] = Field(default_factory=list)
+
+    @field_validator("escalation_level", mode="before")
+    @classmethod
+    def normalize_escalation_level(cls, v: Any) -> str:
+        """
+        Normalize escalation_level to allowed enum values.
+        
+        Accepts: "SOFT"/"soft" → "L1", "HARD"/"hard" → "L2", empty/None → "NONE".
+        This ensures backward compatibility if legacy code writes "SOFT"/"HARD".
+        
+        Returns: Canonical escalation level ("NONE", "L1", "L2", or "L3").
+        """
+        if not v or v == "":
+            return "NONE"
+
+        v_str = str(v).upper().strip()
+
+        # Map legacy UX modes to escalation levels
+        if v_str in ("SOFT", "SOFT_ESCALATION"):
+            return "L1"
+        if v_str in ("HARD", "HARD_ESCALATION"):
+            return "L2"
+
+        # Validate against allowed values
+        if v_str in ("NONE", "L1", "L2", "L3"):
+            return v_str
+
+        # Unknown value → default to NONE (don't crash in production)
+        # In dev, we could raise, but for production safety, normalize to NONE
+        return "NONE"
+
+    @field_validator("current_state", mode="before")
+    @classmethod
+    def normalize_state(cls, v: Any) -> str:
+        """
+        Normalize state to string, validating against State enum.
+        Accepts: State enum, string (any format), None.
+        Returns: Canonical state string (e.g., "STATE_0_INIT").
+        """
+        if isinstance(v, State):
+            return v.value
+        if isinstance(v, str) and v:
+            return State.from_string(v).value
+        return "STATE_0_INIT"
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def normalize_intent(cls, v: Any) -> str:
+        """
+        Normalize intent to string, validating against Intent enum.
+        Accepts: Intent enum, string (any case), None.
+        Returns: Canonical intent string (e.g., "GREETING_ONLY").
+        """
+        if isinstance(v, Intent):
+            return v.value
+        if isinstance(v, str) and v:
+            return Intent.from_string(v).value
+        return "UNKNOWN_OR_EMPTY"
+
+    @property
+    def state_enum(self) -> State:
+        """Get current_state as State enum (type-safe access)."""
+        return State.from_string(self.current_state)
+
+    @property
+    def intent_enum(self) -> Intent:
+        """Get intent as Intent enum (type-safe access)."""
+        return Intent.from_string(self.intent)
+
+    def is_escalation_state(self) -> bool:
+        """Check if current state requires escalation."""
+        return self.state_enum.requires_escalation
+
+
+class Escalation(BaseModel):
+    """Escalation descriptor when operator handover is needed."""
+
+    level: Literal["L1", "L2", "L3"]
+    reason: str
+    target: str
+
+
+class DebugInfo(BaseModel):
+    """Optional debug payload for observability."""
+
+    state: str | None = None
+    intent: str | None = None
+
+
+class AgentResponse(BaseModel):
+    """Unified output contract for the AI agent."""
+
+    event: str
+    messages: list[Message]
+    products: list[Product] = Field(default_factory=list)
+    metadata: Metadata
+    escalation: Escalation | None = None
+    debug: DebugInfo | None = None
