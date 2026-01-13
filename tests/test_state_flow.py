@@ -27,12 +27,19 @@ class TestIntentDetection:
             "оформлюємо",
             "оплачую",
             "замовляю",
-            "хочу купити",
         ]
         for phrase in payment_phrases:
             intent = detect_intent_from_text(phrase, has_image=False, current_state="STATE_0_INIT")
             assert intent == "PAYMENT_DELIVERY", (
                 f"'{phrase}' should be PAYMENT_DELIVERY, got {intent}"
+            )
+
+        # "хочу купити" now maps to DISCOVERY/PRODUCT_CATEGORY in INIT state
+        discovery_phrases = ["хочу купити"]
+        for phrase in discovery_phrases:
+            intent = detect_intent_from_text(phrase, has_image=False, current_state="STATE_0_INIT")
+            assert intent in ("DISCOVERY_OR_QUESTION", "PRODUCT_CATEGORY"), (
+                f"'{phrase}' should be DISCOVERY/PRODUCT_CATEGORY, got {intent}"
             )
 
     def test_product_selection_in_offer_state(self):
