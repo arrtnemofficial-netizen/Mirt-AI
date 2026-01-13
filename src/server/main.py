@@ -113,6 +113,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Memory System: Check failed - %s", e)
 
+    # Initialize PostgreSQL connection pool (async, for FastAPI endpoints)
+    postgres_pool = None
+    try:
+        from src.services.storage.postgres_pool import get_postgres_pool, close_postgres_pool
+        postgres_pool = await get_postgres_pool()
+        await postgres_pool.open()
+        logger.info("✓ PostgreSQL Pool: OPENED (min=%d, max=%d)",
+                   postgres_pool.min_size, postgres_pool.max_size)
+    except Exception as e:
+        logger.warning("⚠ PostgreSQL Pool: Failed to open - %s (endpoints will use fallback)", e)
+
+    # Create shared HTTP client for external services (Sitniks CRM, ManyChat)
+    shared_http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0, connect=10.0),
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        follow_redirects=True,
+    )
+    app.state.http_client = shared_http_client
+    logger.info("✓ Shared HTTP Client: CREATED (max_conn=100)")
+
     # Log Celery status
     if settings.CELERY_ENABLED:
         logger.info("Celery: ENABLED")
@@ -193,6 +213,22 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down MIRT AI Webhooks server")
+
+    # Close shared HTTP client
+    try:
+        if hasattr(app.state, 'http_client') and app.state.http_client:
+            await app.state.http_client.aclose()
+            logger.info("✓ Shared HTTP Client: CLOSED")
+    except Exception as e:
+        logger.warning("Failed to close HTTP client: %s", e)
+
+    # Close PostgreSQL connection pool
+    try:
+        from src.services.storage.postgres_pool import close_postgres_pool
+        await close_postgres_pool()
+        logger.info("✓ PostgreSQL Pool: CLOSED")
+    except Exception as e:
+        logger.warning("Failed to close PostgreSQL pool: %s", e)
 
     # Gracefully close checkpointer pool
     try:

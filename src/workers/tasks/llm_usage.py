@@ -28,50 +28,10 @@ from src.core.constants import DBTable
 
 # PostgreSQL only - no Supabase dependency
 from src.workers.exceptions import DatabaseError, PermanentError, RetryableError
+from src.services.observability.billing import calculate_cost
 
 
 logger = logging.getLogger(__name__)
-
-
-# Pricing per 1M tokens (USD) - update as needed
-MODEL_PRICING: dict[str, dict[str, Decimal]] = {
-    "gpt-5.1": {"input": Decimal("5.00"), "output": Decimal("15.00")},  # Estimated pricing for GPT-5.1
-    "gpt-5.1-mini": {"input": Decimal("0.30"), "output": Decimal("1.20")},  # Estimated pricing for GPT-5.1-mini
-    "gpt-5.1-nano": {"input": Decimal("0.10"), "output": Decimal("0.40")},  # Estimated pricing for GPT-5.1-nano
-    "gpt-4o": {"input": Decimal("2.50"), "output": Decimal("10.00")},
-    "gpt-4o-mini": {"input": Decimal("0.15"), "output": Decimal("0.60")},
-    "gpt-4-turbo": {"input": Decimal("10.00"), "output": Decimal("30.00")},
-    "gpt-4": {"input": Decimal("30.00"), "output": Decimal("60.00")},
-    "gpt-3.5-turbo": {"input": Decimal("0.50"), "output": Decimal("1.50")},
-    "claude-3-5-sonnet": {"input": Decimal("3.00"), "output": Decimal("15.00")},
-    "claude-3-5-haiku": {"input": Decimal("0.25"), "output": Decimal("1.25")},
-    # Default fallback
-    "default": {"input": Decimal("1.00"), "output": Decimal("3.00")},
-}
-
-
-def calculate_cost(
-    model: str,
-    tokens_input: int,
-    tokens_output: int,
-) -> Decimal:
-    """Calculate cost in USD for token usage.
-
-    Args:
-        model: Model name
-        tokens_input: Input token count
-        tokens_output: Output token count
-
-    Returns:
-        Cost in USD as Decimal
-    """
-    pricing = MODEL_PRICING.get(model, MODEL_PRICING["default"])
-
-    # Calculate cost (pricing is per 1M tokens)
-    input_cost = (Decimal(tokens_input) / Decimal(1_000_000)) * pricing["input"]
-    output_cost = (Decimal(tokens_output) / Decimal(1_000_000)) * pricing["output"]
-
-    return (input_cost + output_cost).quantize(Decimal("0.000001"))
 
 
 @shared_task(

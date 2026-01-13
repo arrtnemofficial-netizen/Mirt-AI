@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_memory_models():
-    """Lazy import memory models to avoid circular import."""
-    from src.agents.pydantic.memory_models import (
+    """Lazy import memory models (now in services/memory/models.py)."""
+    from src.services.memory.models import (
         ChildProfile,
         CommerceInfo,
         Fact,
@@ -27,6 +27,7 @@ def _get_memory_models():
         UpdateFact,
         UserProfile,
     )
+
 
     return {
         "ChildProfile": ChildProfile,

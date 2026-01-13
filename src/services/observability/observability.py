@@ -313,6 +313,8 @@ class AsyncTracingService:
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         cost: float | None = None,
+        cost_usd: float | None = None,
+        cost_uah: float | None = None,
         model_name: str | None = None,
     ) -> None:
         """Log a trace record to PostgreSQL."""
@@ -339,6 +341,8 @@ class AsyncTracingService:
                 "tokens_in": tokens_in,
                 "tokens_out": tokens_out,
                 "cost": cost,
+                "cost_usd": cost_usd,
+                "cost_uah": cost_uah,
                 "model_name": model_name,
                 "created_at": datetime.now(UTC).isoformat(),
             }
@@ -367,14 +371,14 @@ class AsyncTracingService:
                                     prompt_key, prompt_version, prompt_label,
                                     input_snapshot, output_snapshot,
                                     error_category, error_message,
-                                    latency_ms, tokens_in, tokens_out, cost, model_name,
+                                    latency_ms, tokens_in, tokens_out, cost, cost_usd, cost_uah, model_name,
                                     created_at
                                 ) VALUES (
                                     %s, %s, %s, %s::trace_status, %s,
                                     %s, %s, %s,
                                     %s, %s,
                                     %s::error_category, %s,
-                                    %s, %s, %s, %s, %s,
+                                    %s, %s, %s, %s, %s, %s, %s,
                                     %s
                                 )
                                 """,
@@ -395,6 +399,8 @@ class AsyncTracingService:
                                     payload.get("tokens_in"),
                                     payload.get("tokens_out"),
                                     payload.get("cost"),
+                                    payload.get("cost_usd"),
+                                    payload.get("cost_uah"),
                                     payload.get("model_name"),
                                     payload.get("created_at"),
                                 ),

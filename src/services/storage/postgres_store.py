@@ -30,7 +30,7 @@ from .session_store import InMemorySessionStore, SessionStore, _serialize_for_js
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from src.agents import ConversationState
+    from src.core.models import BaseConversationState as ConversationState
 
 class PostgresSessionStore:
     """Session storage using PostgreSQL table 'agent_sessions'."""
@@ -211,7 +211,7 @@ class PostgresSessionStore:
     def _create_empty_state(self, session_id: str) -> ConversationState:
         """Create a fresh empty state."""
         # Import here to avoid circular dependency
-        from src.agents import ConversationState
+        from src.core.models import BaseConversationState as ConversationState
         from src.core.constants import AgentState as StateEnum
 
         return ConversationState(

@@ -83,7 +83,11 @@ def determine_response_policy(
         state_match = condition.get("state") == next_state
         sub_phase_match = condition.get("payment_sub_phase") == payment_sub_phase if payment_sub_phase else condition.get("payment_sub_phase") is None
         
-        if state_match and sub_phase_match and action_id:
+        # Проверяем requires_flag (для последовательных actions, например SUBSCRIBE после THANK_YOU)
+        requires_flag = condition.get("requires_flag")
+        flag_match = metadata.get(requires_flag, False) if requires_flag else True
+
+        if state_match and sub_phase_match and flag_match and action_id:
             # Нашли правило - проверяем action definition
             action_def = actions.get(action_id)
             if not action_def:
