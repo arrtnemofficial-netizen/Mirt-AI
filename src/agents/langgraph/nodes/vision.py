@@ -56,6 +56,8 @@ from .helpers.vision.escalation import (
     should_escalate_vision,
 )
 from .helpers.vision.product_enrichment import enrich_product_from_db as _enrich_product_from_db
+from .helpers.vision.product_deduplication import add_product_safely
+from src.conf.config import settings
 
 
 def _extract_products(
@@ -92,8 +94,6 @@ def _extract_products(
         # SENIOR-LEVEL: Use professional deduplication utility
         if is_product_addition and existing:
             # Product addition: use safe add with duplicate checking
-            from .helpers.vision.product_deduplication import add_product_safely
-
             products, was_added = add_product_safely(
                 new_product=new_product,
                 existing_products=existing,
@@ -128,7 +128,6 @@ def _extract_products(
     # Only show alternatives if NOT confident enough
     # High confidence = we know what it is, no need to confuse user with options
     # Use configurable threshold (default 0.85 = 85%)
-    from src.conf.config import settings
     alternatives_threshold = getattr(settings, "VISION_ALTERNATIVES_THRESHOLD", 0.85)
     if response.alternative_products and confidence < alternatives_threshold:
         products.extend([p.model_dump() for p in response.alternative_products])

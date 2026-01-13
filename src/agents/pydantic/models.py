@@ -8,6 +8,8 @@ Structured Output Models - Based on OUTPUT_CONTRACT from prompts
 - messages: array з type/content
 - products: array з id/name/price/size/color/photo_url
 - metadata: session_id/current_state/intent/escalation_level
+
+IMPORTED FROM src.core.models TO PREVENT DUPLICATION
 """
 
 from __future__ import annotations
@@ -16,127 +18,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-# Import from centralized state machine to avoid duplication
-from src.core.state_machine import Intent, State
-
-
-# Type aliases for Pydantic compatibility - unpack tuple for Literal
-IntentType = Literal[*tuple(Intent.__members__.keys())]
-StateType = Literal[*tuple(State.__members__.keys())]
-
-# =============================================================================
-# EVENTS (BLOCK 10: OUTPUT_CONTRACT.event)
-# =============================================================================
-
-EventType = Literal[
-    "simple_answer",
-    "clarifying_question",
-    "multi_option",
-    "escalation",
-    "end_smalltalk",
-]
-
-EscalationLevel = Literal["NONE", "L1", "L2", "L3"]
-
-
-# =============================================================================
-# PRODUCT MODEL (OUTPUT_CONTRACT.products)
-# =============================================================================
-
-
-class ProductMatch(BaseModel):
-    """
-    Product from CATALOG.
-
-    Relaxed validation for Vision agent - only name is required.
-    Price/color can be filled later from DB lookup.
-    """
-
-    id: int = Field(default=0, description="Product ID (0 if unknown, will lookup by name)")
-    name: str = Field(description="Назва товару точно як в CATALOG")
-    price: float = Field(
-        default=0.0, ge=0, description="Ціна в грн (0 = варіативна, дізнатись з DB)"
-    )
-    size: str | None = Field(default=None, description="Розмір (якщо клієнт вказав)")
-    color: str = Field(default="", description="Колір (може бути порожнім)")
-    photo_url: str = Field(default="", description="URL фото з CATALOG (може бути порожнім)")
-
-    @field_validator("photo_url")
-    @classmethod
-    def validate_photo_url(cls, v: str) -> str:
-        if v and not v.startswith("https://"):
-            raise ValueError("photo_url MUST start with 'https://'")
-        return v
-
-
-# =============================================================================
-# MESSAGE MODEL (OUTPUT_CONTRACT.messages)
-# =============================================================================
-
-
-class MessageItem(BaseModel):
-    """
-    Single message item.
-
-    BLOCK 10: messages[].type = "text", content = "string (plain text, NO markdown)"
-    """
-
-    type: Literal["text"] = "text"
-    content: str = Field(
-        max_length=900,
-        description="Plain text, NO markdown (**, ##), max 900 chars",
-    )
-
-
-# =============================================================================
-# METADATA MODEL (OUTPUT_CONTRACT.metadata)
-# =============================================================================
-
-
-class ResponseMetadata(BaseModel):
-    """
-    OUTPUT_CONTRACT.metadata - required fields.
-
-    Rules:
-    - session_id: Copy from input as-is. If null -> ''
-    - current_state: MUST be valid STATE_NAME
-    - intent: MUST be valid INTENT_LABEL
-    - escalation_level: NONE/L1/L2/L3 (normalizes SOFT→L1, HARD→L2)
-    """
-
-    session_id: str = Field(default="", description="Copy from input as-is. NEVER generate!")
-    current_state: StateType = Field(default="STATE_0_INIT")
-    intent: IntentType = Field(default="UNKNOWN_OR_EMPTY")
-    escalation_level: EscalationLevel = Field(default="NONE")
-
-    @field_validator("escalation_level", mode="before")
-    @classmethod
-    def normalize_escalation_level(cls, v: Any) -> str:
-        """
-        Normalize escalation_level to allowed enum values.
-        
-        Accepts: "SOFT"/"soft" → "L1", "HARD"/"hard" → "L2", empty/None → "NONE".
-        This ensures backward compatibility if legacy code writes "SOFT"/"HARD".
-        
-        Returns: Canonical escalation level ("NONE", "L1", "L2", or "L3").
-        """
-        if not v or v == "":
-            return "NONE"
-
-        v_str = str(v).upper().strip()
-
-        # Map legacy UX modes to escalation levels
-        if v_str in ("SOFT", "SOFT_ESCALATION"):
-            return "L1"
-        if v_str in ("HARD", "HARD_ESCALATION"):
-            return "L2"
-
-        # Validate against allowed values
-        if v_str in ("NONE", "L1", "L2", "L3"):
-            return v_str
-
-        # Unknown value → default to NONE (don't crash in production)
-        return "NONE"
+# Import Unified Models from Core (Single Source of Truth)
+from src.core.models import (
+    ProductMatch,
+    MessageItem,
+    ResponseMetadata,
+    EscalationLevel,
+    IntentType,
+    StateType,
+    EventType,
+    Intent,
+    State,
+)
 
 
 # =============================================================================
@@ -159,12 +52,7 @@ class EscalationInfo(BaseModel):
 class CustomerDataExtracted(BaseModel):
     """
     Customer data for order.
-
-    STATE_5_PAYMENT_DELIVERY goals:
-    - Зібрати ПІБ, телефон, місто та відділення/адресу
-    - Зафіксувати спосіб оплати
     """
-
     name: str | None = Field(default=None, description="ПІБ отримувача")
     phone: str | None = Field(default=None, description="Номер телефону")
     city: str | None = Field(default=None, description="Місто доставки")
@@ -179,13 +67,7 @@ class CustomerDataExtracted(BaseModel):
 class OfferDeliberation(BaseModel):
     """
     Multi-role analysis before presenting offer to customer.
-
-    Used in STATE_4_OFFER to validate offers from multiple perspectives:
-    - Customer Advocate: clarity, value, no pressure
-    - Business Owner: margin check, upsell potential
-    - Quality Control: price/size/model validation against DB
     """
-
     customer_view: str = Field(
         default="", description="Customer Advocate: Is this clear? Does it show value? No pressure?"
     )
@@ -216,16 +98,6 @@ class OfferDeliberation(BaseModel):
 class SupportResponse(BaseModel):
     """
     OUTPUT CONTRACT - Final JSON Schema.
-
-    BLOCK 10 mandatory_fields: ["event", "messages", "metadata"]
-
-    PRE_OUTPUT_CHECKLIST:
-    1. Чи всі products[].id є в CATALOG?
-    2. Чи всі products[].price > 0 і взяті з CATALOG?
-    3. Чи metadata.session_id скопійовано з input?
-    4. Чи messages[] має >= 1 елемент?
-    5. Якщо event='escalation' -> чи заповнено escalation.reason?
-    6. Чи всі products[].photo_url починаються з 'https://'?
     """
 
     # REQUIRED: event type
@@ -380,7 +252,6 @@ class PaymentResponse(BaseModel):
 class AgentOutput(BaseModel):
     """
     Unified agent output that matches the existing OUTPUT_CONTRACT.
-
     Maps to AgentResponse in src/core/models.py.
     """
 
