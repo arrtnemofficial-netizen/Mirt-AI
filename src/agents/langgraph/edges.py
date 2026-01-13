@@ -17,7 +17,8 @@ from src.core.state_machine import State
 from .nodes.intent import INTENT_PATTERNS
 from .nodes.utils import extract_user_message
 
-# detect_simple_intent removed - using nodes.intent
+# Import for intent detection
+from .state_prompts import detect_simple_intent
 
 
 logger = logging.getLogger(__name__)
@@ -105,15 +106,16 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
 
     # QUALITY: Отримуємо останнє повідомлення для аналізу intent
     user_message = extract_user_message(state.get("messages", []))
+    detected_intent = detect_simple_intent(user_message) if user_message else None
     
-    # SSOT: Use nodes.intent for detection (unified logic)
-    detected_intent = None
-    if user_message:
-        from src.agents.langgraph.nodes.intent import detect_intent_from_text
-        detected_intent = detect_intent_from_text(
-            text=user_message,
+    # SSOT: Обчислюємо dialog_phase через reducer
+    stored_dialog_phase = state.get("dialog_phase", "INIT")
+    if detected_intent:
+        transition = compute_transition(
+            state=state,
+            intent=detected_intent,
             has_image=has_image,
-            current_state=state.get("current_state", "STATE_0_INIT"),
+            user_message=user_message,
         )
         dialog_phase = transition.dialog_phase
         

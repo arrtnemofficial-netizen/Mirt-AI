@@ -1,21 +1,11 @@
 {
-  "version": "1.1",
+  "version": "1.0",
   "description": "SSOT manifest для snippet selection - без хардкода строк в коде",
   "actions": {
     "PAYMENT_REQUEST_DATA": {
       "snippet_header": "Підтвердження замовлення",
       "idempotency_key": "payment_request_data_sent",
       "description": "Запрос данных доставки и выбора оплаты (отправляется ровно один раз при переходе в STATE_5 REQUEST_DATA)"
-    },
-    "PAYMENT_THANK_YOU": {
-      "snippet_header": "Подяка за замовлення",
-      "idempotency_key": "payment_thank_you_sent",
-      "description": "Благодарность после подтверждения оплаты (отправляется ровно один раз)"
-    },
-    "PAYMENT_SUBSCRIBE_REQUEST": {
-      "snippet_header": "Прохання підписатись (безпека)",
-      "idempotency_key": "payment_subscribe_sent",
-      "description": "Просьба подписаться на резервный канал (отправляется ровно один раз после thank you)"
     }
   },
   "rules": [
@@ -25,21 +15,7 @@
         "payment_sub_phase": "REQUEST_DATA"
       },
       "action": "PAYMENT_REQUEST_DATA"
-    },
-    {
-      "condition": {
-        "state": "STATE_5_PAYMENT_DELIVERY",
-        "payment_sub_phase": "THANK_YOU"
-      },
-      "action": "PAYMENT_THANK_YOU"
-    },
-    {
-      "condition": {
-        "state": "STATE_5_PAYMENT_DELIVERY",
-        "payment_sub_phase": "THANK_YOU",
-        "requires_flag": "payment_thank_you_sent"
-      },
-      "action": "PAYMENT_SUBSCRIBE_REQUEST"
     }
   ]
 }
+

@@ -179,9 +179,6 @@ INTENT_PATTERNS = {
         "покажіть",
         "хочу побачити",
         "можна подивитись",
-        "реальне фото",
-        "живе фото",
-        "фото вживу",
     ],
     "DISCOVERY_OR_QUESTION": [
         # NOTE: Clothing types (костюм, сукня, тренч) are now in PRODUCT_CATEGORY

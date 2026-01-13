@@ -28,7 +28,7 @@ Assistant:
   "event": "clarifying_question",
   "messages": [
     {"type": "text", "content": "Супер 🤍"},
-    {"type": "text", "content": "Як вам зручніше оплатити: повна оплата чи передплата {PAYMENT_PREPAY_AMOUNT} грн, решта на Новій Пошті?"}
+    {"type": "text", "content": "Як вам зручніше оплатити: повна оплата чи передплата 200 грн, решта на Новій Пошті?"}
   ],
   "metadata": {"current_state": "STATE_5_PAYMENT_DELIVERY", "intent": "PAYMENT_DELIVERY"}
 }

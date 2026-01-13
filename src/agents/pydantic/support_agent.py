@@ -26,15 +26,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext, RunUsage
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.conf.config import settings
+from src.conf.payment_config import format_requisites_multiline
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry
-
-from .shared.model_factory import build_pydantic_model, get_ironclad_model_settings
-from .shared.catalog_tools import search_products_tool
-from .shared.payment_prompts import add_payment_requisites
 
 from .alerting import record_agent_error
 from .circuit_breaker import get_support_circuit_breaker
@@ -65,7 +65,68 @@ def _get_error_response() -> str:
     return get_human_response("error")
 
 
+# =============================================================================
+# MODEL SETUP (Lazy initialization)
+# =============================================================================
+
+_model: OpenAIChatModel | None = None
 _agent: Agent[AgentDeps, SupportResponse] | None = None
+
+
+def _get_model() -> OpenAIChatModel:
+    """Get or create OpenAI model (lazy initialization)."""
+    global _model
+    if _model is None:
+        # SENIOR-LEVEL: Use AI_MODEL as single source of truth
+        model_name = settings.AI_MODEL
+
+        # Check if we're in production/staging
+        env = settings.SENTRY_ENVIRONMENT.lower() if settings.SENTRY_ENVIRONMENT else "development"
+        is_production = env in ("production", "prod", "staging")
+
+        if settings.LLM_PROVIDER == "openai":
+            api_key = settings.OPENAI_API_KEY.get_secret_value()
+            base_url = "https://api.openai.com/v1"
+
+            # CRITICAL: In production, fail fast if OpenAI key is missing (no silent fallback)
+            if not api_key:
+                error_msg = (
+                    f"OPENAI_API_KEY is required for OpenAI provider in {env} environment. "
+                    "Set OPENAI_API_KEY environment variable."
+                )
+                logger.error(error_msg)
+                from src.services.observability import track_metric
+                track_metric("llm_config_error", 1, {"error": "missing_openai_key", "env": env})
+                if is_production:
+                    raise ValueError(error_msg)
+                # In development, allow OpenRouter fallback with warning
+                logger.warning("Falling back to OpenRouter in development (not allowed in production)")
+                api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+                base_url = settings.OPENROUTER_BASE_URL
+                if not api_key:
+                    raise ValueError("No API key available (neither OPENAI_API_KEY nor OPENROUTER_API_KEY)")
+        else:
+            api_key = settings.OPENROUTER_API_KEY.get_secret_value()
+            base_url = settings.OPENROUTER_BASE_URL
+            if not api_key:
+                raise ValueError(f"OPENROUTER_API_KEY is required for provider {settings.LLM_PROVIDER}")
+
+        # Log resolved configuration
+        logger.info(
+            "Support agent model: %s via %s (provider=%s, env=%s)",
+            model_name,
+            base_url[:30],
+            settings.LLM_PROVIDER,
+            env,
+        )
+
+        client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+        )
+        provider = OpenAIProvider(openai_client=client)
+        _model = OpenAIChatModel(model_name, provider=provider)
+    return _model
 
 
 def _get_base_prompt() -> str:
@@ -88,6 +149,10 @@ async def _add_manager_snippets(ctx: RunContext[AgentDeps]) -> str:
         return ""
 
 
+async def _add_payment_requisites(ctx: RunContext[AgentDeps]) -> str:
+    """Inject canonical payment requisites to avoid LLM hallucinations."""
+    # НЕ показуй технічні заголовки клієнту - просто реквізити
+    return format_requisites_multiline()
 
 
 # =============================================================================
@@ -320,7 +385,30 @@ async def _get_order_summary(ctx: RunContext[AgentDeps]) -> str:
     return "\n".join(lines)
 
 
+async def _search_products(
+    ctx: RunContext[AgentDeps],
+    query: str,
+    category: str | None = None,
+) -> str:
+    """
+    Знайти товари в каталозі.
 
+    Використовуй це коли клієнт питає про наявність або просить показати товари.
+    """
+    products = await ctx.deps.catalog.search_products(query, category)
+
+    if not products:
+        return get_human_response("not_found")
+
+    lines = ["Знайдені товари:"]
+    for p in products:
+        name = p.get("name")
+        price = p.get("price")
+        sizes = ", ".join(p.get("sizes", []))
+        colors = ", ".join(p.get("colors", []))
+        lines.append(f"- {name} ({price} грн). Розміри: {sizes}. Кольори: {colors}")
+
+    return "\n".join(lines)
 
 
 # =============================================================================
@@ -331,7 +419,7 @@ async def _get_order_summary(ctx: RunContext[AgentDeps]) -> str:
 def _register_dynamic_prompts(agent: Agent[AgentDeps, SupportResponse]) -> None:
     """Register dynamic system prompts with the agent."""
     agent.system_prompt(_add_manager_snippets)
-    agent.system_prompt(add_payment_requisites)  # From shared module
+    agent.system_prompt(_add_payment_requisites)
     agent.system_prompt(_add_state_context)
     agent.system_prompt(_add_memory_context)  # Titans-like memory context
     agent.system_prompt(_add_image_context)
@@ -343,10 +431,7 @@ def _register_tools(agent: Agent[AgentDeps, SupportResponse]) -> None:
     agent.tool(name="get_size_recommendation")(_get_size_recommendation)
     agent.tool(name="check_customer_data")(_check_customer_data)
     agent.tool(name="get_order_summary")(_get_order_summary)
-    # Use shared search_products_tool without SKU for support agent
-    async def _search_products_wrapper(ctx: RunContext[AgentDeps], query: str, category: str | None = None) -> str:
-        return await search_products_tool(ctx, query, category, include_sku=False)
-    agent.tool(name="search_products")(_search_products_wrapper)
+    agent.tool(name="search_products")(_search_products)
 
 
 # =============================================================================
@@ -358,16 +443,12 @@ def get_support_agent() -> Agent[AgentDeps, SupportResponse]:
     """Get or create the support agent (lazy initialization)."""
     global _agent
     if _agent is None:
-        # ЗАЛІЗОБЕТОННО: Use ironclad model settings
-        model_settings = get_ironclad_model_settings()
-        
         _agent = Agent(  # type: ignore[call-overload]
-            build_pydantic_model(agent_name="support"),
+            _get_model(),
             deps_type=AgentDeps,
             output_type=SupportResponse,  # Changed from result_type (PydanticAI 1.23+)
             system_prompt=_get_base_prompt(),
             retries=2,
-            model_settings=model_settings,
         )
         _register_dynamic_prompts(_agent)
         _register_tools(_agent)
@@ -402,7 +483,7 @@ async def run_support(
     import asyncio
     import time
 
-    from src.services.observability.llm_usage_logger import log_llm_usage_best_effort
+    from src.services.llm_usage_logger import log_llm_usage_best_effort
 
     # Validate inputs
     validate_agent_deps(deps, "support")

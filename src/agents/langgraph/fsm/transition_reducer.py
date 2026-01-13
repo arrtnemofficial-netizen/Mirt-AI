@@ -273,105 +273,18 @@ def derive_dialog_phase(
     Это гарантирует отсутствие конфликтов между хранимым dialog_phase
     и реальным состоянием системы.
     """
-    # STATE_0_INIT transitions
-    if current_state == State.STATE_0_INIT.value:
-        if intent in {"GREETING_ONLY", "DISCOVERY_OR_QUESTION"}:
-            return "DISCOVERY"
-        elif intent == "PHOTO_IDENT":
-            return "VISION_DONE"
-        elif intent in ("SIZE_HELP", "COLOR_HELP"):
-            return "WAITING_FOR_SIZE"
-        elif intent == "PAYMENT_DELIVERY":
-            return "WAITING_FOR_DELIVERY_DATA"
-        elif intent == "COMPLAINT":
-            return "COMPLAINT"
-        elif intent == "THANKYOU_SMALLTALK":
-            return "COMPLETED"
-        elif intent == "OUT_OF_DOMAIN":
-            return "OUT_OF_DOMAIN"
-        else:
-            return "DISCOVERY"
-
-    # STATE_1_DISCOVERY transitions
-    if current_state == State.STATE_1_DISCOVERY.value:
-        if has_products and has_size:
-            return "SIZE_COLOR_DONE"
-        elif has_products:
-            return "WAITING_FOR_SIZE"
-        # FIXED: Handle intent-based transitions to avoid dead loops
-        elif intent == "PAYMENT_DELIVERY" and user_confirmed:
-            return "WAITING_FOR_DELIVERY_DATA"
-        elif intent == "COMPLAINT":
-            return "COMPLAINT"
-        elif intent == "THANKYOU_SMALLTALK":
-            return "COMPLETED"
-        else:
-            return "DISCOVERY"  # Stay in discovery until we have products
-
-    # STATE_2_VISION transitions
-    if current_state == State.STATE_2_VISION.value:
-        if has_products:
-            return "WAITING_FOR_SIZE"
-        # FIXED: If vision didn't find product, go to DISCOVERY for clarification
-        # instead of staying in VISION_DONE which causes dead loop
-        else:
-            return "DISCOVERY"  # Let agent ask clarifying questions
-
-    # STATE_3_SIZE_COLOR transitions
-    if current_state == State.STATE_3_SIZE_COLOR.value:
-        if has_products and has_size and has_color:
-            return "SIZE_COLOR_DONE"
-        elif has_size:
-            return "WAITING_FOR_COLOR"
-        else:
-            return "WAITING_FOR_SIZE"
-
-    # STATE_4_OFFER transitions
-    if current_state == State.STATE_4_OFFER.value:
-        if user_confirmed or intent == "PAYMENT_DELIVERY":
-            return "WAITING_FOR_DELIVERY_DATA"
-        else:
-            return "OFFER_MADE"
-
-    # STATE_5_PAYMENT_DELIVERY transitions
-    if current_state == State.STATE_5_PAYMENT_DELIVERY.value:
-        # CRITICAL: Map sub-phase to dialog_phase deterministically
-        # SHOW_PAYMENT means we showed payment details and are waiting for proof (screenshot)
-        # CONFIRM_DATA means we're confirming delivery data before showing payment
-        phase_map = {
-            "THANK_YOU": "UPSELL_OFFERED",
-            "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",  # Waiting for screenshot/proof
-            "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",  # Confirming data, then show payment
-            "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",  # Still collecting delivery data
-        }
-        mapped_phase = phase_map.get(payment_sub_phase, "WAITING_FOR_DELIVERY_DATA")
-
-        # Additional check: if user says "оплатила" but sub-phase wasn't updated yet,
-        # force WAITING_FOR_PAYMENT_PROOF
-        # (This is a safety net - ideally get_payment_sub_phase should catch this)
-        if payment_sub_phase == "SHOW_PAYMENT":
-            return "WAITING_FOR_PAYMENT_PROOF"
-
-        return mapped_phase
-
-    # STATE_6_UPSELL transitions
-    if current_state == State.STATE_6_UPSELL.value:
-        return "COMPLETED"
-
-    # STATE_7_END
-    if current_state == State.STATE_7_END.value:
-        return "COMPLETED"
-
-    # STATE_8_COMPLAINT
-    if current_state == State.STATE_8_COMPLAINT.value:
-        return "COMPLETED"
-
-    # STATE_9_OOD
-    if current_state == State.STATE_9_OOD.value:
-        return "COMPLETED"
-
-    # Default
-    return "INIT"
+    # Используем существующую логику из state_prompts.py
+    from src.agents.langgraph.state_prompts import determine_next_dialog_phase
+    
+    return determine_next_dialog_phase(
+        current_state=current_state,
+        intent=intent,
+        has_products=has_products,
+        has_size=has_size,
+        has_color=has_color,
+        user_confirmed=user_confirmed,
+        payment_sub_phase=payment_sub_phase,
+    )
 
 
 # УДАЛЕНО: _detect_user_confirmation перенесена в fsm/facts.py

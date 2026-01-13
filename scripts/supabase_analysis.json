@@ -1,0 +1,349 @@
+{
+  "tables": [
+    {
+      "table": "agent_sessions",
+      "count": null,
+      "error": "{'message': 'column agent_sessions.id does not exist', 'code': '42703', 'hint': None, 'details': None}"
+    },
+    {
+      "table": "messages",
+      "count": 902,
+      "has_sample": true,
+      "sample_keys": [
+        "id",
+        "session_id",
+        "role",
+        "content",
+        "created_at",
+        "user_id",
+        "content_type",
+        "tags"
+      ]
+    },
+    {
+      "table": "users",
+      "count": 0,
+      "has_sample": false,
+      "sample_keys": []
+    },
+    {
+      "table": "products",
+      "count": 29,
+      "has_sample": true,
+      "sample_keys": [
+        "id",
+        "name",
+        "description",
+        "category",
+        "subcategory",
+        "sizes",
+        "colors",
+        "photo_url",
+        "sku",
+        "created_at",
+        "updated_at",
+        "embedding",
+        "price_by_size"
+      ]
+    },
+    {
+      "table": "orders",
+      "count": 4,
+      "has_sample": true,
+      "sample_keys": [
+        "id",
+        "user_id",
+        "session_id",
+        "customer_name",
+        "customer_phone",
+        "customer_city",
+        "delivery_method",
+        "delivery_address",
+        "status",
+        "total_amount",
+        "currency",
+        "created_at",
+        "updated_at",
+        "notes",
+        "user_nickname",
+        "sitniks_chat_id"
+      ]
+    },
+    {
+      "table": "order_items",
+      "count": 1,
+      "has_sample": true,
+      "sample_keys": [
+        "id",
+        "order_id",
+        "product_id",
+        "product_name",
+        "quantity",
+        "price_at_purchase",
+        "selected_size",
+        "selected_color",
+        "created_at"
+      ]
+    },
+    {
+      "table": "crm_orders",
+      "count": 3,
+      "has_sample": true,
+      "sample_keys": [
+        "id",
+        "session_id",
+        "external_id",
+        "crm_order_id",
+        "status",
+        "order_data",
+        "metadata",
+        "task_id",
+        "error_message",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "table": "sitniks_chat_mappings",
+      "count": 0,
+      "has_sample": false,
+      "sample_keys": []
+    },
+    {
+      "table": "mirt_profiles",
+      "count": null,
+      "error": "{'message': 'column mirt_profiles.id does not exist', 'code': '42703', 'hint': None, 'details': None}"
+    },
+    {
+      "table": "mirt_memories",
+      "count": 0,
+      "has_sample": false,
+      "sample_keys": []
+    },
+    {
+      "table": "mirt_memory_summaries",
+      "count": 0,
+      "has_sample": false,
+      "sample_keys": []
+    },
+    {
+      "table": "llm_usage",
+      "count": 0,
+      "has_sample": false,
+      "sample_keys": []
+    },
+    {
+      "table": "llm_traces",
+      "count": 918,
+      "has_sample": true,
+      "sample_keys": [
+        "id",
+        "created_at",
+        "session_id",
+        "trace_id",
+        "node_name",
+        "state_name",
+        "prompt_key",
+        "prompt_version",
+        "prompt_label",
+        "input_snapshot",
+        "output_snapshot",
+        "status",
+        "error_category",
+        "error_message",
+        "latency_ms",
+        "tokens_in",
+        "tokens_out",
+        "cost",
+        "model_name"
+      ]
+    },
+    {
+      "table": "webhook_dedupe",
+      "count": 2,
+      "has_sample": true,
+      "sample_keys": [
+        "id",
+        "dedupe_key",
+        "processed_at",
+        "expires_at"
+      ]
+    }
+  ],
+  "total_records": 1859,
+  "agent_sessions_structure": {
+    "samples": [
+      {
+        "session_id": "619059280",
+        "state_keys": [
+          "messages",
+          "metadata",
+          "has_image",
+          "image_url",
+          "session_id",
+          "retry_count",
+          "step_number",
+          "dialog_phase",
+          "current_state",
+          "agent_response",
+          "detected_intent",
+          "should_escalate",
+          "escalation_reason",
+          "moderation_result",
+          "selected_products",
+          "validation_errors"
+        ],
+        "has_messages": true,
+        "has_metadata": true,
+        "current_state": "STATE_8_COMPLAINT"
+      },
+      {
+        "session_id": "640539646",
+        "state_keys": [
+          "messages",
+          "metadata",
+          "has_image",
+          "image_url",
+          "session_id",
+          "retry_count",
+          "step_number",
+          "dialog_phase",
+          "current_state",
+          "agent_response",
+          "detected_intent",
+          "should_escalate",
+          "offered_products",
+          "escalation_reason",
+          "moderation_result",
+          "selected_products",
+          "validation_errors"
+        ],
+        "has_messages": true,
+        "has_metadata": true,
+        "current_state": "STATE_1_DISCOVERY"
+      },
+      {
+        "session_id": "205787902",
+        "state_keys": [
+          "messages",
+          "metadata",
+          "has_image",
+          "image_url",
+          "session_id",
+          "retry_count",
+          "step_number",
+          "dialog_phase",
+          "current_state",
+          "agent_response",
+          "detected_intent",
+          "should_escalate",
+          "escalation_reason",
+          "moderation_result",
+          "selected_products",
+          "validation_errors"
+        ],
+        "has_messages": true,
+        "has_metadata": true,
+        "current_state": "STATE_1_DISCOVERY"
+      },
+      {
+        "session_id": "1752497563",
+        "state_keys": [
+          "messages",
+          "metadata",
+          "trace_id",
+          "has_image",
+          "image_url",
+          "last_error",
+          "session_id",
+          "step_number",
+          "dialog_phase",
+          "current_state",
+          "agent_response",
+          "detected_intent",
+          "should_escalate",
+          "escalation_level",
+          "offered_products",
+          "escalation_reason",
+          "moderation_result",
+          "selected_products"
+        ],
+        "has_messages": true,
+        "has_metadata": true,
+        "current_state": "STATE_1_DISCOVERY"
+      },
+      {
+        "session_id": "589867342",
+        "state_keys": [
+          "messages",
+          "metadata",
+          "trace_id",
+          "has_image",
+          "image_url",
+          "thread_id",
+          "last_error",
+          "session_id",
+          "max_retries",
+          "retry_count",
+          "step_number",
+          "tool_errors",
+          "dialog_phase",
+          "memory_facts",
+          "approval_data",
+          "approval_type",
+          "current_state",
+          "agent_response",
+          "human_approved",
+          "memory_profile",
+          "detected_intent",
+          "should_escalate",
+          "escalation_level",
+          "offered_products",
+          "tool_plan_result",
+          "escalation_reason",
+          "moderation_result",
+          "selected_products",
+          "validation_errors",
+          "memory_context_prompt",
+          "awaiting_human_approval"
+        ],
+        "has_messages": true,
+        "has_metadata": true,
+        "current_state": "STATE_5_PAYMENT_DELIVERY"
+      }
+    ],
+    "state_keys": [
+      "agent_response",
+      "approval_data",
+      "approval_type",
+      "awaiting_human_approval",
+      "current_state",
+      "detected_intent",
+      "dialog_phase",
+      "escalation_level",
+      "escalation_reason",
+      "has_image",
+      "human_approved",
+      "image_url",
+      "last_error",
+      "max_retries",
+      "memory_context_prompt",
+      "memory_facts",
+      "memory_profile",
+      "messages",
+      "metadata",
+      "moderation_result",
+      "offered_products",
+      "retry_count",
+      "selected_products",
+      "session_id",
+      "should_escalate",
+      "step_number",
+      "thread_id",
+      "tool_errors",
+      "tool_plan_result",
+      "trace_id",
+      "validation_errors"
+    ]
+  }
+}

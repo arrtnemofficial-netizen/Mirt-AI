@@ -3,26 +3,90 @@ LLM Fallback Service.
 =====================
 Provides automatic fallback between LLM providers with circuit breaker pattern.
 Ensures high availability even when primary provider fails.
-
-Architecture:
-- Uses src/core/circuit_breaker.py as the CircuitBreaker implementation (SSOT).
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, TypeVar
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from src.conf.config import settings
-from src.core.circuit_breaker import CircuitBreaker, CircuitState, get_circuit_breaker
 
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+class CircuitState(Enum):
+    """Circuit breaker states."""
+
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, don't try
+    HALF_OPEN = "half_open"  # Testing if recovered
+
+
+@dataclass
+class CircuitBreaker:
+    """Circuit breaker for LLM provider.
+
+    Prevents cascading failures by temporarily disabling failing providers.
+    """
+
+    name: str
+    failure_threshold: int = 3
+    recovery_timeout: float = 60.0  # seconds
+    half_open_max_calls: int = 1
+
+    state: CircuitState = field(default=CircuitState.CLOSED)
+    failure_count: int = field(default=0)
+    last_failure_time: float = field(default=0.0)
+    half_open_calls: int = field(default=0)
+
+    def record_success(self) -> None:
+        """Record successful call."""
+        self.failure_count = 0
+        self.state = CircuitState.CLOSED
+        self.half_open_calls = 0
+        logger.debug("[CIRCUIT:%s] Success, state=CLOSED", self.name)
+
+    def record_failure(self) -> None:
+        """Record failed call."""
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+
+        if self.failure_count >= self.failure_threshold:
+            self.state = CircuitState.OPEN
+            logger.warning(
+                "[CIRCUIT:%s] OPEN after %d failures",
+                self.name,
+                self.failure_count,
+            )
+
+    def can_execute(self) -> bool:
+        """Check if circuit allows execution."""
+        if self.state == CircuitState.CLOSED:
+            return True
+
+        if self.state == CircuitState.OPEN:
+            # Check if recovery timeout passed
+            if time.time() - self.last_failure_time >= self.recovery_timeout:
+                self.state = CircuitState.HALF_OPEN
+                self.half_open_calls = 0
+                logger.info("[CIRCUIT:%s] Transitioning to HALF_OPEN", self.name)
+                return True
+            return False
+
+        # HALF_OPEN: allow limited calls
+        if self.half_open_calls < self.half_open_max_calls:
+            self.half_open_calls += 1
+            return True
+        return False
 
 
 @dataclass
@@ -37,13 +101,7 @@ class LLMProvider:
     circuit: CircuitBreaker = field(default_factory=lambda: CircuitBreaker("default"))
 
     def __post_init__(self):
-        # Use core circuit breaker (creates singleton for this provider name)
-        self.circuit = get_circuit_breaker(
-            name=f"llm_{self.name}",
-            failure_threshold=3,
-            recovery_timeout=60.0,
-            success_threshold=1,
-        )
+        self.circuit = CircuitBreaker(self.name)
 
 
 class LLMFallbackService:
@@ -158,7 +216,7 @@ class LLMFallbackService:
                 return response
 
             except (APIError, APITimeoutError, RateLimitError) as e:
-                provider.circuit.record_failure(e)
+                provider.circuit.record_failure()
                 last_error = e
                 logger.warning(
                     "[LLM_FALLBACK] Provider %s failed: %s",
@@ -168,7 +226,7 @@ class LLMFallbackService:
                 continue
 
             except Exception as e:
-                provider.circuit.record_failure(e)
+                provider.circuit.record_failure()
                 last_error = e
                 logger.exception(
                     "[LLM_FALLBACK] Unexpected error from %s",

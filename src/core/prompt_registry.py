@@ -20,8 +20,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from src.conf.payment_config import PAYMENT_PREPAY_AMOUNT
-
 
 logger = logging.getLogger(__name__)
 
@@ -122,11 +120,7 @@ class PromptRegistry:
             for path in sorted(snippets_dir.glob("*.md")):
                  try:
                      with open(path, encoding="utf-8") as f:
-                         content_raw = f.read()
-                         # SSOT Injection: Prepay Amount
-                         if "{PAYMENT_PREPAY_AMOUNT}" in content_raw:
-                             content_raw = content_raw.replace("{PAYMENT_PREPAY_AMOUNT}", str(PAYMENT_PREPAY_AMOUNT))
-                         contents.append(content_raw)
+                         contents.append(f.read())
                  except Exception:
                      pass
 
@@ -144,11 +138,7 @@ class PromptRegistry:
 
     def _load_file(self, path: Path) -> str:
         with open(path, encoding="utf-8") as f:
-            content = f.read()
-            # SSOT Injection: Prepay Amount
-            if "{PAYMENT_PREPAY_AMOUNT}" in content:
-                content = content.replace("{PAYMENT_PREPAY_AMOUNT}", str(PAYMENT_PREPAY_AMOUNT))
-            return content
+            return f.read()
 
     def _extract_version(self, content: str, path: Path) -> str:
         """Extract version from prompt content."""
