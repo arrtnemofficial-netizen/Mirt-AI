@@ -35,7 +35,7 @@ from src.agents.langgraph.nodes.handlers.color_handler import handle_color_reque
 from src.agents.langgraph.nodes.handlers.dispatch_handler import execute_agent_dispatch
 from src.agents.langgraph.nodes.handlers.cart_handler import merge_cart
 from src.agents.langgraph.nodes.handlers.transition_handler import finalize_transition
-from src.agents.langgraph.state_prompts import get_state_prompt, get_payment_sub_phase
+from src.agents.langgraph.state_prompts import get_state_prompt, get_payment_sub_phase, resolve_state_prompt
 
 # Legacy aliases for backward compatibility import
 _height_to_size = height_to_size
@@ -104,19 +104,8 @@ async def agent_node(
     deps = create_deps_from_state(state_for_llm)
     
     # Inject State Prompt
-    # Note: payment sub-phase logic should arguably be in a handler too, 
-    # but keeping prompt injection near deps creation is acceptable for now.
-    state_prompt = get_state_prompt(current_state_str)
-    if current_state_str == State.STATE_5_PAYMENT_DELIVERY.value:
-        # We need the computed transition to know sub-phase. 
-        # Ideally this is computed before LLM.
-        # For now, we rely on the `get_payment_sub_phase` or the one passed in state.
-        # But wait, `transition` variable isn't computed yet. 
-        # Using heuristic from existing code (it was computing it twice).
-        # We will use the helper directly.
-        payment_sub = get_payment_sub_phase(state)
-        state_prompt = get_state_prompt(current_state_str, payment_sub)
-    
+    # Uses resolve_state_prompt which handles all dynamic sub-phase logic
+    state_prompt = resolve_state_prompt(state)
     if state_prompt:
         deps.state_specific_prompt = state_prompt
 
