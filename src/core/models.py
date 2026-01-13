@@ -68,10 +68,10 @@ class MessageItem(BaseModel):
     BLOCK 10: messages[].type = "text", content = "string (plain text, NO markdown)"
     """
 
-    type: Literal["text"] = "text"
+    type: Literal["text", "image"] = "text"
     content: str = Field(
         max_length=900,
-        description="Plain text, NO markdown (**, ##), max 900 chars",
+        description="Plain text (or image URL), NO markdown (**, ##), max 900 chars",
     )
 
 

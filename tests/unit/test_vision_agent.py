@@ -67,7 +67,7 @@ class TestRunVision:
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
     @patch("src.agents.pydantic.vision_agent._download_image_as_base64")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_success(
         self,
         mock_log_usage,
@@ -98,7 +98,7 @@ class TestRunVision:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_no_image_url(
         self, mock_log_usage, mock_get_agent, mock_deps_no_image
     ):
@@ -119,7 +119,7 @@ class TestRunVision:
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
     @patch("src.agents.pydantic.vision_agent._download_image_as_base64")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_private_cdn_download(
         self,
         mock_log_usage,
@@ -157,7 +157,7 @@ class TestRunVision:
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
     @patch("src.agents.pydantic.vision_agent._download_image_as_base64")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_timeout(
         self,
         mock_log_usage,
@@ -183,7 +183,7 @@ class TestRunVision:
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
     @patch("src.agents.pydantic.vision_agent._download_image_as_base64")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_generic_error(
         self,
         mock_log_usage,
@@ -209,7 +209,7 @@ class TestRunVision:
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
     @patch("src.agents.pydantic.vision_agent._download_image_as_base64")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_extracts_tokens(
         self,
         mock_log_usage,
@@ -241,7 +241,7 @@ class TestRunVision:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_handles_invalid_image_url(
         self, mock_log_usage, mock_get_agent, mock_deps
     ):
@@ -272,7 +272,7 @@ class TestRunVision:
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.vision_agent.get_vision_agent")
     @patch("src.agents.pydantic.vision_agent._download_image_as_base64")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_vision_base64_conversion(
         self,
         mock_log_usage,

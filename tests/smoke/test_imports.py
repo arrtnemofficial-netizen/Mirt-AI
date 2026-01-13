@@ -86,12 +86,10 @@ class TestCriticalImports:
         """Core services must import."""
         from src.services.catalog import CatalogService
         from src.services.conversation import ConversationHandler
-        from src.services.memory_service import MemoryService
         from src.services.orders import OrderService
 
         assert CatalogService is not None
         assert OrderService is not None
-        assert MemoryService is not None
         assert ConversationHandler is not None
 
     def test_integrations_importable(self):
@@ -141,7 +139,6 @@ class TestCriticalImports:
         assert "sync_order_status" not in __all__
         assert "ping" not in __all__
         assert "process_message" not in __all__
-        assert "record_usage" not in __all__
 
 
 @pytest.mark.smoke

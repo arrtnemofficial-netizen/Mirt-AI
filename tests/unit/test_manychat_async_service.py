@@ -119,9 +119,9 @@ def test_build_manychat_messages_preserves_inline_image_order():
     agent_response = AgentResponse(
         event="simple_answer",
         messages=[
-            Message(content="Це наш Костюм Лагуна!"),
+            Message(type="text", content="Це наш Костюм Лагуна!"),
             Message(type="image", content="https://example.com/laguna.jpg"),
-            Message(content="На який зріст підказати?"),
+            Message(type="text", content="На який зріст підказати?"),
         ],
         products=[
             # Same URL as the inline image: should not duplicate.

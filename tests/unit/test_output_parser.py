@@ -265,14 +265,17 @@ class TestMessageItem:
             MessageItem(content="x" * 1000)  # > 900 chars
 
     def test_message_item_types(self):
-        """Test MessageItem type field - only 'text' is supported."""
+        """Test MessageItem type field - 'text' and 'image' are supported."""
         text_msg = MessageItem(type="text", content="Text")
-
         assert text_msg.type == "text"
 
-        # Test that only 'text' type is allowed
+        # Test that 'image' type is allowed
+        img_msg = MessageItem(type="image", content="https://example.com/img.jpg")
+        assert img_msg.type == "image"
+
+        # Test invalid type
         with pytest.raises(ValueError):
-            MessageItem(type="image", content="https://example.com/img.jpg")
+            MessageItem(type="video", content="https://example.com/video.mp4")
 
 
 # =============================================================================

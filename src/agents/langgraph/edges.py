@@ -108,6 +108,11 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
     
     # SSOT: Use nodes.intent for detection (unified logic)
     detected_intent = None
+
+    # SSOT: Обчислюємо dialog_phase через SSOT reducer
+    # Для backward compatibility отримуємо stored_dialog_phase
+    stored_dialog_phase = state.get("dialog_phase", "INIT")
+
     if user_message:
         from src.agents.langgraph.nodes.intent import detect_intent_from_text
         detected_intent = detect_intent_from_text(
@@ -115,16 +120,35 @@ def master_router(state: dict[str, Any]) -> MasterRoute:
             has_image=has_image,
             current_state=state.get("current_state", "STATE_0_INIT"),
         )
-        dialog_phase = transition.dialog_phase
         
-        # Перевіряємо інваріант: якщо stored_dialog_phase відрізняється від computed - логуємо
-        if stored_dialog_phase != dialog_phase and stored_dialog_phase != "INIT":
-            logger.warning(
-                "[SESSION %s] ⚠️ Dialog phase mismatch in routing: stored=%s, computed=%s. Using computed (SSOT).",
-                session_id,
-                stored_dialog_phase,
-                dialog_phase,
+        # Use reducer to compute phase based on intent
+        intent_enum = None
+        # Try to map string intent to Enum
+        try:
+            from src.core.state_machine import Intent
+            intent_enum = getattr(Intent, detected_intent, None)
+        except (AttributeError, ValueError):
+            pass
+
+        if intent_enum:
+            transition = compute_transition(
+                state=state,
+                intent=intent_enum.value,
+                has_image=has_image,
+                user_message=user_message
             )
+            dialog_phase = transition.dialog_phase
+
+            # Перевіряємо інваріант: якщо stored_dialog_phase відрізняється від computed - логуємо
+            if stored_dialog_phase != dialog_phase and stored_dialog_phase != "INIT":
+                logger.warning(
+                    "[SESSION %s] ⚠️ Dialog phase mismatch in routing: stored=%s, computed=%s. Using computed (SSOT).",
+                    session_id,
+                    stored_dialog_phase,
+                    dialog_phase,
+                )
+        else:
+            dialog_phase = stored_dialog_phase
     else:
         # Якщо intent не визначено, використовуємо stored (для backward compatibility)
         dialog_phase = stored_dialog_phase
