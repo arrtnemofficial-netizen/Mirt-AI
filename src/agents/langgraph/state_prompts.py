@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-
+from src.core.state_machine import State
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,24 @@ PAYMENT_SUB_PHASES = {
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
+def resolve_state_prompt(state: dict[str, Any]) -> str:
+    """
+    Unified entry point to resolve the prompt for the current state.
+    Handles dynamic sub-phase logic automatically.
+
+    This replaces hardcoded `if state == STATE_5` logic in agent.py.
+    """
+    current_state_str = state.get("current_state", State.STATE_0_INIT.value)
+
+    sub_phase = None
+    if current_state_str == State.STATE_5_PAYMENT_DELIVERY.value:
+        try:
+            sub_phase = get_payment_sub_phase(state)
+        except Exception as e:
+            logger.warning("Failed to resolve payment sub-phase: %s", e)
+
+    return get_state_prompt(current_state_str, sub_phase)
 
 
 def get_state_prompt(state_name: str, sub_phase: str | None = None) -> str:
@@ -262,9 +280,3 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
         return "CONFIRM_DATA"
     else:
         return "REQUEST_DATA"
-
-
-
-
-
-

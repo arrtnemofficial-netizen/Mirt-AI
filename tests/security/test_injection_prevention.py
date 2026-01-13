@@ -154,13 +154,14 @@ class TestInputValidation:
     def test_message_length_limits(self):
         """Extremely long messages should be handled."""
         from src.core.models import Message
+        from pydantic import ValidationError
 
         # Very long message (potential DoS)
         long_content = "A" * 100000  # 100KB of text
 
-        # Should not crash
-        msg = Message(type="text", content=long_content)
-        assert len(msg.content) == 100000
+        # Should raise ValidationError due to max_length=900 constraint
+        with pytest.raises(ValidationError):
+            Message(type="text", content=long_content)
 
     def test_unicode_handling(self):
         """Unicode edge cases should be handled."""

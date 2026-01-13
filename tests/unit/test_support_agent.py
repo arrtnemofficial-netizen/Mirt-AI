@@ -58,7 +58,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_success(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_agent_run_result
     ):
@@ -93,7 +93,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_with_message_history(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_agent_run_result
     ):
@@ -125,7 +125,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_timeout(
         self, mock_log_usage, mock_get_agent, mock_deps
     ):
@@ -148,7 +148,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_generic_error(
         self, mock_log_usage, mock_get_agent, mock_deps
     ):
@@ -172,7 +172,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_extracts_tokens(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_support_response
     ):
@@ -198,7 +198,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_handles_none_usage(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_support_response
     ):
@@ -221,7 +221,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_handles_empty_usage(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_support_response
     ):
@@ -244,7 +244,7 @@ class TestRunSupport:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_support_logs_usage(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_agent_run_result
     ):
@@ -263,7 +263,7 @@ class TestRunSupport:
         # Note: log_llm_usage_best_effort is called via asyncio.create_task
         # which is fire-and-forget, so we can't easily verify it was called
         # But we can verify the function exists and is importable
-        from src.services.llm_usage_logger import log_llm_usage_best_effort
+        from src.services.observability.llm_usage_logger import log_llm_usage_best_effort
 
         assert callable(log_llm_usage_best_effort)
 

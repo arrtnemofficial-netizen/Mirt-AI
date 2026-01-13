@@ -171,7 +171,7 @@ class TestAgentNode:
         )
 
         with patch(
-            "src.agents.langgraph.nodes.agent.run_support", new_callable=AsyncMock
+            "src.agents.langgraph.nodes.agent.execute_agent_dispatch", new_callable=AsyncMock
         ) as mock_run:
             mock_run.return_value = mock_response
 
@@ -184,14 +184,15 @@ class TestAgentNode:
     async def test_agent_node_handles_error(self, state_with_user_message):
         """Agent node should handle errors gracefully."""
         with patch(
-            "src.agents.langgraph.nodes.agent.run_support", new_callable=AsyncMock
+            "src.agents.langgraph.nodes.agent.execute_agent_dispatch", new_callable=AsyncMock
         ) as mock_run:
             mock_run.side_effect = Exception("Test error")
 
             result = await agent_node(state_with_user_message)
 
             # Should return error state
-            assert "last_error" in result or "retry_count" in result
+            # Note: agent_node catches exception and returns {error: str}
+            assert "error" in result or "last_error" in result
 
 
 # =============================================================================

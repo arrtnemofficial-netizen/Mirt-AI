@@ -24,7 +24,7 @@ class TestAgentEdgeCases:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_agent_handles_none_message(
         self, mock_log_usage, mock_get_agent
     ):
@@ -45,7 +45,7 @@ class TestAgentEdgeCases:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_agent_handles_empty_message(
         self, mock_log_usage, mock_get_agent
     ):
@@ -66,7 +66,7 @@ class TestAgentEdgeCases:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_agent_handles_none_deps(
         self, mock_log_usage, mock_get_agent
     ):
@@ -81,7 +81,7 @@ class TestAgentEdgeCases:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_agent_handles_invalid_deps(
         self, mock_log_usage, mock_get_agent
     ):
@@ -103,7 +103,7 @@ class TestAgentEdgeCases:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_agent_handles_none_message_history(
         self, mock_log_usage, mock_get_agent
     ):
@@ -140,7 +140,7 @@ class TestAgentEdgeCases:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_agent_handles_llm_api_error(
         self, mock_log_usage, mock_get_agent
     ):
@@ -169,7 +169,7 @@ class TestAgentEdgeCases:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.support_agent.get_support_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_agent_handles_network_error(
         self, mock_log_usage, mock_get_agent
     ):

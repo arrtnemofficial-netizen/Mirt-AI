@@ -55,7 +55,7 @@ class TestRunPayment:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.payment_agent.get_payment_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_payment_success(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_agent_run_result
     ):
@@ -83,7 +83,7 @@ class TestRunPayment:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.payment_agent.get_payment_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_payment_timeout(
         self, mock_log_usage, mock_get_agent, mock_deps
     ):
@@ -103,7 +103,7 @@ class TestRunPayment:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.payment_agent.get_payment_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_payment_generic_error(
         self, mock_log_usage, mock_get_agent, mock_deps
     ):
@@ -123,7 +123,7 @@ class TestRunPayment:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.payment_agent.get_payment_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_payment_extracts_tokens(
         self, mock_log_usage, mock_get_agent, mock_deps, mock_payment_response
     ):
@@ -149,7 +149,7 @@ class TestRunPayment:
 
     @pytest.mark.asyncio
     @patch("src.agents.pydantic.payment_agent.get_payment_agent")
-    @patch("src.services.llm_usage_logger.log_llm_usage_best_effort")
+    @patch("src.services.observability.llm_usage_logger.log_llm_usage_best_effort")
     async def test_run_payment_handles_missing_fields(
         self,
         mock_log_usage,

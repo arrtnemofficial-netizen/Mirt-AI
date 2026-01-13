@@ -175,20 +175,3 @@ async def payment_node(
         return await prepare_payment_and_interrupt(state, runner, session_id)
 
 
-# =============================================================================
-# RE-EXPORTS FOR BACKWARD COMPATIBILITY (Tests patch these)
-# =============================================================================
-# These are re-exported so tests can patch at the payment.py level.
-# New code should import directly from helpers.payment or the source modules.
-
-from src.agents.pydantic.payment_agent import run_payment  # noqa: F401
-from src.services.observability import log_agent_step, track_metric  # noqa: F401
-from langgraph.types import interrupt  # noqa: F401
-
-# Also re-export helpers for any existing imports
-_ensure_prices_from_catalog = ensure_prices_from_catalog
-_prepare_payment_and_interrupt = prepare_payment_and_interrupt
-_handle_payment_method_selection = handle_payment_method_selection
-_handle_delivery_data = handle_delivery_data
-_handle_approval_response = handle_approval_response
-_persist_order_and_queue_crm = persist_order_and_queue_crm
