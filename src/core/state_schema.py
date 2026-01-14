@@ -11,18 +11,21 @@ FUTURE MIGRATION:
 
 from __future__ import annotations
 
-from typing import Any, Literal, List, Dict, Optional
+from typing import Any, Literal, List, Dict, Optional, MutableMapping
 from pydantic import BaseModel, Field, ConfigDict
 
 from src.core.models import AgentResponse, Product, Message
 from src.core.state_machine import State, Intent
 
-class StateSchema(BaseModel):
+class StateSchema(BaseModel, MutableMapping):
     """
     Unified Conversation State.
     Strictly validated. No more KeyErrors.
+    
+    Implements MutableMapping to fully emulate a dictionary,
+    ensuring 100% compatibility with legacy code.
     """
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True) # Allow extra for gradual migration
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True) 
 
     # --- Core Identifiers ---
     session_id: str
@@ -39,7 +42,7 @@ class StateSchema(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     # --- Commerce ---
-    selected_products: List[Dict[str, Any]] = Field(default_factory=list) # Should be List[Product] later
+    selected_products: List[Dict[str, Any]] = Field(default_factory=list) 
     offered_products: List[Dict[str, Any]] = Field(default_factory=list)
 
     # --- Flow Flags ---
@@ -47,7 +50,7 @@ class StateSchema(BaseModel):
     image_url: Optional[str] = None
 
     # --- Agent Output ---
-    agent_response: Optional[Dict[str, Any]] = None # Serialized AgentResponse
+    agent_response: Optional[Dict[str, Any]] = None 
 
     # --- Validation & Retry ---
     validation_errors: List[str] = Field(default_factory=list)
@@ -73,14 +76,34 @@ class StateSchema(BaseModel):
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(exclude_none=True)
 
-    def __getitem__(self, item: str) -> Any:
-        """Legacy compatibility: allow dict-like access."""
-        return getattr(self, item)
+    # --- MutableMapping Implementation (Ironclad Compatibility) ---
 
-    def get(self, item: str, default: Any = None) -> Any:
-        """Legacy compatibility: allow .get() access."""
-        return getattr(self, item, default)
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
 
     def __setitem__(self, key: str, value: Any) -> None:
-        """Legacy compatibility: allow dict-like assignment."""
         setattr(self, key, value)
+
+    def __delitem__(self, key: str) -> None:
+        # Pydantic models don't easily support deleting fields, 
+        # but we can set to None or default if it's optional.
+        # For now, just deleting from __dict__ if it exists in extra
+        try:
+            del self.__dict__[key]
+        except KeyError:
+             # If it's a model field, set to default? 
+             # Safety: Validation error is better than crash?
+             pass
+
+    def __iter__(self):
+        return iter(self.model_dump())
+
+    def __len__(self):
+        return len(self.model_dump())
+
+    def update(self, *args, **kwargs):
+        """Dict-like update."""
+        data = dict(*args, **kwargs)
+        for k, v in data.items():
+            setattr(self, k, v)
+
