@@ -53,6 +53,7 @@ class StateSchema(BaseModel, MutableMapping):
     agent_response: Optional[Dict[str, Any]] = None 
 
     # --- Validation & Retry ---
+    step_number: int = Field(default=0, description="Graph step counter")
     validation_errors: List[str] = Field(default_factory=list)
     retry_count: int = 0
     max_retries: int = 3
