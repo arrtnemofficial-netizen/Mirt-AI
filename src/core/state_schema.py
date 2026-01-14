@@ -79,6 +79,14 @@ class StateSchema(BaseModel, MutableMapping):
     # --- Memory System ---
     memory_profile: Optional[Any] = None # Using Any to avoid circular import of UserProfile
     memory_facts: List[str] = Field(default_factory=list)
+    memory_context_prompt: Optional[str] = None
+
+    # --- Sitniks CRM ---
+    sitniks_chat_id: Optional[str] = None
+    sitniks_first_touch_done: bool = False
+    
+    # --- Internal ---
+    temp_context: Optional[Dict[str, Any]] = None
 
     @property
     def state_enum(self) -> State:

@@ -33,7 +33,9 @@ def verify_architecture():
         "validation_errors", "retry_count", "max_retries",
         "crm_order_result", "tool_plan_result",
         "is_first_message",
-        "memory_profile", "memory_facts"
+        "memory_profile", "memory_facts", "memory_context_prompt",
+        "sitniks_chat_id", "sitniks_first_touch_done",
+        "temp_context"
     ]
     
     schema_fields = StateSchema.model_fields.keys()
