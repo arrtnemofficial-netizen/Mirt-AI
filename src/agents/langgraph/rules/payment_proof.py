@@ -33,6 +33,12 @@ PAYMENT_PROOF_KEYWORDS: tuple[str, ...] = (
     "квитанц",  # Partial match
     "доказ оплати",
     "готово",  # Generic confirmation
+    "скинув",
+    "скинула",
+    "все",
+    "є",
+    "закинув",
+    "закинула",
 )
 
 # Keywords that indicate payment proof ONLY if combined with image/URL

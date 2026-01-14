@@ -255,7 +255,19 @@ TRANSITIONS: list[Transition] = [
     Transition(
         State.STATE_5_PAYMENT_DELIVERY, State.STATE_9_OOD, frozenset({Intent.OUT_OF_DOMAIN})
     ),
+    Transition(
+        State.STATE_5_PAYMENT_DELIVERY,
+        State.STATE_7_END,
+        frozenset({Intent.THANKYOU_SMALLTALK}),
+        "клієнт скасував оплату або відмовився",
+    ),
     # From STATE_6_UPSELL
+    Transition(
+        State.STATE_6_UPSELL,
+        State.STATE_3_SIZE_COLOR,
+        frozenset({Intent.SIZE_HELP, Intent.COLOR_HELP, Intent.PAYMENT_DELIVERY, Intent.DISCOVERY_OR_QUESTION}),
+        "клієнт зацікавився допродажем (вибір розміру/кольору)",
+    ),
     Transition(
         State.STATE_6_UPSELL,
         State.STATE_7_END,
