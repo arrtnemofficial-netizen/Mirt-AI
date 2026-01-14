@@ -259,7 +259,7 @@ TRANSITIONS: list[Transition] = [
     Transition(
         State.STATE_6_UPSELL,
         State.STATE_7_END,
-        frozenset({Intent.THANKYOU_SMALLTALK, Intent.PAYMENT_DELIVERY}),
+        frozenset({Intent.THANKYOU_SMALLTALK}),
         "клієнт підтвердив або відмовився",
     ),
     # From STATE_8_COMPLAINT
