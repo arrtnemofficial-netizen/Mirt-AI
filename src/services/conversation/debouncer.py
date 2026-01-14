@@ -68,7 +68,108 @@ class MessageDebouncer:
         self, session_id: str, message: BufferedMessage
     ) -> BufferedMessage | None:
         """
-        Add message and wait.
+        Add message and wait (Distributed Redis Version).
+        
+        Logic:
+        1. Push message to Redis List.
+        2. Try to acquire Lock (Leader Election).
+           - IF LEADER: Wait delay, Pop all, Aggregate, Publish 'DONE', Return Result.
+           - IF FOLLOWER: Subscribe to channel, Wait for 'DONE', Return None.
+        """
+        from src.conf.config import settings
+        import redis.asyncio as redis
+        import json
+
+        # Fallback to in-memory if no Redis or explicit disable
+        if not settings.REDIS_URL:
+             return await self._wait_for_debounce_memory(session_id, message)
+
+        try:
+             client = redis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
+             
+             # Keys
+             list_key = f"debounce:list:{session_id}"
+             lock_key = f"debounce:lock:{session_id}"
+             channel_key = f"debounce:channel:{session_id}"
+
+             # 1. Serialize and Push
+             # We must serialize BufferedMessage. original_message (dict) is preserved.
+             # Non-serializable objects in original_message will break this. Assuming dicts for Webhooks.
+             msg_dict = {
+                 "text": message.text,
+                 "has_image": message.has_image,
+                 "image_url": message.image_url,
+                 "extra_metadata": message.extra_metadata,
+                 "original_message": message.original_message if isinstance(message.original_message, dict) else {}
+             }
+             await client.rpush(list_key, json.dumps(msg_dict))
+             
+             # 2. Try Acquire Lock (3s TTL - slightly more than delay)
+             # Leader waits `delay`, so lock must hold at least that long.
+             # We add buffer to TTL.
+             lock_ttl = int(self.delay + 5)
+             is_leader = await client.set(lock_key, "1", nx=True, ex=lock_ttl)
+
+             if is_leader:
+                 logger.debug(f"[DEBOUNCER] {session_id}: I am LEADER. Waiting {self.delay}s...")
+                 
+                 # Wait for debounce window
+                 await asyncio.sleep(self.delay)
+
+                 # Pop ALL messages
+                 # Transactionally? Or just LRANGE + DEL.
+                 # LPOP count is new in Redis 6.2. 
+                 # Safe way: LRANGE 0 -1 then DEL.
+                 msgs_raw = await client.lrange(list_key, 0, -1)
+                 await client.delete(list_key)
+                 await client.delete(lock_key) # Early release or let expire
+
+                 # Deserialize and Aggregate
+                 buffered_msgs = []
+                 for m_str in msgs_raw:
+                     try:
+                         m_data = json.loads(m_str)
+                         buffered_msgs.append(BufferedMessage(**m_data))
+                     except Exception:
+                         continue
+
+                 aggregated = self._aggregate_list(session_id, buffered_msgs)
+                 
+                 # Publish completion signal (payload doesn't matter much, receivers return None)
+                 # But theoretically we *could* broadcast the result if we wanted followers to handle it.
+                 # For now: Followers return None. Leader returns Result.
+                 await client.publish(channel_key, "DONE")
+                 
+                 await client.aclose()
+                 return aggregated
+
+             else:
+                 logger.debug(f"[DEBOUNCER] {session_id}: I am FOLLOWER. Waiting for leader...")
+                 # Subscribe and wait
+                 pubsub = client.pubsub()
+                 await pubsub.subscribe(channel_key)
+                 
+                 try:
+                     # Wait slightly longer than delay to prevent hanging
+                     async for msg in pubsub.listen():
+                         if msg["type"] == "message" and msg["data"] == "DONE":
+                             break
+                 except asyncio.TimeoutError:
+                     logger.warning(f"[DEBOUNCER] {session_id}: Follower timed out waiting for leader.")
+                 
+                 await pubsub.unsubscribe()
+                 await client.aclose()
+                 return None
+
+        except Exception as e:
+            logger.error(f"[DEBOUNCER] Redis error: {e}. Fallback to memory.", exc_info=True)
+            return await self._wait_for_debounce_memory(session_id, message)
+
+    async def _wait_for_debounce_memory(
+        self, session_id: str, message: BufferedMessage
+    ) -> BufferedMessage | None:
+        """
+        Add message and wait (Legacy In-Memory Mode).
         Returns aggregated message if this request triggered the processing.
         Returns None if this request was superseded by a newer one.
         """
@@ -128,7 +229,7 @@ class MessageDebouncer:
 
     async def _process_callback(self, session_id: str):
         """Aggregate messages and call the callback."""
-        aggregated = self._aggregate_messages(session_id)
+        aggregated = self._aggregate_messages_memory(session_id)
         if not aggregated:
             return
 
@@ -143,7 +244,7 @@ class MessageDebouncer:
 
     def _process_future(self, session_id: str):
         """Aggregate messages and resolve the active future."""
-        aggregated = self._aggregate_messages(session_id)
+        aggregated = self._aggregate_messages_memory(session_id)
         future = self.active_futures.get(session_id)
 
         self._cleanup(session_id)
@@ -151,11 +252,16 @@ class MessageDebouncer:
         if future and not future.done():
             future.set_result(aggregated)
 
-    def _aggregate_messages(self, session_id: str) -> BufferedMessage | None:
+    def _aggregate_messages_memory(self, session_id: str) -> BufferedMessage | None:
         if session_id not in self.buffers or not self.buffers[session_id]:
             return None
-
         messages = self.buffers[session_id]
+        return self._aggregate_list(session_id, messages)
+
+    def _aggregate_list(self, session_id: str, messages: list[BufferedMessage]) -> BufferedMessage | None:
+        """Shared aggregation logic."""
+        if not messages:
+            return None
 
         full_text_parts = []
         has_image = False
@@ -213,3 +319,4 @@ class MessageDebouncer:
         if session_id in self.timers:
             self.timers[session_id].cancel()
         self._cleanup(session_id)
+

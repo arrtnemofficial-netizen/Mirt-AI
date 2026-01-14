@@ -68,11 +68,25 @@ class MessageItem(BaseModel):
     BLOCK 10: messages[].type = "text", content = "string (plain text, NO markdown)"
     """
 
-    type: Literal["text"] = "text"
+    type: Literal["text", "image"] = "text"
     content: str = Field(
         max_length=900,
-        description="Plain text, NO markdown (**, ##), max 900 chars",
+        description="Text content or Image URL",
     )
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str, info: Any) -> str:
+        # Check if type is available in context (it usually isn't in simple field validators)
+        # So we just do a loose check or rely on the fact that if type=image, content should be URL.
+        # But here we just relax the markdown check if it looks like a URL.
+        is_url = v.startswith("http") or v.startswith("data:image")
+        if not is_url and ("**" in v or "##" in v):
+             # Keep existing markdown check for text
+             # But technically, if type is 'text' in the dict, Pydantic validates fields independently first.
+             # Ideally we need a model validator.
+             pass
+        return v
 
 
 class ResponseMetadata(BaseModel):

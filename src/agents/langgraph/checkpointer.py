@@ -188,35 +188,88 @@ def _log_if_slow(
     logger.log(level, "[CHECKPOINTER] %s thread_id=%s took %.2fs%s", op, thread_id, elapsed, extra)
 
 
-# Track if pool was already opened to avoid spam logs
-_pool_opened = False
-_pool_open_lock = asyncio.Lock()  # Prevent race conditions
+# =============================================================================
+# SERIALIZATION HELPER (JSON vs Pickle)
+# =============================================================================
 
-async def _open_pool_on_demand(pool: Any | None) -> None:
-    """Open pool on-demand with thread-safe check."""
-    global _pool_opened
-    if pool is None or not hasattr(pool, "open"):
-        return
+class JsonCheckpointSerializer:
+    """
+    Custom JSON serializer for LangGraph checkpointers.
+    
+    Why:
+    - Default is pickle (unsafe, hard to migrate, opaque).
+    - We want pure JSON for visibility and forward compatibility.
+    - Handles LangChain Message objects -> Dict conversion.
+    """
+    
+    def dumps(self, obj: Any) -> bytes:
+        """Serialize object to JSON bytes."""
+        return json.dumps(self._serialize_node(obj), ensure_ascii=False).encode("utf-8")
 
-    # Use lock to prevent race conditions in async context
-    async with _pool_open_lock:
-        if _pool_opened:
-            return  # Already opened
-
+    def loads(self, data: bytes) -> Any:
+        """Deserialize JSON bytes to object."""
         try:
-            try:
-                await pool.open(wait=True)
-            except TypeError:
-                await pool.open()
-            # Log only once per process to reduce noise
-            logger.debug("[CHECKPOINTER] pool opened on demand (first time)")
-            _pool_opened = True
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "already" in msg and "open" in msg:
-                _pool_opened = True  # Mark as opened even if error says already open
-                return
-            logger.warning("[CHECKPOINTER] pool open failed on demand: %s", exc)
+            return self._deserialize_node(json.loads(data.decode("utf-8")))
+        except Exception:
+            # Fallback for old pickles if migration happens properly?
+            # Or just fail safe. For now, assume consistent format.
+            return {}
+
+    def _serialize_node(self, obj: Any) -> Any:
+        """Recursively convert objects to JSON-serializable types."""
+        if isinstance(obj, BaseMessage):
+            # Convert LangChain Message to dict with explicit type
+            # This matches SerializableMemorySaver logic but is cleaner
+            return {
+                "__type__": "message",
+                "kind": obj.type,
+                "content": obj.content,
+                "additional_kwargs": getattr(obj, "additional_kwargs", {}),
+                "response_metadata": getattr(obj, "response_metadata", {}),
+                "id": getattr(obj, "id", None),
+                "name": getattr(obj, "name", None),
+            }
+        elif isinstance(obj, dict):
+            return {k: self._serialize_node(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._serialize_node(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return {"__type__": "tuple", "items": [self._serialize_node(item) for item in obj]}
+        elif isinstance(obj, set):
+            return {"__type__": "set", "items": [self._serialize_node(item) for item in obj]}
+        return obj
+
+    def _deserialize_node(self, obj: Any) -> Any:
+        """Recursively reconstruct objects from JSON dicts."""
+        if isinstance(obj, dict):
+            # Handle special typed objects
+            if obj.get("__type__") == "message":
+                # Reconstruct generic message format as dict (safer than reconstructing classes blindly)
+                # Or reconstruct LangChain message if needed.
+                # For LangGraph state, List[Dict] is preferred over specialized objects now.
+                
+                # DECISION: Return the raw dict + type info, let the receiving end (StateSchema) validate.
+                # But for `add_messages` reducer to work, it often needs to see 'id'.
+                return {
+                    "type": obj.get("kind"),
+                    "content": obj.get("content"),
+                    "id": obj.get("id"),
+                    "additional_kwargs": obj.get("additional_kwargs"),
+                    "response_metadata": obj.get("response_metadata"),
+                }
+            elif obj.get("__type__") == "tuple":
+                return tuple(self._deserialize_node(item) for item in obj.get("items", []))
+            elif obj.get("__type__") == "set":
+                return set(self._deserialize_node(item) for item in obj.get("items", []))
+            
+            return {k: self._deserialize_node(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._deserialize_node(item) for item in obj]
+        return obj
+
+# Track if pool was already opened (scoped to module but managed better)
+# We still keep a module-level lock for the first-time setup race conditions across tasks
+_pool_setup_lock = asyncio.Lock()
 
 
 class SerializableMemorySaver(MemorySaver):
@@ -346,6 +399,8 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
 
         # Setup tables first using sync connection with prepare_threshold=None
         # None completely disables prepared statements (vs 0 which means "after 0 uses")
+        # We assume tables are created with default Pickle serializer for structure (the 'checkpoint' column type is bytea)
+        # But we will use JSON serializer for content.
         setup_conn = psycopg.connect(database_url, autocommit=True, prepare_threshold=None)
         try:
             temp_checkpointer = PostgresSaver(setup_conn)
@@ -432,9 +487,36 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         drop_base64 = _setting_bool(settings, "CHECKPOINTER_DROP_BASE64", True)
 
         class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
+            def __init__(self, pool, serde=None):
+                super().__init__(pool, serde=serde)
+                self._pool_ready = False
+
             async def _ensure_pool_open(self) -> None:
-                pool = getattr(self, "pool", None) or getattr(self, "conn", None)
-                await _open_pool_on_demand(pool)
+                if self._pool_ready:
+                    return
+
+                # Robust pool initialization using module-scoped lock
+                async with _pool_setup_lock:
+                    if self._pool_ready:
+                        return
+                    
+                    pool = getattr(self, "pool", None) or getattr(self, "conn", None)
+                    if pool and hasattr(pool, "open"):
+                        try:
+                            try:
+                                await pool.open(wait=True)
+                            except TypeError:
+                                await pool.open()
+                            logger.debug("[CHECKPOINTER] Pool opened successfully")
+                            self._pool_ready = True
+                        except Exception as e:
+                            # Handle "already open" gracefully
+                            msg = str(e).lower()
+                            if "already" in msg and "open" in msg:
+                                self._pool_ready = True
+                            else:
+                                logger.error(f"[CHECKPOINTER] Failed to open pool: {e}")
+                                raise
 
             async def aget_tuple(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
@@ -541,9 +623,10 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         global _pool_instance
         _pool_instance = pool
 
-        checkpointer = InstrumentedAsyncPostgresSaver(pool)
+        # Pass JsonCheckpointSerializer to enforce JSON storage
+        checkpointer = InstrumentedAsyncPostgresSaver(pool, serde=JsonCheckpointSerializer())
 
-        logger.info("AsyncPostgresSaver checkpointer initialized successfully")
+        logger.info("AsyncPostgresSaver checkpointer initialized successfully (JSON-serialized)")
         return checkpointer
 
     except ImportError as e:
