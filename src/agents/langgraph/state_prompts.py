@@ -269,6 +269,9 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
     # Check if payment details already sent
     payment_details_sent = metadata.get("payment_details_sent", False)
 
+    # Check if payment proof already received
+    payment_proof = metadata.get("payment_proof_received", False)
+
     if payment_proof:
         return "THANK_YOU"
     elif user_says_paid or payment_details_sent:
