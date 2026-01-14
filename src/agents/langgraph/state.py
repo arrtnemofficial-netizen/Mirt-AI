@@ -15,7 +15,7 @@ from typing_extensions import TypedDict
 
 from src.core.models import BaseConversationState
 from src.core.state_machine import State
-
+from src.core.state_schema import StateSchema
 
 # =============================================================================
 # REDUCERS (how state fields are updated)
@@ -62,28 +62,24 @@ def add_messages_capped(current: list, new: list) -> list:
 # =============================================================================
 
 
-class ConversationState(BaseConversationState, total=False):
+class ConversationState(StateSchema):
     """
-    Production conversation state.
-
-    Every field has a proper reducer for LangGraph's state management.
+    Production conversation state (Pydantic V2).
+    
+    Inherits fields from StateSchema (SSOT).
+    Adds LangGraph Reducers via Annotated.
     """
-
-    # Core conversation data (Overrides with Annotated reducers)
-    messages: Annotated[list[dict[str, Any]], add_messages_capped]
-    current_state: str  # FSM state (STATE_0_INIT, etc.)
+    
+    # Redefine fields to attach Reducers
+    messages: Annotated[list[Any], add_messages_capped]
+    
+    # Metadata merging is crucial
     metadata: Annotated[dict[str, Any], merge_dict]
 
-    # Other fields are inherited from BaseConversationState!
-    # Only re-declare if adding Annotated reducers.
+    # These are already in StateSchema, but we can override default handling if needed
+    # For now, default Pydantic behavior (replace) is fine for strings/ints.
+    # We only annotate what needs SPECIAL reduction logic (merging/appending).
 
-    # agent_response needs reducer?
-    agent_response: Annotated[dict[str, Any], replace_value]
-     
-    # step_number needs reducer?
-    step_number: Annotated[int, replace_value]
-    
-    # We can omit re-declaring non-Annotated fields as they come from BaseConversationState
 
 
 
@@ -128,7 +124,7 @@ def create_initial_state(
     base_metadata["has_image"] = False
     base_metadata["image_url"] = None
 
-    base_state: ConversationState = {
+    base_state_dict = {
         # Core
         "messages": messages or [],
         "current_state": State.STATE_0_INIT.value,
@@ -137,12 +133,12 @@ def create_initial_state(
         "dialog_phase": "INIT",
         # Session
         "session_id": session_id,
-        "trace_id": kwargs.get("trace_id"),  # Should be generated at entry point
-        "thread_id": session_id,  # Use same ID for LangGraph threading
+        "trace_id": kwargs.get("trace_id", ""),  
+        "thread_id": session_id,  
         # Intent
         "detected_intent": None,
-        "has_image": False,  # CRITICAL: Reset at top level too
-        "image_url": None,  # CRITICAL: Clear at top level too
+        "has_image": False,  
+        "image_url": None, 
         # Products
         "selected_products": [],
         "offered_products": [],
@@ -163,11 +159,11 @@ def create_initial_state(
         "approval_type": None,
         "approval_data": None,
         "human_approved": None,
-        # Time travel support (prefixed to avoid LangGraph reserved names)
+        # Time travel support
         "saved_checkpoint_id": None,
         "saved_parent_checkpoint_id": None,
         "step_number": 0,
-        # Memory System (Titans-like)
+        # Memory System
         "memory_profile": None,
         "memory_facts": [],
         "memory_context_prompt": None,
@@ -175,10 +171,9 @@ def create_initial_state(
 
     # Apply overrides
     for key, value in kwargs.items():
-        if key in base_state:
-            base_state[key] = value
+        base_state_dict[key] = value
 
-    return base_state
+    return ConversationState(**base_state_dict)
 
 
 def get_state_snapshot(state: ConversationState) -> dict[str, Any]:

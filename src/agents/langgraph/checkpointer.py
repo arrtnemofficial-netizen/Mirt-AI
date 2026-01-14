@@ -229,6 +229,12 @@ class JsonCheckpointSerializer:
                 "id": getattr(obj, "id", None),
                 "name": getattr(obj, "name", None),
             }
+        elif hasattr(obj, "model_dump"):
+            # Pydantic V2
+            return obj.model_dump(mode="json")
+        elif hasattr(obj, "dict"):
+            # Pydantic V1
+            return obj.dict()
         elif isinstance(obj, dict):
             return {k: self._serialize_node(v) for k, v in obj.items()}
         elif isinstance(obj, list):

@@ -199,7 +199,16 @@ async def agent_node(
             "current_state": new_state_str,
             "detected_intent": final_intent,
             "dialog_phase": state.get("dialog_phase", "UNKNOWN"), # Let reducer handle phase in future
-            "messages": [m.model_dump() for m in response.messages], # Use standardized messages
+            # CRITICAL FIX: Convert internal MessageItem (type='text'/'image') 
+            # to LangChain compatible dict (type='ai', content=...)
+            "messages": [
+                {
+                    "type": "ai", 
+                    "content": m.content, 
+                    "additional_kwargs": {"original_type": m.type} # Preserve original type in kwargs
+                } 
+                for m in response.messages
+            ], 
             "metadata": metadata_update,
             "selected_products": updated_products,
             "should_escalate": response.event == "escalation",

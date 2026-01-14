@@ -69,5 +69,10 @@ def safe_router(func: Callable[[StateSchema], R]) -> Callable[[Dict[str, Any]], 
     """
     def wrapper(state: Dict[str, Any]) -> R:
         schema = to_schema(state) # type: ignore
-        return func(schema)
+        result = func(schema)
+        
+        # Auto-unwrap Enums to strings for LangGraph
+        if hasattr(result, "value"):
+            return result.value
+        return result
     return wrapper

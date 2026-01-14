@@ -22,7 +22,7 @@ class StateSchema(BaseModel):
     Unified Conversation State.
     Strictly validated. No more KeyErrors.
     """
-    model_config = ConfigDict(extra="allow") # Allow extra for gradual migration
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True) # Allow extra for gradual migration
 
     # --- Core Identifiers ---
     session_id: str
@@ -35,7 +35,7 @@ class StateSchema(BaseModel):
     detected_intent: Optional[str] = None
 
     # --- Data ---
-    messages: List[Dict[str, Any]] = Field(default_factory=list) # Raw messages for now
+    messages: List[Any] = Field(default_factory=list) # Can be Dict or BaseMessage objects
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     # --- Commerce ---
@@ -72,3 +72,11 @@ class StateSchema(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(exclude_none=True)
+
+    def __getitem__(self, item: str) -> Any:
+        """Legacy compatibility: allow dict-like access."""
+        return getattr(self, item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        """Legacy compatibility: allow .get() access."""
+        return getattr(self, item, default)
