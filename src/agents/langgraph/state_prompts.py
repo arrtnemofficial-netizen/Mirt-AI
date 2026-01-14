@@ -266,13 +266,13 @@ def get_payment_sub_phase(state: dict[str, Any]) -> str:
     # Check if data is confirmed
     data_confirmed = metadata.get("delivery_data_confirmed", False)
 
-    # Check if payment proof received
-    payment_proof = metadata.get("payment_proof_received", False)
+    # Check if payment details already sent
+    payment_details_sent = metadata.get("payment_details_sent", False)
 
     if payment_proof:
         return "THANK_YOU"
-    elif user_says_paid:
-        # User says they paid → we're waiting for proof (screenshot)
+    elif user_says_paid or payment_details_sent:
+        # If user says paid OR we already showed details → waiting for proof
         return "SHOW_PAYMENT"
     elif data_confirmed:
         return "SHOW_PAYMENT"
