@@ -24,6 +24,8 @@ from src.core.state_machine import State
 from src.services.catalog import CatalogService
 from src.services.observability import log_agent_step, log_trace, track_metric
 
+from .utils import (
+    extract_height_from_text,
     get_size_and_price_for_height,
     text_msg,
 )
