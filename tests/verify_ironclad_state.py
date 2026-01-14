@@ -38,5 +38,14 @@ def test_full_dict_emulation():
     
     print("✅ Concrete (Zhiezobetonno) Compatibility Proven!")
 
+    print("\n🛡️ Testing to_schema recursion...")
+    from src.agents.langgraph.routers.base import to_schema
+    # Converting Schema -> Schema should work now
+    schema1 = to_schema(state)
+    schema2 = to_schema(schema1) 
+    assert schema2.session_id == schema1.session_id
+    print("✅ to_schema recursion worked!")
+
+
 if __name__ == "__main__":
     test_full_dict_emulation()

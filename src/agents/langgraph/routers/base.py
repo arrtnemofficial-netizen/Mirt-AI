@@ -13,32 +13,33 @@ from src.agents.langgraph.state import ConversationState
 # Generic type for router functions
 R = TypeVar("R")
 
-def to_schema(state: ConversationState) -> StateSchema:
+def to_schema(state: ConversationState | Dict[str, Any]) -> StateSchema:
     """
     Safely convert TypedDict state to Pydantic StateSchema.
 
     This ensures we access fields safely via dot notation
     and validate types at the boundary.
     """
-    # Ensure required fields exist.
-    # In tests, create_initial_state sets trace_id, but if state is modified manually
-    # or passed as a partial dict, it might be missing.
-    if "trace_id" not in state or state["trace_id"] is None:
-        state["trace_id"] = "" # Default to empty string if missing/None
+    # 1. Normalize to Dict
+    if hasattr(state, "model_dump"):
+        state_dict = state.model_dump()
+    elif isinstance(state, dict):
+        state_dict = state.copy()
+    else:
+        # Fallback for MutableMapping or other types
+        state_dict = dict(state)
 
-    if "thread_id" not in state or state["thread_id"] is None:
-        # thread_id usually matches session_id
-        state["thread_id"] = state.get("session_id", "")
+    # 2. Ensure Defaults (Safe Access on DICT now)
+    if "trace_id" not in state_dict or state_dict["trace_id"] is None:
+        state_dict["trace_id"] = "" 
 
-    # Filter out keys that might not be in StateSchema yet
-    # (since allow_extra is True in Schema, this is safe, but explicit is better)
-    
-    # CRITICAL FIX: Serialize messages to dicts if they are LangChain objects
-    # StateSchema expects List[Dict], but LangGraph may pass List[BaseMessage]
-    state_copy = state.copy()
-    if "messages" in state_copy and state_copy["messages"]:
+    if "thread_id" not in state_dict or state_dict["thread_id"] is None:
+        state_dict["thread_id"] = state_dict.get("session_id", "")
+
+    # 3. Serialize Messages (Logic preserved)
+    if "messages" in state_dict and state_dict["messages"]:
         serialized_msgs = []
-        for msg in state_copy["messages"]:
+        for msg in state_dict["messages"]:
              if hasattr(msg, "model_dump"):
                  serialized_msgs.append(msg.model_dump())
              elif hasattr(msg, "dict"):
@@ -46,14 +47,14 @@ def to_schema(state: ConversationState) -> StateSchema:
              elif isinstance(msg, dict):
                  serialized_msgs.append(msg)
              else:
-                 # Fallback for unknown types
                  try:
                      serialized_msgs.append(dict(msg))
                  except Exception:
-                     pass # Skip uncleanable messages
-        state_copy["messages"] = serialized_msgs
+                     pass 
+        state_dict["messages"] = serialized_msgs
 
-    return StateSchema(**state_copy)
+    # 4. Construct Schema
+    return StateSchema(**state_dict)
 
 def safe_router(func: Callable[[StateSchema], R]) -> Callable[[Dict[str, Any]], R]:
     """
