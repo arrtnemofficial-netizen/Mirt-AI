@@ -114,9 +114,48 @@ async def lifespan(app: FastAPI):
         logger.warning("Memory System: Check failed - %s", e)
 
     # Initialize PostgreSQL connection pool (async, for FastAPI endpoints)
+    try:
+        # CRITICAL STARTUP SELF-CHECK: Verify State Architecture
+        # This prevents runtime errors by confirming State object compatibility
+        # with both Pydantic (validation) and LangGraph (dict access).
+        from src.agents.langgraph.state import create_initial_state
+        test_state = create_initial_state(session_id="STARTUP_CHECK")
+        
+        # 1. Test Dict Write (The most common cause of "Assignment not supported")
+        try:
+            test_state["startup_check_key"] = "OK"
+        except TypeError as e:
+             logger.critical("🚨 FATAL ARCHITECTURE ERROR: State object does not support dict assignment! %s", e)
+             raise RuntimeError("State Compatibility Check Failed - Fix StateSchema MutableMapping") from e
+             
+        # 2. Test Critical Attributes
+        if not hasattr(test_state, "step_number"):
+             logger.critical("🚨 FATAL ARCHITECTURE ERROR: State missing 'step_number' field!")
+             raise RuntimeError("State Schema Validation Failed - Missing 'step_number'")
+
+        # 3. Test Router Conversion Logic (to_schema)
+        from src.agents.langgraph.routers.base import to_schema
+        try:
+            # Recursive check: to_schema(state) -> state
+            # This confirms the router decorator won't crash
+            _ = to_schema(test_state)
+        except Exception as e:
+             logger.critical("🚨 FATAL ARCHITECTURE ERROR: Router 'to_schema' recursion failed! %s", e)
+             raise RuntimeError("Router Compatibility Check Failed") from e
+
+        logger.info("✓ Architecture Integrity: VERIFIED (Hybrid State Bridge OK)")
+
+    except ImportError:
+         logger.warning("⚠ Could not import State/LangGraph for verification (imports might be broken)")
+    except Exception as e:
+         # If self-check fails, we MUST stop deployment.
+         logger.critical("🚨 STARTUP BLOCKED: Integrity Check Failed: %s", e)
+         raise e
+    
     postgres_pool = None
     try:
         from src.services.storage.postgres_pool import get_postgres_pool, close_postgres_pool
+
         postgres_pool = await get_postgres_pool()
         await postgres_pool.open()
         logger.info("✓ PostgreSQL Pool: OPENED (min=%d, max=%d)", 

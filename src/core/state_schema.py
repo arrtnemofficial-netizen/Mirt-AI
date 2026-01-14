@@ -69,6 +69,16 @@ class StateSchema(BaseModel, MutableMapping):
     should_escalate: bool = False
     escalation_reason: Optional[str] = None
     moderation_result: Optional[Dict[str, Any]] = None
+    # --- Integration Results ---
+    crm_order_result: Optional[Dict[str, Any]] = None
+    tool_plan_result: Optional[Dict[str, Any]] = None
+    
+    # --- Logic Flags ---
+    is_first_message: bool = False
+    
+    # --- Memory System ---
+    memory_profile: Optional[Any] = None # Using Any to avoid circular import of UserProfile
+    memory_facts: List[str] = Field(default_factory=list)
 
     @property
     def state_enum(self) -> State:
