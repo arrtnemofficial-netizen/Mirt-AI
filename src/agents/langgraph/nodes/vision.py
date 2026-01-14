@@ -24,11 +24,10 @@ from src.core.state_machine import State
 from src.services.catalog import CatalogService
 from src.services.observability import log_agent_step, log_trace, track_metric
 
-from .utils import (
-    extract_height_from_text,
     get_size_and_price_for_height,
     text_msg,
 )
+from src.core.fallbacks import get_vision_failed_message
 
 
 if TYPE_CHECKING:
@@ -207,7 +206,7 @@ async def vision_node(
 
     def _build_vision_error_escalation(error_msg: str) -> dict[str, Any]:
         escalation_messages = [
-            text_msg("Не вдалося обробити фото. Передаю менеджеру."),
+            text_msg(get_vision_failed_message()),
             text_msg("Будь ласка, очікуйте відповідь від менеджера."),
         ]
 

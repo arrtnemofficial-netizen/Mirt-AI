@@ -18,6 +18,7 @@ from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.services.observability import log_agent_step, track_metric
 from src.services.notifications import NotificationService
+from src.core.fallbacks import get_thank_you_message, get_subscribe_message
 import re
 
 
@@ -125,8 +126,8 @@ async def upsell_node(
 
     if is_refusal:
         # HUMAN REFUSED UPSELL -> THANKS + SUBSCRIBE + COMPLETED
-        thank_you_text = "Дякуємо за замовлення ⭐️\nГарного вам вечора та мирного неба 🕊️"
-        subscribe_text = "Зараз великі магазини, такі як наш, конкуренти часто намагаються зламувати. Щоб ви нас не втратили, підпишіться, будь ласка, також на нашу другу офіційну сторінку. @mirt_original"
+        thank_you_text = get_thank_you_message()
+        subscribe_text = get_subscribe_message()
         
         assistant_content = f"{thank_you_text}\n\n{subscribe_text}"
         msgs = [{"role": "assistant", "content": m} for m in [thank_you_text, subscribe_text]]

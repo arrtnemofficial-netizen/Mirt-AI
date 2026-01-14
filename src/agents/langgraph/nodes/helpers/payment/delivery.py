@@ -167,6 +167,7 @@ async def _handle_payment_proof_received(
 
     from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
     from src.agents.langgraph.fsm.policy import determine_response_policy, load_manifest
+    from src.core.fallbacks import get_thank_you_message, get_subscribe_message, get_payment_fallback_text
     
     manifest = load_manifest()
     actions = manifest.get("actions", {})
@@ -181,7 +182,7 @@ async def _handle_payment_proof_received(
         thank_you = "\n".join(thank_you_snippets)
     else:
         # Fallback
-        thank_you = "Дякуємо за замовлення ⭐️\nГарного вам вечора та мирного неба 🕊️"
+        thank_you = get_thank_you_message()
     
     # Mark as sent (idempotency)
     metadata_update[thank_you_idempotency_key] = True
@@ -196,10 +197,7 @@ async def _handle_payment_proof_received(
         subscribe = "\n".join(subscribe_snippets)
     else:
         # Fallback
-        subscribe = (
-            "Зараз великі магазини, такі як наш, конкуренти часто намагаються зламувати. "
-            "Щоб ви нас не втратили, підпишіться, будь ласка, також на нашу другу офіційну сторінку. @mirt_original"
-        )
+        subscribe = get_subscribe_message()
     
     # Mark as sent (idempotency)
     metadata_update[subscribe_idempotency_key] = True
@@ -424,10 +422,10 @@ async def _delegate_to_llm(
         return Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                "messages": [{"role": "assistant", "content": "Надішліть ПІБ, телефон та адресу НП 🤍"}],
+                "messages": [{"role": "assistant", "content": get_payment_fallback_text()}],
                 "agent_response": {
                     "event": "simple_answer",
-                    "messages": [{"type": "text", "content": "Надішліть ПІБ, телефон та адресу НП 🤍"}],
+                    "messages": [{"type": "text", "content": get_payment_fallback_text()}],
                     "metadata": {
                         "session_id": session_id,
                         "current_state": State.STATE_5_PAYMENT_DELIVERY.value,

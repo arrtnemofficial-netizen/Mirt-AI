@@ -41,44 +41,72 @@ class FallbackType(Enum):
 
 
 # =============================================================================
+# UI MESSAGES (SSOT for User-Facing Strings)
+# =============================================================================
+
+def get_thank_you_message() -> str:
+    """Standard Thank You message."""
+    return "Дякуємо за замовлення ⭐️\nГарного вам вечора та мирного неба 🕊️"
+
+
+def get_subscribe_message() -> str:
+    """Standard Subscribe request (Security focus)."""
+    return (
+        "Зараз великі магазини, такі як наш, конкуренти часто намагаються зламувати. "
+        "Щоб ви нас не втратили, підпишіться, будь ласка, також на нашу другу офіційну сторінку. @mirt_original"
+    )
+
+
+def get_vision_failed_message() -> str:
+    """Friendly vision failure message."""
+    return "Ой, я трохи розгубилась і не можу точно зрозуміти, яка це модель на фото 🙈 Покажу менеджеру, він гляне і відпише вам!"
+
+
+def get_payment_fallback_text() -> str:
+    """Fallback when Payment LLM fails."""
+    return "Щоб я могла все оформити, напишіть, будь ласка: ПІБ, телефон та куди відправляти (місто/відділення) ✍️"
+
+
+
+# =============================================================================
 # FALLBACK MESSAGES (Ukrainian)
 # =============================================================================
 
 FALLBACK_MESSAGES: dict[FallbackType, dict[str, Any]] = {
     FallbackType.LLM_UNAVAILABLE: {
         "text": (
-            "Вибачте, у мене зараз технічні труднощі 🔧\n"
-            "Спробуйте написати ще раз через хвилинку, або напишіть напряму менеджеру."
+            "Зараз перевіряю інформацію, зачекайте хвилинку, будь ласка... 👩‍💻\n"
+            "Якщо довго не відповідаю - можете написати моєму колезі."
         ),
-        "quick_replies": ["Спробувати ще раз", "Написати менеджеру"],
+        "quick_replies": ["Написати менеджеру"],
         "should_escalate": False,
         "retry_after_seconds": 60,
     },
     FallbackType.LLM_TIMEOUT: {
-        "text": ("Ой, щось довго думаю... 🤔\nДавайте спробуємо ще раз? Повторіть ваше питання."),
-        "quick_replies": ["Повторити"],
+        "text": ("Заточнюю на складі... Ще секундочку ⏳"),
+        "quick_replies": [],
         "should_escalate": False,
         "retry_after_seconds": 30,
     },
     FallbackType.DATABASE_UNAVAILABLE: {
         "text": (
-            "Вибачте, не можу зараз зберегти дані.\n"
-            "Ваше повідомлення я отримав, продовжуйте спілкування!"
+            "Зараз поганий зв'язок, не можу записати дані.\n"
+            "Надішліть, будь ласка, ще раз через хвилину."
         ),
         "quick_replies": [],
         "should_escalate": False,
         "retry_after_seconds": 120,
     },
     FallbackType.MANYCHAT_UNAVAILABLE: {
-        "text": None,  # Silent - user won't see this
+        "text": None,  # Silent
         "quick_replies": [],
         "should_escalate": True,
         "retry_after_seconds": 60,
     },
     FallbackType.VISION_FAILED: {
         "text": (
-            "Не вдалося розпізнати фото 📷\n"
-            "Спробуйте надіслати ще раз або опишіть що ви шукаєте словами."
+            "Погано видно деталі на фото.\n"
+            "Можете зробити інше фото або просто напишіть, що ви шукаєте?"
         ),
         "quick_replies": ["Описати словами", "Надіслати інше фото"],
         "should_escalate": False,
@@ -86,8 +114,8 @@ FALLBACK_MESSAGES: dict[FallbackType, dict[str, Any]] = {
     },
     FallbackType.CATALOG_EMPTY: {
         "text": (
-            "Не знайшла такого товару в каталозі 🔍\n"
-            "Можливо ви шукаєте щось інше? Опишіть детальніше."
+            "На жаль, саме такої моделі зараз немає в наявності.\n"
+            "Давайте підберу вам щось схоже? Що для вас важливо?"
         ),
         "quick_replies": ["Показати каталог", "Допомога"],
         "should_escalate": False,
@@ -95,28 +123,28 @@ FALLBACK_MESSAGES: dict[FallbackType, dict[str, Any]] = {
     },
     FallbackType.PAYMENT_ERROR: {
         "text": (
-            "Виникла помилка з оформленням замовлення.\n"
-            "Не хвилюйтесь, менеджер зв'яжеться з вами найближчим часом!"
+            "Щось система не пропускає замовлення.\n"
+            "Я зараз передам інформацію старшому менеджеру, він перевірить вручну."
         ),
         "quick_replies": ["Зателефонувати"],
         "should_escalate": True,
         "retry_after_seconds": 0,
     },
     FallbackType.CRM_UNAVAILABLE: {
-        "text": ("Замовлення прийнято! ✅\nМенеджер зв'яжеться з вами для підтвердження."),
+        "text": ("Замовлення зафіксувала! ✅\nЗараз передам на склад для підтвердження."),
         "quick_replies": [],
-        "should_escalate": True,  # Notify manager
+        "should_escalate": True,
         "retry_after_seconds": 300,
     },
     FallbackType.RATE_LIMITED: {
-        "text": ("Занадто багато повідомлень 😅\nЗачекайте трохи і спробуйте знову."),
+        "text": ("Ви дуже швидко пишете, я не встигаю відповідати) Давайте по черзі."),
         "quick_replies": [],
         "should_escalate": False,
         "retry_after_seconds": 30,
     },
     FallbackType.UNKNOWN_ERROR: {
         "text": (
-            "Щось пішло не так 😔\nСпробуйте ще раз або напишіть /restart щоб почати спочатку."
+            "Вибачте, не зрозуміла останнє повідомлення.\nМожете повторити?"
         ),
         "quick_replies": ["Спробувати ще раз", "/restart"],
         "should_escalate": False,
