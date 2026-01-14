@@ -40,7 +40,7 @@ def finalize_transition(
     
     # 1. Extract context
     intent = response.metadata.intent
-    payment_context = state.get("_payment_context", {})
+    payment_context = state.get("payment_info_buffer", {})
     preserve_payment_state = payment_context.get("preserve_state", False)
     
     # 2. Check Global Priorities (immutable)

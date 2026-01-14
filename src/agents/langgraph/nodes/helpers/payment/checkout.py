@@ -248,7 +248,7 @@ async def prepare_payment_and_interrupt(
                     "metadata": metadata_update,
                     "step_number": state.get("step_number", 0) + 1,
                     # ВАЖНО: Передаем контекст, чтобы agent node знал о payment фазе
-                    "_payment_context": {
+                    "payment_info_buffer": {
                         "preserve_state": True,
                         "extract_customer_data": True,
                     },

@@ -35,7 +35,7 @@ def verify_architecture():
         "is_first_message",
         "memory_profile", "memory_facts", "memory_context_prompt",
         "sitniks_chat_id", "sitniks_first_touch_done",
-        "temp_context"
+        "temp_context", "payment_info_buffer"
     ]
     
     schema_fields = StateSchema.model_fields.keys()

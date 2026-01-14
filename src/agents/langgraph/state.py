@@ -76,9 +76,11 @@ class ConversationState(StateSchema):
     # Metadata merging is crucial
     metadata: Annotated[dict[str, Any], merge_dict]
 
-    # These are already in StateSchema, but we can override default handling if needed
     # For now, default Pydantic behavior (replace) is fine for strings/ints.
     # We only annotate what needs SPECIAL reduction logic (merging/appending).
+    
+    # Resolves InvalidUpdateError for parallel step updates
+    step_number: Annotated[int, replace_value]
 
 
 

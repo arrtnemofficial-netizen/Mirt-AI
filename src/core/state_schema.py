@@ -87,6 +87,7 @@ class StateSchema(BaseModel, MutableMapping):
     
     # --- Internal ---
     temp_context: Optional[Dict[str, Any]] = None
+    payment_info_buffer: Optional[Dict[str, Any]] = None # Renamed from _payment_context
 
     @property
     def state_enum(self) -> State:
