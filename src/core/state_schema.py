@@ -80,3 +80,7 @@ class StateSchema(BaseModel):
     def get(self, item: str, default: Any = None) -> Any:
         """Legacy compatibility: allow .get() access."""
         return getattr(self, item, default)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Legacy compatibility: allow dict-like assignment."""
+        setattr(self, key, value)
