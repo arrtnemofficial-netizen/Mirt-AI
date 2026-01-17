@@ -37,7 +37,7 @@ from src.services.core.observability import log_agent_step, track_metric
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from src.agents.pydantic.models import OfferResponse
+    from src.core.models import OfferResponse
 
 
 def _get_fallback_text(reason: str) -> str:

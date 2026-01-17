@@ -25,11 +25,11 @@ from src.agents.pydantic.main_agent_config import (
 from src.services.domain.payment.payment_config import get_payment_section
 
 from .deps import AgentDeps
-from .models import (
-    EscalationInfo,
+from src.core.models import (
+    Escalation as EscalationInfo,
     MessageItem,
     OfferResponse,
-    ResponseMetadata,
+    Metadata as ResponseMetadata,
     SupportResponse,
 )
 

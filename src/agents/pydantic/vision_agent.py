@@ -25,7 +25,7 @@ from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry, get_snippet_by_header
 
 from .deps import AgentDeps
-from .models import VisionResponse
+from src.core.models import VisionResponse
 
 
 logger = logging.getLogger(__name__)

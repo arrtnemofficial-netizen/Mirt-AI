@@ -28,13 +28,14 @@ from src.services.domain.catalog.product_matcher import extract_requested_color
 
 # Module imports
 from . import catalog, logic, tools
+from src.services.cart import CartManager
 from src.agents.langgraph.nodes.utils import extract_user_message, extract_height_from_text
 from src.agents.langgraph.state_prompts import get_state_prompt, get_payment_sub_phase
 from src.agents.langgraph.nodes.vision.snippets import get_snippet_by_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from src.agents.pydantic.models import SupportResponse
+    from src.core.models import SupportResponse
 
 
 logger = logging.getLogger(__name__)
@@ -338,12 +339,16 @@ async def agent_node(
                     base_products = upsell_base_products
                     used_upsell_base = True
                     
-                selected_products = tools.merge_products(
+                selected_products = CartManager.merge_products(
                     base_products, new_products, append=True
                 )
                 
                 # Cleanup duplicates if we inserted base products
                 if used_upsell_base:
+                     # Note: logic relies on tools.product_match_key which is still in tools.py for now
+                     # but CartManager handles basic deduplication.
+                     # We keep this custom logic or move it to CartManager?
+                     # For now, let's keep the specialized cleanup here but use tools helper
                      new_keys = {
                         tools.product_match_key(p) for p in new_products if tools.product_match_key(p)
                     }
@@ -354,7 +359,7 @@ async def agent_node(
 
             else:
                 # Normal replace
-                selected_products = tools.merge_products(
+                selected_products = CartManager.merge_products(
                     selected_products, new_products, append=False
                 )
 

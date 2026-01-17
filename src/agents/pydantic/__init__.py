@@ -1,79 +1,29 @@
 """
-PydanticAI Agents - Production Grade.
-=====================================
-This is the "sniper rifle" inside your LangGraph orchestra.
-
-Structure:
-- deps.py: Dependency Injection (DB, user context, etc.)
-- models.py: Structured output models (type-safe responses)
-- main_agent.py: Main sales/support agent
-- vision_agent.py: Photo recognition specialist
-- payment_agent.py: Payment flow specialist
-
-Integration with LangGraph:
-- LangGraph nodes call agent.run(message, deps=deps)
-- Agents return typed Pydantic models
-- Nodes update graph state based on agent output
+PydanticAI agents package.
 """
 
-from src.services.data.catalog_service import CatalogService
-from src.services.data.order_service import OrderService as Database
-
-from .deps import AgentDeps, create_deps_from_state
-from .models import (
-    CustomerDataExtracted,
-    EscalationInfo,
-    EscalationLevel,
-    EventType,
-    # Types (from OUTPUT_CONTRACT)
-    IntentType,
-    MessageItem,
+from src.core.models import (
+    AgentResponse,
+    SupportResponse,
     OfferResponse,
     PaymentResponse,
-    # Models
-    ProductMatch,
-    ResponseMetadata,
-    StateType,
-    SupportResponse,
     VisionResponse,
+    Product as ProductMatch,
+    Message as MessageItem,
+    Metadata as ResponseMetadata,
+    Escalation as EscalationInfo,
 )
-from .observability import configure_logfire, setup_observability
-from .payment_agent import get_payment_agent, run_payment
-from .main_agent import get_main_agent, run_main, run_offer
-from .vision_agent import get_vision_agent, run_vision
-
+from .deps import AgentDeps
 
 __all__ = [
-    # Dependencies
     "AgentDeps",
-    "Database",
-    "CatalogService",
-    "create_deps_from_state",
-    # Type Literals (OUTPUT_CONTRACT)
-    "IntentType",
-    "StateType",
-    "EventType",
-    "EscalationLevel",
-    # Models (OUTPUT_CONTRACT)
+    "AgentResponse",
+    "SupportResponse",
+    "OfferResponse",
+    "PaymentResponse",
+    "VisionResponse",
     "ProductMatch",
     "MessageItem",
     "ResponseMetadata",
     "EscalationInfo",
-    "CustomerDataExtracted",
-    "SupportResponse",
-    "OfferResponse",
-    "VisionResponse",
-    "PaymentResponse",
-    # Agent factories (lazy initialization)
-    "get_main_agent",
-    "get_vision_agent",
-    "get_payment_agent",
-    # Runners (what LangGraph nodes call)
-    "run_main",
-    "run_offer",
-    "run_vision",
-    "run_payment",
-    # Observability
-    "setup_observability",
-    "configure_logfire",
 ]

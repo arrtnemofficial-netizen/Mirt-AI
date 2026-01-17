@@ -26,7 +26,7 @@ from src.services.domain.payment.payment_validation import (
 )
 
 from .deps import AgentDeps
-from .models import PaymentResponse
+from src.core.models import PaymentResponse
 
 
 logger = logging.getLogger(__name__)

@@ -5,6 +5,8 @@ This module defines the unified data contracts for:
 - Messages
 - Metadata
 - AgentResponse (OUTPUT_CONTRACT)
+
+It serves as the Single Source of Truth (SSOT) for both domain logic and LLM structured outputs.
 """
 
 from __future__ import annotations
@@ -16,6 +18,25 @@ from pydantic import BaseModel, Field, field_validator
 from src.core.state_machine import Intent, State
 
 
+# =============================================================================
+# TYPES & ENUMS
+# =============================================================================
+
+EventType = Literal[
+    "simple_answer",
+    "clarifying_question",
+    "multi_option",
+    "escalation",
+    "end_smalltalk",
+]
+
+EscalationLevel = Literal["NONE", "L1", "L2", "L3"]
+
+
+# =============================================================================
+# PRODUCT MODEL
+# =============================================================================
+
 class Product(BaseModel):
     """
     Product as returned from the catalog tool and exposed to clients.
@@ -24,12 +45,12 @@ class Product(BaseModel):
     The `product_id` alias is provided for backward compatibility.
     """
 
-    id: int = Field(..., gt=0, description="Product ID")
-    name: str
-    size: str = ""
-    color: str = ""
-    price: float = Field(..., gt=0)
-    photo_url: str
+    id: int = Field(..., gt=0, description="Product ID from catalog (must exist).")
+    name: str = Field(description="Product name exactly as in catalog.")
+    size: str = Field(default="", description="Size from catalog sizes.")
+    color: str = Field(default="", description="Color from catalog colors.")
+    price: float = Field(..., gt=0, description="Price in UAH (must come from catalog).")
+    photo_url: str = Field(description="Photo URL from catalog.")
     sku: str | None = None
     category: str | None = None
 
@@ -54,29 +75,37 @@ class Product(BaseModel):
         return cls(**data)
 
 
+# Alias for Agent usage
+ProductMatch = Product
+
+
+# =============================================================================
+# MESSAGE MODEL
+# =============================================================================
+
 class Message(BaseModel):
     """Single message chunk to the end user."""
 
     type: Literal["text", "image"] = "text"
-    content: str
+    content: str = Field(
+        description="Plain text, NO markdown (**, ##), max 900 chars",
+    )
 
+
+# Alias for Agent usage
+MessageItem = Message
+
+
+# =============================================================================
+# METADATA & ESCALATION
+# =============================================================================
 
 class Metadata(BaseModel):
     """
     Technical metadata about the conversation step.
-
-    Note on types:
-        current_state and intent are stored as str for JSON serialization compatibility,
-        but are validated and normalized to known enum values via field_validators.
-        Use state_enum/intent_enum properties for type-safe access.
-
-    Example:
-        metadata = Metadata(current_state="STATE_0_INIT", intent="GREETING_ONLY")
-        state: State = metadata.state_enum  # Type-safe enum access
-        intent: Intent = metadata.intent_enum
     """
 
-    session_id: str = ""
+    session_id: str = Field(default="", description="Copy from input as-is. NEVER generate!")
     timestamp: str = ""
     current_state: str = Field(
         default="STATE_0_INIT", description="Current FSM state (validated against State enum)"
@@ -85,18 +114,24 @@ class Metadata(BaseModel):
         default="UNKNOWN_OR_EMPTY", description="Classified intent (validated against Intent enum)"
     )
     event_trigger: str = ""
-    escalation_level: Literal["NONE", "L1", "L2", "L3"] = "NONE"
+    escalation_level: EscalationLevel = "NONE"
     notes: str = ""
     moderation_flags: list[str] = Field(default_factory=list)
+
+    # Additional fields needed for logic
+    upsell_flow_active: bool = False
+    upsell_base_products: list[dict] = Field(default_factory=list)
+    vision_greeted: bool = False
+    height_cm: int | None = None
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    customer_city: str | None = None
+    customer_nova_poshta: str | None = None
+    selected_color: str | None = None
 
     @field_validator("current_state", mode="before")
     @classmethod
     def normalize_state(cls, v: Any) -> str:
-        """
-        Normalize state to string, validating against State enum.
-        Accepts: State enum, string (any format), None.
-        Returns: Canonical state string (e.g., "STATE_0_INIT").
-        """
         if isinstance(v, State):
             return v.value
         if isinstance(v, str) and v:
@@ -106,11 +141,6 @@ class Metadata(BaseModel):
     @field_validator("intent", mode="before")
     @classmethod
     def normalize_intent(cls, v: Any) -> str:
-        """
-        Normalize intent to string, validating against Intent enum.
-        Accepts: Intent enum, string (any case), None.
-        Returns: Canonical intent string (e.g., "GREETING_ONLY").
-        """
         if isinstance(v, Intent):
             return v.value
         if isinstance(v, str) and v:
@@ -119,40 +149,184 @@ class Metadata(BaseModel):
 
     @property
     def state_enum(self) -> State:
-        """Get current_state as State enum (type-safe access)."""
         return State.from_string(self.current_state)
 
     @property
     def intent_enum(self) -> Intent:
-        """Get intent as Intent enum (type-safe access)."""
         return Intent.from_string(self.intent)
-
-    def is_escalation_state(self) -> bool:
-        """Check if current state requires escalation."""
-        return self.state_enum.requires_escalation
 
 
 class Escalation(BaseModel):
     """Escalation descriptor when operator handover is needed."""
 
-    level: Literal["L1", "L2", "L3"]
+    level: EscalationLevel
     reason: str
-    target: str
+    target: str = "human_operator"
 
 
 class DebugInfo(BaseModel):
     """Optional debug payload for observability."""
-
     state: str | None = None
     intent: str | None = None
 
 
-class AgentResponse(BaseModel):
-    """Unified output contract for the AI agent."""
+# =============================================================================
+# CUSTOMER DATA (for STATE_5_PAYMENT_DELIVERY)
+# =============================================================================
 
-    event: str
+class CustomerDataExtracted(BaseModel):
+    """
+    Customer data for order.
+    """
+    name: str | None = Field(default=None, description="Recipient full name")
+    phone: str | None = Field(default=None, description="Phone number")
+    city: str | None = Field(default=None, description="Delivery city")
+    nova_poshta: str | None = Field(default=None, description="Nova Poshta branch")
+
+
+# =============================================================================
+# AGENT RESPONSES (OUTPUT CONTRACTS)
+# =============================================================================
+
+class AgentResponse(BaseModel):
+    """
+    Unified output contract for the AI agent.
+    Acts as the base class and the runtime contract.
+    """
+
+    event: EventType
     messages: list[Message]
     products: list[Product] = Field(default_factory=list)
     metadata: Metadata
     escalation: Escalation | None = None
     debug: DebugInfo | None = None
+
+    # Optional fields for LLM internal thought process
+    reasoning: str | None = Field(
+        default=None,
+        description="Internal debug log (Input -> Intent -> Catalog -> State -> Output)",
+    )
+    deliberation: str | None = Field(
+        default=None,
+        description="Internal deliberation/thinking process",
+    )
+    customer_data: CustomerDataExtracted | None = Field(
+        default=None,
+        description="Customer data extracted from message (for STATE_5)",
+    )
+
+    @field_validator("messages")
+    @classmethod
+    def validate_messages_not_empty(cls, v: list[Message]) -> list[Message]:
+        if not v:
+            raise ValueError("messages[] must not be empty. Always >= 1 message.")
+        return v
+
+
+# Aliases for Agent usage (Backwards Compatibility / Specific Roles)
+SupportResponse = AgentResponse
+
+
+class OfferDeliberation(BaseModel):
+    """Structure for offer deliberation."""
+    analysis: str
+
+
+class OfferResponse(AgentResponse):
+    """
+    Output contract for offer generation with deliberation.
+    """
+    # Note: We keep simple str deliberation in AgentResponse,
+    # but OfferResponse might have had a complex one.
+    # For now, we map it to the string field or keep as is if Pydantic allows.
+    pass
+
+
+class VisionResponse(BaseModel):
+    """
+    Vision agent response (photo analysis).
+    """
+    reply_to_user: str = Field(
+        description="Customer-facing response about the product in the photo",
+    )
+    identified_product: Product | None = Field(
+        default=None,
+        description="Identified product in the photo",
+    )
+    alternative_products: list[Product] = Field(
+        default_factory=list,
+        description="Alternative products if exact match not found",
+    )
+    confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score",
+    )
+    needs_clarification: bool = Field(
+        default=False,
+        description="Whether clarification is needed from the customer",
+    )
+    clarification_question: str | None = Field(
+        default=None,
+        description="Clarification question",
+    )
+    vision_quality_check: dict[str, Any] | None = Field(
+        default=None,
+        description="Quality control check data",
+    )
+
+
+class PaymentResponse(BaseModel):
+    """
+    Payment agent response (order processing).
+    """
+
+    reply_to_user: str = Field(
+        description="Customer-facing response about payment/delivery",
+    )
+
+    # Data collection status
+    customer_data: CustomerDataExtracted | None = Field(
+        default=None,
+        description="Collected customer data",
+    )
+
+    missing_fields: list[str] = Field(
+        default_factory=list,
+        description="Missing fields: name, phone, city, nova_poshta",
+    )
+
+    payment_quality_check: dict[str, Any] | None = Field(
+        default=None,
+        description="Quality control check before payment step transition (for STATE_5_PAYMENT_DELIVERY). "
+        "Required before showing requisites. "
+        "Fields: all_fields_collected, missing_fields, data_quality, normalization_applied, validation_errors, ready_for_payment",
+    )
+
+    # Order status
+    order_ready: bool = Field(
+        default=False,
+        description="Whether order is ready for CRM creation",
+    )
+
+    order_total: float = Field(
+        default=0.0,
+        description="Order total",
+    )
+
+    # Payment
+    payment_details_sent: bool = Field(
+        default=False,
+        description="Whether payment requisites were sent",
+    )
+
+    awaiting_payment_confirmation: bool = Field(
+        default=False,
+        description="Whether payment confirmation is pending",
+    )
+
+    payment_proof_detected: bool = Field(
+        default=False,
+        description="Whether payment proof is present in current message",
+    )

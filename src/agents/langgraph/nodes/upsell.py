@@ -25,7 +25,7 @@ from src.services.core.observability import log_agent_step, track_metric
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from src.agents.pydantic.models import SupportResponse
+    from src.core.models import SupportResponse
 
 
 logger = logging.getLogger(__name__)

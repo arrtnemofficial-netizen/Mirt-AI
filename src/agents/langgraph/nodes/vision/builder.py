@@ -10,7 +10,7 @@ import logging
 from contextlib import suppress
 from typing import Any
 
-from src.agents.pydantic.models import VisionResponse
+from src.core.models import VisionResponse
 from src.core.state_machine import State
 from src.services.data.catalog_service import CatalogService
 

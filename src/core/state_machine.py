@@ -210,8 +210,7 @@ class EventType(str, Enum):
 
     NOTE: This enum is kept for reference but not actively used.
     The actual event types are defined as Literal in:
-    - src/agents/pydantic/models.py (EventType Literal)
-    - src/core/models.py (AgentResponse.event as str)
+    - src/core/models.py (EventType Literal)
     """
 
     SIMPLE_ANSWER = "simple_answer"

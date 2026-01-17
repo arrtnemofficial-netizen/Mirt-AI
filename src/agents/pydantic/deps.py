@@ -19,7 +19,10 @@ if TYPE_CHECKING:
     from src.services.domain.memory.memory_service import MemoryService
     from src.services.domain.vision.vision_context import VisionContextService
 
-    from .models import StateType
+    # StateType alias (State enum keys)
+    from src.core.models import State
+    from typing import Literal
+    StateType = Literal["STATE_0_INIT", "STATE_1_DISCOVERY", "STATE_2_VISION", "STATE_3_SIZE_COLOR", "STATE_4_OFFER", "STATE_5_PAYMENT_DELIVERY", "STATE_6_UPSELL", "STATE_7_END", "STATE_8_COMPLAINT", "STATE_9_OOD"]
 
 
 if TYPE_CHECKING:
