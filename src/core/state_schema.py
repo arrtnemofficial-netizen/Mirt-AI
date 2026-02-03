@@ -72,6 +72,7 @@ class StateSchema(BaseModel, MutableMapping):
     # --- Integration Results ---
     crm_order_result: Optional[Dict[str, Any]] = None
     tool_plan_result: Optional[Dict[str, Any]] = None
+    tool_errors: List[str] = Field(default_factory=list)
     
     # --- Logic Flags ---
     is_first_message: bool = False
@@ -99,7 +100,12 @@ class StateSchema(BaseModel, MutableMapping):
     # --- MutableMapping Implementation (Ironclad Compatibility) ---
 
     def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
+        """Get value by key. Raises KeyError (not AttributeError) so state.get(k, default) works."""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            # Pydantic extra fields or legacy checkpoints without some fields
+            raise KeyError(key) from None
 
     def __setitem__(self, key: str, value: Any) -> None:
         setattr(self, key, value)

@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING, Any
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.models import BaseConversationState as ConversationState
-from src.core.state_machine import State
+from src.core.state_machine import (
+    State,
+    VALID_DIALOG_PHASES,
+    get_default_dialog_phase_for_state,
+)
 from src.services.observability import track_metric
 
 if TYPE_CHECKING:
@@ -23,24 +27,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_DIALOG_PHASES: set[str] = {
-    "INIT",
-    "DISCOVERY",
-    "VISION_DONE",
-    "WAITING_FOR_SIZE",
-    "WAITING_FOR_COLOR",
-    "SIZE_COLOR_DONE",
-    "OFFER_MADE",
-    "WAITING_FOR_DELIVERY_DATA",
-    "WAITING_FOR_PAYMENT_METHOD",
-    "WAITING_FOR_PAYMENT_PROOF",
-    "UPSELL_OFFERED",
-    # "CRM_ERROR_HANDLING",  # Removed - CRM orders integration disabled
-    "ESCALATED",
-    "COMPLAINT",
-    "OUT_OF_DOMAIN",
-    "COMPLETED",
-}
+# VALID_DIALOG_PHASES imported from core.state_machine (SSOT). No local copy.
 
 
 def _safe_hash(value: str) -> str:
@@ -116,17 +103,24 @@ def apply_loop_protection(
         after_state["metadata"] = meta
 
     dialog_phase = after_state.get("dialog_phase", "INIT")
+    current_state = after_state.get("current_state", State.STATE_0_INIT.value)
     if (
         not dialog_phase
         or not isinstance(dialog_phase, str)
-        or dialog_phase not in _ALLOWED_DIALOG_PHASES
+        or dialog_phase not in VALID_DIALOG_PHASES
     ):
+        try:
+            state_enum = State.from_string(str(current_state))
+            correct_phase = get_default_dialog_phase_for_state(state_enum)
+        except (ValueError, TypeError):
+            correct_phase = "INIT"
         logger.error(
-            "[SESSION %s] Guardrail: invalid dialog_phase=%r -> INIT",
+            "[SESSION %s] Guardrail: invalid dialog_phase=%r -> %s",
             session_id,
             dialog_phase,
+            correct_phase,
         )
-        after_state["dialog_phase"] = "INIT"
+        after_state["dialog_phase"] = correct_phase
 
     current_state = after_state.get("current_state", State.STATE_0_INIT.value)
     # Normalize state to ensure it matches Enum values

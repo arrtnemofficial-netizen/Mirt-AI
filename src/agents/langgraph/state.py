@@ -14,7 +14,12 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from src.core.models import BaseConversationState
-from src.core.state_machine import State
+from src.core.state_machine import (
+    State,
+    STATE_TO_ALLOWED_PHASES,
+    VALID_DIALOG_PHASES,
+    get_default_dialog_phase_for_state,
+)
 from src.core.state_schema import StateSchema
 
 # =============================================================================
@@ -197,43 +202,9 @@ def get_state_snapshot(state: ConversationState) -> dict[str, Any]:
     }
 
 
-# =============================================================================
-# VALID DIALOG PHASES (Single Source of Truth)
-# =============================================================================
-
-VALID_DIALOG_PHASES: frozenset[str] = frozenset({
-    "INIT",
-    "DISCOVERY",
-    "VISION_DONE",
-    "WAITING_FOR_SIZE",
-    "WAITING_FOR_COLOR",
-    "SIZE_COLOR_DONE",
-    "OFFER_MADE",
-    "WAITING_FOR_DELIVERY_DATA",
-    "WAITING_FOR_PAYMENT_METHOD",
-    "WAITING_FOR_PAYMENT_PROOF",
-    "UPSELL_OFFERED",
-    "COMPLETED",
-    "COMPLAINT",
-    "OUT_OF_DOMAIN",
-    "ESCALATED",  # Used by vision/escalation nodes
-    # "CRM_ERROR_HANDLING",  # Removed - CRM orders integration disabled
-})
-
-# Map: FSM state -> allowed dialog_phases
-# This ensures current_state and dialog_phase are consistent
-STATE_TO_ALLOWED_PHASES: dict[State, frozenset[str]] = {
-    State.STATE_0_INIT: frozenset({"INIT", "DISCOVERY", "VISION_DONE", "WAITING_FOR_SIZE", "WAITING_FOR_DELIVERY_DATA", "COMPLAINT", "COMPLETED", "OUT_OF_DOMAIN"}),
-    State.STATE_1_DISCOVERY: frozenset({"DISCOVERY", "WAITING_FOR_SIZE", "SIZE_COLOR_DONE", "WAITING_FOR_DELIVERY_DATA", "COMPLAINT", "COMPLETED", "OUT_OF_DOMAIN"}),
-    State.STATE_2_VISION: frozenset({"VISION_DONE", "DISCOVERY", "WAITING_FOR_SIZE", "OUT_OF_DOMAIN"}),
-    State.STATE_3_SIZE_COLOR: frozenset({"WAITING_FOR_SIZE", "WAITING_FOR_COLOR", "SIZE_COLOR_DONE"}),
-    State.STATE_4_OFFER: frozenset({"OFFER_MADE", "WAITING_FOR_DELIVERY_DATA"}),
-    State.STATE_5_PAYMENT_DELIVERY: frozenset({"WAITING_FOR_DELIVERY_DATA", "WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_PAYMENT_PROOF", "UPSELL_OFFERED"}),
-    State.STATE_6_UPSELL: frozenset({"UPSELL_OFFERED", "COMPLETED"}),
-    State.STATE_7_END: frozenset({"COMPLETED"}),
-    State.STATE_8_COMPLAINT: frozenset({"COMPLAINT", "COMPLETED", "ESCALATED"}),
-    State.STATE_9_OOD: frozenset({"OUT_OF_DOMAIN", "COMPLETED"}),
-}
+# STATE_TO_ALLOWED_PHASES, VALID_DIALOG_PHASES, get_default_dialog_phase_for_state
+# are imported from core.state_machine (SSOT). Re-exported here for consumers of
+# agents.langgraph.state (e.g. validate_state below).
 
 
 # =============================================================================

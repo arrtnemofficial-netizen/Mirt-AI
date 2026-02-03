@@ -22,7 +22,11 @@ import json
 import logging
 from typing import Any
 
-from src.agents.langgraph.state import detect_state_loop, validate_state
+from src.agents.langgraph.state import (
+    detect_state_loop,
+    get_default_dialog_phase_for_state,
+    validate_state,
+)
 from src.core.product_adapter import ProductAdapter
 from src.services.observability import log_trace, log_validation_result, track_metric
 
@@ -57,6 +61,7 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # RUNTIME GUARDRAILS: Validate state consistency and detect loops
     state_errors = validate_state(state)
+    phase_fix: dict[str, str] = {}
     if state_errors:
         errors.extend([f"State validation: {e}" for e in state_errors])
         logger.warning(
@@ -65,6 +70,21 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
             state_errors,
         )
         track_metric("state_validation_failed", 1, {"session_id": session_id})
+        # Auto-normalize: fix dialog_phase when inconsistent with current_state
+        if any("Inconsistent state/phase" in e for e in state_errors):
+            try:
+                current_state_str = state.get("current_state", "")
+                state_enum = State(current_state_str)
+                correct_phase = get_default_dialog_phase_for_state(state_enum)
+                phase_fix = {"dialog_phase": correct_phase}
+                logger.info(
+                    "[SESSION %s] Auto-normalized dialog_phase to %s for current_state=%s",
+                    session_id,
+                    correct_phase,
+                    current_state_str,
+                )
+            except (ValueError, KeyError, TypeError):
+                pass
 
     # Loop detection
     metadata = state.get("metadata", {})
@@ -171,13 +191,16 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         output_metadata["loop_detected"] = True
         output_metadata["loop_phase"] = state.get("dialog_phase")
 
-    return {
+    result: dict[str, Any] = {
         "validation_errors": errors,
         "retry_count": retry_count,
         "last_error": errors[0] if errors else None,
         "step_number": state.get("step_number", 0) + 1,
         "metadata": output_metadata,
     }
+    if phase_fix:
+        result.update(phase_fix)
+    return result
 
 
 def _get_latest_assistant_response(messages: list[Any]) -> dict[str, Any] | None:

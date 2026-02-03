@@ -97,7 +97,11 @@ def get_product_colors(product_name: str) -> list[dict[str, str]]:
             continue
 
         product_name_in_yaml = product_data.get("name", "").strip().lower()
-        if product_name_norm == product_name_in_yaml:
+        
+        # Match logic:
+        # 1. Exact match
+        # 2. Prefix match (e.g. "Сукня Анна" matches "Сукня Анна (малина)")
+        if product_name_norm == product_name_in_yaml or product_name_norm.startswith(product_name_in_yaml):
             colors_data = product_data.get("colors", {})
             if not isinstance(colors_data, dict):
                 return []

@@ -16,7 +16,16 @@ from src.agents.langgraph.edges import (
     route_after_vision,
 )
 from src.agents.langgraph.nodes.intent import detect_intent_from_text
-from src.core.state_machine import TRANSITIONS, Intent, State, get_next_state
+from src.core.state_machine import (
+    TRANSITIONS,
+    Intent,
+    State,
+    STATE_DEFAULT_PHASE,
+    STATE_TO_ALLOWED_PHASES,
+    VALID_DIALOG_PHASES,
+    get_default_dialog_phase_for_state,
+    get_next_state,
+)
 
 
 # =============================================================================
@@ -45,6 +54,37 @@ class TestStateValidity:
         for intent in Intent:
             assert isinstance(intent.value, str)
             assert intent.value.isupper()
+
+
+class TestDialogPhasesSSOT:
+    """VALID_DIALOG_PHASES derived from STATE_TO_ALLOWED_PHASES - no duplication."""
+
+    def test_valid_dialog_phases_equals_union_of_allowed(self):
+        """VALID_DIALOG_PHASES must equal union of all STATE_TO_ALLOWED_PHASES values."""
+        union = frozenset().union(*STATE_TO_ALLOWED_PHASES.values())
+        assert VALID_DIALOG_PHASES == union, (
+            f"VALID_DIALOG_PHASES must be derived from STATE_TO_ALLOWED_PHASES. "
+            f"Diff: {VALID_DIALOG_PHASES ^ union}"
+        )
+
+
+class TestStateDefaultPhase:
+    """STATE_DEFAULT_PHASE must be consistent with STATE_TO_ALLOWED_PHASES."""
+
+    def test_default_phase_is_allowed_for_each_state(self):
+        """Default phase for each state must be in STATE_TO_ALLOWED_PHASES."""
+        for state_enum, default_phase in STATE_DEFAULT_PHASE.items():
+            allowed = STATE_TO_ALLOWED_PHASES.get(state_enum, frozenset())
+            assert default_phase in allowed, (
+                f"STATE_DEFAULT_PHASE[{state_enum}]={default_phase} "
+                f"not in allowed phases {sorted(allowed)}"
+            )
+
+    def test_get_default_dialog_phase_for_state(self):
+        """get_default_dialog_phase_for_state returns valid phase."""
+        assert get_default_dialog_phase_for_state(State.STATE_1_DISCOVERY) == "DISCOVERY"
+        assert get_default_dialog_phase_for_state(State.STATE_3_SIZE_COLOR) == "WAITING_FOR_SIZE"
+        assert get_default_dialog_phase_for_state(State.STATE_0_INIT) == "INIT"
 
 
 # =============================================================================

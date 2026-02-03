@@ -327,6 +327,57 @@ def get_next_state(current_state: State, intent: Intent) -> State:
 
 
 # =============================================================================
+# DIALOG PHASES (Single Source of Truth)
+# =============================================================================
+# FSM state → allowed dialog_phases. Defines which phase strings are valid per state.
+# VALID_DIALOG_PHASES = union of all allowed phases (derived, no duplication).
+# Both agents and services import from here — core has no agents/services deps.
+
+STATE_TO_ALLOWED_PHASES: dict[State, frozenset[str]] = {
+    State.STATE_0_INIT: frozenset({"INIT", "DISCOVERY", "VISION_DONE", "WAITING_FOR_SIZE", "WAITING_FOR_DELIVERY_DATA", "COMPLAINT", "COMPLETED", "OUT_OF_DOMAIN"}),
+    State.STATE_1_DISCOVERY: frozenset({"DISCOVERY", "WAITING_FOR_SIZE", "SIZE_COLOR_DONE", "WAITING_FOR_DELIVERY_DATA", "COMPLAINT", "COMPLETED", "OUT_OF_DOMAIN"}),
+    State.STATE_2_VISION: frozenset({"VISION_DONE", "DISCOVERY", "WAITING_FOR_SIZE", "OUT_OF_DOMAIN"}),
+    State.STATE_3_SIZE_COLOR: frozenset({"WAITING_FOR_SIZE", "WAITING_FOR_COLOR", "SIZE_COLOR_DONE"}),
+    State.STATE_4_OFFER: frozenset({"OFFER_MADE", "WAITING_FOR_DELIVERY_DATA"}),
+    State.STATE_5_PAYMENT_DELIVERY: frozenset({"WAITING_FOR_DELIVERY_DATA", "WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_PAYMENT_PROOF", "UPSELL_OFFERED"}),
+    State.STATE_6_UPSELL: frozenset({"UPSELL_OFFERED", "COMPLETED"}),
+    State.STATE_7_END: frozenset({"COMPLETED"}),
+    State.STATE_8_COMPLAINT: frozenset({"COMPLAINT", "COMPLETED", "ESCALATED"}),
+    State.STATE_9_OOD: frozenset({"OUT_OF_DOMAIN", "COMPLETED"}),
+}
+
+# Derived: all phase strings that appear in STATE_TO_ALLOWED_PHASES.
+# Guarantees consistency — cannot have phase in mapping but not in valid set.
+VALID_DIALOG_PHASES: frozenset[str] = frozenset().union(*STATE_TO_ALLOWED_PHASES.values())
+
+
+# =============================================================================
+# DEFAULT DIALOG PHASE (for auto-normalization)
+# =============================================================================
+# Canonical default dialog_phase per FSM state.
+# Used when fixing inconsistent state (e.g. dialog_phase=INIT with current_state=STATE_1).
+# Invariant: STATE_DEFAULT_PHASE[s] must be in STATE_TO_ALLOWED_PHASES[s].
+
+STATE_DEFAULT_PHASE: dict[State, str] = {
+    State.STATE_0_INIT: "INIT",
+    State.STATE_1_DISCOVERY: "DISCOVERY",
+    State.STATE_2_VISION: "DISCOVERY",
+    State.STATE_3_SIZE_COLOR: "WAITING_FOR_SIZE",
+    State.STATE_4_OFFER: "OFFER_MADE",
+    State.STATE_5_PAYMENT_DELIVERY: "WAITING_FOR_DELIVERY_DATA",
+    State.STATE_6_UPSELL: "UPSELL_OFFERED",
+    State.STATE_7_END: "COMPLETED",
+    State.STATE_8_COMPLAINT: "COMPLAINT",
+    State.STATE_9_OOD: "OUT_OF_DOMAIN",
+}
+
+
+def get_default_dialog_phase_for_state(state_enum: State) -> str:
+    """Return canonical default dialog_phase for FSM state. Used for auto-normalization."""
+    return STATE_DEFAULT_PHASE.get(state_enum, "INIT")
+
+
+# =============================================================================
 # PLATFORM ALIASES (Telegram / ManyChat)
 # =============================================================================
 

@@ -192,15 +192,21 @@ async def vision_node(
     # КРИТИЧНО: Передаємо реальний current_state, щоб vision_agent знав контекст
     # Якщо це product addition в STATE_5 - залишаємо STATE_5, інакше STATE_2_VISION
     metadata = state.get("metadata", {}) or {}
-    is_product_addition = bool(metadata.get("product_addition_context", False))
+    # Auto-detect product addition context if we are deep in the funnel
+    # This ensures that "Yes + photo" in STATE_4/5 adds to order instead of resetting flow
+    if current_state_from_state in (State.STATE_4_OFFER.value, State.STATE_5_PAYMENT_DELIVERY.value):
+        is_product_addition = True
+    else:
+        is_product_addition = bool(metadata.get("product_addition_context", False))
     current_state_from_state = state.get("current_state", State.STATE_2_VISION.value)
     
-    if is_product_addition and current_state_from_state == State.STATE_5_PAYMENT_DELIVERY.value:
-        # Product addition в STATE_5 - залишаємо STATE_5 для правильного prompt
-        deps.current_state = State.STATE_5_PAYMENT_DELIVERY.value
+    if is_product_addition and current_state_from_state in (State.STATE_4_OFFER.value, State.STATE_5_PAYMENT_DELIVERY.value):
+        # Product addition в STATE_4/5 - залишаємо поточний стан для правильного prompt
+        deps.current_state = current_state_from_state
         logger.info(
-            "[SESSION %s] Vision called from STATE_5 (product addition), using STATE_5 prompt",
+            "[SESSION %s] Vision called from deep funnel (%s), preserving state for product addition",
             session_id,
+            current_state_from_state,
         )
     else:
         # Звичайний виклик vision - використовуємо STATE_2_VISION
@@ -611,13 +617,22 @@ async def vision_node(
     #    - Залишаємося в WAITING_FOR_PAYMENT_PROOF
     # =====================================================
     if is_product_addition and selected_products:
-        # Product addition: товар додано, залишаємося в payment flow
-        # Не переходимо до SIZE_COLOR, бо це додавання до існуючого замовлення
-        next_phase = state.get("dialog_phase", "WAITING_FOR_PAYMENT_PROOF")
-        next_state = State.STATE_5_PAYMENT_DELIVERY.value
+        # Product addition: товар додано, залишаємося в поточному flow
+        # Для STATE_5 - залишаємося в Payment
+        # Для STATE_4 - залишаємося в Offer
+        next_state = current_state_from_state
+        
+        if next_state == State.STATE_5_PAYMENT_DELIVERY.value:
+             next_phase = state.get("dialog_phase", "WAITING_FOR_PAYMENT_PROOF")
+        elif next_state == State.STATE_4_OFFER.value:
+             next_phase = state.get("dialog_phase", "OFFER_MADE")
+        else:
+             next_phase = state.get("dialog_phase", "WAITING_FOR_DELIVERY_DATA")
+
         logger.info(
-            "[SESSION %s] Product addition: товар додано, залишаємося в payment flow (phase=%s)",
+            "[SESSION %s] Product addition: товар додано, залишаємося в flow %s (phase=%s)",
             session_id,
+            next_state,
             next_phase,
         )
     elif selected_products:

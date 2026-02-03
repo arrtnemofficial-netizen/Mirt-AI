@@ -251,11 +251,12 @@ async def offer_node(
         
         new_state = transition.next_state
         dialog_phase = transition.dialog_phase
+        current_state_str = state.get("current_state", State.STATE_4_OFFER.value)
         
         logger.info(
             "🔄 [SESSION %s] Offer → SSOT Transition: %s → %s (dialog_phase=%s, reason=%s)",
             session_id,
-            current_state,
+            current_state_str,
             new_state,
             dialog_phase,
             transition.reason,
@@ -293,9 +294,14 @@ async def offer_node(
                 message=str(e) or type(e).__name__,
             )
 
+        # Defensive: state may be ConversationState without tool_errors (legacy checkpoints)
+        try:
+            existing_errors = state.get("tool_errors", [])
+        except (AttributeError, KeyError):
+            existing_errors = []
         return {
             "last_error": str(e),
-            "tool_errors": [*state.get("tool_errors", []), f"Offer error: {e}"],
+            "tool_errors": [*existing_errors, f"Offer error: {e}"],
             "retry_count": state.get("retry_count", 0) + 1,
             "step_number": state.get("step_number", 0) + 1,
         }
