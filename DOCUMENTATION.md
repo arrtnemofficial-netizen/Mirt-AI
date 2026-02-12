@@ -28,6 +28,11 @@ docs/deployment/DEPLOYMENT.md → docs/operations/CELERY.md → docker-compose.y
 docs/quality/TESTING.md → docs/architecture/FSM_TRANSITION_TABLE.md → tests/
 ```
 
+### ДЛЯ INSTAGRAM DIRECT ЯКОСТІ
+```
+docs/INSTAGRAM_DIRECT_QUALITY_PLAN.md → docs/quality/TESTING.md → tests/
+```
+
 ---
 
 ## 📁 СТРУКТУРА ДОКУМЕНТАЦІЇ
@@ -109,6 +114,7 @@ Mirt-AI/
 | `docs/deployment/DEPLOYMENT.md` | DevOps | Деплой інструкції |
 | `docs/operations/CELERY.md` | Backend Dev | Background tasks |
 | `docs/development/CONTRIBUTING.md` | Contributors | Правила контрибʼюції |
+| `docs/INSTAGRAM_DIRECT_QUALITY_PLAN.md` | Backend/QA/PM | План якості для Instagram Direct (reliability + test matrix) |
 | `data/vision/README.md` | Vision Engineers | Vision система |
 | `client_script/README.md` | Business / QA | Клієнтські правила |
 
