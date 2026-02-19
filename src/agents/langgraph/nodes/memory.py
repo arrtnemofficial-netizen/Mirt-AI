@@ -25,6 +25,7 @@ from typing import Any
 
 from src.agents.pydantic.memory_agent import analyze_for_memory, extract_quick_facts
 from src.agents.pydantic.memory_models import NewFact
+from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.memory import MemoryService
 from src.services.observability import log_agent_step, track_metric
@@ -179,14 +180,14 @@ MEMORY_TRIGGER_PHASES = {
 
 # States that trigger memory update
 MEMORY_TRIGGER_STATES = {
-    "STATE_0_INIT",
-    "STATE_1_DISCOVERY",
-    "STATE_2_VISION",
-    "STATE_3_SIZE_COLOR",
-    "STATE_4_OFFER",
-    "STATE_5_PAYMENT_DELIVERY",
-    "STATE_7_FINISHED",
-    "STATE_8_COMPLAINT",
+    State.STATE_0_INIT,
+    State.STATE_1_DISCOVERY,
+    State.STATE_2_VISION,
+    State.STATE_3_SIZE_COLOR,
+    State.STATE_4_OFFER,
+    State.STATE_5_PAYMENT_DELIVERY,
+    State.STATE_7_END,
+    State.STATE_8_COMPLAINT,
 }
 
 
