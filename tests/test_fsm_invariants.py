@@ -312,7 +312,7 @@ class TestRoutingConsistency:
 
     def test_route_after_agent_returns_valid_route(self):
         """route_after_agent must return valid route."""
-        valid_routes = {"validation", "offer", "end"}
+        valid_routes = {"validation", "offer", "payment", "end", "post_agent_memory"}
 
         route = route_after_agent({})
         assert route in valid_routes
