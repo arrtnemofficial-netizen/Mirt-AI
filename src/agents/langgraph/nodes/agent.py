@@ -11,9 +11,13 @@ Responsibility:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Callable
+
+import httpx
+from pydantic import ValidationError
 
 # Core & Config
 from src.conf.config import settings
@@ -43,6 +47,60 @@ _extract_size_from_response = extract_size_from_response
 _get_instructions_for_intent = get_instructions_for_intent
 
 logger = logging.getLogger(__name__)
+
+
+def _build_agent_error_payload(
+    *,
+    error_code: str,
+    error_type: str,
+    recoverable: bool,
+    next_action: str,
+    error: Exception,
+) -> dict[str, Any]:
+    return {
+        "error_code": error_code,
+        "error_type": error_type,
+        "recoverable": recoverable,
+        "next_action": next_action,
+        "message": str(error),
+    }
+
+
+def _classify_agent_error(error: Exception) -> dict[str, Any]:
+    if isinstance(error, (ValidationError, ValueError, TypeError)):
+        return _build_agent_error_payload(
+            error_code="AGENT_VALIDATION_ERROR",
+            error_type="validation",
+            recoverable=True,
+            next_action="retry_with_validation",
+            error=error,
+        )
+
+    if isinstance(error, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return _build_agent_error_payload(
+            error_code="AGENT_TIMEOUT",
+            error_type="timeout",
+            recoverable=True,
+            next_action="retry_with_backoff",
+            error=error,
+        )
+
+    if isinstance(error, (httpx.HTTPError, ConnectionError, OSError)):
+        return _build_agent_error_payload(
+            error_code="AGENT_PROVIDER_UNAVAILABLE",
+            error_type="network_provider",
+            recoverable=True,
+            next_action="retry_provider_or_fallback",
+            error=error,
+        )
+
+    return _build_agent_error_payload(
+        error_code="AGENT_UNEXPECTED_ERROR",
+        error_type="unexpected",
+        recoverable=False,
+        next_action="escalate_to_human",
+        error=error,
+    )
 
 
 async def agent_node(
@@ -219,10 +277,30 @@ async def agent_node(
         }
 
     except Exception as e:
-        logger.error("Agent execution failed: %s", e, exc_info=True)
-        # Fail safe return
+        error_payload = _classify_agent_error(e)
+        logger.error(
+            "Agent execution failed: code=%s type=%s recoverable=%s error=%s",
+            error_payload["error_code"],
+            error_payload["error_type"],
+            error_payload["recoverable"],
+            e,
+            exc_info=True,
+        )
+        track_metric(
+            "agent_errors_total",
+            1,
+            {
+                "state": current_state_str,
+                "error_code": str(error_payload["error_code"]),
+                "error_type": str(error_payload["error_type"]),
+            },
+        )
+
         return {
-            "current_state": current_state_str, 
+            "current_state": current_state_str,
             "error": str(e),
+            "agent_error": error_payload,
+            "agent_response": {"agent_error": error_payload},
+            "last_error": str(error_payload["error_code"]),
             "step_number": state.get("step_number", 0) + 1,
         }
