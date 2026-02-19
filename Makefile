@@ -1,4 +1,4 @@
-.PHONY: format lint test run clean docker-build
+.PHONY: format lint test run clean docker-build regression-gate
 
 # Variables
 PYTHON := python
@@ -42,3 +42,7 @@ clean:
 	find . -type d -name ".pytest_cache" -exec rm -rf {} +
 	find . -type d -name ".mypy_cache" -exec rm -rf {} +
 	find . -type d -name ".ruff_cache" -exec rm -rf {} +
+
+
+regression-gate:
+	$(PYTHON) scripts/run_regression_gate.py

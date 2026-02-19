@@ -19,6 +19,7 @@ These scripts are critical for the production environment and are used in the Do
 |--------|-------------|-------|
 | `start_telegram_bot.ps1` | PowerShell helper to start the bot locally with Ngrok checking. | `.\scripts\start_telegram_bot.ps1` |
 | `generate_vision_artifacts.py` | Helper to generate Vision API prompts from configuration. | `python scripts/generate_vision_artifacts.py` |
+| `run_regression_gate.py` | Local regression gate: validates Python baseline, dependency manifest alignment, lint availability, and critical pytest suites. | `python scripts/run_regression_gate.py --quick` or `python scripts/run_regression_gate.py` |
 
 ## 🗄️ Archive
 
