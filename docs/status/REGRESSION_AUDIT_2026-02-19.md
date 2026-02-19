@@ -1,32 +1,35 @@
 # Regression Audit (2026-02-19)
 
 ## Scope
-Поглиблена перевірка після останніх великих комітів із фокусом на критичні контракти: graph build, payment flow, vision contract, STATE_5 сценарії.
+Поглиблена перевірка після останніх великих комітів із акцентом на **ідеальність AI-шару**: промпти, контракти, анти-smell контроль, vision-контракт, плюс базові системні регресії.
 
 ## Implemented gate system
-- Додано `scripts/run_regression_gate.py`.
-- Додано `make regression-gate`.
-- Gate перевіряє:
-  1. Базову сумісність Python версії (`>=3.11`).
-  2. Узгодженість ключових залежностей між `pyproject.toml` і `requirements.txt`.
-  3. Lint (`ruff check src tests`).
-  4. Критичні тести (smoke + payment/vision/scenario).
-- Для обмежень середовища (proxy/package-resolver) повертає `warn`, щоб відокремити інфраструктурну проблему від реальної регресії коду.
+- Додано/оновлено `scripts/run_regression_gate.py`.
+- Додано `make regression-gate` і `make ai-layer-gate`.
+- Новий режим: `--ai-layer-only`.
+
+### AI-layer gates (обов'язкові)
+1. `python scripts/check_ai_smell_comments.py`
+2. `pytest -q tests/unit/test_prompt_compliance.py`
+3. `pytest -q tests/unit/test_prompt_contract_snapshot.py`
+4. `pytest -q tests/test_vision_contract.py`
+
+### Cross-layer regression gates
+1. `ruff check src tests`
+2. `pytest -q tests/smoke/test_graph_builds.py`
+3. `pytest -q tests/unit/test_payment_node.py tests/scenario/test_state5_scenarios.py`
+
+### Stability guards
+- Перевірка Python baseline (`>=3.11`).
+- Перевірка узгодженості critical dependency pins між `pyproject.toml` і `requirements.txt`.
+- Інфраструктурні обмеження (proxy / package resolver) маркуються як `warn`, а не як псевдо-регресія коду.
 
 ## Findings
-1. **Dependency drift знайдено і виправлено:**
-   - `requirements.txt` мав плаваючі версії, що могли тягнути несумісні оновлення.
-   - Файл вирівняно з pinned-версіями з `pyproject.toml` для критичних пакетів.
-
-2. **Середовище перевірки обмежене:**
-   - Локально Python 3.10, тоді як проєкт вимагає 3.11+.
-   - Встановлення пакетів блокується proxy (`403 Forbidden`), тому повний pytest прогін локально недоступний.
-
-3. **Стан коду за доступними перевірками:**
-   - Gate виконується, формує структурований звіт і не падає на інфраструктурних блокерах.
-   - Виявлено велику кількість lint-порушень (не нових у цій задачі), що потребує окремого cleanup-циклу.
+1. **Dependency drift** виправлено вирівнюванням pinned версій.
+2. **AI-layer gate** виділено в окремий режим, щоб перевіряти саме якість AI-шару незалежно від решти системи.
+3. Поточне локальне середовище обмежене (Python 3.10, proxy 403), тому повний verdict треба підтверджувати в CI на Python 3.11/3.12.
 
 ## Next actions
-1. Запустити `make regression-gate` в CI на Python 3.11/3.12 з доступом до package registry.
-2. Винести lint cleanup у окремий PR (без змішування з функціональними змінами).
-3. Додати регресійний gate в CI як обов'язковий статус для merge.
+1. Додати `make ai-layer-gate` у CI як required status check.
+2. Тримати prompt/vision зміни тільки разом із відповідними AI-layer тестами.
+3. Винести lint cleanup в окремий PR без функціональних змін.

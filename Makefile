@@ -1,4 +1,4 @@
-.PHONY: format lint test run clean docker-build regression-gate
+.PHONY: format lint test run clean docker-build regression-gate ai-layer-gate
 
 # Variables
 PYTHON := python
@@ -46,3 +46,7 @@ clean:
 
 regression-gate:
 	$(PYTHON) scripts/run_regression_gate.py
+
+
+ai-layer-gate:
+	$(PYTHON) scripts/run_regression_gate.py --ai-layer-only

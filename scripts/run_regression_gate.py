@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Локальний регресійний gate для швидкої перевірки стабільності.
+"""Локальний регресійний gate із фокусом на AI-шар.
 
-Скрипт не вимагає сторонніх бібліотек; запускає доступні команди,
-фіксує їх статус і повертає зрозумілий звіт.
+Запускає стабільний набір перевірок, відокремлює інфраструктурні обмеження
+від дефектів коду та підтримує окремий режим `--ai-layer-only`.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -27,7 +26,7 @@ class CheckResult:
     details: str
 
 
-def _run(command: list[str], *, timeout_s: int = 120) -> tuple[int, str]:
+def _run(command: list[str], *, timeout_s: int = 180) -> tuple[int, str]:
     proc = subprocess.run(
         command,
         cwd=ROOT,
@@ -44,26 +43,36 @@ def _tool_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def _tail(text: str, n: int = 12) -> str:
+    return "\n".join(text.splitlines()[-n:]) if text else "No output"
+
+
 def check_python_version(*, strict: bool) -> CheckResult:
     major, minor = sys.version_info[:2]
     if (major, minor) >= (3, 11):
         status = "pass"
     else:
         status = "fail" if strict else "warn"
-    details = f"Detected Python {major}.{minor}; required >= 3.11"
     return CheckResult(
         name="python-version",
         status=status,
         command="python --version",
-        details=details,
+        details=f"Detected Python {major}.{minor}; required >= 3.11",
     )
 
 
 def check_manifest_alignment() -> CheckResult:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-
-    critical = ["pydantic-ai", "langgraph", "openai", "pydantic", "fastapi", "pytest-asyncio"]
+    critical = [
+        "pydantic-ai",
+        "langgraph",
+        "openai",
+        "pydantic",
+        "fastapi",
+        "pytest",
+        "pytest-asyncio",
+    ]
     mismatches: list[str] = []
 
     for package in critical:
@@ -77,17 +86,15 @@ def check_manifest_alignment() -> CheckResult:
         if "==" in py and "==" in req and py.split("==", 1)[1] != req.split("==", 1)[1]:
             mismatches.append(f"{package}: pyproject={py} requirements={req}")
 
-    status = "pass" if not mismatches else "fail"
-    details = "OK" if not mismatches else "; ".join(mismatches)
     return CheckResult(
         name="dependency-manifest-alignment",
-        status=status,
+        status="pass" if not mismatches else "fail",
         command="internal-check",
-        details=details,
+        details="OK" if not mismatches else "; ".join(mismatches),
     )
 
 
-def check_command(name: str, command: list[str], *, required: bool = True) -> CheckResult:
+def run_command_check(name: str, command: list[str], *, required: bool = True) -> CheckResult:
     if not _tool_exists(command[0]):
         return CheckResult(
             name=name,
@@ -100,49 +107,70 @@ def check_command(name: str, command: list[str], *, required: bool = True) -> Ch
     if code == 0:
         return CheckResult(name=name, status="pass", command=" ".join(command), details="OK")
 
-    tail = "\n".join(out.splitlines()[-10:]) if out else "No output"
     env_limited_markers = [
         "No module named 'pytest_asyncio'",
         "Cannot connect to proxy",
         "No matching distribution found",
     ]
     if any(marker in out for marker in env_limited_markers):
-        return CheckResult(name=name, status="warn", command=" ".join(command), details=tail)
+        return CheckResult(name=name, status="warn", command=" ".join(command), details=_tail(out))
 
-    status = "fail" if required else "warn"
-    return CheckResult(name=name, status=status, command=" ".join(command), details=tail)
+    return CheckResult(
+        name=name,
+        status="fail" if required else "warn",
+        command=" ".join(command),
+        details=_tail(out),
+    )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Run local regression gate checks")
-    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output")
-    parser.add_argument("--quick", action="store_true", help="Skip heavy checks")
-    parser.add_argument("--strict-python", action="store_true", help="Fail when Python < 3.11")
-    args = parser.parse_args()
-
-    results: list[CheckResult] = [
-        check_python_version(strict=args.strict_python),
-        check_manifest_alignment(),
-        check_command("ruff", ["ruff", "check", "src", "tests"], required=False),
+def build_ai_layer_checks() -> list[CheckResult]:
+    checks = [
+        run_command_check("ai-smell-comments", ["python", "scripts/check_ai_smell_comments.py"], required=True),
+        run_command_check("prompt-compliance", ["pytest", "-q", "tests/unit/test_prompt_compliance.py"], required=True),
+        run_command_check("prompt-contract-snapshot", ["pytest", "-q", "tests/unit/test_prompt_contract_snapshot.py"], required=True),
+        run_command_check("vision-contract", ["pytest", "-q", "tests/test_vision_contract.py"], required=True),
     ]
+    return checks
 
-    if not args.quick:
-        results.extend(
+
+def build_general_checks(*, quick: bool) -> list[CheckResult]:
+    checks = [
+        run_command_check("ruff", ["ruff", "check", "src", "tests"], required=False),
+    ]
+    if not quick:
+        checks.extend(
             [
-                check_command("smoke-graph", ["pytest", "-q", "tests/smoke/test_graph_builds.py"], required=True),
-                check_command(
+                run_command_check("smoke-graph", ["pytest", "-q", "tests/smoke/test_graph_builds.py"], required=True),
+                run_command_check(
                     "critical-regression",
                     [
                         "pytest",
                         "-q",
                         "tests/unit/test_payment_node.py",
-                        "tests/test_vision_contract.py",
                         "tests/scenario/test_state5_scenarios.py",
                     ],
                     required=True,
                 ),
             ]
         )
+    return checks
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run local regression gate checks")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output")
+    parser.add_argument("--quick", action="store_true", help="Skip heavy non-AI checks")
+    parser.add_argument("--strict-python", action="store_true", help="Fail when Python < 3.11")
+    parser.add_argument("--ai-layer-only", action="store_true", help="Run only AI-layer quality gates")
+    args = parser.parse_args()
+
+    results: list[CheckResult] = [check_python_version(strict=args.strict_python), check_manifest_alignment()]
+
+    if args.ai_layer_only:
+        results.extend(build_ai_layer_checks())
+    else:
+        results.extend(build_ai_layer_checks())
+        results.extend(build_general_checks(quick=args.quick))
 
     if args.json:
         print(json.dumps([asdict(r) for r in results], ensure_ascii=False, indent=2))
@@ -152,8 +180,7 @@ def main() -> int:
             print(f"{icon} {item.name}: {item.details}")
             print(f"   $ {item.command}")
 
-    failed = [r for r in results if r.status == "fail"]
-    return 1 if failed else 0
+    return 1 if any(r.status == "fail" for r in results) else 0
 
 
 if __name__ == "__main__":
