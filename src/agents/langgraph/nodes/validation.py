@@ -27,6 +27,7 @@ from src.agents.langgraph.state import (
     get_default_dialog_phase_for_state,
     validate_state,
 )
+from src.core.state_machine import State
 from src.core.product_adapter import ProductAdapter
 from src.services.observability import log_trace, log_validation_result, track_metric
 
@@ -74,7 +75,7 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
         if any("Inconsistent state/phase" in e for e in state_errors):
             try:
                 current_state_str = state.get("current_state", "")
-                state_enum = State(current_state_str)
+                state_enum = State.from_string(current_state_str)
                 correct_phase = get_default_dialog_phase_for_state(state_enum)
                 phase_fix = {"dialog_phase": correct_phase}
                 logger.info(
@@ -83,8 +84,25 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
                     correct_phase,
                     current_state_str,
                 )
-            except (ValueError, KeyError, TypeError):
-                pass
+            except (ValueError, KeyError, TypeError, AttributeError):
+                logger.warning(
+                    "[SESSION %s] Failed to auto-normalize dialog_phase for current_state=%s",
+                    session_id,
+                    state.get("current_state", ""),
+                )
+                try:
+                    track_metric(
+                        "fallback_triggered",
+                        1,
+                        {
+                            "fallback_reason": "validation_phase_autofix_failed",
+                            "session_id": session_id or "unknown",
+                            "state": str(state.get("current_state") or ""),
+                            "node": "validation_node",
+                        },
+                    )
+                except Exception as metric_error:
+                    logger.debug("Failed to emit validation fallback metric: %s", metric_error)
 
     # Loop detection
     metadata = state.get("metadata", {})
@@ -107,10 +125,13 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     if not assistant_response:
         # No response to validate - might be first step
-        return {
+        result: dict[str, Any] = {
             "validation_errors": [],
             "step_number": state.get("step_number", 0) + 1,
         }
+        if phase_fix:
+            result.update(phase_fix)
+        return result
 
     # 1. Validate products
     products = assistant_response.get("products", [])
@@ -214,8 +235,8 @@ def _get_latest_assistant_response(messages: list[Any]) -> dict[str, Any] | None
     if content:
         try:
             return json.loads(content)
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except (json.JSONDecodeError, TypeError) as parse_error:
+            logger.debug("Failed to parse assistant response JSON: %s", parse_error)
     return None
 
 
@@ -336,15 +357,16 @@ def _validate_pydantic_schema(response: dict[str, Any]) -> list[str]:
     errors = []
 
     try:
+        from pydantic import ValidationError
         from src.agents.pydantic.models import SupportResponse
 
         # Try to parse response as SupportResponse
         # This will catch type mismatches, missing required fields, etc.
         try:
-            parsed = SupportResponse(**response)
+            SupportResponse(**response)
             # If parsing succeeded, schema is valid
             # Additional checks can be added here if needed
-        except Exception as e:
+        except (ValidationError, TypeError, ValueError) as e:
             # Pydantic validation error - schema mismatch
             errors.append(f"Schema validation failed: {e!s}")
             logger.warning("Pydantic schema validation failed: %s", e)

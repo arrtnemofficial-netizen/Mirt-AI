@@ -15,7 +15,6 @@ try:
 except ImportError:
     LOGFIRE_AVAILABLE = False
 
-from src.services.observability import track_metric
 
 logger = logging.getLogger(__name__)
 

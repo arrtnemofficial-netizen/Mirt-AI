@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 
 from src.conf.config import settings
 from src.core.logging import log_event
@@ -20,6 +20,17 @@ from src.services.webhook import WebhookDedupeStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+if settings.RATE_LIMITER_SLOWAPI_ENABLED:
+    try:
+        from src.server.rate_limiter import limit_webhook
+    except Exception:  # Fallback to no-op if SlowAPI is unavailable
+        def limit_webhook(func):  # type: ignore[misc]
+            return func
+else:
+    def limit_webhook(func):  # type: ignore[misc]
+        return func
 
 
 def _generate_followup_text(current_state: str, last_product: str = "") -> str | None:
@@ -47,6 +58,29 @@ def _generate_followup_text(current_state: str, last_product: str = "") -> str |
         return None
 
     return followup_templates.get(current_state, "Чим можу допомогти? 🤍")
+
+
+def _user_replied_after_last_ai(message_store: MessageStoreDep | None, session_id: str) -> bool:
+    """Return True when latest user message is newer than latest assistant message."""
+    if message_store is None:
+        return False
+
+    messages = message_store.list(session_id)
+    if not messages:
+        return False
+
+    last_user_at = None
+    last_assistant_at = None
+    for item in messages:
+        role = (item.role or "").lower()
+        if role == "user":
+            last_user_at = item.created_at
+        elif role == "assistant":
+            last_assistant_at = item.created_at
+
+    if last_assistant_at is None or last_user_at is None:
+        return False
+    return last_user_at > last_assistant_at
 
 
 def _strip_manychat_prefix(text: str) -> str:
@@ -88,7 +122,9 @@ def _extract_text_and_image(message: Any) -> tuple[str, str | None]:
 
 
 @router.post("/webhooks/manychat")
+@limit_webhook
 async def manychat_webhook(
+    request: Request,
     payload: dict[str, Any],
     background_tasks: BackgroundTasks,
     x_manychat_token: str | None = Header(default=None),
@@ -235,15 +271,17 @@ async def manychat_webhook(
 
 
 @router.post("/webhooks/manychat/followup")
+@limit_webhook
 async def manychat_followup(
+    request: Request,
     payload: dict[str, Any],
     x_manychat_token: str | None = Header(default=None),
     message_store: MessageStoreDep = None,
 ) -> dict[str, Any]:
     """ManyChat follow-up endpoint called after Smart Delay.
 
-    This endpoint checks if the user has responded since the last AI message.
-    If not, it generates a follow-up message.
+    This endpoint generates a follow-up only when user has not replied
+    after the last assistant message.
 
     ManyChat Conditions can check:
     - needs_followup: true/false
@@ -279,9 +317,13 @@ async def manychat_followup(
     current_state = custom_fields.get("ai_state", "STATE_0_INIT")
     last_product = custom_fields.get("last_product", "")
 
-    # Generate follow-up based on state
-    followup_text = _generate_followup_text(current_state, last_product)
-    needs_followup = followup_text is not None
+    user_replied_after_ai = _user_replied_after_last_ai(message_store, user_id)
+
+    followup_text = None
+    needs_followup = False
+    if not user_replied_after_ai:
+        followup_text = _generate_followup_text(current_state, last_product)
+        needs_followup = followup_text is not None
 
     # Build response for ManyChat Conditions
     return {

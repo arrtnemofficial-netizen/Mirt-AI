@@ -1,6 +1,8 @@
 import os
+from contextlib import suppress
 
 import pytest
+import pytest_asyncio
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +25,18 @@ def reset_sitniks_singleton(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mod, "_chat_service", None, raising=False)
     yield
     monkeypatch.setattr(mod, "_chat_service", None, raising=False)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _shutdown_vision_background_tasks_after_async_tests():
+    """Ensure no vision background tasks are left pending between async tests."""
+    try:
+        yield
+    finally:
+        with suppress(Exception):
+            from src.agents.langgraph.nodes.vision import shutdown_vision_background_tasks
+
+            await shutdown_vision_background_tasks(timeout_s=0.5)
 
 import os
 import sys

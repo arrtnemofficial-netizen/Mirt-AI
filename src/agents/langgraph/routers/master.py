@@ -5,9 +5,8 @@ Top-level routing logic for the conversation.
 Determines entry points based on FSM state.
 """
 
-from typing import Dict, Literal, Any
+from typing import Dict, Literal
 import logging
-from langgraph.graph import END
 
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
@@ -17,7 +16,6 @@ from src.agents.langgraph.routers.enums import Route
 from src.agents.langgraph.nodes.utils import extract_user_message
 from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
 from src.agents.langgraph.nodes.intent import detect_intent_from_text, INTENT_PATTERNS
-from src.services.observability import track_metric
 
 logger = logging.getLogger(__name__)
 

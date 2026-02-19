@@ -233,6 +233,17 @@ INTENT_PATTERNS = {
     ],
 }
 
+# In STATE_5, these phrases are treated as explicit refusal/cancel and can exit payment flow.
+STATE5_EXPLICIT_CANCEL_PATTERNS = [
+    "відміна",
+    "відмов",
+    "скасувати",
+    "не хочу",
+    "не треба",
+    "передум",
+    "cancel",
+]
+
 
 def detect_intent_from_text(
     text: str,
@@ -301,6 +312,12 @@ def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -
         for keyword in INTENT_PATTERNS["COMPLAINT"]:
             if keyword in text_lower:
                 return None  # Let keyword matching handle complaints
+
+        # Explicit refusal/cancel should preserve legacy exit behavior.
+        for keyword in STATE5_EXPLICIT_CANCEL_PATTERNS:
+            if keyword in text_lower:
+                logger.info("Intent: THANKYOU_SMALLTALK (explicit cancel in payment state)")
+                return "THANKYOU_SMALLTALK"
 
         # Off-topic intents: allow them (will be handled by agent with snippets-first)
         for keyword in INTENT_PATTERNS["PRODUCT_CATEGORY"]:

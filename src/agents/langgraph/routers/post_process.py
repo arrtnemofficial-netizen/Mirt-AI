@@ -5,7 +5,7 @@ Routers for agent, moderation, validation, vision steps.
 """
 
 from typing import Dict, Literal, Any
-from src.core.state_machine import State, Intent
+from src.core.state_machine import State
 from src.agents.langgraph.routers.base import safe_router, StateSchema
 
 

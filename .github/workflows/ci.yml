@@ -38,6 +38,12 @@ jobs:
       - name: Run Ruff linter
         run: ruff check src/ tests/
 
+      - name: Run Critical Ruff Gate (F821/F401)
+        run: ruff check --select F821,F401 src/ tests/
+
+      - name: Check AI-smell comment markers (changed source files)
+        run: python scripts/check_ai_smell_comments.py
+
       - name: Run Ruff formatter check
         run: ruff format --check src/ tests/
 
@@ -66,12 +72,59 @@ jobs:
         continue-on-error: true  # Make non-blocking initially
 
   # ---------------------------------------------------------------------------
+  # Critical Quality Gates
+  # ---------------------------------------------------------------------------
+  critical-gates:
+    name: Critical Gates
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run smoke gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/smoke/test_graph_builds.py
+
+      - name: Run payment and vision contract gates
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/unit/test_payment_node.py tests/test_vision_contract.py
+
+      - name: Run prompt compliance gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/unit/test_prompt_compliance.py
+
+      - name: Run security behavior gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          MANYCHAT_VERIFY_TOKEN: "test-token"
+        run: pytest -q tests/security/test_auth_and_rate_limiting.py
+
+      - name: Run STATE_5 scenario gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/scenario/test_state5_scenarios.py
+
+  # ---------------------------------------------------------------------------
   # Unit Tests
   # ---------------------------------------------------------------------------
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [lint]
+    needs: [critical-gates]
     steps:
       - uses: actions/checkout@v4
 

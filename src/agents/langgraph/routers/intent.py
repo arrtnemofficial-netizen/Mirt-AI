@@ -39,6 +39,11 @@ def route_after_intent(state: StateSchema) -> Literal["vision", "agent", "offer"
     if intent in ("GREETING_ONLY", "THANKYOU_SMALLTALK"):
         return Route.AGENT
 
+    # 2.5 PHOTO_IDENT is a hard signal for vision even if has_image flag
+    # was dropped in a synthetic/test payload.
+    if intent == "PHOTO_IDENT":
+        return Route.VISION
+
     # 3. Vision Flow (Image present)
     # Priority: If image is present, usually go to vision, UNLESS in payment flow
     if has_image:
@@ -47,10 +52,6 @@ def route_after_intent(state: StateSchema) -> Literal["vision", "agent", "offer"
             # Intent logic should have handled this, but we double check
             if intent == "PAYMENT_DELIVERY":
                  return Route.PAYMENT
-
-        # If intent is clearly photo ident, go to vision
-        if intent == "PHOTO_IDENT":
-            return Route.VISION
 
         # Fallback: if we are here with an image, and it's not payment, default to vision
         return Route.VISION
@@ -78,5 +79,9 @@ def route_after_intent(state: StateSchema) -> Literal["vision", "agent", "offer"
     if current_state == State.STATE_4_OFFER and intent == "CONFIRMATION":
         return Route.PAYMENT
 
-    # 6. Default: Agent
+    # 6. If size/color clarification arrives with products selected, continue offer flow.
+    if intent in ("SIZE_HELP", "COLOR_HELP") and (state.selected_products or state.offered_products):
+        return Route.OFFER
+
+    # 7. Default: Agent
     return Route.AGENT

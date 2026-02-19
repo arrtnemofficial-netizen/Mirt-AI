@@ -23,12 +23,11 @@ from pydantic_ai import Agent, RunContext
 
 from .shared.model_factory import build_pydantic_model, get_ironclad_model_settings
 
-from src.agents.pydantic.memory_models import (
+from src.services.memory.models import (
     Fact,
     MemoryDecision,
     UserProfile,
 )
-from src.conf.config import settings
 
 
 logger = logging.getLogger(__name__)
@@ -176,7 +175,7 @@ def get_memory_agent() -> Agent[MemoryDeps, MemoryDecision]:
     """Get or create the memory agent (lazy initialization)."""
     global _memory_agent
     if _memory_agent is None:
-        # ЗАЛІЗОБЕТОННО: Use ironclad model settings (gpt-5.1, temp 0.2, medium)
+        # Use shared model settings for deterministic memory classification.
         model_settings = get_ironclad_model_settings()
         
         _memory_agent = Agent(  # type: ignore[call-overload]

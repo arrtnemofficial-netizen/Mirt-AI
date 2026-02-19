@@ -4,7 +4,6 @@ import os
 sys.path.append(os.getcwd())
 try:
     from src.agents.langgraph.state import create_initial_state
-    from src.core.state_schema import StateSchema
 except ImportError:
     print("❌ Failed to import!")
     sys.exit(1)

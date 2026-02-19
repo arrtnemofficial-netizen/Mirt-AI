@@ -21,7 +21,7 @@ from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 
 # Services
-from src.services.observability import log_agent_step, track_metric
+from src.services.observability import track_metric
 from src.services.conversation import trim_message_history
 
 # PydanticAI Deps
@@ -35,7 +35,7 @@ from src.agents.langgraph.nodes.handlers.color_handler import handle_color_reque
 from src.agents.langgraph.nodes.handlers.dispatch_handler import execute_agent_dispatch
 from src.agents.langgraph.nodes.handlers.cart_handler import merge_cart
 from src.agents.langgraph.nodes.handlers.transition_handler import finalize_transition
-from src.agents.langgraph.state_prompts import get_state_prompt, get_payment_sub_phase, resolve_state_prompt
+from src.agents.langgraph.state_prompts import resolve_state_prompt
 
 # Legacy aliases for backward compatibility import
 _height_to_size = height_to_size
@@ -154,7 +154,7 @@ async def agent_node(
         # HANDLER 4: TRANSITION (SSOT)
         # =====================================================================
         # Updates response.metadata.current_state and intent based on SSOT reducer
-        new_state_str, final_intent = finalize_transition(state, response, user_text)
+        new_state_str, final_intent, transition_meta = finalize_transition(state, response, user_text)
         
         # Apply updates to response object for consistency
         response.metadata.current_state = new_state_str
@@ -194,11 +194,15 @@ async def agent_node(
 
         metadata_update["current_state"] = new_state_str
         metadata_update["intent"] = final_intent
+        metadata_update["transition_reason"] = transition_meta.get("transition_reason")
+        metadata_update["transition_source"] = transition_meta.get("transition_source")
+        if transition_meta.get("payment_sub_phase"):
+            metadata_update["payment_sub_phase"] = transition_meta.get("payment_sub_phase")
 
         return {
             "current_state": new_state_str,
             "detected_intent": final_intent,
-            "dialog_phase": state.get("dialog_phase", "UNKNOWN"), # Let reducer handle phase in future
+            "dialog_phase": transition_meta.get("dialog_phase", state.get("dialog_phase", "INIT")),
             # CRITICAL FIX: Convert internal MessageItem (type='text'/'image') 
             # to LangChain compatible dict (type='ai', content=...)
             "messages": [

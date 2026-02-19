@@ -26,7 +26,6 @@ Example Redis integration:
 import logging
 import time
 from collections import defaultdict
-from typing import Any
 
 from src.services.observability import track_metric
 

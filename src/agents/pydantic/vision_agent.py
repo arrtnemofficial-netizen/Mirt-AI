@@ -23,6 +23,7 @@ from .shared.catalog_tools import search_products_tool
 from src.conf.config import settings
 from src.core.human_responses import get_human_response
 from src.core.prompt_registry import registry
+from src.services.common.vision_tasks import create_vision_task
 
 from .alerting import record_agent_error
 from .circuit_breaker import get_vision_circuit_breaker
@@ -59,7 +60,7 @@ def _load_reference_images_by_product() -> dict[str, list[str]]:
     try:
         with open(test_set_path, encoding="utf-8") as f:
             test_set = json.load(f)
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
         logger.warning("Failed to load reference images (%s): %s", test_set_path, e)
         return {}
 
@@ -269,7 +270,7 @@ async def _download_image_as_base64(url: str, max_retries: int = 3) -> str | Non
             )
             return None
 
-        except Exception as e:
+        except (httpx.RequestError, OSError, ValueError, RuntimeError) as e:
             last_error = type(e).__name__
             if attempt < max_retries:
                 logger.warning(
@@ -319,7 +320,7 @@ def _is_private_cdn_url(url: str) -> bool:
     try:
         parsed = urlparse(url)
         return any(host in parsed.netloc for host in _PRIVATE_CDN_HOSTS)
-    except Exception:
+    except (AttributeError, ValueError, TypeError):
         return False
 
 
@@ -448,7 +449,7 @@ def _load_model_rules_yaml() -> str:
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (OSError, ModuleNotFoundError, TypeError, ValueError) as e:
         logger.warning("Failed to load model_rules.yaml: %s", e)
         return ""
 
@@ -484,7 +485,7 @@ def _load_vision_guide_from_json() -> str:
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
         logger.warning("Failed to load vision_guide.json: %s", e)
         return ""
 
@@ -607,7 +608,7 @@ def _get_base_vision_prompt() -> str:
         snippets = registry.get("snippets.products").content
         parts.append("\n---\n# СТИЛЬ СПІЛКУВАННЯ (SNIPPETS)\n")
         parts.append(snippets)
-    except Exception as e:
+    except (AttributeError, KeyError, TypeError, ValueError) as e:
         logger.warning(f"Could not load snippets: {e}")
 
     # NO MODEL_RULES.YAML - WE USE DB CONTEXT ONLY
@@ -617,30 +618,16 @@ def _get_base_vision_prompt() -> str:
 
 async def _add_state_specific_instructions(ctx: RunContext[AgentDeps]) -> str:
     """
-    Додає state-specific інструкції на основі current_state.
-    КРИТИЧНО: Для STATE_5_PAYMENT_DELIVERY додаємо інструкції для product addition.
+    Add deterministic state-specific instructions for vision behavior.
     """
-    current_state = ctx.deps.current_state
-    
-    if current_state == "STATE_5_PAYMENT_DELIVERY":
-        # Додаємо інструкції для product addition в STATE_5
-        try:
-            state_prompt = registry.get("state.STATE_2_VISION").content
-            # Використовуємо тільки секцію про product addition в STATE_5
-            if "PRODUCT ADDITION В STATE_5" in state_prompt:
-                # Витягуємо секцію про product addition
-                import re
-                match = re.search(
-                    r"## ⚠️ КРИТИЧНО: PRODUCT ADDITION В STATE_5.*?## TRANSITIONS",
-                    state_prompt,
-                    re.DOTALL,
-                )
-                if match:
-                    product_addition_section = match.group(0)
-                    return f"\n---\n# ІНСТРУКЦІЇ ДЛЯ PRODUCT ADDITION В STATE_5\n{product_addition_section}\n"
-        except Exception as e:
-            logger.warning(f"Could not load STATE_2_VISION prompt for product addition: {e}")
-    
+    if ctx.deps.current_state == "STATE_5_PAYMENT_DELIVERY":
+        return (
+            "\n---\n"
+            "# STATE_5 PRODUCT ADDITION RULES\n"
+            "- If user sends a new product photo while already in payment flow, treat it as product addition.\n"
+            "- Do not interpret a product photo as payment proof unless payment confirmation evidence is explicit.\n"
+            "- Keep the flow in STATE_5 payment lifecycle after product addition.\n"
+        )
     return ""
 
 
@@ -656,11 +643,12 @@ async def _add_image_url(ctx: RunContext[AgentDeps]) -> str:
 def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
     global _vision_agent
     if _vision_agent is None:
-        # ЗАЛІЗОБЕТОННО: Use ironclad model settings
+        # Use a single configured vision model source for agent init and usage logs.
+        vision_model_name = settings.LLM_MODEL_VISION or settings.AI_MODEL
         model_settings = get_ironclad_model_settings()
 
         _vision_agent = Agent(
-            build_pydantic_model(agent_name="vision"),
+            build_pydantic_model(agent_name="vision", model_override=vision_model_name),
             deps_type=AgentDeps,
             output_type=VisionResponse,
             system_prompt=_get_base_vision_prompt(),
@@ -677,7 +665,8 @@ def get_vision_agent() -> Agent[AgentDeps, VisionResponse]:
         _vision_agent.tool(name="search_products")(_search_products_with_sku)
 
         logger.info(
-            "Vision agent initialized: model=gpt-5.1, temp=0.2, reasoning=medium (IRONCLAD)",
+            "Vision agent initialized: model=%s, temp=0.2, reasoning=medium",
+            vision_model_name,
         )
 
     return _vision_agent
@@ -716,10 +705,8 @@ async def run_vision(
     error_message: str | None = None
     tokens_input = 0
     tokens_output = 0
-    # SENIOR-LEVEL: Get model name from actual model, not hardcoded fallback
     model_name: str | None = None
-    # Use AI_MODEL as single source of truth
-    vision_model_name = settings.AI_MODEL
+    vision_model_name = settings.LLM_MODEL_VISION or settings.AI_MODEL
 
     if not deps.image_url:
         logger.error("👁️ Vision agent called WITHOUT image! deps.image_url is empty.")
@@ -732,10 +719,10 @@ async def run_vision(
         success = False
         error_message = "NO_IMAGE_URL"
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        asyncio.create_task(
+        create_vision_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model=settings.AI_MODEL,
+                model=vision_model_name,
                 tokens_input=0,
                 tokens_output=0,
                 latency_ms=latency_ms,
@@ -762,10 +749,10 @@ async def run_vision(
             success = False
             error_message = "INVALID_IMAGE_URL_SCHEME"
             latency_ms = (time.perf_counter() - start_time) * 1000.0
-            asyncio.create_task(
+            create_vision_task(
                 log_llm_usage_best_effort(
                     session_id=deps.session_id,
-                    model=settings.AI_MODEL,
+                    model=vision_model_name,
                     tokens_input=0,
                     tokens_output=0,
                     latency_ms=latency_ms,
@@ -787,10 +774,10 @@ async def run_vision(
             success = False
             error_message = "INVALID_IMAGE_URL_NO_HOST"
             latency_ms = (time.perf_counter() - start_time) * 1000.0
-            asyncio.create_task(
+            create_vision_task(
                 log_llm_usage_best_effort(
                     session_id=deps.session_id,
-                    model=settings.AI_MODEL,
+                    model=vision_model_name,
                     tokens_input=0,
                     tokens_output=0,
                     latency_ms=latency_ms,
@@ -801,7 +788,7 @@ async def run_vision(
                 )
             )
             return response
-    except Exception as e:
+    except (ValueError, TypeError) as e:
         logger.error("👁️ URL parse error: %s", e)
         response = VisionResponse(
             reply_to_user=get_human_response("photo_error"),
@@ -812,10 +799,10 @@ async def run_vision(
         success = False
         error_message = f"URL_PARSE_ERROR: {str(e)[:50]}"
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        asyncio.create_task(
+        create_vision_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model=settings.AI_MODEL,
+                model=vision_model_name,
                 tokens_input=0,
                 tokens_output=0,
                 latency_ms=latency_ms,
@@ -839,10 +826,10 @@ async def run_vision(
         success = False
         error_message = "BLOCKED_INTERNAL_URL"
         latency_ms = (time.perf_counter() - start_time) * 1000.0
-        asyncio.create_task(
+        create_vision_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
-                model=settings.AI_MODEL,
+                model=vision_model_name,
                 tokens_input=0,
                 tokens_output=0,
                 latency_ms=latency_ms,
@@ -872,10 +859,10 @@ async def run_vision(
             success = False
             error_message = "FAILED_TO_DOWNLOAD_IMAGE"
             latency_ms = (time.perf_counter() - start_time) * 1000.0
-            asyncio.create_task(
+            create_vision_task(
                 log_llm_usage_best_effort(
                     session_id=deps.session_id,
-                    model=settings.AI_MODEL,
+                    model=vision_model_name,
                     tokens_input=0,
                     tokens_output=0,
                     latency_ms=latency_ms,
@@ -993,7 +980,6 @@ async def run_vision(
             elif hasattr(agent.model, "name"):
                 model_name = agent.model.name
 
-        # SENIOR-LEVEL: Fallback to actual vision model from settings, not hardcoded
         if not model_name:
             model_name = vision_model_name
 
@@ -1104,9 +1090,8 @@ async def run_vision(
             if not model_name:
                 model_name = vision_model_name
 
-        # SENIOR-LEVEL: Use actual vision model, not hardcoded fallback
-        # Log asynchronously (fire-and-forget)
-        asyncio.create_task(
+        # Log asynchronously as best-effort telemetry.
+        create_vision_task(
             log_llm_usage_best_effort(
                 session_id=deps.session_id,
                 model=model_name or vision_model_name,

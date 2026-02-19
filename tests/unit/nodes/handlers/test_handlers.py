@@ -71,6 +71,58 @@ class TestTransitionHandler:
         # Response tries to change state
         response.metadata.current_state = "STATE_1_DISCOVERY"
         
-        new_state, _ = finalize_transition(state_payment, response, "hi")
+        new_state, _, _ = finalize_transition(state_payment, response, "hi")
         assert new_state == State.STATE_5_PAYMENT_DELIVERY.value
+
+    def test_state5_prioritizes_detected_intent_over_llm_intent(self):
+        """STATE_5 must trust deterministic detected_intent before LLM metadata intent."""
+        state = {
+            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            "detected_intent": "PAYMENT_DELIVERY",
+            "metadata": {"session_id": "test"},
+            "messages": [{"role": "user", "content": "ок"}],
+        }
+        response = SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(type="text", content="dummy")],
+            products=[],
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state=State.STATE_7_END.value,
+                intent="THANKYOU_SMALLTALK",
+                escalation_level="NONE",
+            ),
+        )
+
+        new_state, final_intent, meta = finalize_transition(state, response, "ок")
+
+        assert new_state == State.STATE_5_PAYMENT_DELIVERY.value
+        assert final_intent == "PAYMENT_DELIVERY"
+        assert meta["transition_source"] == "intent_node"
+        assert meta.get("payment_sub_phase") in {"REQUEST_DATA", "CONFIRM_DATA", "SHOW_PAYMENT", "THANK_YOU", None}
+
+    def test_finalize_transition_returns_transition_metadata(self):
+        """Transition handler should provide additive metadata for observability."""
+        state = {
+            "current_state": State.STATE_4_OFFER.value,
+            "detected_intent": "PAYMENT_DELIVERY",
+            "metadata": {"session_id": "test"},
+        }
+        response = SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(type="text", content="dummy")],
+            products=[],
+            metadata=ResponseMetadata(
+                session_id="test",
+                current_state=State.STATE_4_OFFER.value,
+                intent="PAYMENT_DELIVERY",
+                escalation_level="NONE",
+            ),
+        )
+
+        _, _, meta = finalize_transition(state, response, "беру")
+
+        assert "transition_reason" in meta
+        assert "transition_source" in meta
+        assert "dialog_phase" in meta
 

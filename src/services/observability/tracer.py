@@ -9,7 +9,6 @@ import logging
 import functools
 from typing import Any, Callable
 
-from src.conf.config import settings
 from src.services.observability import track_metric
 
 logger = logging.getLogger("tracer")

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from .memory_models import Fact, UserProfile
+    from src.services.memory.models import Fact, UserProfile
     from .models import StateType
 
 

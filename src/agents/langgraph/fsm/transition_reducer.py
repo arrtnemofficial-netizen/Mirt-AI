@@ -20,12 +20,36 @@ SSOT Transition Reducer - Единый источник правды для пе
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from src.core.state_machine import State
 
 logger = logging.getLogger(__name__)
+
+_STATE5_SHORT_ACKS = {
+    "так",
+    "да",
+    "ok",
+    "okay",
+    "ок",
+    "окей",
+    "добре",
+    "дякую",
+    "спасибі",
+}
+
+_STATE5_EXPLICIT_CANCEL_MARKERS = {
+    "скасувати",
+    "відміна",
+    "відмов",
+    "не хочу",
+    "не треба",
+    "передум",
+    "cancel",
+    "stop",
+}
 
 
 @dataclass
@@ -95,6 +119,7 @@ def compute_transition(
     """
     from src.core.state_machine import Intent, get_next_state
     from src.agents.langgraph.fsm.facts import compute_facts
+    from src.conf.config import settings
     
     current_state_str = state.get("current_state", State.STATE_0_INIT.value)
     metadata = state.get("metadata", {}) or {}
@@ -106,6 +131,23 @@ def compute_transition(
     # Вычисляем факты ПЕРЕД определением next_state (нужно для user_confirmed)
     facts = compute_facts(state, intent, user_message)
     user_confirmed = facts["user_confirmed"]
+    payment_proof_received = facts.get("payment_proof_received", False)
+    strict_state5_override = False
+
+    if (
+        settings.FSM_STATE5_STRICT_MODE
+        and current_state == State.STATE_5_PAYMENT_DELIVERY
+        and intent == "THANKYOU_SMALLTALK"
+        and not payment_proof_received
+        and _is_state5_short_ack_not_cancel(user_message)
+    ):
+        logger.info(
+            "[SESSION %s] STATE_5 strict mode: short acknowledgement '%s' treated as PAYMENT_DELIVERY",
+            session_id,
+            (user_message or "").strip()[:50],
+        )
+        intent = "PAYMENT_DELIVERY"
+        strict_state5_override = True
     
     # КРИТИЧНО: Если user_confirmed=True в STATE_4_OFFER, принудительно используем PAYMENT_DELIVERY intent
     # Это гарантирует переход STATE_4 → STATE_5 даже если intent был SIZE_HELP или другой
@@ -183,6 +225,7 @@ def compute_transition(
         intent=intent,
         user_confirmed=user_confirmed,
         payment_sub_phase=payment_sub_phase,
+        strict_state5_override=strict_state5_override,
     )
     
     logger.info(
@@ -385,6 +428,7 @@ def _format_transition_reason(
     intent: str,
     user_confirmed: bool,
     payment_sub_phase: str | None,
+    strict_state5_override: bool = False,
 ) -> str:
     """Форматировать причину перехода для логирования."""
     parts = []
@@ -400,6 +444,34 @@ def _format_transition_reason(
     
     if payment_sub_phase:
         parts.append(f"payment_sub_phase:{payment_sub_phase}")
+
+    if strict_state5_override:
+        parts.append("strict_state5_short_ack_override")
     
     return "|".join(parts) if parts else "no_change"
+
+
+def _is_state5_short_ack_not_cancel(user_message: str | None) -> bool:
+    """True for short acknowledgements in payment flow, excluding explicit cancels/refusals."""
+    if not user_message:
+        return False
+
+    text = user_message.lower().strip()
+    if not text:
+        return False
+
+    if any(marker in text for marker in _STATE5_EXPLICIT_CANCEL_MARKERS):
+        return False
+
+    # Normalize punctuation around short replies.
+    normalized = re.sub(r"[!?.…,]+", "", text).strip()
+    if normalized in _STATE5_SHORT_ACKS:
+        return True
+
+    # Guard for short variants like "так, дякую" or "ок, добре".
+    tokens = [t for t in re.split(r"\s+", normalized) if t]
+    if 1 <= len(tokens) <= 3 and all(t in _STATE5_SHORT_ACKS for t in tokens):
+        return True
+
+    return False
 

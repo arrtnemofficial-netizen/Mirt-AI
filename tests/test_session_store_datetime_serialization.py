@@ -6,7 +6,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from src.services.storage.session_store import _serialize_for_json
-from src.agents.pydantic.memory_models import UserProfile, Fact, FactType, FactCategory
+from src.services.memory.models import UserProfile, Fact, FactType, FactCategory
 
 
 def test_serialize_datetime_objects():
@@ -186,7 +186,7 @@ async def test_postgres_store_save_with_datetime_in_state():
     """Integration test: verify PostgresSessionStore can save state with datetime."""
     from src.services.storage.postgres_store import PostgresSessionStore
     from src.agents.langgraph.state import create_initial_state
-    from src.agents.pydantic.memory_models import UserProfile
+    from src.services.memory.models import UserProfile
     from datetime import UTC, datetime
     
     # Create state with memory_profile containing datetime

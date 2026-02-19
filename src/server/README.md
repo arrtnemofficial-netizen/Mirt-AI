@@ -118,7 +118,6 @@ RateLimitConfig(
 
 | Декоратор | Ліміти | Використання |
 | :--- | :--- | :--- |
-| `@limit_llm` | 20/min, 200/hour | LLM endpoints. |
 | `@limit_auth` | 5/min, 30/hour | Auth endpoints. |
 | `@limit_webhook` | 200/min, 5000/hour | Webhook endpoints. |
 

@@ -17,7 +17,25 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+if settings.RATE_LIMITER_SLOWAPI_ENABLED:
+    try:
+        from src.server.rate_limiter import limit_auth, limit_webhook
+    except Exception:  # Fallback to no-op if SlowAPI is unavailable
+        def limit_webhook(func):  # type: ignore[misc]
+            return func
+
+        def limit_auth(func):  # type: ignore[misc]
+            return func
+else:
+    def limit_webhook(func):  # type: ignore[misc]
+        return func
+
+    def limit_auth(func):  # type: ignore[misc]
+        return func
+
+
 @router.post("/api/v1/messages", status_code=202)
+@limit_webhook
 async def api_v1_messages(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -117,7 +135,9 @@ async def api_v1_messages(
 
 
 @router.post("/api/v1/sitniks/update-status")
+@limit_auth
 async def sitniks_update_status(
+    request: Request,
     payload: SitniksUpdateRequest,
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),

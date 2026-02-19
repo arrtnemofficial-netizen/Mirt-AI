@@ -9,12 +9,10 @@ Rules Module - Single Source of Truth (SSOT) for Detection Rules.
 Модулі:
 - payment_proof.py: Детекція payment proof (скрін, квитанція, оплата)
 - product_addition.py: Детекція наміру додати товар до замовлення
-- offer_transition.py: Детекція переходу з offer до payment (delivery request)
 - cart_intent.py: Детекція intent додавання товару до кошика
 """
 
 from .cart_intent import detect_add_to_cart
-from .offer_transition import detect_delivery_request
 from .payment_proof import detect_payment_proof
 from .product_addition import detect_product_addition_intent
 
@@ -22,7 +20,6 @@ from .product_addition import detect_product_addition_intent
 __all__ = [
     "detect_payment_proof",
     "detect_product_addition_intent",
-    "detect_delivery_request",
     "detect_add_to_cart",
 ]
 

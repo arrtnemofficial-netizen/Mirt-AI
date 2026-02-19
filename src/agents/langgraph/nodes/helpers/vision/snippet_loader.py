@@ -26,7 +26,7 @@ def get_snippet_by_header(header_name: str) -> list[str] | None:
         from src.core.prompt_registry import registry
 
         content = registry.get("system.snippets").content
-    except Exception:
+    except (AttributeError, KeyError, TypeError, ValueError):
         return None
 
     if not content:
@@ -94,7 +94,7 @@ def get_product_snippet(product_name: str) -> list[str] | None:
 
         # Optimize: Product snippets are only in snippets.products
         content = registry.get("snippets.products").content
-    except Exception:
+    except (AttributeError, KeyError, TypeError, ValueError):
         return None
 
     if not content:
@@ -105,7 +105,7 @@ def get_product_snippet(product_name: str) -> list[str] | None:
     if not pn_lower:
         return None
 
-    # КРИТИЧНО: Удаляем цвет в скобках и другие дополнения
+    # Normalize product name: strip color and bracketed modifiers.
     # "Сукня Анна (лео рожева)" -> "Сукня Анна"
     # "Костюм Лагуна (синий)" -> "Костюм Лагуна"
     import re

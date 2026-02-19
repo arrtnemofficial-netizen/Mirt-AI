@@ -1,3 +1,5 @@
+import pytest
+
 from src.core.prompt_registry import PromptRegistry
 
 
@@ -5,6 +7,19 @@ from src.core.prompt_registry import PromptRegistry
 
 # Load Registry (Subject Under Test)
 registry = PromptRegistry()
+STATE5_PROMPT_KEYS = [
+    "STATE_5_PAYMENT_DELIVERY",
+    "STATE_5_PAYMENT_DELIVERY_REQUEST",
+    "STATE_5_PAYMENT_DELIVERY_CONFIRM",
+    "STATE_5_PAYMENT_DELIVERY_PAYMENT",
+    "STATE_5_PAYMENT_DELIVERY_THANKS",
+]
+STATE5_PREPROOF_KEYS = [
+    "STATE_5_PAYMENT_DELIVERY",
+    "STATE_5_PAYMENT_DELIVERY_REQUEST",
+    "STATE_5_PAYMENT_DELIVERY_CONFIRM",
+    "STATE_5_PAYMENT_DELIVERY_PAYMENT",
+]
 
 
 class TestPromptStaticCompliance:
@@ -40,3 +55,60 @@ class TestPromptStaticCompliance:
         prompt_content = registry.get("state.STATE_3_SIZE_COLOR").content
         assert "White/Milk Equivalence" in prompt_content
         assert 'ЗАБОРОНЕНО писати "білого немає' in prompt_content
+
+
+class TestState5PromptCodeConsistency:
+    """STATE_5 prompts should stay consistent with deterministic guards in code."""
+
+    def test_state5_short_ack_rules_match_code_guardrails(self):
+        prompt_content = registry.get("state.STATE_5_PAYMENT_DELIVERY").content.lower()
+
+        # Prompt must explicitly keep short acknowledgements in payment flow.
+        assert "так" in prompt_content
+        assert "ок" in prompt_content
+        assert "дякую" in prompt_content
+        assert "payment_delivery" in prompt_content
+        assert "залишайся в state_5" in prompt_content
+
+    def test_state5_explicit_cancel_is_documented(self):
+        from src.agents.langgraph.nodes.intent import STATE5_EXPLICIT_CANCEL_PATTERNS
+
+        prompt_content = "\n".join(
+            registry.get(f"state.{key}").content.lower() for key in STATE5_PREPROOF_KEYS
+        )
+        documented = [token for token in STATE5_EXPLICIT_CANCEL_PATTERNS if token in prompt_content]
+
+        assert documented, (
+            "STATE_5 prompt must document explicit cancel/refusal markers "
+            "that are handled in code."
+        )
+
+    def test_state5_prompt_has_no_directive_to_finish_without_proof(self):
+        prompt_content = "\n".join(
+            registry.get(f"state.{key}").content.lower() for key in STATE5_PREPROOF_KEYS
+        )
+        contradictory_phrases = [
+            "- завершуй діалог без скріну",
+            "- завершуй без підтвердження оплати",
+        ]
+        for phrase in contradictory_phrases:
+            assert phrase not in prompt_content
+
+    @pytest.mark.parametrize("prompt_key", STATE5_PREPROOF_KEYS)
+    def test_state5_preproof_prompts_require_payment_proof_before_finish(self, prompt_key):
+        prompt_content = registry.get(f"state.{prompt_key}").content.lower()
+
+        assert "не завершуй діалог" in prompt_content
+        assert ("скрін" in prompt_content) or ("квитанц" in prompt_content)
+
+    def test_state5_thanks_prompt_is_gated_by_proof(self):
+        prompt_content = registry.get("state.STATE_5_PAYMENT_DELIVERY_THANKS").content.lower()
+
+        assert "тільки після payment proof" in prompt_content
+        assert "скрін" in prompt_content
+
+    def test_state5_payment_prompt_has_single_bubble_contract(self):
+        prompt_content = registry.get("state.STATE_5_PAYMENT_DELIVERY_PAYMENT").content.lower()
+
+        assert "3 бабл" in prompt_content
+        assert "4 бабл" not in prompt_content

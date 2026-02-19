@@ -58,12 +58,6 @@ DEFAULT_LIMITS = [
     "1000/hour",  # Hourly cap
 ]
 
-# Stricter limits for expensive operations
-LLM_LIMITS = [
-    "20/minute",  # LLM calls are expensive
-    "200/hour",  # Hourly cap for LLM
-]
-
 # Very strict limits for auth/sensitive operations
 AUTH_LIMITS = [
     "5/minute",  # Prevent brute force
@@ -108,11 +102,6 @@ def setup_rate_limiter(app: FastAPI) -> None:
 # =============================================================================
 # DECORATOR HELPERS
 # =============================================================================
-
-
-def limit_llm(func: Callable) -> Callable:
-    """Apply LLM-specific rate limits to endpoint."""
-    return limiter.limit(LLM_LIMITS[0])(limiter.limit(LLM_LIMITS[1])(func))
 
 
 def limit_auth(func: Callable) -> Callable:

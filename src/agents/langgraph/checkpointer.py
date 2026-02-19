@@ -173,8 +173,24 @@ def _log_if_slow(
     try:
         from src.services.observability import track_metric
         track_metric("checkpointer_latency_ms", elapsed_ms, {"operation": op})
-    except Exception:
-        pass  # Don't fail if observability is unavailable
+    except Exception as metric_error:
+        # This path must stay observable; failing to emit latency should never fail flow.
+        logger.debug("checkpointer latency metric failed: %s", metric_error)
+        try:
+            from src.services.observability import track_metric
+
+            track_metric(
+                "fallback_triggered",
+                1,
+                {
+                    "fallback_reason": "checkpointer_metric_failed",
+                    "session_id": _extract_thread_id(config),
+                    "state": "unknown",
+                    "node": "checkpointer_latency_metric",
+                },
+            )
+        except Exception:
+            logger.debug("checkpointer fallback metric emission failed (secondary path)")
 
     if elapsed < slow_threshold_s:
         return
@@ -830,9 +846,27 @@ async def warmup_checkpointer_pool() -> bool:
                 await conn.execute("SELECT 1")
             logger.debug("[CHECKPOINTER] warmup skipped: pool already open and working")
             return True
-        except Exception:
+        except Exception as probe_error:
             # Pool exists but not working, continue with warmup
-            pass
+            logger.warning(
+                "[CHECKPOINTER] warmup probe failed on pre-open check: %s",
+                probe_error,
+            )
+            try:
+                from src.services.observability import track_metric
+
+                track_metric(
+                    "fallback_triggered",
+                    1,
+                    {
+                        "fallback_reason": "checkpointer_warmup_precheck_failed",
+                        "session_id": "unknown",
+                        "state": str(getattr(pool, "current_state", "STATE_0_INIT")),
+                        "node": "checkpointer_warmup",
+                    },
+                )
+            except Exception:
+                logger.debug("Failed to emit checkpointer warmup probe fallback metric")
 
     _t0 = time.perf_counter()
     try:

@@ -8,19 +8,20 @@ Uses TypedDict with Annotated reducers for proper LangGraph integration.
 from __future__ import annotations
 
 import os
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from langgraph.graph.message import add_messages
-from typing_extensions import TypedDict
 
-from src.core.models import BaseConversationState
 from src.core.state_machine import (
     State,
     STATE_TO_ALLOWED_PHASES,
     VALID_DIALOG_PHASES,
-    get_default_dialog_phase_for_state,
+    get_default_dialog_phase_for_state as _core_get_default_dialog_phase_for_state,
 )
 from src.core.state_schema import StateSchema
+
+# Backward-compatible re-export used by validation and external callers.
+get_default_dialog_phase_for_state = _core_get_default_dialog_phase_for_state
 
 # =============================================================================
 # REDUCERS (how state fields are updated)

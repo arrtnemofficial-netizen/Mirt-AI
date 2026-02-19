@@ -357,6 +357,22 @@ class TestPaymentStateInvariants:
             # (depends on keyword priority)
             assert intent in ["COMPLAINT", "PAYMENT_DELIVERY"]
 
+    @pytest.mark.parametrize("text", ["дякую", "ок", "так", "добре"])
+    def test_payment_state_short_ack_stays_payment_intent(self, text):
+        """Short acknowledgements in STATE_5 should continue payment flow."""
+        intent = detect_intent_from_text(
+            text, has_image=False, current_state="STATE_5_PAYMENT_DELIVERY"
+        )
+        assert intent == "PAYMENT_DELIVERY"
+
+    @pytest.mark.parametrize("text", ["скасувати", "не хочу", "відміна"])
+    def test_payment_state_explicit_cancel_maps_to_thankyou_smalltalk(self, text):
+        """Explicit cancel phrases in STATE_5 should be treated as closure/refusal."""
+        intent = detect_intent_from_text(
+            text, has_image=False, current_state="STATE_5_PAYMENT_DELIVERY"
+        )
+        assert intent == "THANKYOU_SMALLTALK"
+
 
 # =============================================================================
 # INIT STATE TRANSITIONS
@@ -538,3 +554,24 @@ class TestSSOTInvariants:
                 f"payment_sub_phase={sub_phase} must map to dialog_phase={expected_dialog_phase}, "
                 f"got {computed_phase}"
             )
+
+    def test_state5_strict_mode_short_thanks_without_proof_does_not_end(self):
+        """With strict mode enabled, short thanks in STATE_5 without proof must stay in payment."""
+        from src.agents.langgraph.fsm.transition_reducer import compute_transition
+
+        state = {
+            "current_state": "STATE_5_PAYMENT_DELIVERY",
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {"session_id": "test", "payment_proof_received": False},
+            "session_id": "test",
+        }
+
+        transition = compute_transition(
+            state=state,
+            intent="THANKYOU_SMALLTALK",
+            has_image=False,
+            user_message="дякую",
+        )
+
+        assert transition.next_state == "STATE_5_PAYMENT_DELIVERY"
+        assert "strict_state5_short_ack_override" in transition.reason

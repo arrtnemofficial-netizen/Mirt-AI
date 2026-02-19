@@ -11,11 +11,10 @@ FUTURE MIGRATION:
 
 from __future__ import annotations
 
-from typing import Any, Literal, List, Dict, Optional, MutableMapping
+from typing import Any, List, Dict, Optional, MutableMapping
 from pydantic import BaseModel, Field, ConfigDict
 
-from src.core.models import AgentResponse, Product, Message
-from src.core.state_machine import State, Intent
+from src.core.state_machine import State
 
 class StateSchema(BaseModel, MutableMapping):
     """

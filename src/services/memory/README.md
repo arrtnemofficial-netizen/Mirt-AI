@@ -23,7 +23,6 @@ src/services/memory/
 ```
 
 > ℹ️ **SSOT:** `models.py` — канонічне місце для `Fact`, `UserProfile`, `MemoryContext` etc.
-> Старий шлях `src/agents/pydantic/memory_models.py` залишений як deprecated shim.
 
 ---
 

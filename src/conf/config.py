@@ -5,6 +5,8 @@ Reads environment variables for API access and runtime tuning.
 
 from __future__ import annotations
 
+import logging
+import os
 from functools import lru_cache
 from typing import Self
 
@@ -329,6 +331,15 @@ class Settings(BaseSettings):
             "Default 0.5 (50%) means half-confident results require user confirmation."
         ),
     )
+    VISION_ALTERNATIVES_THRESHOLD: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Show alternative products only when confidence is below this threshold. "
+            "Higher confidence suppresses alternatives to avoid user confusion."
+        ),
+    )
     LLM_TEMPERATURE: float = Field(
         default=0.3,
         description="LLM temperature (0.0-1.0)",
@@ -359,6 +370,36 @@ class Settings(BaseSettings):
     USE_OFFER_DELIBERATION: bool = Field(
         default=True,
         description="Enable Multi-Role Deliberation for STATE_4_OFFER (Customer/Business/Quality views)",
+    )
+    FSM_STATE5_STRICT_MODE: bool = Field(
+        default=True,
+        description=(
+            "Strict STATE_5 behavior: short confirmations (e.g., ok/yes/thanks) stay in payment "
+            "flow until payment proof is received."
+        ),
+    )
+    PAYMENT_DELEGATE_V2: bool = Field(
+        default=True,
+        description="Enable hardened STATE_5 payment delegation path.",
+    )
+    ROUTER_SCHEMA_TOLERANT: bool = Field(
+        default=True,
+        description=(
+            "Sanitize minimal/malformed state inputs at router boundary before StateSchema parsing."
+        ),
+    )
+    RATE_LIMITER_SLOWAPI_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable SlowAPI limiter integration for HTTP endpoints. Disabled by default and intended "
+            "for canary rollout."
+        ),
+    )
+    STRICT_EXCEPTION_POLICY: bool = Field(
+        default=True,
+        description=(
+            "Enable strict exception handling policy with observable fallbacks in critical nodes."
+        ),
     )
     DELIBERATION_MIN_CONFIDENCE: float = Field(
         default=0.6,
@@ -556,12 +597,11 @@ class Settings(BaseSettings):
         # Use SENTRY_ENVIRONMENT as indicator of deployment environment
         env = self.SENTRY_ENVIRONMENT.lower() if self.SENTRY_ENVIRONMENT else "development"
         is_production = env in ("production", "prod", "staging")
+        logger = logging.getLogger(__name__)
 
         if is_production:
             # In production/staging, enforce prompt fallback disable for safety
             if not self.DISABLE_CODE_STATE_PROMPTS_FALLBACK:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.warning(
                     "DISABLE_CODE_STATE_PROMPTS_FALLBACK is False in %s environment. "
                     "Auto-enabling for production safety.",
@@ -569,6 +609,18 @@ class Settings(BaseSettings):
                 )
                 # Auto-enable for production safety
                 self.DISABLE_CODE_STATE_PROMPTS_FALLBACK = True
+
+        deprecated_flags = (
+            "MANYCHAT_USE_CELERY",
+            "PAYMENT_DELEGATE_V2",
+        )
+        for flag in deprecated_flags:
+            if os.getenv(flag) is not None:
+                logger.warning(
+                    "Deprecated setting %s is configured in environment but is ignored. "
+                    "Remove it from .env after migration window.",
+                    flag,
+                )
 
         return self
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
@@ -238,9 +238,40 @@ def apply_loop_protection(
                     "target": "human_operator",
                 },
             }
-        except Exception:
-            # Fallback if text replacement fails
-            pass
+        except (ImportError, KeyError, TypeError, ValueError) as escalation_error:
+            logger.warning(
+                "[SESSION %s] Loop guard escalation response fallback triggered: %s",
+                session_id,
+                escalation_error,
+            )
+            try:
+                track_metric(
+                    "fallback_triggered",
+                    1,
+                    {
+                        "fallback_reason": "loop_guard_escalation_response_failed",
+                        "session_id": session_id or "unknown",
+                        "state": str(after_state.get("current_state") or ""),
+                        "node": "loop_detector",
+                    },
+                )
+            except Exception as metric_error:
+                logger.debug("Failed to emit loop guard fallback metric: %s", metric_error)
+            after_state["agent_response"] = {
+                "event": "escalation",
+                "messages": [
+                    {
+                        "type": "text",
+                        "content": "Передаю ваш запит менеджеру. Очікуйте, будь ласка.",
+                    }
+                ],
+                "metadata": {
+                    "session_id": session_id,
+                    "current_state": State.STATE_8_COMPLAINT.value,
+                    "intent": "COMPLAINT",
+                    "escalation_level": "L1",
+                },
+            }
             
         if settings.DEBUG_TRACE_LOGS:
             debug_log.error(
@@ -255,7 +286,7 @@ def apply_loop_protection(
     if isinstance(agent_response, dict):
         messages = agent_response.get("messages")
         if isinstance(messages, list):
-            # No-op specific cleanup for now as per original code
-            pass
+            # Explicit no-op: kept for backward compatibility with legacy cleanup hook.
+            agent_response["messages"] = messages
 
     return after_state

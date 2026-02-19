@@ -14,8 +14,10 @@ from langgraph.types import Command
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
 from src.conf.config import settings
+from src.core.fallbacks import get_payment_fallback_text
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
+from src.services.observability import track_metric
 
 from .utils import ensure_prices_from_catalog
 
@@ -49,10 +51,7 @@ async def handle_payment_method_selection(
     deps.selected_products = products
 
     # Set sub-phase to SHOW_PAYMENT (we're about to show requisites)
-    try:
-        deps.payment_sub_phase = "SHOW_PAYMENT"
-    except Exception:
-        deps.payment_sub_phase = "SHOW_PAYMENT"
+    deps.payment_sub_phase = "SHOW_PAYMENT"
 
     try:
         # Call payment agent to generate response with requisites
@@ -70,10 +69,37 @@ async def handle_payment_method_selection(
 
     except Exception as e:
         logger.error("[SESSION %s] Payment method selection processing error: %s", session_id, e)
+        if settings.STRICT_EXCEPTION_POLICY:
+            try:
+                track_metric(
+                    "fallback_triggered",
+                    1,
+                    {
+                        "fallback_reason": type(e).__name__,
+                        "session_id": session_id,
+                        "state": State.STATE_5_PAYMENT_DELIVERY.value,
+                        "node": "payment_method_selection",
+                    },
+                )
+            except Exception as metric_error:
+                logger.debug(
+                    "[SESSION %s] Failed to emit payment method fallback metric: %s",
+                    session_id,
+                    metric_error,
+                )
         # Fallback: show requisites directly
-        from src.conf.payment_config import format_requisites_with_receipt_request
-        requisites_parts = format_requisites_with_receipt_request(price=int(total_price))
-        response_text = "\n\n".join(requisites_parts)
+        try:
+            from src.conf.payment_config import format_requisites_with_receipt_request
+
+            requisites_parts = format_requisites_with_receipt_request(price=int(total_price))
+            response_text = "\n\n".join(requisites_parts)
+        except Exception as fallback_error:
+            logger.error(
+                "[SESSION %s] Requisites fallback formatting failed: %s",
+                session_id,
+                fallback_error,
+            )
+            response_text = get_payment_fallback_text()
         metadata_update = state.get("metadata", {}).copy()
         metadata_update["payment_details_sent"] = True
         metadata_update["awaiting_payment_confirmation"] = True

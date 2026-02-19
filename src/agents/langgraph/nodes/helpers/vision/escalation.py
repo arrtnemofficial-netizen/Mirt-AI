@@ -16,6 +16,7 @@ from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 from src.core.state_machine import State
+from src.services.vision import evaluate_vision_escalation
 
 from ...utils import text_msg
 
@@ -30,6 +31,36 @@ logger = logging.getLogger(__name__)
 # SAFETY: Limited size to prevent memory leak (FIFO eviction)
 _MAX_ACTIVE_ESCALATIONS = 1000
 _ACTIVE_ESCALATIONS: set[str] = set()
+
+
+def try_start_escalation(
+    session_key: str,
+    active_escalations: set[str] | None = None,
+) -> bool:
+    """Mark escalation as active, returns False for duplicate session key."""
+    active = _ACTIVE_ESCALATIONS if active_escalations is None else active_escalations
+    if session_key in active:
+        return False
+    if len(active) >= _MAX_ACTIVE_ESCALATIONS:
+        oldest = next(iter(active), None)
+        if oldest:
+            active.discard(oldest)
+            logger.warning(
+                "Active escalations set full (%d), evicted oldest: %s",
+                _MAX_ACTIVE_ESCALATIONS,
+                oldest,
+            )
+    active.add(session_key)
+    return True
+
+
+def finish_escalation(
+    session_key: str,
+    active_escalations: set[str] | None = None,
+) -> None:
+    """Remove escalation key from active set."""
+    active = _ACTIVE_ESCALATIONS if active_escalations is None else active_escalations
+    active.discard(session_key)
 
 
 def should_escalate_vision(
@@ -53,45 +84,22 @@ def should_escalate_vision(
     Returns:
         Tuple of (should_escalate: bool, reason: str)
     """
-    confidence = response.confidence or 0.0
-    claimed_name = (
-        getattr(response.identified_product, "name", None)
-        if response.identified_product
-        else None
+    decision = evaluate_vision_escalation(
+        response=response,
+        catalog_row=catalog_row,
+        confidence_threshold=confidence_threshold,
     )
 
-    product_not_in_catalog = response.identified_product is not None and catalog_row is None
-    no_product_identified = response.identified_product is None or (
-        response.identified_product
-        and (response.identified_product.name or "") in ("<not identified>", "<none>", "")
-    )
-
-    low_confidence = confidence < confidence_threshold
-
-    # Escalate if:
-    # 1. Product identified but NOT in catalog (hallucination/competitor)
-    # 2. Product NOT identified AND confidence is low (even if needs_clarification=True)
-    #    Reason: User already sent photo, asking for clarification again is poor UX
-    should_escalate = product_not_in_catalog or (no_product_identified and low_confidence)
-
-    # SAFETY: If confidence is VERY low (< 0.5), always escalate regardless of needs_clarification
-    # This prevents infinite clarification loops
-    if no_product_identified and confidence < 0.5:
+    if decision.no_product_identified and decision.confidence < 0.5:
         should_escalate = True
         logger.info(
             "🚨 Force escalation: very low confidence (%.0f%%) even with needs_clarification",
-            confidence * 100,
+            decision.confidence * 100,
         )
-
-    # Determine escalation reason
-    if product_not_in_catalog:
-        reason = "product_not_in_catalog"
-    elif no_product_identified:
-        reason = "product_not_identified"
     else:
-        reason = "low_confidence"
+        should_escalate = decision.should_escalate
 
-    return should_escalate, reason
+    return should_escalate, decision.reason
 
 
 def build_escalation_state_update(
@@ -139,9 +147,8 @@ def build_escalation_state_update(
         text_msg("Зараз уточню по цьому товару наявність 🙌🏻"),
     ]
 
-    # SAFETY: Prevent duplicate escalations for the same session
     session_key = f"{session_id}_vision_escalation"
-    if session_key in active_escalations:
+    if not try_start_escalation(session_key, active_escalations):
         logger.warning(
             "🚨 [SESSION %s] Escalation already in progress, skipping duplicate",
             session_id,
@@ -177,20 +184,6 @@ def build_escalation_state_update(
             "step_number": state.get("step_number", 0) + 1,
         }
 
-    # Add to active escalations BEFORE creating task to prevent race condition
-    # SAFETY: Prevent memory leak by limiting set size (FIFO eviction)
-    if len(active_escalations) >= _MAX_ACTIVE_ESCALATIONS:
-        # Remove oldest entries (simple FIFO - remove first item)
-        oldest = next(iter(active_escalations), None)
-        if oldest:
-            active_escalations.discard(oldest)
-            logger.warning(
-                "Active escalations set full (%d), evicted oldest: %s",
-                _MAX_ACTIVE_ESCALATIONS,
-                oldest,
-            )
-    active_escalations.add(session_key)
-
     async def _send_notification_background() -> None:
         try:
             from src.services.notifications import NotificationService
@@ -224,11 +217,10 @@ def build_escalation_state_update(
                 "📲 [SESSION %s] Telegram notification sent to manager (dual-track escalation)",
                 session_id,
             )
-        except Exception as notif_err:
+        except (RuntimeError, OSError, ValueError, TypeError) as notif_err:
             logger.warning("Failed to send Telegram notification: %s", notif_err)
         finally:
-            # Remove from active escalations after completion
-            active_escalations.discard(session_key)
+            finish_escalation(session_key, active_escalations)
 
     task = create_task_fn(_send_notification_background())
     if bg_tasks is not None:

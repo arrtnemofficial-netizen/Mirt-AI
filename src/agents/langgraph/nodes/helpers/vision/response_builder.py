@@ -5,10 +5,13 @@ This module handles building multi-bubble assistant responses from VisionRespons
 Extracted from vision.py for better testability and maintainability.
 """
 
+import logging
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
+from src.conf.config import settings
 from src.services.catalog import CatalogService
+from src.services.observability import track_metric
 
 from ...utils import (
     extract_height_from_text,
@@ -23,7 +26,8 @@ from src.core.human_responses import get_human_response
 if TYPE_CHECKING:
     from src.agents.pydantic.models import VisionResponse
 
-from .snippet_loader import get_snippet_by_header
+
+logger = logging.getLogger(__name__)
 
 
 def build_vision_messages(
@@ -61,6 +65,23 @@ def build_vision_messages(
     messages: list[dict[str, str]] = []
     confidence = response.confidence or 0.0
 
+    def _track_builder_fallback(reason: str) -> None:
+        if not settings.STRICT_EXCEPTION_POLICY:
+            return
+        try:
+            track_metric(
+                "fallback_triggered",
+                1,
+                {
+                    "fallback_reason": reason,
+                    "session_id": "unknown",
+                    "state": "STATE_2_VISION",
+                    "node": "vision_response_builder",
+                },
+            )
+        except (RuntimeError, ValueError, TypeError) as metric_error:
+            logger.debug("Failed to emit vision builder fallback metric: %s", metric_error)
+
     def _history_has_greeting(prev: list[Any]) -> bool:
         try:
             for m in prev or []:
@@ -68,7 +89,9 @@ def build_vision_messages(
                     content = str(m.get("content") or "")
                     if "менеджер соф" in content.lower():
                         return True
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as history_error:
+            logger.warning("Failed to parse message history for greeting detection: %s", history_error)
+            _track_builder_fallback("vision_history_parse_failed")
             return False
         return False
 
@@ -104,7 +127,7 @@ def build_vision_messages(
         return False
 
     # 1. Greeting: один раз на першу фото-взаємодію в сесії
-    # CRITICAL: Use AND (not OR) to prevent repeat greeting when history is trimmed/missing
+    # Use AND (not OR) to avoid repeated greeting when history is partially trimmed.
     if (not vision_greeted) and (not _history_has_greeting(previous_messages)):
         messages.append(text_msg("Вітаю 🎀 З вами MIRT_UA, менеджер Софія."))
 
@@ -124,7 +147,9 @@ def build_vision_messages(
                 color_options = [
                     str(x) for x in (catalog_product.get("_color_options") or []) if str(x).strip()
                 ]
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as color_error:
+            logger.warning("Failed to extract catalog color options: %s", color_error)
+            _track_builder_fallback("vision_color_options_parse_failed")
             color_options = []
 
         option_norms = {_norm_color(c) for c in color_options}
@@ -137,9 +162,8 @@ def build_vision_messages(
             )
         )
 
-        # CRITICAL: Different message for product addition context
+        # Product-addition flow uses a different UX message.
         if product_addition_context:
-            # SENIOR-LEVEL: Professional product addition messaging
             # First bubble: "Зафіксували [товар] 🫶"
             if color_already_in_name:
                 message_text = f"Зафіксували {product_name} 🫶"
@@ -198,8 +222,9 @@ def build_vision_messages(
                     if product_name_norm == product_name_in_yaml:
                         yaml_product = product_data
                         break
-        except Exception:
-            pass  # YAML loading failed, continue without it
+        except (ImportError, FileNotFoundError, AttributeError, TypeError, ValueError, KeyError) as yaml_error:
+            logger.warning("Failed to load product YAML for presentation builder: %s", yaml_error)
+            _track_builder_fallback("vision_yaml_load_failed")
 
         presentation_text = build_presentation_text(
             product_name=product_name,
@@ -223,7 +248,7 @@ def build_vision_messages(
                 text_msg(f"Підкажіть, будь ласка, який колір обираєте: {options_text}? 🤍")
             )
 
-        # БАБЛА 3: Якщо зріст вже в тексті (фото + текст разом) - показуємо ціну одразу!
+        # If height is present with photo, return size and price in the same turn.
         # Інакше питаємо зріст, і agent_node обробить відповідь
         height = extract_height_from_text(user_message)
         if height:
@@ -245,12 +270,11 @@ def build_vision_messages(
     elif response.clarification_question:
         messages.append(text_msg(response.clarification_question.strip()))
     elif response.needs_clarification:
-        # HUMAN TOUCH: If vision is unsure, don't ask users to do work.
-        # Use Soft Escalation ("I'll check with manager")
+        # Use soft escalation when vision is unsure.
         messages.append(text_msg(get_human_response("vision_soft_escalation")))
 
     # If we still have no product and no clarification - this is likely NOT our product
-    # CRITICAL: Only use "not ours" if vision truly couldn't identify after all attempts
+    # Show "not ours" only when vision has clearly failed identification.
     # Conditions:
     # 1. No product identified AND low confidence (< 0.3) - vision gave up
     # 2. OR enrichment failed (product identified but not in catalog) - competitor/hallucination
@@ -264,8 +288,7 @@ def build_vision_messages(
     ) or enrichment_failed  # Product identified but not in catalog
 
     if should_show_not_ours:
-        # HUMAN TOUCH: Even if likely not ours or DB error - Escalation is better than rejection.
-        # "I'll check availability" keeps the lead alive.
+        # Escalation keeps lead handling consistent.
         messages.append(text_msg(get_human_response("vision_soft_escalation")))
 
     # 5. Fallback - use Soft Escalation instead of "Photo Error"

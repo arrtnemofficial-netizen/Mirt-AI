@@ -6,7 +6,6 @@ Handles order creation and history retrieval.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -18,8 +17,6 @@ except ImportError:
     psycopg = None  # type: ignore
     dict_row = None  # type: ignore
 
-from src.services.common import ServiceUnavailableError
-from src.services.storage import get_postgres_url
 
 
 logger = logging.getLogger(__name__)

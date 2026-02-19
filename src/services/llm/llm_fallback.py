@@ -17,7 +17,7 @@ from typing import Any, TypeVar
 from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from src.conf.config import settings
-from src.core.circuit_breaker import CircuitBreaker, CircuitState, get_circuit_breaker
+from src.core.circuit_breaker import CircuitBreaker, get_circuit_breaker
 
 
 logger = logging.getLogger(__name__)

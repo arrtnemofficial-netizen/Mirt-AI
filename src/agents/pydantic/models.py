@@ -14,26 +14,39 @@ IMPORTED FROM src.core.models TO PREVENT DUPLICATION
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 # Import Unified Models from Core (Single Source of Truth)
 from src.core.models import (
-    Product,
-    ProductMatch,
-    MessageItem,
-    ResponseMetadata,
     EscalationLevel,
-    IntentType,
-    StateType,
     EventType,
-    Intent,
-    State,
+    IntentType,
+    MessageItem,
+    ProductMatch,
+    ResponseMetadata,
+    StateType,
 )
 
 # Export Alias for backward compatibility
 Message = MessageItem
+
+__all__ = [
+    "ProductMatch",
+    "MessageItem",
+    "Message",
+    "ResponseMetadata",
+    "EscalationInfo",
+    "CustomerDataExtracted",
+    "SupportResponse",
+    "VisionResponse",
+    "PaymentResponse",
+    "EventType",
+    "EscalationLevel",
+    "IntentType",
+    "StateType",
+]
 
 
 # =============================================================================

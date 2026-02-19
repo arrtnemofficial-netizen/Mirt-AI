@@ -11,6 +11,7 @@ Tests cover:
 
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
+from langgraph.types import Command
 from src.core.state_machine import State
 from src.agents.langgraph.fsm.transition_reducer import TransitionDecision, ResponsePolicy
 
@@ -44,7 +45,39 @@ class TestPaymentNode:
     @pytest.mark.asyncio
     async def test_hitl_disabled_skips_interrupt(self, base_state, mock_observability):
         """When ENABLE_PAYMENT_HITL=False, checkout proceeds without LLM call."""
-        pass
+        from src.agents.langgraph.nodes.payment import payment_node
+
+        mock_settings = MagicMock()
+        mock_settings.ENABLE_PAYMENT_HITL = False
+        mock_settings.SNITKIX_API_KEY = MagicMock(get_secret_value=MagicMock(return_value=""))
+        mock_settings.PAYMENT_PREPAY_AMOUNT = 200
+        mock_settings.DEBUG_TRACE_LOGS = False
+        mock_settings.ENABLE_CRM_INTEGRATION = False
+
+        state = {
+            **base_state,
+            "current_state": State.STATE_4_OFFER.value,
+            "selected_products": base_state.get("selected_products", []),
+            "metadata": {"session_id": "sess_123"},
+        }
+
+        with patch("src.agents.langgraph.nodes.helpers.payment.checkout.settings", mock_settings), \
+             patch("src.agents.langgraph.nodes.helpers.payment.checkout.interrupt") as interrupt_mock, \
+             patch(
+                "src.agents.langgraph.nodes.helpers.payment.checkout.ensure_prices_from_catalog",
+                AsyncMock(return_value=state["selected_products"]),
+             ), \
+             patch(
+                "src.agents.langgraph.nodes.helpers.payment.checkout.get_snippet_by_header",
+                return_value=["Підтвердження замовлення"],
+             ):
+            result = await payment_node(state)
+
+        interrupt_mock.assert_not_called()
+        assert result.goto == "end"
+        assert result.update["awaiting_human_approval"] is False
+        assert result.update["current_state"] == State.STATE_5_PAYMENT_DELIVERY.value
+        assert result.update["messages"]
 
     @pytest.mark.asyncio
     async def test_request_data_snippet_sent_exactly_once(self, base_state, mock_observability):
@@ -229,3 +262,122 @@ class TestPaymentStateUpdates:
             result = await payment_node(state)
 
         assert result.update["step_number"] == 6
+
+
+class TestPaymentDeliveryRegressions:
+    """Regression tests for payment helper runtime bugs."""
+
+    @pytest.mark.asyncio
+    async def test_product_addition_delegate_call_without_runner_kw(self):
+        """Product-addition path must delegate with the canonical _delegate_to_llm signature."""
+        from src.agents.langgraph.nodes.helpers.payment.delivery import handle_delivery_data
+
+        expected = Command(update={"step_number": 2}, goto="end")
+
+        async def fake_delegate(*, state, session_id, user_message, products):
+            return expected
+
+        state = {
+            "session_id": "sess_regression",
+            "messages": [{"role": "user", "content": "додай ще один товар"}],
+            "metadata": {"session_id": "sess_regression"},
+            "selected_products": [],
+            "step_number": 1,
+        }
+
+        with patch(
+            "src.agents.langgraph.nodes.helpers.payment.delivery.ensure_prices_from_catalog",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "src.agents.langgraph.rules.product_addition.detect_product_addition_intent",
+            return_value=True,
+        ), patch(
+            "src.agents.langgraph.nodes.helpers.payment.delivery._delegate_to_llm",
+            side_effect=fake_delegate,
+        ) as mock_delegate:
+            result = await handle_delivery_data(state, runner=None, session_id="sess_regression")
+
+        assert result is expected
+        assert "runner" not in mock_delegate.call_args.kwargs
+        assert mock_delegate.call_args.kwargs["session_id"] == "sess_regression"
+
+    @pytest.mark.asyncio
+    async def test_delegate_to_llm_fallback_does_not_raise_name_error(self):
+        """LLM failure in payment delegate must return fallback text instead of NameError."""
+        from src.agents.langgraph.nodes.helpers.payment.delivery import _delegate_to_llm
+
+        state = {
+            "session_id": "sess_fallback",
+            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            "metadata": {"session_id": "sess_fallback"},
+            "messages": [],
+            "step_number": 7,
+        }
+
+        with patch(
+            "src.agents.langgraph.nodes.helpers.payment.delivery.run_payment",
+            new=AsyncMock(side_effect=RuntimeError("llm_down")),
+        ), patch(
+            "src.services.observability.track_metric",
+        ) as track_metric_mock:
+            result = await _delegate_to_llm(
+                state=state,
+                session_id="sess_fallback",
+                user_message="оплата",
+                products=[],
+            )
+
+        message = result.update["messages"][0]["content"]
+        assert isinstance(message, str)
+        assert message.strip()
+        track_metric_mock.assert_called()
+        assert any(
+            call.args and call.args[0] == "fallback_triggered"
+            for call in track_metric_mock.call_args_list
+        )
+
+    @pytest.mark.asyncio
+    async def test_delegate_to_llm_emits_metric_when_sub_phase_resolution_fails(self):
+        """Fallback path for payment_sub_phase resolution must be observable."""
+        from src.agents.langgraph.nodes.helpers.payment.delivery import _delegate_to_llm
+
+        state = {
+            "session_id": "sess_subphase",
+            "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
+            "dialog_phase": "WAITING_FOR_DELIVERY_DATA",
+            "metadata": {"session_id": "sess_subphase"},
+            "messages": [{"role": "user", "content": "ок"}],
+            "step_number": 1,
+        }
+
+        mock_response = MagicMock()
+        mock_response.reply_to_user = "Продовжуємо оплату"
+        mock_response.payment_details_sent = False
+        mock_response.awaiting_payment_confirmation = False
+
+        with patch(
+            "src.agents.langgraph.state_prompts.get_payment_sub_phase",
+            side_effect=RuntimeError("phase_fail"),
+        ), patch(
+            "src.agents.langgraph.nodes.helpers.payment.delivery.run_payment",
+            new=AsyncMock(return_value=mock_response),
+        ), patch(
+            "src.services.observability.track_metric",
+        ) as track_metric_mock:
+            result = await _delegate_to_llm(
+                state=state,
+                session_id="sess_subphase",
+                user_message="ок",
+                products=[],
+            )
+
+        assert result.update["current_state"] == State.STATE_5_PAYMENT_DELIVERY.value
+        assert any(
+            (
+                call.args
+                and call.args[0] == "fallback_triggered"
+                and isinstance(call.args[2], dict)
+                and call.args[2].get("fallback_reason") == "payment_sub_phase_resolution_failed"
+            )
+            for call in track_metric_mock.call_args_list
+        )

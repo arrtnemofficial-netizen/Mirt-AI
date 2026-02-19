@@ -29,17 +29,13 @@ from langgraph.types import Command
 
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
-from src.core.state_machine import State
-from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
 
 # Import extracted handlers from helpers
 from .helpers.payment import (
-    ensure_prices_from_catalog,
     prepare_payment_and_interrupt,
     handle_payment_method_selection,
     handle_delivery_data,
     handle_approval_response,
-    persist_order_and_queue_crm,
 )
 
 

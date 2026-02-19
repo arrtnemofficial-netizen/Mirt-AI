@@ -20,6 +20,7 @@ from langgraph.types import Command
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.payment_agent import run_payment
 from src.conf.config import settings
+from src.core.fallbacks import get_payment_fallback_text
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
 from src.services.observability import log_agent_step
@@ -31,6 +32,20 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+
+def _derive_dialog_phase_from_sub_phase(
+    payment_sub_phase: str | None,
+    fallback_phase: str,
+) -> str:
+    """Keep dialog_phase consistent with SSOT payment sub-phase."""
+    phase_map = {
+        "REQUEST_DATA": "WAITING_FOR_DELIVERY_DATA",
+        "CONFIRM_DATA": "WAITING_FOR_PAYMENT_METHOD",
+        "SHOW_PAYMENT": "WAITING_FOR_PAYMENT_PROOF",
+        "THANK_YOU": "UPSELL_OFFERED",
+    }
+    return phase_map.get(payment_sub_phase or "", fallback_phase)
 
 
 async def handle_delivery_data(
@@ -86,7 +101,7 @@ async def handle_delivery_data(
         # Это фото товара, не payment proof - делегируем в LLM
         return await _delegate_to_llm(
             state=state,
-            runner=runner,
+            session_id=session_id,
             user_message=user_message,
             products=products,
         )
@@ -162,12 +177,35 @@ async def _handle_payment_proof_received(
             user_context="Payment Proof Received",
             details=approval_data,
         )
-    except Exception:
-        pass
+    except Exception as notification_error:
+        logger.warning(
+            "[SESSION %s] Manager notification failed after payment proof: %s",
+            session_id,
+            notification_error,
+        )
+        if settings.STRICT_EXCEPTION_POLICY:
+            try:
+                from src.services.observability import track_metric
+
+                track_metric(
+                    "fallback_triggered",
+                    1,
+                    {
+                        "fallback_reason": "payment_manager_notification_failed",
+                        "session_id": session_id,
+                        "state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    },
+                )
+            except Exception as metric_error:
+                logger.debug(
+                    "[SESSION %s] Failed to emit notification fallback metric: %s",
+                    session_id,
+                    metric_error,
+                )
 
     from src.agents.langgraph.nodes.helpers.vision.snippet_loader import get_snippet_by_header
-    from src.agents.langgraph.fsm.policy import determine_response_policy, load_manifest
-    from src.core.fallbacks import get_thank_you_message, get_subscribe_message, get_payment_fallback_text
+    from src.agents.langgraph.fsm.policy import load_manifest
+    from src.core.fallbacks import get_thank_you_message, get_subscribe_message
     
     manifest = load_manifest()
     actions = manifest.get("actions", {})
@@ -290,8 +328,22 @@ def _check_upsell_opportunity(
             metadata_update["color_gallery_exclude"] = purchased_color
             metadata_update["color_gallery_offset"] = 0
             return "Хочете ще один колір на зміну? Показати доступні кольори?"
-    except Exception:
-        pass
+    except Exception as upsell_error:
+        logger.warning("Upsell color lookup failed for '%s': %s", product_name, upsell_error)
+        if settings.STRICT_EXCEPTION_POLICY:
+            try:
+                from src.services.observability import track_metric
+
+                track_metric(
+                    "fallback_triggered",
+                    1,
+                    {
+                        "fallback_reason": "upsell_color_lookup_failed",
+                        "state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    },
+                )
+            except Exception as metric_error:
+                logger.debug("Failed to emit upsell fallback metric: %s", metric_error)
 
     return None
 
@@ -334,13 +386,42 @@ async def _delegate_to_llm(
                 session_id,
                 deps.payment_sub_phase,
             )
-        except Exception:
+        except Exception as sub_phase_error:
+            logger.warning(
+                "[SESSION %s] Failed to compute payment_sub_phase via fallback: %s",
+                session_id,
+                sub_phase_error,
+            )
+            if settings.STRICT_EXCEPTION_POLICY:
+                try:
+                    from src.services.observability import track_metric
+
+                    track_metric(
+                        "fallback_triggered",
+                        1,
+                        {
+                            "fallback_reason": "payment_sub_phase_resolution_failed",
+                            "session_id": session_id,
+                            "state": State.STATE_5_PAYMENT_DELIVERY.value,
+                            "node": "payment_delivery_delegate",
+                        },
+                    )
+                except Exception as metric_error:
+                    logger.debug(
+                        "[SESSION %s] Failed to emit payment_sub_phase metric: %s",
+                        session_id,
+                        metric_error,
+                    )
             deps.payment_sub_phase = None
 
     logger.debug(
         "[SESSION %s] Delegating to LLM with sub_phase=%s",
         session_id,
         deps.payment_sub_phase,
+    )
+    fallback_dialog_phase = _derive_dialog_phase_from_sub_phase(
+        deps.payment_sub_phase,
+        state.get("dialog_phase", "WAITING_FOR_DELIVERY_DATA"),
     )
 
     try:
@@ -350,6 +431,7 @@ async def _delegate_to_llm(
             message_history=None,
         )
         response_text = response.reply_to_user or ""
+        dialog_phase = fallback_dialog_phase
 
         # Update metadata with customer data from response
         metadata_update = state.get("metadata", {}).copy()
@@ -369,6 +451,8 @@ async def _delegate_to_llm(
         metadata_update["awaiting_payment_confirmation"] = bool(
             getattr(response, "awaiting_payment_confirmation", False)
         )
+        if deps.payment_sub_phase:
+            metadata_update["payment_sub_phase"] = deps.payment_sub_phase
 
         # Split response into bubbles
         response_parts = [p.strip() for p in response_text.split("\n\n") if p.strip()]
@@ -392,7 +476,7 @@ async def _delegate_to_llm(
                     },
                 },
                 "metadata": metadata_update,
-                "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                "dialog_phase": dialog_phase,
                 "step_number": state.get("step_number", 0) + 1,
             },
             goto="end",
@@ -403,7 +487,7 @@ async def _delegate_to_llm(
                 session_id=session_id,
                 node_name="payment",
                 goto="end",
-                new_phase="WAITING_FOR_PAYMENT_PROOF",
+                new_phase=dialog_phase,
                 response_preview=response_text[:100] if response_text else "(empty)",
             )
 
@@ -411,6 +495,27 @@ async def _delegate_to_llm(
 
     except Exception as e:
         logger.error("[SESSION %s] LLM delegation error: %s", session_id, e)
+        fallback_text = get_payment_fallback_text()
+        try:
+            from src.services.observability import track_metric
+
+            track_metric(
+                "fallback_triggered",
+                1,
+                {
+                    "fallback_reason": type(e).__name__,
+                    "session_id": session_id,
+                    "state": State.STATE_5_PAYMENT_DELIVERY.value,
+                    "node": "payment_delivery_delegate",
+                },
+            )
+        except Exception as metric_error:
+            logger.debug(
+                "[SESSION %s] Failed to emit fallback metric: %s",
+                session_id,
+                metric_error,
+            )
+
         if settings.DEBUG_TRACE_LOGS:
             debug_log.error(
                 session_id=session_id,
@@ -422,10 +527,10 @@ async def _delegate_to_llm(
         return Command(
             update={
                 "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
-                "messages": [{"role": "assistant", "content": get_payment_fallback_text()}],
+                "messages": [{"role": "assistant", "content": fallback_text}],
                 "agent_response": {
                     "event": "simple_answer",
-                    "messages": [{"type": "text", "content": get_payment_fallback_text()}],
+                    "messages": [{"type": "text", "content": fallback_text}],
                     "metadata": {
                         "session_id": session_id,
                         "current_state": State.STATE_5_PAYMENT_DELIVERY.value,
@@ -433,7 +538,11 @@ async def _delegate_to_llm(
                         "escalation_level": "NONE",
                     },
                 },
-                "dialog_phase": "WAITING_FOR_PAYMENT_PROOF",
+                "dialog_phase": fallback_dialog_phase,
+                "metadata": {
+                    **state.get("metadata", {}),
+                    "payment_sub_phase": deps.payment_sub_phase,
+                },
                 "step_number": state.get("step_number", 0) + 1,
             },
             goto="end",

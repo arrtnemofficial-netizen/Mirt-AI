@@ -7,10 +7,7 @@ by providing a single ConversationHandler that manages the full message lifecycl
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
-import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -20,7 +17,7 @@ from src.conf.config import settings
 from src.core.constants import AgentState as StateEnum
 from src.core.constants import MessageTag
 from src.core.debug_logger import debug_log
-from src.core.models import AgentResponse, Escalation, Message, Metadata, Product
+from src.core.models import AgentResponse, Escalation, Message, Metadata
 from src.services.observability import track_metric
 from src.services.storage import MessageStore, StoredMessage
 from src.services.guardrails.loop_detector import apply_loop_protection

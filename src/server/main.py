@@ -271,6 +271,12 @@ async def lifespan(app: FastAPI):
 
     # Gracefully close checkpointer pool
     try:
+        from src.agents.langgraph.nodes.vision import shutdown_vision_background_tasks
+        await shutdown_vision_background_tasks()
+    except Exception as e:
+        logger.warning("Failed to shutdown vision background tasks: %s", e)
+
+    try:
         from src.agents.langgraph.checkpointer import shutdown_checkpointer_pool
         await shutdown_checkpointer_pool()
     except Exception as e:
@@ -284,8 +290,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Setup middleware (rate limiting, request logging)
-setup_middleware(app, enable_rate_limit=True, enable_logging=True)
+# Setup middleware / rate limiting.
+if settings.RATE_LIMITER_SLOWAPI_ENABLED:
+    try:
+        from src.server.rate_limiter import setup_rate_limiter
+
+        setup_rate_limiter(app)
+        setup_middleware(app, enable_rate_limit=False, enable_logging=True)
+    except Exception as rate_limiter_error:
+        logger.warning(
+            "SlowAPI rate limiter setup failed (%s), falling back to in-memory middleware.",
+            rate_limiter_error,
+        )
+        setup_middleware(app, enable_rate_limit=True, enable_logging=True)
+else:
+    setup_middleware(app, enable_rate_limit=True, enable_logging=True)
 
 # Include routers
 from src.server.routers import (

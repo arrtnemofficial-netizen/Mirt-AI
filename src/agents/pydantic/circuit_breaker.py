@@ -13,8 +13,6 @@ import logging
 from typing import Any, Callable
 
 from src.core.circuit_breaker import (
-    CircuitBreaker,
-    CircuitOpenError,
     CircuitState,
     get_circuit_breaker,
 )

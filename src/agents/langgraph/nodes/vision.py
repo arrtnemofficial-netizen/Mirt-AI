@@ -12,7 +12,6 @@ REFACTORED for clarity:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from contextlib import suppress
@@ -22,6 +21,11 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.vision_agent import run_vision
 from src.core.state_machine import State
 from src.services.catalog import CatalogService
+from src.services.common.vision_tasks import (
+    create_vision_task,
+    get_vision_background_task_count as _get_registered_vision_task_count,
+    shutdown_vision_background_tasks as _shutdown_registered_vision_tasks,
+)
 from src.services.observability import log_agent_step, log_trace, track_metric
 
 from .utils import (
@@ -39,11 +43,16 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-_BG_TASKS: set[asyncio.Task] = set()
-# Track active escalation tasks per session to prevent duplicates
-# SAFETY: Limited size to prevent memory leak (FIFO eviction)
-_MAX_ACTIVE_ESCALATIONS = 1000
-_ACTIVE_ESCALATIONS: set[str] = set()
+
+
+def get_vision_background_task_count() -> int:
+    """Expose active task count for lifecycle tests/health checks."""
+    return _get_registered_vision_task_count()
+
+
+async def shutdown_vision_background_tasks(timeout_s: float = 2.0) -> None:
+    """Gracefully cancel and await all outstanding vision background tasks."""
+    await _shutdown_registered_vision_tasks(timeout_s=timeout_s)
 
 
 # =============================================================================
@@ -54,7 +63,9 @@ _ACTIVE_ESCALATIONS: set[str] = set()
 # Import helper functions from vision helpers
 from .helpers.vision.escalation import (
     build_escalation_state_update,
+    finish_escalation,
     should_escalate_vision,
+    try_start_escalation,
 )
 from .helpers.vision.product_enrichment import enrich_product_from_db as _enrich_product_from_db
 from .helpers.vision.product_deduplication import add_product_safely
@@ -84,15 +95,13 @@ def _extract_products(
     Returns:
         Updated products list
     """
-    # CRITICAL: If existing products provided, keep them (product addition context)
-    # Otherwise, start fresh (normal vision flow)
+    # Preserve existing list when this is product addition, otherwise start fresh.
     products = list(existing) if existing else []
     confidence = response.confidence or 0.0
 
     if response.identified_product:
         new_product = response.identified_product.model_dump()
 
-        # SENIOR-LEVEL: Use professional deduplication utility
         if is_product_addition and existing:
             # Product addition: use safe add with duplicate checking
             products, was_added = add_product_safely(
@@ -189,16 +198,15 @@ async def vision_node(
     deps = create_deps_from_state(state)
     deps.has_image = True
     deps.image_url = state.get("image_url") or state.get("metadata", {}).get("image_url")
-    # КРИТИЧНО: Передаємо реальний current_state, щоб vision_agent знав контекст
-    # Якщо це product addition в STATE_5 - залишаємо STATE_5, інакше STATE_2_VISION
+    # Pass current_state so vision prompt can respect flow context.
     metadata = state.get("metadata", {}) or {}
+    current_state_from_state = state.get("current_state", State.STATE_2_VISION.value)
     # Auto-detect product addition context if we are deep in the funnel
     # This ensures that "Yes + photo" in STATE_4/5 adds to order instead of resetting flow
     if current_state_from_state in (State.STATE_4_OFFER.value, State.STATE_5_PAYMENT_DELIVERY.value):
         is_product_addition = True
     else:
         is_product_addition = bool(metadata.get("product_addition_context", False))
-    current_state_from_state = state.get("current_state", State.STATE_2_VISION.value)
     
     if is_product_addition and current_state_from_state in (State.STATE_4_OFFER.value, State.STATE_5_PAYMENT_DELIVERY.value):
         # Product addition в STATE_4/5 - залишаємо поточний стан для правильного prompt
@@ -218,25 +226,12 @@ async def vision_node(
             text_msg("Будь ласка, очікуйте відповідь від менеджера."),
         ]
 
-        # SAFETY: Prevent duplicate escalations for the same session
         session_key = f"{session_id}_vision_error"
-        if session_key in _ACTIVE_ESCALATIONS:
+        if not try_start_escalation(session_key):
             logger.warning(
                 "🚨 [SESSION %s] Escalation already in progress, skipping duplicate",
                 session_id,
             )
-        else:
-            # SAFETY: Prevent memory leak by limiting set size (FIFO eviction)
-            if len(_ACTIVE_ESCALATIONS) >= _MAX_ACTIVE_ESCALATIONS:
-                oldest = next(iter(_ACTIVE_ESCALATIONS), None)
-                if oldest:
-                    _ACTIVE_ESCALATIONS.discard(oldest)
-                    logger.warning(
-                        "Active escalations set full (%d), evicted oldest: %s",
-                        _MAX_ACTIVE_ESCALATIONS,
-                        oldest,
-                    )
-            _ACTIVE_ESCALATIONS.add(session_key)
 
         async def _send_notification_background() -> None:
             try:
@@ -257,15 +252,26 @@ async def vision_node(
                     },
                 )
                 logger.info("[SESSION %s] Telegram notification sent to manager", session_id)
-            except Exception as notif_err:
+            except (RuntimeError, OSError, ValueError, TypeError) as notif_err:
                 logger.warning("Failed to send Telegram notification: %s", notif_err)
+                if settings.STRICT_EXCEPTION_POLICY:
+                    try:
+                        track_metric(
+                            "fallback_triggered",
+                            1,
+                            {
+                                "fallback_reason": "vision_manager_notification_failed",
+                                "session_id": session_id or "unknown",
+                                "state": State.STATE_2_VISION.value,
+                                "node": "vision_error_escalation",
+                            },
+                        )
+                    except (RuntimeError, ValueError, TypeError) as metric_err:
+                        logger.debug("Failed to emit vision notification metric: %s", metric_err)
             finally:
-                # Remove from active escalations after completion
-                _ACTIVE_ESCALATIONS.discard(session_key)
+                finish_escalation(session_key)
 
-        task = asyncio.create_task(_send_notification_background())
-        _BG_TASKS.add(task)
-        task.add_done_callback(_BG_TASKS.discard)
+        create_vision_task(_send_notification_background())
 
         return {
             "current_state": State.STATE_0_INIT.value,
@@ -331,7 +337,12 @@ async def vision_node(
             ):
                 vision_color = ""
                 response.identified_product.color = ""
-        except Exception:
+        except (AttributeError, TypeError) as color_parse_error:
+            logger.debug(
+                "[SESSION %s] Vision color normalization skipped: %s",
+                session_id,
+                color_parse_error,
+            )
             vision_color = vision_color_raw
 
         # Attempt enrichment
@@ -357,8 +368,30 @@ async def vision_node(
                         catalog_row["_color_options"] = enriched_row.get("_color_options")
                     if "_ambiguous_color" in enriched_row:
                         catalog_row["_ambiguous_color"] = enriched_row.get("_ambiguous_color")
-                except Exception:
-                    pass
+                except (AttributeError, TypeError, ValueError, KeyError) as color_merge_err:
+                    logger.debug(
+                        "[SESSION %s] Failed to merge color options from enrichment: %s",
+                        session_id,
+                        color_merge_err,
+                    )
+                    if settings.STRICT_EXCEPTION_POLICY:
+                        try:
+                            track_metric(
+                                "fallback_triggered",
+                                1,
+                                {
+                                    "fallback_reason": "vision_color_options_merge_failed",
+                                    "session_id": session_id,
+                                    "state": State.STATE_2_VISION.value,
+                                    "node": "vision_enrichment",
+                                },
+                            )
+                        except (RuntimeError, ValueError, TypeError) as metric_err:
+                            logger.debug(
+                                "[SESSION %s] Failed to emit color merge fallback metric: %s",
+                                session_id,
+                                metric_err,
+                            )
             else:
                 # Enrichment FAILED - product not found in DB
                 # This is a critical quality issue: escalate instead of clarification
@@ -380,8 +413,26 @@ async def vision_node(
                 )
                 # Keep product info for escalation check, but mark that it's not in catalog
                 # (catalog_row remains None, which will trigger escalation)
-        except Exception as enrich_err:
+        except (RuntimeError, AttributeError, TypeError, ValueError, OSError) as enrich_err:
             logger.warning("Enrichment error: %s", enrich_err)
+            if settings.STRICT_EXCEPTION_POLICY:
+                try:
+                    track_metric(
+                        "fallback_triggered",
+                        1,
+                        {
+                            "fallback_reason": type(enrich_err).__name__,
+                            "session_id": session_id,
+                            "state": State.STATE_2_VISION.value,
+                            "node": "vision_enrichment",
+                        },
+                    )
+                except (RuntimeError, ValueError, TypeError) as metric_err:
+                    logger.debug(
+                        "[SESSION %s] Failed to emit enrichment fallback metric: %s",
+                        session_id,
+                        metric_err,
+                    )
             catalog_row = None
             # If we had a product but enrichment failed, mark as failed
             if response.identified_product:
@@ -397,8 +448,6 @@ async def vision_node(
     # IMPORTANT: This must work even when identified_product is None.
     # Otherwise UX regresses to "що саме на фото?" (which user explicitly rejected).
     # =====================================================
-    from src.conf.config import settings
-
     should_escalate, escalation_reason = should_escalate_vision(
         response,
         catalog_row,
@@ -425,8 +474,7 @@ async def vision_node(
         response.identified_product = None
         response.needs_clarification = False  # Escalation, not clarification
 
-        # SENIOR-LEVEL: Enhanced escalation for product addition context
-        # Store context in escalation for better manager handling
+        # Store product-addition context for manager escalation payload.
         escalation_metadata = {
             "product_addition_context": is_product_addition,
             "existing_products_count": len(state.get("selected_products", [])) if is_product_addition else 0,
@@ -442,9 +490,7 @@ async def vision_node(
             escalation_reason=escalation_reason,
             confidence=confidence,
             claimed_name=claimed_name,
-            create_task_fn=asyncio.create_task,
-            active_escalations=_ACTIVE_ESCALATIONS,
-            bg_tasks=_BG_TASKS,
+            create_task_fn=create_vision_task,
         )
 
         # Enhance metadata with product addition context
@@ -486,17 +532,16 @@ async def vision_node(
             latency_ms=(time.perf_counter() - start_time) * 1000,
             model_name=None,
         )
-    except Exception as trace_error:  # Observability must not break main flow
+    except (RuntimeError, ValueError, TypeError, AttributeError) as trace_error:  # Observability must not break main flow
         logger.debug("Vision trace logging skipped: %s", trace_error)
 
     # Extract products and build messages using helpers
     metadata = state.get("metadata", {})
     is_product_addition = bool(metadata.get("product_addition_context", False))
 
-    # CRITICAL: For product addition, ADD to existing products (don't replace)
+    # For product addition add to existing products instead of replacing list.
     existing_products = state.get("selected_products", []) if is_product_addition else []
 
-    # SENIOR-LEVEL: Use professional extraction with deduplication
     selected_products = _extract_products(
         response,
         existing_products,
@@ -548,7 +593,12 @@ async def vision_node(
                 s = str(catalog_row.get("color") or "").strip()
                 if s:
                     available_colors = [s]
-    except Exception:
+    except (AttributeError, TypeError, ValueError) as color_options_error:
+        logger.debug(
+            "[SESSION %s] Failed to parse available colors from catalog row: %s",
+            session_id,
+            color_options_error,
+        )
         available_colors = []
 
     height_in_text = extract_height_from_text(user_message)
@@ -680,8 +730,7 @@ async def vision_node(
         "messages": assistant_messages,
         "selected_products": selected_products,
         "dialog_phase": next_phase,
-        # ВАЖЛИВО: Скидаємо has_image після обробки!
-        # Це запобігає повторному входу в vision при наступних текстових повідомленнях
+        # Reset has_image after processing to avoid re-entering vision on text-only turns.
         "has_image": False,
         "escalation_level": escalation_level,  # For CRM tracking
         "metadata": {
