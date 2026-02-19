@@ -233,8 +233,8 @@ def build_production_graph(
         {"offer": "offer", "agent": "agent", "validation": "validation", "end": "end"},
     )
 
-    # Agent -> memory_update -> END (capture facts from early conversation)
-    graph.add_edge("agent", "memory_update")
+    # Agent -> memory_update is routed via route_after_agent("post_agent_memory").
+    # Keep a single routing model (conditional router only) to avoid parallel updates.
 
     # Offer -> memory_update -> END (Turn-Based: wait for user confirmation)
     # Memory update runs silently after offer is made
