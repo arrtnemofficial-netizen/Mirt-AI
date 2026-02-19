@@ -16,7 +16,7 @@ def test_full_dict_emulation():
     # 1. Assignment
     state['new_key'] = 'custom_val'
     assert state['new_key'] == 'custom_val'
-    assert state.new_key == 'custom_val' # Extra field magic
+    assert state['legacy_extra']['new_key'] == 'custom_val'
     
     # 2. Update()
     state.update({'dialog_phase': 'TEST_PHASE', 'trace_id': 'xyz'})
@@ -26,7 +26,7 @@ def test_full_dict_emulation():
     # 3. Keys / Items / Values
     keys = list(state.keys())
     assert 'session_id' in keys
-    assert 'new_key' in keys
+    assert 'legacy_extra' in keys
     
     # 4. Length
     assert len(state) > 10

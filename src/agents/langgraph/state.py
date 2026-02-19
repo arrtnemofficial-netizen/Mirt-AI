@@ -116,21 +116,14 @@ def create_initial_state(
     Returns:
         Fully initialized ConversationState
     """
-    # CRITICAL: Ensure vision flags are reset for fresh start
-    # This is especially important for /restart command
     base_metadata = {
         "session_id": session_id,
         "channel": "unknown",
         "language": "uk",
-        "vision_greeted": False,  # CRITICAL: Reset vision greeting flag
-        "has_image": False,  # CRITICAL: Reset image flag
-        "image_url": None,  # CRITICAL: Clear image URL
+        "vision_greeted": False,
         **(metadata or {}),
     }
-    # Override metadata to ensure vision flags are reset even if passed in
-    base_metadata["vision_greeted"] = False
-    base_metadata["has_image"] = False
-    base_metadata["image_url"] = None
+    base_metadata.setdefault("vision_greeted", False)
 
     base_state_dict = {
         # Core
@@ -145,8 +138,8 @@ def create_initial_state(
         "thread_id": session_id,  
         # Intent
         "detected_intent": None,
-        "has_image": False,  
-        "image_url": None, 
+        "has_image": False,
+        "image_url": None,
         # Products
         "selected_products": [],
         "offered_products": [],
@@ -182,6 +175,39 @@ def create_initial_state(
         base_state_dict[key] = value
 
     return ConversationState(**base_state_dict)
+
+
+def map_canonical_image_fields(
+    *,
+    metadata: dict[str, Any] | None,
+    has_image: Any = None,
+    image_url: Any = None,
+) -> tuple[dict[str, Any], bool, str | None]:
+    """Map inbound image fields to canonical top-level state fields.
+
+    Canonical source of truth lives only in `state.has_image` and `state.image_url`.
+    Metadata image aliases are accepted only on ingress for backward compatibility.
+    """
+    normalized_metadata = dict(metadata or {})
+
+    meta_has_image = normalized_metadata.pop("has_image", None)
+    meta_image_url = normalized_metadata.pop("image_url", None)
+
+    resolved_image_url = image_url if image_url is not None else meta_image_url
+    if isinstance(resolved_image_url, str):
+        resolved_image_url = resolved_image_url.strip() or None
+    elif resolved_image_url is not None:
+        resolved_image_url = None
+
+    resolved_has_image = has_image if has_image is not None else meta_has_image
+    resolved_has_image = bool(resolved_has_image)
+
+    if resolved_image_url:
+        resolved_has_image = True
+    if not resolved_has_image:
+        resolved_image_url = None
+
+    return normalized_metadata, resolved_has_image, resolved_image_url
 
 
 def get_state_snapshot(state: ConversationState) -> dict[str, Any]:

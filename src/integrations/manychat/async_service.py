@@ -638,14 +638,11 @@ class ManyChatAsyncService:
         try:
             from src.agents.langgraph.state import create_initial_state
 
-            # CRITICAL: Explicitly reset vision flags on restart
             reset_state = create_initial_state(
                 session_id=user_id,
                 metadata={
                     "channel": channel,
-                    "vision_greeted": False,  # Explicitly reset
-                    "has_image": False,  # Explicitly reset
-                    "image_url": None,  # Explicitly clear
+                    "vision_greeted": False,
                 },
             )
             _lg_start = _time.time()

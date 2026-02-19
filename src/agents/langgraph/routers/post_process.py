@@ -35,22 +35,31 @@ def get_agent_routes() -> Dict[str, str]:
         "offer": "offer",
         "validation": "validation",
         "payment": "payment", # Shortcut for direct buy
-        "end": "end"
+        "end": "end",
+        "escalation": "escalation",
+        "post_agent_memory": "memory_update",
     }
 
 @safe_router
-def route_after_agent(state: StateSchema) -> Literal["offer", "validation", "payment", "end"]:
+def route_after_agent(
+    state: StateSchema,
+) -> Literal["offer", "validation", "payment", "end", "escalation", "post_agent_memory"]:
     """
     Agent has produced a response. Where to next?
     """
-    # Turn-Based Check: If agent set a phase that waits for user, go to END
+    agent_error = state.agent_response.get("agent_error") if isinstance(state.agent_response, dict) else None
+    if isinstance(agent_error, dict):
+        recoverable = bool(agent_error.get("recoverable", False))
+        return "validation" if recoverable else "escalation"
+
+    # Turn-Based Check: if agent set a waiting phase, run memory post-hook then end
     waiting_phases = {
         "DISCOVERY", "VISION_DONE", "WAITING_FOR_SIZE", "WAITING_FOR_COLOR",
         "OFFER_MADE", "WAITING_FOR_DELIVERY_DATA", "WAITING_FOR_PAYMENT_METHOD",
         "WAITING_FOR_PAYMENT_PROOF", "UPSELL_OFFERED", "COMPLETED", "ESCALATED"
     }
     if state.dialog_phase in waiting_phases:
-        return "end"
+        return "post_agent_memory"
 
     # If agent prepared an offer (Structured Output), go to Offer node to render it
     if state.dialog_phase == "SIZE_COLOR_DONE":

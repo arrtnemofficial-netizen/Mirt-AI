@@ -144,6 +144,46 @@ DELIBERATION_MIN_CONFIDENCE=0.6
 
 ## 📋 Next Steps & Recommendations
 
+## 🚀 Nearest Release Scope (мінімальний обсяг)
+
+### Scope baseline (release-blocking)
+
+| Item | Owner | Deadline | Acceptance Criteria | Rollback |
+|------|-------|----------|---------------------|----------|
+| **Redis caching for catalog + vision/session hot paths** | Backend Lead (Platform) | 2026-02-26 | 1) p95 latency for repeated catalog reads improves by **>=30%** vs baseline. 2) Cache hit rate for target endpoints **>=60%** after warm-up. 3) Fallback behavior unchanged (no growth of 5xx and escalation errors). | Feature flag `REDIS_CACHE_ENABLED=false`; return to direct DB/runtime path; keep read-through cache code disabled until incident resolved. |
+| **RAG catalog retrieval (text, top-K)** | ML Engineer (Retrieval) | 2026-03-01 | 1) Offer/discovery prompt context is formed from top-K retrieved products (not full catalog dump). 2) Retrieval p95 added latency **<=200ms**. 3) Relevance QA pass on контрольний набір: top-3 contains correct SKU in **>=90%** cases. | Feature flag `RAG_CATALOG_ENABLED=false`; fallback to existing deterministic catalog lookup and current prompt composition. |
+
+### Success metrics (release decision)
+
+- **Latency p95**
+  - API end-to-end p95 (offer/discovery): target **<=4.5s**.
+  - Retrieval overhead p95: target **<=200ms**.
+- **Fallback rate**
+  - Target: **<=5%** від усіх offer/discovery запитів.
+  - Alert threshold: >7% за 30 хвилин.
+- **Conversion impact**
+  - Primary KPI: checkout-start / qualified-offer.
+  - Release accepted if delta is **not negative beyond -2%** vs 7-day baseline.
+
+### Technical gate (Definition of Done)
+
+Функція вважається закритою **лише якщо одночасно виконано**:
+1. Є автоматизовані тести (мінімум unit + integration для щасливого шляху і fallback).
+2. Оновлена документація (architecture + runbook + feature flags + rollback steps).
+3. Метрики і алерти додані в dashboard та перевірені на staging.
+
+### A/B Offers (експериментальний контур, не блокує стабільність)
+
+- Винесено в окремий feature flag: `AB_OFFERS_EXPERIMENT_ENABLED`.
+- Traffic split: 10% (canary) → 25% only після 48h стабільних метрик.
+- Не входить у release-blocking scope для базової стабільності.
+- Автовимкнення при одному з тригерів:
+  - fallback rate > 7%,
+  - conversion delta < -3%,
+  - p95 latency degradation > 15%.
+
+---
+
 ### Phase 1: Production Monitoring (Week 1)
 1. **Enable logging** for deliberation metrics
 2. **Monitor fallback rate** - should be < 5%

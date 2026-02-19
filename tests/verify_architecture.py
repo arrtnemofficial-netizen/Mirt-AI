@@ -59,13 +59,10 @@ def verify_architecture():
     try:
         # Test Dict Write
         state["new_magic_field"] = 999
-        # Test Prop Access (via __getattr__ fallback in generic generic?) 
-        # No, StateSchema is explicit. Attributes must exist to be accessed via dot.
-        # But 'new_magic_field' via dot? Only if we allow extra.
-        # Let's check if it's in model_dump
         dump = state.model_dump()
-        assert dump["new_magic_field"] == 999
-        print("  ✅ Dict Write -> Model Update works.")
+        assert dump["legacy_extra"]["new_magic_field"] == 999
+        assert state["new_magic_field"] == 999
+        print("  ✅ Dict Write -> legacy_extra compatibility works.")
         
         # Test Update
         state.update({"step_number": 50, "dialog_phase": "ARCH_TEST"})
