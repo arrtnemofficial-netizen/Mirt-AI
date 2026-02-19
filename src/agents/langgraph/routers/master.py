@@ -5,21 +5,22 @@ Top-level routing logic for the conversation.
 Determines entry points based on FSM state.
 """
 
-from typing import Dict, Literal
 import logging
+from typing import Literal
 
+from src.agents.langgraph.nodes.intent import INTENT_PATTERNS, detect_intent_from_text
+from src.agents.langgraph.nodes.utils import extract_user_message
+from src.agents.langgraph.routers.base import StateSchema, safe_router
+from src.agents.langgraph.routers.enums import Route
+from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
-from src.agents.langgraph.routers.base import safe_router, StateSchema
-from src.agents.langgraph.routers.enums import Route
-from src.agents.langgraph.nodes.utils import extract_user_message
-from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
-from src.agents.langgraph.nodes.intent import detect_intent_from_text, INTENT_PATTERNS
+
 
 logger = logging.getLogger(__name__)
 
-def get_master_routes() -> Dict[str, str]:
+def get_master_routes() -> dict[str, str]:
     """Map routing outcomes to graph nodes."""
     return {
         Route.MODERATION.value: "moderation",
@@ -56,70 +57,6 @@ def _route_debug(
             reason,
         )
 
-
-def _route_offer_payment_policy(state: StateSchema, user_msg: str) -> tuple[Route, str, str | None]:
-    """
-    Policy router for STATE_4_OFFER and STATE_5_PAYMENT_DELIVERY.
-
-    Priority:
-    1) dialog_phase + structured state flags
-    2) intent detection
-    3) keyword fallback
-    """
-    current_state = state.state_enum
-    metadata = state.metadata or {}
-    msg_lower = (user_msg or "").lower()
-
-    # 1) Phase policy + structured flags (highest priority)
-    if current_state == State.STATE_4_OFFER:
-        if state.dialog_phase == "WAITING_FOR_DELIVERY_DATA":
-            return Route.PAYMENT, "route_reason=phase_policy phase=WAITING_FOR_DELIVERY_DATA", None
-
-        if metadata.get("user_confirmed") or metadata.get("awaiting_payment_confirmation"):
-            return Route.PAYMENT, "route_reason=phase_policy flag=user_confirmed", None
-
-    if current_state == State.STATE_5_PAYMENT_DELIVERY:
-        if state.dialog_phase == "WAITING_FOR_DELIVERY_DATA":
-            if metadata.get("payment_request_data_sent"):
-                return (
-                    Route.AGENT,
-                    "route_reason=phase_policy phase=WAITING_FOR_DELIVERY_DATA flag=payment_request_data_sent",
-                    None,
-                )
-            return Route.PAYMENT, "route_reason=phase_policy phase=WAITING_FOR_DELIVERY_DATA", None
-
-        if state.dialog_phase in {"WAITING_FOR_PAYMENT_METHOD", "WAITING_FOR_PAYMENT_PROOF", "UPSELL_OFFERED"}:
-            return Route.PAYMENT, f"route_reason=phase_policy phase={state.dialog_phase}", None
-
-    # 2) Intent result
-    detected_intent = detect_intent_from_text(user_msg, state.has_image, current_state.value)
-    if current_state == State.STATE_4_OFFER:
-        if detected_intent == "PAYMENT_DELIVERY":
-            return Route.PAYMENT, "route_reason=intent intent=PAYMENT_DELIVERY", detected_intent
-        return Route.AGENT, f"route_reason=intent intent={detected_intent}", detected_intent
-
-    if current_state == State.STATE_5_PAYMENT_DELIVERY:
-        if detected_intent in {"PRODUCT_CATEGORY", "REQUEST_PHOTO", "DISCOVERY_OR_QUESTION", "SIZE_HELP", "COLOR_HELP"}:
-            return Route.AGENT, f"route_reason=intent intent={detected_intent}", detected_intent
-        if detected_intent == "PAYMENT_DELIVERY":
-            return Route.PAYMENT, "route_reason=intent intent=PAYMENT_DELIVERY", detected_intent
-
-    # 3) Keyword fallback (last resort only)
-    if current_state == State.STATE_4_OFFER and any(
-        keyword in msg_lower for keyword in INTENT_PATTERNS.get("CONFIRMATION", [])
-    ):
-        return Route.PAYMENT, "route_reason=keyword_fallback keyword=confirmation", None
-
-    if current_state == State.STATE_5_PAYMENT_DELIVERY and any(
-        keyword in msg_lower for keyword in INTENT_PATTERNS.get("PAYMENT_DELIVERY", [])
-    ):
-        return Route.PAYMENT, "route_reason=keyword_fallback keyword=payment_delivery", None
-
-    # Safe defaults by state
-    if current_state == State.STATE_4_OFFER:
-        return Route.AGENT, "route_reason=keyword_fallback default=offer_question", None
-    return Route.PAYMENT, "route_reason=keyword_fallback default=payment_flow", None
-
 @safe_router
 def master_router(state: StateSchema) -> Literal["moderation", "agent", "offer", "payment", "upsell", "end", "escalation"]:
     """
@@ -135,7 +72,7 @@ def master_router(state: StateSchema) -> Literal["moderation", "agent", "offer",
         state_dict = state.to_dict()
         user_msg = extract_user_message(state.messages)
 
-        photo_purpose, reason = determine_photo_purpose(state_dict, user_msg)
+        photo_purpose, _reason = determine_photo_purpose(state_dict, user_msg)
 
         if photo_purpose == "transactional":
             _route_debug(session_id, current_state.value, "payment", f"Photo purpose: {photo_purpose}")
@@ -159,20 +96,54 @@ def master_router(state: StateSchema) -> Literal["moderation", "agent", "offer",
         return Route.AGENT
 
     if current_state == State.STATE_4_OFFER:
+        # In OFFER state, we need to distinguish between:
+        # A) User confirms ("I'll take it") -> Payment
+        # B) User asks questions ("Is it wool?") -> Agent
         user_msg = extract_user_message(state.messages)
-        if not user_msg:
-            _route_debug(session_id, current_state.value, "offer", "route_reason=phase_policy no_user_message")
-            return Route.OFFER
+        if user_msg:
+             # Fast intent check
+             intent = detect_intent_from_text(user_msg, has_image, current_state.value)
 
-        target_route, reason, intent = _route_offer_payment_policy(state, user_msg)
-        _route_debug(session_id, current_state.value, target_route.value, reason, intent)
-        return target_route
+             if intent == "PAYMENT_DELIVERY":
+                 _route_debug(session_id, current_state.value, "payment", "Intent: PAYMENT_DELIVERY")
+                 return Route.PAYMENT
+
+             # Simple keyword check for confirmation
+             msg_lower = user_msg.lower()
+             if any(k in msg_lower for k in INTENT_PATTERNS.get("CONFIRMATION", [])):
+                 _route_debug(session_id, current_state.value, "payment", "Keyword: Confirmation")
+                 return Route.PAYMENT
+
+             # If not payment/confirmation, let Agent handle questions
+             _route_debug(session_id, current_state.value, "agent", "Questions in OFFER state")
+             return Route.AGENT
+
+        # Fallback if no message (rare) or unclear
+        return Route.OFFER
 
     if current_state == State.STATE_5_PAYMENT_DELIVERY:
-        user_msg = extract_user_message(state.messages)
-        target_route, reason, intent = _route_offer_payment_policy(state, user_msg)
-        _route_debug(session_id, current_state.value, target_route.value, reason, intent)
-        return target_route
+        # In PAYMENT state, we need to distinguish between:
+        # A) First time entering (send snippet) -> Payment Node
+        # B) Data collection (Name, City) -> Agent Node (to parse and update state)
+        # C) Payment method selection / Proof -> Payment Node (via Command or flow)
+
+        # NOTE: The dialog_phase is more granular here.
+        dialog_phase = state.dialog_phase
+
+        if dialog_phase == "WAITING_FOR_DELIVERY_DATA":
+            # Check if we already sent the request snippet
+            if state.metadata.get("payment_request_data_sent"):
+                 # Snippet sent, user is replying with data -> Agent parses it
+                 _route_debug(session_id, current_state.value, "agent", "Collecting Delivery Data")
+                 return Route.AGENT
+            else:
+                 # First time -> Payment node sends snippet
+                 _route_debug(session_id, current_state.value, "payment", "Send Delivery Snippet")
+                 return Route.PAYMENT
+
+        # For other sub-phases (Method, Proof), Payment node handles it or we route there
+        _route_debug(session_id, current_state.value, "payment", "Payment/Method/Proof")
+        return Route.PAYMENT
 
     if current_state == State.STATE_6_UPSELL:
         return Route.UPSELL
