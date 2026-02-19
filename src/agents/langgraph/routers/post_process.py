@@ -36,16 +36,22 @@ def get_agent_routes() -> Dict[str, str]:
         "validation": "validation",
         "payment": "payment", # Shortcut for direct buy
         "end": "end",
+        "escalation": "escalation",
         "post_agent_memory": "memory_update",
     }
 
 @safe_router
 def route_after_agent(
     state: StateSchema,
-) -> Literal["offer", "validation", "payment", "end", "post_agent_memory"]:
+) -> Literal["offer", "validation", "payment", "end", "escalation", "post_agent_memory"]:
     """
     Agent has produced a response. Where to next?
     """
+    agent_error = state.agent_response.get("agent_error") if isinstance(state.agent_response, dict) else None
+    if isinstance(agent_error, dict):
+        recoverable = bool(agent_error.get("recoverable", False))
+        return "validation" if recoverable else "escalation"
+
     # Turn-Based Check: if agent set a waiting phase, run memory post-hook then end
     waiting_phases = {
         "DISCOVERY", "VISION_DONE", "WAITING_FOR_SIZE", "WAITING_FOR_COLOR",
