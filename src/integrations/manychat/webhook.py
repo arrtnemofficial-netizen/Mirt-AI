@@ -15,6 +15,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from src.agents import get_active_graph  # Fixed: was graph_v2
+from src.agents.langgraph.state import map_canonical_image_fields
 from src.services.conversation import BufferedMessage, MessageDebouncer, create_conversation_handler
 from src.services.storage import MessageStore, create_message_store
 
@@ -77,20 +78,19 @@ class ManychatWebhook:
         """Process a ManyChat webhook body and produce a response envelope."""
         user_id, text, image_url = self._extract_user_text_and_image(payload)
 
-        # Build extra_metadata for images
-        extra_metadata = {}
-        if image_url:
-            extra_metadata = {
-                "has_image": True,
-                "image_url": image_url,
-            }
-            logger.info("[MANYCHAT:%s] 📷 Image received: %s", user_id, image_url[:80])
+        # Build canonical ingress metadata once at webhook boundary
+        _, canonical_has_image, canonical_image_url = map_canonical_image_fields(
+            metadata={"has_image": bool(image_url), "image_url": image_url},
+        )
+        extra_metadata = {"has_image": canonical_has_image, "image_url": canonical_image_url}
+        if canonical_has_image:
+            logger.info("[MANYCHAT:%s] 📷 Image received: %s", user_id, (canonical_image_url or "")[:80])
 
         # ---------------------------------------------------------------------
         # DEBOUNCING LOGIC
         # ---------------------------------------------------------------------
         buffered_msg = BufferedMessage(
-            text=text, has_image=bool(image_url), image_url=image_url, extra_metadata=extra_metadata
+            text=text, has_image=canonical_has_image, image_url=canonical_image_url, extra_metadata=extra_metadata
         )
 
         # Wait for aggregation.
@@ -113,7 +113,12 @@ class ManychatWebhook:
         # PROCESS AGGREGATED MESSAGE
         # ---------------------------------------------------------------------
         final_text = aggregated_msg.text
-        final_metadata = aggregated_msg.extra_metadata
+        final_metadata, canonical_has_image, canonical_image_url = map_canonical_image_fields(
+            metadata=aggregated_msg.extra_metadata,
+            has_image=aggregated_msg.has_image,
+            image_url=aggregated_msg.image_url,
+        )
+        final_metadata.update({"has_image": canonical_has_image, "image_url": canonical_image_url})
 
         logger.info("[MANYCHAT:%s] Processing AGGREGATED: text='%s'", user_id, final_text[:50])
 

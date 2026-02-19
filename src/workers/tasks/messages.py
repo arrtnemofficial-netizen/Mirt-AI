@@ -76,7 +76,7 @@ def process_message(
         # Import agent here to avoid circular imports
         from src.agents import get_active_graph as create_agent_graph  # Fixed typo: was src.agent
         from src.agents.langgraph.graph import invoke_graph
-        from src.agents.langgraph.state import create_initial_state
+        from src.agents.langgraph.state import create_initial_state, map_canonical_image_fields
         from src.services.storage import StoredMessage, create_message_store
 
         # Get or create message store
@@ -104,11 +104,16 @@ def process_message(
             "chat_id": chat_id,
             "message_id": message_id,
         }
+        mapped_metadata, canonical_has_image, canonical_image_url = map_canonical_image_fields(
+            metadata=graph_metadata,
+        )
 
         state = create_initial_state(
             session_id=session_id,
             messages=[{"role": m.role, "content": m.content} for m in history],
-            metadata=graph_metadata,
+            metadata=mapped_metadata,
+            has_image=canonical_has_image,
+            image_url=canonical_image_url,
         )
 
         # Run agent (async)

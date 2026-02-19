@@ -13,6 +13,7 @@ import time as _time
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from src.agents.langgraph.state import map_canonical_image_fields
 from src.core.models import BaseConversationState as ConversationState
 
 if TYPE_CHECKING:
@@ -76,12 +77,12 @@ class SessionManager:
                 metadata={
                     "session_id": session_id,
                     "vision_greeted": False,
-                    "has_image": False,
                 },
                 current_state="STATE_0_INIT",
                 dialog_phase="INIT",
                 should_escalate=False,
                 has_image=False,
+                image_url=None,
                 detected_intent=None,
                 selected_products=[],
                 offered_products=[],
@@ -103,28 +104,26 @@ class SessionManager:
         # Ensure top-level session_id is always present
         state.setdefault("session_id", session_id)
 
-        # 4. Reset transient flags (like image flags) that shouldn't persist across turns
-        # This prevents stale image_url from previous messages affecting routing
-        state["has_image"] = False
-        state["image_url"] = None
-        state["metadata"]["has_image"] = False
-        state["metadata"]["image_url"] = None
+        # 4. Map ingress payload once to canonical image fields (state.has_image/image_url)
+        normalized_metadata, canonical_has_image, canonical_image_url = map_canonical_image_fields(
+            metadata=state["metadata"],
+            has_image=state.get("has_image"),
+            image_url=state.get("image_url"),
+        )
 
-        # 5. Apply extra metadata from current request (e.g. webhook payload)
         if extra_metadata:
-            state["metadata"].update(extra_metadata)
-            
-            # Mirror critical flags (has_image) to top-level
-            if extra_metadata.get("has_image"):
-                image_url = extra_metadata.get("image_url")
-                if isinstance(image_url, str):
-                    trimmed = image_url.strip()
-                    if trimmed.startswith(("http://", "https://")) and len(trimmed) <= 2000:
-                        state["has_image"] = True
-                        state["image_url"] = trimmed
-                        state["metadata"]["image_url"] = trimmed
+            ingress_metadata, ingress_has_image, ingress_image_url = map_canonical_image_fields(
+                metadata=extra_metadata,
+            )
+            normalized_metadata.update(ingress_metadata)
+            canonical_has_image = ingress_has_image
+            canonical_image_url = ingress_image_url
 
-        # 6. Generate Trace ID for Observability
+        state["metadata"] = normalized_metadata
+        state["has_image"] = canonical_has_image
+        state["image_url"] = canonical_image_url
+
+        # 5. Generate Trace ID for Observability
         trace_id = None
         if extra_metadata and isinstance(extra_metadata, dict):
             trace_id = str(extra_metadata.get("trace_id") or "").strip() or None
