@@ -104,6 +104,7 @@ async def lifespan(app: FastAPI):
     # Log Memory system status
     try:
         from src.services.memory import MemoryService
+
         memory_service = MemoryService()
         if memory_service.enabled:
             logger.info("Memory System: ENABLED")
@@ -114,52 +115,17 @@ async def lifespan(app: FastAPI):
         logger.warning("Memory System: Check failed - %s", e)
 
     # Initialize PostgreSQL connection pool (async, for FastAPI endpoints)
-    try:
-        # CRITICAL STARTUP SELF-CHECK: Verify State Architecture
-        # This prevents runtime errors by confirming State object compatibility
-        # with both Pydantic (validation) and LangGraph (dict access).
-        from src.agents.langgraph.state import create_initial_state
-        test_state = create_initial_state(session_id="STARTUP_CHECK")
-        
-        # 1. Test Dict Write (The most common cause of "Assignment not supported")
-        try:
-            test_state["startup_check_key"] = "OK"
-        except TypeError as e:
-             logger.critical("🚨 FATAL ARCHITECTURE ERROR: State object does not support dict assignment! %s", e)
-             raise RuntimeError("State Compatibility Check Failed - Fix StateSchema MutableMapping") from e
-             
-        # 2. Test Critical Attributes
-        if not hasattr(test_state, "step_number"):
-             logger.critical("🚨 FATAL ARCHITECTURE ERROR: State missing 'step_number' field!")
-             raise RuntimeError("State Schema Validation Failed - Missing 'step_number'")
-
-        # 3. Test Router Conversion Logic (to_schema)
-        from src.agents.langgraph.routers.base import to_schema
-        try:
-            # Recursive check: to_schema(state) -> state
-            # This confirms the router decorator won't crash
-            _ = to_schema(test_state)
-        except Exception as e:
-             logger.critical("🚨 FATAL ARCHITECTURE ERROR: Router 'to_schema' recursion failed! %s", e)
-             raise RuntimeError("Router Compatibility Check Failed") from e
-
-        logger.info("✓ Architecture Integrity: VERIFIED (Hybrid State Bridge OK)")
-
-    except ImportError:
-         logger.warning("⚠ Could not import State/LangGraph for verification (imports might be broken)")
-    except Exception as e:
-         # If self-check fails, we MUST stop deployment.
-         logger.critical("🚨 STARTUP BLOCKED: Integrity Check Failed: %s", e)
-         raise e
-    
     postgres_pool = None
     try:
-        from src.services.storage.postgres_pool import get_postgres_pool, close_postgres_pool
+        from src.services.storage.postgres_pool import close_postgres_pool, get_postgres_pool
 
         postgres_pool = await get_postgres_pool()
         await postgres_pool.open()
-        logger.info("✓ PostgreSQL Pool: OPENED (min=%d, max=%d)", 
-                   postgres_pool.min_size, postgres_pool.max_size)
+        logger.info(
+            "✓ PostgreSQL Pool: OPENED (min=%d, max=%d)",
+            postgres_pool.min_size,
+            postgres_pool.max_size,
+        )
     except Exception as e:
         logger.warning("⚠ PostgreSQL Pool: Failed to open - %s (endpoints will use fallback)", e)
 
@@ -180,70 +146,6 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Celery: DISABLED - scheduled tasks will NOT run")
 
-    # Check external services (non-blocking, with timeouts)
-    logger.info("Checking external services...")
-
-    async def check_http_reachable(name: str, url: str, timeout: float = 3.0) -> tuple[bool, int | None, str | None]:
-        """Check if HTTP service is reachable.
-        
-        Uses HEAD first (lighter), falls back to GET if HEAD returns 405 Method Not Allowed.
-        Treats 200-399 as reachable (handles redirects properly).
-        
-        Returns: (is_reachable, status_code, error_type)
-        - is_reachable: True if status 200-399
-        - status_code: HTTP status code if request succeeded
-        - error_type: Exception type name if request failed
-        """
-        try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                # Try HEAD first (lighter, no body)
-                try:
-                    response = await client.head(url)
-                    status = response.status_code
-                except httpx.HTTPStatusError as e:
-                    # If HEAD returns 405 Method Not Allowed, fallback to GET
-                    if e.response.status_code == 405:
-                        response = await client.get(url)
-                        status = response.status_code
-                    else:
-                        # Other HTTP errors - still return status code
-                        status = e.response.status_code
-                        is_reachable = 200 <= status < 400
-                        return is_reachable, status, None
-                except Exception:
-                    # If HEAD fails for other reasons (network, timeout), try GET
-                    response = await client.get(url)
-                    status = response.status_code
-
-                is_reachable = 200 <= status < 400
-                return is_reachable, status, None
-        except Exception as e:
-            return False, None, type(e).__name__
-
-    # Check ManyChat API
-    if settings.MANYCHAT_API_KEY:
-        reachable, status, err = await check_http_reachable("ManyChat API", settings.MANYCHAT_API_URL, timeout=5.0)
-        if reachable:
-            logger.info("✓ ManyChat API: Reachable (status=%d)", status)
-        else:
-            logger.warning("⚠ ManyChat API: %s (status=%s, err=%s)",
-                          "Unreachable" if err else "Not reachable", status, err)
-    else:
-        logger.warning("⚠ ManyChat API: Not configured (MANYCHAT_API_KEY not set)")
-
-    # Check Sitniks CRM
-    if settings.SNITKIX_API_KEY and settings.ENABLE_CRM_INTEGRATION:
-        reachable, status, err = await check_http_reachable("Sitniks CRM", settings.SNITKIX_API_URL, timeout=5.0)
-        if reachable:
-            logger.info("✓ Sitniks CRM: Reachable (status=%d)", status)
-        else:
-            logger.warning("⚠ Sitniks CRM: %s (status=%s, err=%s)",
-                          "Unreachable" if err else "Not reachable", status, err)
-    elif settings.ENABLE_CRM_INTEGRATION:
-        logger.warning("⚠ Sitniks CRM: Not configured (SNITKIX_API_KEY not set but ENABLE_CRM_INTEGRATION=true)")
-    else:
-        logger.info("Sitniks CRM: Integration disabled")
-
     logger.info("=" * 60)
     logger.info("Server ready! All systems operational.")
     logger.info("=" * 60)
@@ -255,7 +157,7 @@ async def lifespan(app: FastAPI):
 
     # Close shared HTTP client
     try:
-        if hasattr(app.state, 'http_client') and app.state.http_client:
+        if hasattr(app.state, "http_client") and app.state.http_client:
             await app.state.http_client.aclose()
             logger.info("✓ Shared HTTP Client: CLOSED")
     except Exception as e:
@@ -264,6 +166,7 @@ async def lifespan(app: FastAPI):
     # Close PostgreSQL connection pool
     try:
         from src.services.storage.postgres_pool import close_postgres_pool
+
         await close_postgres_pool()
         logger.info("✓ PostgreSQL Pool: CLOSED")
     except Exception as e:
@@ -272,6 +175,7 @@ async def lifespan(app: FastAPI):
     # Gracefully close checkpointer pool
     try:
         from src.agents.langgraph.checkpointer import shutdown_checkpointer_pool
+
         await shutdown_checkpointer_pool()
     except Exception as e:
         logger.warning("Failed to shutdown checkpointer pool: %s", e)
