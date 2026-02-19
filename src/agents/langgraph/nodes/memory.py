@@ -23,6 +23,7 @@ import logging
 import time
 from typing import Any
 
+from src.agents.langgraph.routers.base import to_schema
 from src.agents.pydantic.memory_agent import analyze_for_memory, extract_quick_facts
 from src.agents.pydantic.memory_models import NewFact
 from src.core.state_machine import State
@@ -55,11 +56,12 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
     Returns:
         State update with memory context
     """
+    schema_state = to_schema(state)
     start_time = time.perf_counter()
-    session_id = state.get("session_id", "")
-    user_id = state.get("metadata", {}).get("user_id", "")
-    trace_id = state.get("trace_id", "")
-    current_state = state.get("current_state", "")
+    session_id = schema_state.session_id
+    user_id = schema_state.metadata.get("user_id", "")
+    trace_id = schema_state.trace_id
+    current_state = schema_state.current_state
 
     log_agent_step(
         session_id=session_id,
@@ -72,14 +74,14 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
     # Skip if no user_id
     if not user_id:
         logger.debug("[SESSION %s] No user_id, skipping memory context", session_id)
-        return {"step_number": state.get("step_number", 0) + 1}
+        return {"step_number": schema_state.step_number + 1}
 
     try:
         memory_service = MemoryService()
 
         if not memory_service.enabled:
             logger.debug("[SESSION %s] Memory service disabled", session_id)
-            return {"step_number": state.get("step_number", 0) + 1}
+            return {"step_number": schema_state.step_number + 1}
 
         # Load memory context
         context = await memory_service.load_memory_context(user_id)
@@ -116,10 +118,10 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
         # SITNIKS FIRST TOUCH (on first message only)
         # =================================================================
         sitniks_result = None
-        step_number = state.get("step_number", 0)
+        step_number = schema_state.step_number
 
         if step_number <= 1:
-            metadata = state.get("metadata", {})
+            metadata = schema_state.metadata
             instagram_username = metadata.get("instagram_username")
             telegram_username = metadata.get("user_nickname")
 
@@ -155,7 +157,7 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
         track_metric("memory_context_error", 1)
 
         # Don't fail the graph - just return empty memory
-        return {"step_number": state.get("step_number", 0) + 1}
+        return {"step_number": schema_state.step_number + 1}
 
 
 # =============================================================================
@@ -210,12 +212,13 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
     Returns:
         State update (minimal, just step_number)
     """
+    schema_state = to_schema(state)
     start_time = time.perf_counter()
-    session_id = state.get("session_id", "")
-    user_id = state.get("metadata", {}).get("user_id", "")
-    dialog_phase = state.get("dialog_phase", "")
-    current_state = state.get("current_state", "")
-    trace_id = state.get("trace_id", "")
+    session_id = schema_state.session_id
+    user_id = schema_state.metadata.get("user_id", "")
+    dialog_phase = schema_state.dialog_phase
+    current_state = schema_state.current_state
+    trace_id = schema_state.trace_id
 
     log_agent_step(
         session_id=session_id,
@@ -231,7 +234,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Skip if no user_id
     if not user_id:
-        return {"step_number": state.get("step_number", 0) + 1}
+        return {"step_number": schema_state.step_number + 1}
 
     # Check if we should trigger memory update
     should_trigger = dialog_phase in MEMORY_TRIGGER_PHASES or current_state in MEMORY_TRIGGER_STATES
@@ -243,18 +246,18 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
             dialog_phase,
             current_state,
         )
-        return {"step_number": state.get("step_number", 0) + 1}
+        return {"step_number": schema_state.step_number + 1}
 
     try:
         memory_service = MemoryService()
 
         if not memory_service.enabled:
-            return {"step_number": state.get("step_number", 0) + 1}
+            return {"step_number": schema_state.step_number + 1}
 
         # Get messages for analysis
-        messages = state.get("messages", [])
+        messages = schema_state.messages
         if not messages:
-            return {"step_number": state.get("step_number", 0) + 1}
+            return {"step_number": schema_state.step_number + 1}
 
         # Convert messages to dict format if needed
         message_dicts = []
@@ -313,8 +316,8 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
 
         if len(message_dicts) >= llm_analysis_threshold and current_state in MEMORY_TRIGGER_STATES:
             # Load existing facts and profile for context
-            existing_facts = state.get("memory_facts", [])
-            profile = state.get("memory_profile")
+            existing_facts = schema_state.memory_facts
+            profile = schema_state.memory_profile
 
             # Run MemoryAgent
             decision = await analyze_for_memory(
@@ -360,14 +363,14 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
             extra={"trace_id": trace_id, "elapsed_ms": elapsed},
         )
 
-        return {"step_number": state.get("step_number", 0) + 1}
+        return {"step_number": schema_state.step_number + 1}
 
     except Exception as e:
         logger.error("[SESSION %s] Memory update error: %s", session_id, e)
         track_metric("memory_update_error", 1)
 
         # Don't fail the graph
-        return {"step_number": state.get("step_number", 0) + 1}
+        return {"step_number": schema_state.step_number + 1}
 
 
 # =============================================================================
@@ -384,11 +387,12 @@ def should_load_memory(state: dict[str, Any]) -> bool:
     - Це не перше повідомлення (є хоч якась історія)
     - Не в escalation
     """
-    user_id = state.get("metadata", {}).get("user_id", "")
+    schema_state = to_schema(state)
+    user_id = schema_state.metadata.get("user_id", "")
     if not user_id:
         return False
 
-    dialog_phase = state.get("dialog_phase", "INIT")
+    dialog_phase = schema_state.dialog_phase
     return dialog_phase not in {"COMPLAINT", "OUT_OF_DOMAIN"}
 
 
@@ -400,11 +404,12 @@ def should_update_memory(state: dict[str, Any]) -> bool:
     - Є user_id
     - Знаходимось в trigger phase/state
     """
-    user_id = state.get("metadata", {}).get("user_id", "")
+    schema_state = to_schema(state)
+    user_id = schema_state.metadata.get("user_id", "")
     if not user_id:
         return False
 
-    dialog_phase = state.get("dialog_phase", "")
-    current_state = state.get("current_state", "")
+    dialog_phase = schema_state.dialog_phase
+    current_state = schema_state.current_state
 
     return dialog_phase in MEMORY_TRIGGER_PHASES or current_state in MEMORY_TRIGGER_STATES

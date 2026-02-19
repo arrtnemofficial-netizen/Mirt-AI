@@ -5,23 +5,22 @@ Top-level routing logic for the conversation.
 Determines entry points based on FSM state.
 """
 
-from typing import Dict, Literal, Any
 import logging
-from langgraph.graph import END
+from typing import Literal
 
+from src.agents.langgraph.nodes.intent import INTENT_PATTERNS, detect_intent_from_text
+from src.agents.langgraph.nodes.utils import extract_user_message
+from src.agents.langgraph.routers.base import StateSchema, safe_router
+from src.agents.langgraph.routers.enums import Route
+from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
-from src.agents.langgraph.routers.base import safe_router, StateSchema
-from src.agents.langgraph.routers.enums import Route
-from src.agents.langgraph.nodes.utils import extract_user_message
-from src.agents.langgraph.rules.photo_purpose import determine_photo_purpose
-from src.agents.langgraph.nodes.intent import detect_intent_from_text, INTENT_PATTERNS
-from src.services.observability import track_metric
+
 
 logger = logging.getLogger(__name__)
 
-def get_master_routes() -> Dict[str, str]:
+def get_master_routes() -> dict[str, str]:
     """Map routing outcomes to graph nodes."""
     return {
         Route.MODERATION.value: "moderation",
@@ -73,7 +72,7 @@ def master_router(state: StateSchema) -> Literal["moderation", "agent", "offer",
         state_dict = state.to_dict()
         user_msg = extract_user_message(state.messages)
 
-        photo_purpose, reason = determine_photo_purpose(state_dict, user_msg)
+        photo_purpose, _reason = determine_photo_purpose(state_dict, user_msg)
 
         if photo_purpose == "transactional":
             _route_debug(session_id, current_state.value, "payment", f"Photo purpose: {photo_purpose}")
