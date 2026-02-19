@@ -75,6 +75,8 @@ def process_message(
     try:
         # Import agent here to avoid circular imports
         from src.agents import get_active_graph as create_agent_graph  # Fixed typo: was src.agent
+        from src.agents.langgraph.graph import invoke_graph
+        from src.agents.langgraph.state import create_initial_state
         from src.services.storage import StoredMessage, create_message_store
 
         # Get or create message store
@@ -93,23 +95,29 @@ def process_message(
         # Get conversation history
         history = message_store.list(session_id, limit=20)
 
-        # Build context for agent
-        context = {
+        # Build SSOT metadata/state for agent
+        graph_metadata = {
+            **(metadata or {}),
             "session_id": session_id,
             "user_id": user_id,
             "platform": platform,
-            "history": [{"role": m.role, "content": m.content} for m in history],
-            "metadata": metadata or {},
+            "chat_id": chat_id,
+            "message_id": message_id,
         }
+
+        state = create_initial_state(
+            session_id=session_id,
+            messages=[{"role": m.role, "content": m.content} for m in history],
+            metadata=graph_metadata,
+        )
 
         # Run agent (async)
         async def _run_agent():
             graph = create_agent_graph()
-            result = await graph.ainvoke(
-                {
-                    "messages": [{"role": "user", "content": user_message}],
-                    "context": context,
-                }
+            result = await invoke_graph(
+                state=state,
+                session_id=session_id,
+                graph=graph,
             )
             return result
 
