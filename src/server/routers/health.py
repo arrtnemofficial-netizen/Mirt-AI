@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from src.conf.config import settings
 from src.server.routers.common import get_build_info
+from src.server.startup_checks import run_smoke_checks
 
 
 router = APIRouter()
@@ -118,17 +119,20 @@ async def health_observability() -> dict[str, Any]:
         from src.services.storage import get_postgres_pool
 
         pool = await get_postgres_pool()
-        async with pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'")
-                row = await cur.fetchone()
-                recent_traces = row[0] if row else 0
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'"
+            )
+            row = await cur.fetchone()
+            recent_traces = row[0] if row else 0
 
         return {
             "status": status,
             "enabled": enabled,
             "recent_traces_1h": recent_traces,
-            "message": "llm_traces will be populated" if enabled else "llm_traces will NOT be populated (ENABLE_OBSERVABILITY=False)",
+            "message": "llm_traces will be populated"
+            if enabled
+            else "llm_traces will NOT be populated (ENABLE_OBSERVABILITY=False)",
         }
     except Exception as e:
         return {
@@ -157,15 +161,18 @@ async def health_memory() -> dict[str, Any]:
 
         # Check tables using async pool
         pool = await get_postgres_pool()
-        async with pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'")
-                row = await cur.fetchone()
-                recent_profiles = row[0] if row else 0
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'"
+            )
+            row = await cur.fetchone()
+            recent_profiles = row[0] if row else 0
 
-                await cur.execute("SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'")
-                row = await cur.fetchone()
-                recent_memories = row[0] if row else 0
+            await cur.execute(
+                "SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'"
+            )
+            row = await cur.fetchone()
+            recent_memories = row[0] if row else 0
 
         return {
             "status": "ok",
@@ -234,7 +241,9 @@ async def health_workers() -> dict[str, Any]:
                 "count": worker_count,
             },
             "scheduled_tasks": scheduled_tasks,
-            "message": f"Scheduled tasks configured: {', '.join(scheduled_tasks)}" if scheduled_tasks else "No scheduled tasks configured",
+            "message": f"Scheduled tasks configured: {', '.join(scheduled_tasks)}"
+            if scheduled_tasks
+            else "No scheduled tasks configured",
         }
     except Exception as e:
         return {
@@ -242,6 +251,13 @@ async def health_workers() -> dict[str, Any]:
             "celery_enabled": settings.CELERY_ENABLED,
             "error": str(e),
         }
+
+
+@router.get("/health/smoke")
+async def health_smoke() -> dict[str, Any]:
+    """Run startup smoke checks outside startup hot path."""
+    report = run_smoke_checks()
+    return report.to_dict()
 
 
 @router.get("/health/preflight")
@@ -273,16 +289,15 @@ async def health_preflight() -> dict[str, Any]:
         if is_healthy:
             # Check critical tables exist using async pool
             pool = await get_postgres_pool()
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("""
-                        SELECT table_name 
-                        FROM information_schema.tables 
-                        WHERE table_schema = 'public' 
-                        AND table_name IN ('users', 'messages', 'orders', 'order_items', 'llm_traces', 'mirt_profiles', 'mirt_memories')
-                    """)
-                    rows = await cur.fetchall()
-                    existing_tables = {row[0] for row in rows}
+            async with pool.connection() as conn, conn.cursor() as cur:
+                await cur.execute("""
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    AND table_name IN ('users', 'messages', 'orders', 'order_items', 'llm_traces', 'mirt_profiles', 'mirt_memories')
+                """)
+                rows = await cur.fetchall()
+                existing_tables = {row[0] for row in rows}
 
             checks["postgresql"] = {
                 "status": "ok",
@@ -303,6 +318,7 @@ async def health_preflight() -> dict[str, Any]:
     if settings.CELERY_ENABLED:
         try:
             import redis
+
             r = redis.from_url(settings.REDIS_URL)
             r.ping()
             checks["redis"] = {"status": "ok", "connection": "ok"}
@@ -320,7 +336,6 @@ async def health_preflight() -> dict[str, Any]:
 
             inspect = celery_app.control.inspect()
             active_workers = inspect.active()
-            scheduled_tasks = inspect.scheduled()
 
             worker_count = len(active_workers) if active_workers else 0
             beat_schedule = celery_app.conf.beat_schedule or {}
@@ -329,7 +344,7 @@ async def health_preflight() -> dict[str, Any]:
                 checks["celery_workers"] = {
                     "status": "ok",
                     "active_count": worker_count,
-                    "queues": list(set([q.name for q in celery_app.conf.task_queues])),
+                    "queues": list({q.name for q in celery_app.conf.task_queues}),
                 }
             else:
                 checks["celery_workers"] = {
@@ -338,7 +353,9 @@ async def health_preflight() -> dict[str, Any]:
                     "message": "No active workers found - check Worker service on Railway",
                 }
                 overall_status = "degraded" if overall_status == "ok" else overall_status
-                recommendations.append("No Celery workers active - verify Worker service is running with 'python scripts/run_worker.py'")
+                recommendations.append(
+                    "No Celery workers active - verify Worker service is running with 'python scripts/run_worker.py'"
+                )
 
             checks["celery_beat"] = {
                 "status": "ok" if beat_schedule else "no_schedule",
@@ -346,7 +363,9 @@ async def health_preflight() -> dict[str, Any]:
                 "count": len(beat_schedule),
             }
             if not beat_schedule:
-                recommendations.append("No scheduled tasks configured - verify Beat service is running with 'python scripts/run_beat.py'")
+                recommendations.append(
+                    "No scheduled tasks configured - verify Beat service is running with 'python scripts/run_beat.py'"
+                )
         except Exception as e:
             checks["celery_workers"] = {"status": "error", "error": str(e)}
             checks["celery_beat"] = {"status": "error", "error": str(e)}
@@ -365,14 +384,17 @@ async def health_preflight() -> dict[str, Any]:
 
         if enabled:
             pool = await get_postgres_pool()
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'")
-                    row = await cur.fetchone()
-                    recent_profiles = row[0] if row else 0
-                    await cur.execute("SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'")
-                    row = await cur.fetchone()
-                    recent_memories = row[0] if row else 0
+            async with pool.connection() as conn, conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT COUNT(*) FROM mirt_profiles WHERE created_at > NOW() - INTERVAL '1 day'"
+                )
+                row = await cur.fetchone()
+                recent_profiles = row[0] if row else 0
+                await cur.execute(
+                    "SELECT COUNT(*) FROM mirt_memories WHERE created_at > NOW() - INTERVAL '1 day'"
+                )
+                row = await cur.fetchone()
+                recent_memories = row[0] if row else 0
 
             checks["memory_system"] = {
                 "status": "ok",
@@ -396,11 +418,12 @@ async def health_preflight() -> dict[str, Any]:
             from src.services.storage import get_postgres_pool
 
             pool = await get_postgres_pool()
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'")
-                    row = await cur.fetchone()
-                    recent_traces = row[0] if row else 0
+            async with pool.connection() as conn, conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT COUNT(*) FROM llm_traces WHERE created_at > NOW() - INTERVAL '1 hour'"
+                )
+                row = await cur.fetchone()
+                recent_traces = row[0] if row else 0
 
             checks["observability"] = {
                 "status": "ok",
@@ -425,25 +448,34 @@ async def health_preflight() -> dict[str, Any]:
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
                 # Simple check - ManyChat may not have /status, so we just check if we can reach it
-                response = await client.get(settings.MANYCHAT_API_URL, timeout=3.0)
+                await client.get(settings.MANYCHAT_API_URL, timeout=3.0)
                 checks["external_apis"]["manychat"] = {"status": "ok", "reachable": True}
         except Exception as e:
             checks["external_apis"]["manychat"] = {"status": "warning", "error": type(e).__name__}
     else:
-        checks["external_apis"]["manychat"] = {"status": "not_configured", "message": "MANYCHAT_API_KEY not set"}
+        checks["external_apis"]["manychat"] = {
+            "status": "not_configured",
+            "message": "MANYCHAT_API_KEY not set",
+        }
 
     # Sitniks
     if settings.SNITKIX_API_KEY and settings.ENABLE_CRM_INTEGRATION:
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
-                response = await client.get(settings.SNITKIX_API_URL, timeout=3.0)
+                await client.get(settings.SNITKIX_API_URL, timeout=3.0)
                 checks["external_apis"]["sitniks"] = {"status": "ok", "reachable": True}
         except Exception as e:
             checks["external_apis"]["sitniks"] = {"status": "warning", "error": type(e).__name__}
     elif settings.ENABLE_CRM_INTEGRATION:
-        checks["external_apis"]["sitniks"] = {"status": "not_configured", "message": "SNITKIX_API_KEY not set but ENABLE_CRM_INTEGRATION=true"}
+        checks["external_apis"]["sitniks"] = {
+            "status": "not_configured",
+            "message": "SNITKIX_API_KEY not set but ENABLE_CRM_INTEGRATION=true",
+        }
     else:
-        checks["external_apis"]["sitniks"] = {"status": "disabled", "message": "CRM integration disabled"}
+        checks["external_apis"]["sitniks"] = {
+            "status": "disabled",
+            "message": "CRM integration disabled",
+        }
 
     return {
         "status": overall_status,
@@ -452,9 +484,16 @@ async def health_preflight() -> dict[str, Any]:
         "recommendations": recommendations,
         "summary": {
             "all_systems_operational": overall_status == "ok",
-            "critical_issues": len([r for r in recommendations if "critical" in r.lower() or "failed" in r.lower()]),
-            "warnings": len([r for r in recommendations if "warning" in r.lower() or "not configured" in r.lower()]),
+            "critical_issues": len(
+                [r for r in recommendations if "critical" in r.lower() or "failed" in r.lower()]
+            ),
+            "warnings": len(
+                [
+                    r
+                    for r in recommendations
+                    if "warning" in r.lower() or "not configured" in r.lower()
+                ]
+            ),
         },
         **get_build_info(),
     }
-
