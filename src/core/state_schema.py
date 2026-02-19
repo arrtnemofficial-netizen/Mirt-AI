@@ -187,6 +187,26 @@ class StateSchema(BaseModel, MutableMapping):
                 f"({self.retry_count} > {self.max_retries} + {RETRY_BUFFER})"
             )
 
+        metadata_has_image = self.metadata.get("has_image")
+        metadata_image_url = self.metadata.get("image_url")
+
+        if metadata_has_image is not None and bool(metadata_has_image) != self.has_image:
+            raise ValueError(
+                "metadata.has_image conflicts with canonical has_image"
+            )
+
+        normalized_meta_image_url = (
+            metadata_image_url.strip() if isinstance(metadata_image_url, str) else metadata_image_url
+        )
+        if normalized_meta_image_url == "":
+            normalized_meta_image_url = None
+
+        if normalized_meta_image_url != self.image_url:
+            if normalized_meta_image_url is not None or self.image_url is not None:
+                raise ValueError(
+                    "metadata.image_url conflicts with canonical image_url"
+                )
+
         return self
 
     @property
