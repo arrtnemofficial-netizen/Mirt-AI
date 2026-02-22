@@ -15,6 +15,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -49,10 +50,7 @@ def _tail(text: str, n: int = 12) -> str:
 
 def check_python_version(*, strict: bool) -> CheckResult:
     major, minor = sys.version_info[:2]
-    if (major, minor) >= (3, 11):
-        status = "pass"
-    else:
-        status = "fail" if strict else "warn"
+    status = "pass" if (major, minor) >= (3, 11) else "fail" if strict else "warn"
     return CheckResult(
         name="python-version",
         status=status,
@@ -135,6 +133,15 @@ def build_ai_layer_checks() -> list[CheckResult]:
         run_command_check(
             "langgraph-state-import-smoke",
             ["python", "-c", "from src.agents.langgraph.state import create_initial_state; create_initial_state(session_id='SMOKE')"],
+            required=True,
+        ),
+        run_command_check(
+            "memory-node-import-smoke",
+            [
+                "python",
+                "-c",
+                "from src.agents.langgraph.nodes.memory import memory_context_node, memory_update_node; from src.agents.langgraph.state import create_initial_state; create_initial_state(session_id='SMOKE-MEMORY'); print(memory_context_node.__name__, memory_update_node.__name__)",
+            ],
             required=True,
         ),
         run_command_check("prompt-compliance", ["pytest", "-q", "tests/unit/test_prompt_compliance.py"], required=True),

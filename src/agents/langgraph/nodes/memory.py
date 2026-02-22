@@ -25,10 +25,10 @@ from typing import Any
 
 from src.agents.langgraph.routers.base import to_schema
 from src.agents.pydantic.memory_agent import analyze_for_memory, extract_quick_facts
-from src.agents.pydantic.memory_models import NewFact
 from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.memory import MemoryService
+from src.services.memory.models import NewFact
 from src.services.observability import log_agent_step, track_metric
 
 
