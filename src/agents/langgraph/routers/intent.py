@@ -12,6 +12,7 @@ from src.agents.langgraph.routers.enums import Route
 
 logger = logging.getLogger(__name__)
 
+
 def get_intent_routes() -> Dict[str, str]:
     return {
         Route.VISION.value: "vision",
@@ -19,11 +20,15 @@ def get_intent_routes() -> Dict[str, str]:
         Route.OFFER.value: "offer",
         Route.PAYMENT.value: "payment",
         Route.ESCALATION.value: "escalation",
+        Route.DISAMBIGUATION.value: "agent",
         Route.END.value: "end",
     }
 
+
 @safe_router
-def route_after_intent(state: StateSchema) -> Literal["vision", "agent", "offer", "payment", "escalation", "end"]:
+def route_after_intent(
+    state: StateSchema,
+) -> Literal["vision", "agent", "offer", "payment", "escalation", "end"]:
     """
     Decide where to go based on detected intent and current state.
     """
@@ -34,6 +39,10 @@ def route_after_intent(state: StateSchema) -> Literal["vision", "agent", "offer"
     # 1. Escalation / Complaint
     if state.should_escalate or intent == "ESCALATION" or intent == "COMPLAINT":
         return Route.ESCALATION
+
+    # 1.5 Ambiguous intent -> clarification/disambiguation node (agent)
+    if intent == "AMBIGUOUS":
+        return Route.DISAMBIGUATION
 
     # 2. Greeting / Smalltalk -> Agent
     if intent in ("GREETING_ONLY", "THANKYOU_SMALLTALK"):
@@ -51,7 +60,7 @@ def route_after_intent(state: StateSchema) -> Literal["vision", "agent", "offer"
             # Check context: is it payment proof?
             # Intent logic should have handled this, but we double check
             if intent == "PAYMENT_DELIVERY":
-                 return Route.PAYMENT
+                return Route.PAYMENT
 
         # Fallback: if we are here with an image, and it's not payment, default to vision
         return Route.VISION
@@ -68,10 +77,7 @@ def route_after_intent(state: StateSchema) -> Literal["vision", "agent", "offer"
 
         # If user says "buy" but no products?
         if state.selected_products or state.offered_products:
-            return Route.OFFER # Go to offer to confirm/finalize before payment?
-            # Original logic:
-            # if products -> offer
-            # if no products -> agent
+            return Route.OFFER
 
         return Route.AGENT
 
