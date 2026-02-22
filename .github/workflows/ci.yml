@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -41,8 +43,10 @@ jobs:
       - name: Run Critical Ruff Gate (F821/F401)
         run: ruff check --select F821,F401 src/ tests/
 
-      - name: Check AI-smell comment markers (changed source files)
-        run: python scripts/check_ai_smell_comments.py
+      - name: Check AI-smell comment markers (PR merge-base diff)
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          python scripts/check_ai_smell_comments.py --base origin/main --head HEAD --merge-base
 
       - name: Run Ruff formatter check
         run: ruff format --check src/ tests/

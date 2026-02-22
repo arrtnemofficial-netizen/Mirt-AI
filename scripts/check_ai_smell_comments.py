@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -32,21 +33,12 @@ class Finding:
     snippet: str
 
 
-def _git_added_lines() -> list[tuple[str, int, str]]:
-    """Return (file, line_no, line_text) for added lines in HEAD commit."""
-    result = subprocess.run(
-        ["git", "show", "--unified=0", "--pretty=format:", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return []
-
+def _parse_added_lines_from_unified_diff(diff_text: str) -> list[tuple[str, int, str]]:
+    """Return (file, line_no, line_text) for added lines from unified diff text."""
     findings: list[tuple[str, int, str]] = []
     current_file: str | None = None
     current_new_line = 0
-    for raw in result.stdout.splitlines():
+    for raw in diff_text.splitlines():
         file_match = SOURCE_FILE_RE.match(raw)
         if file_match:
             current_file = file_match.group(1)
@@ -71,6 +63,34 @@ def _git_added_lines() -> list[tuple[str, int, str]]:
         else:
             current_new_line += 1
     return findings
+
+
+def _git_added_lines(*, base: str, head: str, merge_base: bool) -> list[tuple[str, int, str]]:
+    """Return (file, line_no, line_text) for added lines in selected revision range."""
+    revision_range = f"{base}...{head}" if merge_base else f"{base}..{head}"
+    result = subprocess.run(
+        ["git", "diff", "--unified=0", "--no-color", revision_range],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return _parse_added_lines_from_unified_diff(result.stdout)
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Fail when newly added lines contain AI-smell markers or merge conflict markers"
+    )
+    parser.add_argument("--base", default="HEAD~1", help="Base revision (default: HEAD~1)")
+    parser.add_argument("--head", default="HEAD", help="Head revision (default: HEAD)")
+    parser.add_argument(
+        "--merge-base",
+        action="store_true",
+        help="Compare using merge-base (triple-dot diff, e.g. origin/main...HEAD)",
+    )
+    return parser.parse_args()
 
 
 def _detect_findings(added_lines: list[tuple[str, int, str]]) -> list[Finding]:
@@ -108,7 +128,8 @@ def _detect_findings(added_lines: list[tuple[str, int, str]]) -> list[Finding]:
 
 
 def main() -> int:
-    added_lines = _git_added_lines()
+    args = _parse_args()
+    added_lines = _git_added_lines(base=args.base, head=args.head, merge_base=args.merge_base)
     if not added_lines:
         return 0
 
