@@ -5,8 +5,7 @@ Transition Handler.
 Responsible for computing the next state using SSOT Reducer.
 Handles:
 1. Transition computation (Reducer).
-2. Global Priority Overrides (Complaint, Vision).
-3. Payment State Preservation (Context).
+2. Payment State Preservation (Context).
 """
 
 import logging
@@ -71,23 +70,7 @@ def finalize_transition(
             intent = "PAYMENT_DELIVERY"
             transition_source = "override"
     
-    # 2. Check Global Priorities (immutable)
-    global_priority_intents = {"COMPLAINT", "PHOTO_IDENT"}
-    if intent in global_priority_intents:
-        logger.debug(
-            "[SESSION %s] Global priority intent %s - skipping SSOT override",
-            session_id,
-            intent,
-        )
-        return response.metadata.current_state, intent, {
-            "transition_reason": f"global_priority_intent:{intent}",
-            "transition_source": transition_source,
-            "payment_sub_phase": None,
-            "dialog_phase": state.get("dialog_phase"),
-            "has_deferred_intents": bool(state.get("metadata", {}).get("deferred_intents", [])),
-        }
-
-    # 3. Compute SSOT Transition
+    # 2. Compute SSOT Transition
     has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
     deferred_intents = state.get("metadata", {}).get("deferred_intents", [])
     transition = compute_transition(
@@ -98,7 +81,7 @@ def finalize_transition(
         deferred_intents=deferred_intents,
     )
 
-    # 4. Apply Overrides
+    # 3. Apply Overrides
     if preserve_payment_state and current_state == State.STATE_5_PAYMENT_DELIVERY.value:
         # Override: Force stay in Payment
         logger.info(
@@ -113,7 +96,7 @@ def finalize_transition(
             "has_deferred_intents": transition.has_deferred_intents,
         }
     
-    # 5. Apply SSOT Decision
+    # 4. Apply SSOT Decision
     # If SSOT says X, but LLM says Y -> Trust SSOT (Transition Reducer)
     new_state = transition.next_state
     

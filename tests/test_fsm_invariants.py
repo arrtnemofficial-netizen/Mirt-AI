@@ -16,6 +16,7 @@ from src.agents.langgraph.edges import (
     route_after_vision,
 )
 from src.agents.langgraph.nodes.intent import detect_intent_from_text
+from src.agents.langgraph.nodes.handlers.transition_handler import finalize_transition
 from src.core.state_machine import (
     TRANSITIONS,
     Intent,
@@ -575,3 +576,66 @@ class TestSSOTInvariants:
 
         assert transition.next_state == "STATE_5_PAYMENT_DELIVERY"
         assert "strict_state5_short_ack_override" in transition.reason
+
+
+class TestNextStateSSOTInvariant:
+    """Same event must produce same next_state in all FSM entry points."""
+
+    @pytest.mark.parametrize(
+        ("current_state", "intent", "message", "has_image"),
+        [
+            ("STATE_0_INIT", "DISCOVERY_OR_QUESTION", "покажи сукню", False),
+            ("STATE_4_OFFER", "PAYMENT_DELIVERY", "беру", False),
+            ("STATE_5_PAYMENT_DELIVERY", "THANKYOU_SMALLTALK", "відміна", False),
+            ("STATE_3_SIZE_COLOR", "PHOTO_IDENT", "", True),
+            ("STATE_2_VISION", "COMPLAINT", "скарга", False),
+        ],
+    )
+    def test_same_event_same_next_state_for_router_reducer_and_finalize(
+        self,
+        current_state: str,
+        intent: str,
+        message: str,
+        has_image: bool,
+    ):
+        from src.agents.langgraph.fsm.transition_reducer import compute_transition
+        from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
+        from src.core.state_machine import Intent as IntentEnum, State, resolve_next_state
+
+        state = {
+            "session_id": "fsm-invariant",
+            "current_state": current_state,
+            "detected_intent": intent,
+            "has_image": has_image,
+            "messages": [{"role": "user", "content": message}],
+            "selected_products": [{"name": "Test", "price": 100}],
+            "metadata": {"session_id": "fsm-invariant", "has_image": has_image},
+        }
+
+        expected = resolve_next_state(State.from_string(current_state), IntentEnum.from_string(intent)).value
+
+        route = _resolve_intent_route(intent, current_state, {"has_image": has_image})
+        assert isinstance(route, str)
+
+        transition = compute_transition(
+            state=state,
+            intent=intent,
+            has_image=has_image,
+            user_message=message,
+        )
+
+        response = SupportResponse(
+            event="simple_answer",
+            messages=[MessageItem(type="text", content=message or "ok")],
+            products=[],
+            metadata=ResponseMetadata(
+                session_id="fsm-invariant",
+                current_state=current_state,
+                intent=intent,
+                escalation_level="NONE",
+            ),
+        )
+        finalized_state, _, _ = finalize_transition(state, response, message)
+
+        assert transition.next_state == expected
+        assert finalized_state == expected

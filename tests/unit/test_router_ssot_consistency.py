@@ -9,7 +9,7 @@ from src.agents.langgraph.fsm.transition_reducer import compute_transition
 from src.agents.langgraph.nodes.handlers.transition_handler import finalize_transition
 from src.agents.langgraph.nodes.intent import detect_intent_from_text
 from src.agents.pydantic.models import MessageItem, ResponseMetadata, SupportResponse
-from src.core.state_machine import State
+from src.core.state_machine import Intent, State, map_state_to_router_node, resolve_next_state
 
 
 def _state(state: State, message: str, *, dialog_phase: str = "WAITING_FOR_DELIVERY_DATA") -> dict:
@@ -88,3 +88,58 @@ def test_state5_explicit_cancel_routes_to_end() -> None:
 
 def test_ambiguous_intent_routes_to_agent_disambiguation_branch() -> None:
     assert _resolve_intent_route("AMBIGUOUS", State.STATE_4_OFFER.value, {}) == "agent"
+
+
+@pytest.mark.parametrize(
+    ("current_state", "intent", "message", "has_image"),
+    [
+        (State.STATE_0_INIT, "DISCOVERY_OR_QUESTION", "покажи костюм", False),
+        (State.STATE_4_OFFER, "PAYMENT_DELIVERY", "беру", False),
+        (State.STATE_5_PAYMENT_DELIVERY, "THANKYOU_SMALLTALK", "відміна", False),
+        (State.STATE_1_DISCOVERY, "COMPLAINT", "скарга", False),
+        (State.STATE_3_SIZE_COLOR, "PHOTO_IDENT", "", True),
+    ],
+)
+def test_next_state_ssot_is_identical_for_all_entry_points(
+    current_state: State,
+    intent: str,
+    message: str,
+    has_image: bool,
+) -> None:
+    state = {
+        "session_id": "ssot-entrypoints",
+        "current_state": current_state.value,
+        "detected_intent": intent,
+        "has_image": has_image,
+        "messages": [{"role": "user", "content": message}],
+        "selected_products": [{"name": "Тест", "price": 100}],
+        "metadata": {"session_id": "ssot-entrypoints", "has_image": has_image},
+    }
+
+    ssot_state = resolve_next_state(current_state, Intent.from_string(intent)).value
+    route = _resolve_intent_route(intent, current_state.value, {"has_image": has_image})
+    route_state = resolve_next_state(current_state, Intent.from_string(intent)).value
+    assert route == map_state_to_router_node(State.from_string(route_state))
+
+    transition = compute_transition(
+        state=state,
+        intent=intent,
+        has_image=has_image,
+        user_message=message,
+    )
+
+    response = SupportResponse(
+        event="simple_answer",
+        messages=[MessageItem(type="text", content=message or "ok")],
+        products=[],
+        metadata=ResponseMetadata(
+            session_id="ssot-entrypoints",
+            current_state=current_state.value,
+            intent=intent,
+            escalation_level="NONE",
+        ),
+    )
+    finalized_state, _, _ = finalize_transition(state, response, message)
+
+    assert transition.next_state == ssot_state
+    assert finalized_state == ssot_state

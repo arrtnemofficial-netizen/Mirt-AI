@@ -234,18 +234,6 @@ INTENT_PATTERNS = {
     ],
 }
 
-# In STATE_5, these phrases are treated as explicit refusal/cancel and can exit payment flow.
-STATE5_EXPLICIT_CANCEL_PATTERNS = [
-    "відміна",
-    "відмов",
-    "скасувати",
-    "не хочу",
-    "не треба",
-    "передум",
-    "cancel",
-]
-
-
 def detect_intent_from_text(
     text: str,
     has_image: bool,
@@ -291,77 +279,17 @@ def detect_intent_candidates_from_text(
     }
 
 
-def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -> str | None:
-    """Check special cases before keyword matching."""
+def _check_special_cases(text_lower: str, has_image: bool, _current_state: str) -> str | None:
+    """Check intent-only special cases before keyword matching."""
     # Empty text with image = definitely photo identification
     if not text_lower and has_image:
         return "PHOTO_IDENT"
 
-    # In OFFER state: payment keywords, confirmations, or product names = PAYMENT
-    if current_state == "STATE_4_OFFER":
-        # Payment keywords
-        for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
-            if keyword in text_lower:
-                logger.info(
-                    "Intent override: PAYMENT_DELIVERY in OFFER state (payment keyword: %s)",
-                    keyword,
-                )
-                return "PAYMENT_DELIVERY"
-        # Confirmation words (так, да, ок, etc.)
-        for keyword in INTENT_PATTERNS["CONFIRMATION"]:
-            if keyword in text_lower:
-                logger.info(
-                    "Intent override: PAYMENT_DELIVERY in OFFER state (confirmation: %s)", keyword
-                )
-                return "PAYMENT_DELIVERY"
-        # Product name selection (лагуна, мрія, etc.)
-        for keyword in INTENT_PATTERNS["PRODUCT_NAMES"]:
-            if keyword in text_lower:
-                logger.info(
-                    "Intent override: PAYMENT_DELIVERY in OFFER state (product selection: %s)",
-                    keyword,
-                )
-                return "PAYMENT_DELIVERY"
-
-    # Payment context takes priority in payment state - BUT allow off-topic intents
-    if current_state == "STATE_5_PAYMENT_DELIVERY":
-        # In payment state, most inputs are payment-related (size, address, phone, etc.)
-        # BUT: Allow off-topic intents (PRODUCT_CATEGORY, REQUEST_PHOTO) to be handled
-        # by agent node with snippets-first policy, then return to payment
-
-        # Explicit complaints: let keyword matching handle
-        for keyword in INTENT_PATTERNS["COMPLAINT"]:
-            if keyword in text_lower:
-                return None  # Let keyword matching handle complaints
-
-        # Explicit refusal/cancel should preserve legacy exit behavior.
-        for keyword in STATE5_EXPLICIT_CANCEL_PATTERNS:
-            if keyword in text_lower:
-                logger.info("Intent: THANKYOU_SMALLTALK (explicit cancel in payment state)")
-                return "THANKYOU_SMALLTALK"
-
-        # Off-topic intents: allow them (will be handled by agent with snippets-first)
-        for keyword in INTENT_PATTERNS["PRODUCT_CATEGORY"]:
-            if keyword in text_lower:
-                logger.info("Intent: PRODUCT_CATEGORY (in payment state, allowing off-topic)")
-                return "PRODUCT_CATEGORY"
-
-        for keyword in INTENT_PATTERNS["REQUEST_PHOTO"]:
-            if keyword in text_lower:
-                logger.info("Intent: REQUEST_PHOTO (in payment state, allowing off-topic)")
-                return "REQUEST_PHOTO"
-
-        # Everything else in payment state stays in payment
-        logger.info("Intent: PAYMENT_DELIVERY (in payment state, continuing flow)")
-        return "PAYMENT_DELIVERY"
-
-    # Photo identification ONLY if user sent text that looks like photo query
-    # OR if there's no meaningful text (just "ціна" etc with image)
+    # Photo identification only when image is attached and text is not clearly payment-oriented
     if has_image:
-        # Check if text is a payment/action keyword - don't override to PHOTO_IDENT
         for keyword in INTENT_PATTERNS["PAYMENT_DELIVERY"]:
             if keyword in text_lower:
-                return None  # Let keyword matching handle it
+                return None
         return "PHOTO_IDENT"
 
     return None

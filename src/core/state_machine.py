@@ -326,6 +326,41 @@ def get_next_state(current_state: State, intent: Intent) -> State:
     return current_state
 
 
+# High-priority intents that must override transition table from any state.
+GLOBAL_INTENT_OVERRIDES: dict[Intent, State] = {
+    Intent.COMPLAINT: State.STATE_8_COMPLAINT,
+    Intent.PHOTO_IDENT: State.STATE_2_VISION,
+}
+
+
+def resolve_next_state(current_state: State, intent: Intent) -> State:
+    """
+    Resolve next state using SSOT transition policy.
+
+    Order:
+    1) Global intent overrides (must work from any state).
+    2) FSM transition table.
+    """
+    forced_state = GLOBAL_INTENT_OVERRIDES.get(intent)
+    if forced_state is not None:
+        return forced_state
+    return get_next_state(current_state, intent)
+
+
+STATE_TO_ROUTER_NODE: dict[State, str] = {
+    State.STATE_2_VISION: "vision",
+    State.STATE_4_OFFER: "offer",
+    State.STATE_5_PAYMENT_DELIVERY: "payment",
+    State.STATE_8_COMPLAINT: "escalation",
+    State.STATE_7_END: "end",
+}
+
+
+def map_state_to_router_node(next_state: State) -> str:
+    """Map resolved FSM state to graph node route."""
+    return STATE_TO_ROUTER_NODE.get(next_state, "agent")
+
+
 # =============================================================================
 # DIALOG PHASES (Single Source of Truth)
 # =============================================================================
