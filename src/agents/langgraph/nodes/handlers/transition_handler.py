@@ -58,7 +58,7 @@ def finalize_transition(
                 user_message or "",
                 has_image=has_image,
                 current_state=current_state,
-            )
+            ).primary_intent
 
         if detected_intent and detected_intent != "UNKNOWN_OR_EMPTY":
             intent = str(detected_intent)

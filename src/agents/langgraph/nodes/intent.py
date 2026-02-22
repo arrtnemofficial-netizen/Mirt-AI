@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.agents.langgraph.intent.models import IntentDecision
 from src.agents.langgraph.intent.policy import select_intents
+from src.conf.config import settings
 from src.core.input_validator import validate_input_metadata
 
 
@@ -238,14 +240,14 @@ def detect_intent_from_text(
     text: str,
     has_image: bool,
     current_state: str,
-) -> str:
-    """Backward-compatible wrapper: returns only primary intent."""
+) -> IntentDecision:
+    """Detect intent and return structured decision for safe routing."""
     selection = detect_intent_candidates_from_text(
         text=text,
         has_image=has_image,
         current_state=current_state,
     )
-    return selection["primary_intent"]
+    return selection["decision"]
 
 
 def detect_intent_candidates_from_text(
@@ -254,28 +256,80 @@ def detect_intent_candidates_from_text(
     current_state: str,
     top_k: int = 3,
 ) -> dict[str, Any]:
-    """Detect intent candidates and resolve primary/deferred intents by policy."""
-    text_lower = text.lower().strip()
+    """Detect top intent candidates and resolve ambiguity/confidence gates."""
+    text_lower = (text or "").lower().strip()
     min_top_k = max(top_k, 3)
 
-    # Special cases first
     special = _check_special_cases(text_lower, has_image, current_state)
     if special:
         candidates = [special, "DISCOVERY_OR_QUESTION", "THANKYOU_SMALLTALK"]
         selection = select_intents(candidates)
+        decision = IntentDecision(
+            primary_intent=selection.primary_intent,
+            confidence=0.95,
+            secondary_intents=selection.deferred_intents,
+            ambiguous_flag=False,
+            reason="special_case",
+        )
         return {
-            "primary_intent": selection.primary_intent,
-            "deferred_intents": selection.deferred_intents,
+            "decision": decision,
+            "primary_intent": decision.primary_intent,
+            "deferred_intents": decision.secondary_intents,
             "intent_candidates": candidates[:min_top_k],
+            "confidence": decision.confidence,
+            "ambiguous_flag": decision.ambiguous_flag,
+            "reason": decision.reason,
         }
 
-    candidates = _collect_keyword_candidates(text_lower, len(text), min_top_k)
+    scored_candidates = _score_keyword_candidates(text_lower=text_lower, text_len=len(text or ""), top_k=min_top_k)
+    candidates = [intent for intent, _ in scored_candidates]
     selection = select_intents(candidates)
+    top_score = scored_candidates[0][1] if scored_candidates else 0
+    second_score = scored_candidates[1][1] if len(scored_candidates) > 1 else 0
+
+    base_confidence = min(0.95, 0.45 + (top_score * 0.18))
+    mixed_margin = top_score - second_score
+    is_mixed = second_score > 0 and mixed_margin <= settings.INTENT_AMBIGUOUS_MARGIN
+    low_confidence = base_confidence < settings.INTENT_LOW_CONFIDENCE_THRESHOLD
+    ambiguous_flag = bool(is_mixed or low_confidence)
+
+    if ambiguous_flag:
+        primary_intent = "AMBIGUOUS"
+        reason = "mixed_intent" if is_mixed else "low_confidence"
+        secondary_intents = [selection.primary_intent, *selection.deferred_intents]
+    else:
+        primary_intent = selection.primary_intent
+        reason = "clear_match"
+        secondary_intents = selection.deferred_intents
+
+    decision = IntentDecision(
+        primary_intent=primary_intent,
+        confidence=round(base_confidence, 2),
+        secondary_intents=list(dict.fromkeys(secondary_intents)),
+        ambiguous_flag=ambiguous_flag,
+        reason=reason,
+    )
+
+    if settings.INTENT_SHADOW_LOGGING:
+        logger.info(
+            "intent.shadow decision=%s confidence=%.2f ambiguous=%s reason=%s top=%s second=%s text=%s",
+            decision.primary_intent,
+            decision.confidence,
+            decision.ambiguous_flag,
+            decision.reason,
+            top_score,
+            second_score,
+            (text or "")[:120],
+        )
 
     return {
-        "primary_intent": selection.primary_intent,
-        "deferred_intents": selection.deferred_intents,
+        "decision": decision,
+        "primary_intent": decision.primary_intent,
+        "deferred_intents": decision.secondary_intents,
         "intent_candidates": candidates,
+        "confidence": decision.confidence,
+        "ambiguous_flag": decision.ambiguous_flag,
+        "reason": decision.reason,
     }
 
 
@@ -295,9 +349,9 @@ def _check_special_cases(text_lower: str, has_image: bool, _current_state: str) 
     return None
 
 
-def _collect_keyword_candidates(text_lower: str, text_len: int, top_k: int) -> list[str]:
-    """Collect top-k intent candidates using keyword hit counts."""
-    scored: list[tuple[str, int]] = []
+def _score_keyword_candidates(text_lower: str, text_len: int, top_k: int) -> list[tuple[str, float]]:
+    """Collect top-k intent candidates with hit-based scores."""
+    scored: list[tuple[str, float]] = []
 
     candidate_intents = [
         "PAYMENT_DELIVERY",
@@ -314,21 +368,21 @@ def _collect_keyword_candidates(text_lower: str, text_len: int, top_k: int) -> l
 
     for intent in candidate_intents:
         keywords = INTENT_PATTERNS.get(intent, [])
-        score = sum(1 for keyword in keywords if keyword in text_lower)
-        if score > 0:
-            scored.append((intent, score))
+        hits = sum(1 for keyword in keywords if keyword in text_lower)
+        if hits > 0:
+            scored.append((intent, float(hits)))
 
     scored.sort(key=lambda item: item[1], reverse=True)
     candidates = [intent for intent, _score in scored]
 
     if "DISCOVERY_OR_QUESTION" not in candidates:
-        candidates.append("DISCOVERY_OR_QUESTION")
+        scored.append(("DISCOVERY_OR_QUESTION", 0.05))
     if "THANKYOU_SMALLTALK" not in candidates:
-        candidates.append("THANKYOU_SMALLTALK")
+        scored.append(("THANKYOU_SMALLTALK", 0.01))
     if "GREETING_ONLY" not in candidates:
-        candidates.append("GREETING_ONLY")
+        scored.append(("GREETING_ONLY", 0.01))
 
-    return candidates[:top_k]
+    return scored[:top_k]
 
 
 async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -464,6 +518,9 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     detected_intent = selection["primary_intent"]
     deferred_intents = selection["deferred_intents"]
     intent_candidates = selection["intent_candidates"]
+    intent_confidence = selection["confidence"]
+    intent_ambiguous = selection["ambiguous_flag"]
+    intent_reason = selection["reason"]
 
     logger.debug(
         "Intent detected: %s, deferred=%s, candidates=%s (text=%s, has_image=%s, state=%s)",
@@ -487,6 +544,9 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
             "deferred_intents": deferred_intents,
             "has_deferred_intents": bool(deferred_intents),
             "intent_candidates": intent_candidates,
+            "intent_confidence": intent_confidence,
+            "intent_ambiguous": intent_ambiguous,
+            "intent_reason": intent_reason,
         },
         "step_number": state.get("step_number", 0) + 1,
     }
