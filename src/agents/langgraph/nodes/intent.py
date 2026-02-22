@@ -8,12 +8,31 @@ Full intent analysis happens in LLM, but this enables fast routing.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from src.core.input_validator import validate_input_metadata
 
 
 logger = logging.getLogger(__name__)
+
+AMBIGUITY_CONFIDENCE_THRESHOLD = 0.55
+
+
+@dataclass(frozen=True)
+class IntentClassification:
+    primary_intent: str
+    confidence: float
+    secondary_intents: list[str]
+    ambiguity_reason: str | None = None
+
+    def __str__(self) -> str:
+        return self.primary_intent
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return self.primary_intent == other
+        return super().__eq__(other)
 
 
 # Intent keywords for quick detection
@@ -249,7 +268,7 @@ def detect_intent_from_text(
     text: str,
     has_image: bool,
     current_state: str,
-) -> str:
+) -> IntentClassification:
     """
     Quick intent detection based on keywords and context.
 
@@ -264,7 +283,11 @@ def detect_intent_from_text(
     # Special cases first
     special = _check_special_cases(text_lower, has_image, current_state)
     if special:
-        return special
+        return IntentClassification(
+            primary_intent=special,
+            confidence=0.95,
+            secondary_intents=[],
+        )
 
     # Keyword matching in priority order
     return _match_keywords(text_lower, len(text))
@@ -346,7 +369,21 @@ def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -
     return None
 
 
-def _match_keywords(text_lower: str, text_len: int) -> str:
+def _is_conflicting_mix(top_intents: list[str]) -> bool:
+    conflicting_groups = {
+        "PAYMENT_DELIVERY": {"PRODUCT_CATEGORY", "REQUEST_PHOTO", "DISCOVERY_OR_QUESTION"},
+        "PRODUCT_CATEGORY": {"PAYMENT_DELIVERY"},
+        "REQUEST_PHOTO": {"PAYMENT_DELIVERY"},
+    }
+    intent_set = set(top_intents)
+    for intent in top_intents:
+        conflicts = conflicting_groups.get(intent, set())
+        if conflicts.intersection(intent_set):
+            return True
+    return False
+
+
+def _match_keywords(text_lower: str, text_len: int) -> IntentClassification:
     """Match keywords in priority order."""
     # Priority order for keyword matching
     priority_intents = [
@@ -358,26 +395,74 @@ def _match_keywords(text_lower: str, text_len: int) -> str:
         "PRODUCT_CATEGORY",  # User looking for clothing type
     ]
 
+    scores: dict[str, int] = {}
+
     for intent in priority_intents:
         for keyword in INTENT_PATTERNS[intent]:
             if keyword in text_lower:
-                return intent
+                scores[intent] = scores.get(intent, 0) + 1
 
     # Greeting and Smalltalk (only if short message)
     if text_len < 50:
         for keyword in INTENT_PATTERNS["GREETING_ONLY"]:
             if keyword in text_lower:
-                return "GREETING_ONLY"
+                scores["GREETING_ONLY"] = scores.get("GREETING_ONLY", 0) + 1
         for keyword in INTENT_PATTERNS["THANKYOU_SMALLTALK"]:
             if keyword in text_lower:
-                return "THANKYOU_SMALLTALK"
+                scores["THANKYOU_SMALLTALK"] = scores.get("THANKYOU_SMALLTALK", 0) + 1
 
     # Discovery/questions
     for keyword in INTENT_PATTERNS["DISCOVERY_OR_QUESTION"]:
         if keyword in text_lower:
-            return "DISCOVERY_OR_QUESTION"
+            scores["DISCOVERY_OR_QUESTION"] = scores.get("DISCOVERY_OR_QUESTION", 0) + 1
 
-    return "DISCOVERY_OR_QUESTION"
+    if not scores:
+        return IntentClassification(
+            primary_intent="AMBIGUOUS",
+            confidence=0.3,
+            secondary_intents=["DISCOVERY_OR_QUESTION"],
+            ambiguity_reason="no_keywords_detected",
+        )
+
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    top_score = ranked[0][1]
+    top_intents = [intent for intent, score in ranked if score == top_score]
+    secondary = [intent for intent, _ in ranked[1:]]
+
+    total_score = sum(scores.values())
+    confidence = top_score / total_score
+
+    if len(top_intents) > 1:
+        return IntentClassification(
+            primary_intent="AMBIGUOUS",
+            confidence=min(confidence, 0.5),
+            secondary_intents=top_intents + secondary,
+            ambiguity_reason="conflicting_patterns",
+        )
+
+    primary = top_intents[0]
+
+    if _is_conflicting_mix([primary, *secondary]):
+        return IntentClassification(
+            primary_intent="AMBIGUOUS",
+            confidence=min(confidence, 0.5),
+            secondary_intents=[primary, *secondary],
+            ambiguity_reason="conflicting_patterns",
+        )
+
+    if confidence < AMBIGUITY_CONFIDENCE_THRESHOLD:
+        return IntentClassification(
+            primary_intent="AMBIGUOUS",
+            confidence=confidence,
+            secondary_intents=[primary, *secondary],
+            ambiguity_reason="low_confidence",
+        )
+
+    return IntentClassification(
+        primary_intent=primary,
+        confidence=confidence,
+        secondary_intents=secondary,
+    )
 
 
 async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -486,7 +571,7 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     image_url = metadata.image_url
 
     # Detect intent
-    detected_intent = detect_intent_from_text(
+    classification = detect_intent_from_text(
         text=user_content,
         has_image=has_image,
         current_state=metadata.current_state.value,
@@ -494,20 +579,23 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.debug(
         "Intent detected: %s (text=%s, has_image=%s, state=%s)",
-        detected_intent,
+        classification,
         user_content[:50] if user_content else "",
         has_image,
         metadata.current_state.value,
     )
 
     return {
-        "detected_intent": detected_intent,
+        "detected_intent": classification.primary_intent,
         "has_image": has_image,
         "image_url": image_url,
         "metadata": {
             **state.get("metadata", {}),
             "has_image": has_image,
             "image_url": image_url,
+            "intent_confidence": classification.confidence,
+            "secondary_intents": classification.secondary_intents,
+            "ambiguity_reason": classification.ambiguity_reason,
         },
         "step_number": state.get("step_number", 0) + 1,
     }

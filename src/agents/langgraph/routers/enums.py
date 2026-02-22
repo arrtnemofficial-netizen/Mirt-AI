@@ -11,5 +11,6 @@ class Route(str, Enum):
     PAYMENT = "payment"
     MODERATION = "moderation"
     ESCALATION = "escalation"
+    DISAMBIGUATION = "disambiguation"
     UPSELL = "upsell"
     END = "end"

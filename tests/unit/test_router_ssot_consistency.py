@@ -84,3 +84,7 @@ def test_state5_explicit_cancel_routes_to_end() -> None:
     assert new_state == State.STATE_7_END.value
     assert decision.next_state == State.STATE_7_END.value
     assert state["detected_intent"] == "THANKYOU_SMALLTALK"
+
+
+def test_ambiguous_intent_routes_to_agent_disambiguation_branch() -> None:
+    assert _resolve_intent_route("AMBIGUOUS", State.STATE_4_OFFER.value, {}) == "agent"
