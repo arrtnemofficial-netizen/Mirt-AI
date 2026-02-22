@@ -22,9 +22,64 @@ from src.core.state_machine import Intent, State
 # UNIFIED BASE MODELS (Moved from src/agents/pydantic/models.py)
 # =============================================================================
 
-# Type aliases for Pydantic compatibility
-IntentType = Literal[*tuple(Intent.__members__.keys())]
-StateType = Literal[*tuple(State.__members__.keys())]
+# Type aliases for Pydantic compatibility.
+# NOTE: Keep explicit literals for Python 3.10 compatibility.
+INTENT_TYPE_VALUES = (
+    "GREETING_ONLY",
+    "DISCOVERY_OR_QUESTION",
+    "PHOTO_IDENT",
+    "SIZE_HELP",
+    "COLOR_HELP",
+    "PAYMENT_DELIVERY",
+    "COMPLAINT",
+    "THANKYOU_SMALLTALK",
+    "OUT_OF_DOMAIN",
+    "UNKNOWN_OR_EMPTY",
+)
+
+STATE_TYPE_VALUES = (
+    "STATE_0_INIT",
+    "STATE_1_DISCOVERY",
+    "STATE_2_VISION",
+    "STATE_3_SIZE_COLOR",
+    "STATE_4_OFFER",
+    "STATE_5_PAYMENT_DELIVERY",
+    "STATE_6_UPSELL",
+    "STATE_7_END",
+    "STATE_8_COMPLAINT",
+    "STATE_9_OOD",
+)
+
+IntentType = Literal[
+    "GREETING_ONLY",
+    "DISCOVERY_OR_QUESTION",
+    "PHOTO_IDENT",
+    "SIZE_HELP",
+    "COLOR_HELP",
+    "PAYMENT_DELIVERY",
+    "COMPLAINT",
+    "THANKYOU_SMALLTALK",
+    "OUT_OF_DOMAIN",
+    "UNKNOWN_OR_EMPTY",
+]
+StateType = Literal[
+    "STATE_0_INIT",
+    "STATE_1_DISCOVERY",
+    "STATE_2_VISION",
+    "STATE_3_SIZE_COLOR",
+    "STATE_4_OFFER",
+    "STATE_5_PAYMENT_DELIVERY",
+    "STATE_6_UPSELL",
+    "STATE_7_END",
+    "STATE_8_COMPLAINT",
+    "STATE_9_OOD",
+]
+
+if set(INTENT_TYPE_VALUES) != set(Intent.__members__.keys()):
+    raise RuntimeError("IntentType literals are out of sync with Intent enum")
+
+if set(STATE_TYPE_VALUES) != set(State.__members__.keys()):
+    raise RuntimeError("StateType literals are out of sync with State enum")
 
 EventType = Literal[
     "simple_answer",
