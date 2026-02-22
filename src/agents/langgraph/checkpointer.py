@@ -34,6 +34,48 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+CHECKPOINT_SCHEMA_VERSION = 2
+CHECKPOINT_STATE_KEYS_WHITELIST = {
+    "session_id",
+    "thread_id",
+    "trace_id",
+    "current_state",
+    "messages",
+    "metadata",
+    "selected_products",
+    "step_number",
+    "sitniks_chat_id",
+    "sitniks_first_touch_done",
+    "awaiting_human_approval",
+    "approval_type",
+    "approval_data",
+    "human_approved",
+}
+CHECKPOINT_METADATA_KEYS_WHITELIST = {
+    "session_id",
+    "channel",
+    "language",
+    "has_image",
+    "image_url",
+    "dialog_phase_history",
+}
+CHECKPOINT_TECHNICAL_FLAGS_BLACKLIST = {
+    "_tmp",
+    "_transient",
+    "_debug",
+    "_internal",
+    "_last_node",
+    "_loop_detector",
+    "temp_context",
+    "validation_errors",
+    "last_error",
+    "tool_errors",
+    "retry_count",
+    "max_retries",
+    "memory_context_prompt",
+}
+
+
 def _env_float(name: str, default: float) -> float:
     raw = (os.getenv(name, "") or "").strip()
     if not raw:
@@ -158,6 +200,105 @@ def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_ba
     return compact
 
 
+def _prune_messages(messages: list[Any], *, max_messages: int) -> list[Any]:
+    if max_messages <= 0 or len(messages) <= max_messages:
+        return messages
+
+    summary_candidates = [
+        msg for msg in messages if isinstance(msg, dict) and msg.get("type") == "summary"
+    ]
+    tail = messages[-max_messages:]
+    if not summary_candidates:
+        return tail
+
+    latest_summary = summary_candidates[-1]
+    return [latest_summary, *tail]
+
+
+def normalize_checkpoint_state(
+    state: dict[str, Any],
+    *,
+    max_messages: int,
+) -> dict[str, Any]:
+    """Normalize checkpoint state before persistence to avoid oversized payloads."""
+    normalized: dict[str, Any] = {}
+    for key in CHECKPOINT_STATE_KEYS_WHITELIST:
+        if key not in state:
+            continue
+        if key in CHECKPOINT_TECHNICAL_FLAGS_BLACKLIST:
+            continue
+        normalized[key] = state[key]
+
+    metadata = normalized.get("metadata")
+    if isinstance(metadata, dict):
+        normalized["metadata"] = {
+            key: value
+            for key, value in metadata.items()
+            if key in CHECKPOINT_METADATA_KEYS_WHITELIST
+        }
+
+    messages = normalized.get("messages")
+    if isinstance(messages, list):
+        normalized["messages"] = _prune_messages(messages, max_messages=max_messages)
+
+    # dialog_phase is derived from current_state by StateSchema validators.
+    normalized.pop("dialog_phase", None)
+    return normalized
+
+
+def _normalize_checkpoint_payload(payload: Any, *, max_messages: int) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    normalized = dict(payload)
+    normalized["checkpoint_schema_version"] = CHECKPOINT_SCHEMA_VERSION
+
+    channel_values = normalized.get("channel_values")
+    if isinstance(channel_values, dict):
+        normalized["channel_values"] = normalize_checkpoint_state(
+            channel_values,
+            max_messages=max_messages,
+        )
+
+    writes = normalized.get("writes")
+    if isinstance(writes, dict):
+        normalized["writes"] = normalize_checkpoint_state(
+            writes,
+            max_messages=max_messages,
+        )
+
+    values = normalized.get("values")
+    if isinstance(values, dict):
+        normalized["values"] = normalize_checkpoint_state(values, max_messages=max_messages)
+
+    state = normalized.get("state")
+    if isinstance(state, dict):
+        normalized["state"] = normalize_checkpoint_state(state, max_messages=max_messages)
+
+    return normalized
+
+
+def _migrate_legacy_checkpoint_payload(payload: Any) -> Any:
+    """Backwards-compatible reader for payloads without schema version."""
+    if not isinstance(payload, dict):
+        return payload
+
+    schema_version = payload.get("checkpoint_schema_version")
+    if isinstance(schema_version, int) and schema_version >= CHECKPOINT_SCHEMA_VERSION:
+        return payload
+
+    migrated = dict(payload)
+    migrated.setdefault("checkpoint_schema_version", 1)
+    for key in ("channel_values", "values", "state"):
+        section = migrated.get(key)
+        if not isinstance(section, dict):
+            continue
+        section = dict(section)
+        section.pop("dialog_phase", None)
+        migrated[key] = section
+    return migrated
+
+
 def _log_if_slow(
     op: str,
     started_at: float,
@@ -225,7 +366,9 @@ class JsonCheckpointSerializer:
     def loads(self, data: bytes) -> Any:
         """Deserialize JSON bytes to object."""
         try:
-            return self._deserialize_node(json.loads(data.decode("utf-8")))
+            payload = json.loads(data.decode("utf-8"))
+            payload = _migrate_legacy_checkpoint_payload(payload)
+            return self._deserialize_node(payload)
         except Exception:
             # Fallback for old pickles if migration happens properly?
             # Or just fail safe. For now, assume consistent format.
@@ -572,8 +715,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 try:
                     await self._ensure_pool_open()
                     if len(args) > 1:
-                        payload = _compact_payload(
+                        payload = _normalize_checkpoint_payload(
                             args[1],
+                            max_messages=max_messages,
+                        )
+                        payload = _compact_payload(
+                            payload,
                             max_messages=max_messages,
                             max_chars=max_chars,
                             drop_base64=drop_base64,
@@ -592,8 +739,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 try:
                     await self._ensure_pool_open()
                     if len(args) > 1:
-                        payload = _compact_payload(
+                        payload = _normalize_checkpoint_payload(
                             args[1],
+                            max_messages=max_messages,
+                        )
+                        payload = _compact_payload(
+                            payload,
                             max_messages=max_messages,
                             max_chars=max_chars,
                             drop_base64=drop_base64,
