@@ -43,6 +43,7 @@ class ContextMixin(MemoryBase):
         session_id: str | None = None,
     ) -> dict[str, int]:
         stats = {"stored": 0, "updated": 0, "deleted": 0, "rejected": 0}
+        reject_reasons: dict[str, int] = {}
 
         if decision.ignore_messages:
             logger.debug("Decision: ignore messages (no new info)")
@@ -54,6 +55,8 @@ class ContextMixin(MemoryBase):
                 stats["stored"] += 1
             else:
                 stats["rejected"] += 1
+                reason = "LOW_IMPORTANCE_OR_INVALID"
+                reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
 
         for update in decision.updates:
             result = await self.update_fact(update)
@@ -75,12 +78,13 @@ class ContextMixin(MemoryBase):
             )
 
         logger.info(
-            "Applied memory decision for user %s: stored=%d, updated=%d, deleted=%d, rejected=%d",
+            "Applied memory decision for user %s: stored=%d, updated=%d, deleted=%d, rejected=%d, reject_reasons=%s",
             user_id,
             stats["stored"],
             stats["updated"],
             stats["deleted"],
             stats["rejected"],
+            reject_reasons,
         )
 
         return stats

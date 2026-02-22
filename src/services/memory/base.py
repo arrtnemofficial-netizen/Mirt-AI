@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from typing import Any
 
 import psycopg
@@ -55,6 +56,7 @@ class MemoryBase:
         except ValueError:
             self._enabled = False
         self._models = None  # Lazy loaded
+        self._fact_counters: defaultdict[str, int] = defaultdict(int)
 
         if not self._enabled:
             logger.warning("MemoryService disabled - PostgreSQL URL not available")
@@ -81,3 +83,7 @@ class MemoryBase:
     async def _run_db(self, func, *args, **kwargs):
         """Run blocking DB work in a background thread."""
         return await asyncio.to_thread(func, *args, **kwargs)
+
+    def _inc_fact_counter(self, counter_name: str, value: int = 1) -> None:
+        self._fact_counters[counter_name] += value
+        logger.info("metric.memory.%s=%d", counter_name, self._fact_counters[counter_name])
