@@ -22,6 +22,14 @@ Fail-threshold:
 - `missing_schema_version`
 - будь-які `unknown_keys`.
 
+## Contract gate (core model literal sync)
+
+```bash
+pytest -q tests/contract/test_core_model_literals_sync.py
+```
+
+Fail, якщо `src/core/models.py` Literals (`IntentType`, `StateType`) розсинхронені з enum у `src/core/state_machine.py`.
+
 ## Regression gate (route vs FSM)
 
 ```bash
@@ -34,5 +42,5 @@ Fail-threshold:
 
 ## CI інтеграція
 
-Ці три набори тестів підключені в `.github/workflows/ci.yml` в job `critical-gates`.
+Ці обов'язкові gate підключені в `.github/workflows/ci.yml` в job `critical-gates`.
 PR без зеленого статусу цих gate'ів не має merge'итись.

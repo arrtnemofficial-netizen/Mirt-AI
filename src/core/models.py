@@ -11,6 +11,7 @@ UNIFIED with src/agents/pydantic/models.py to prevent Split Brain.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -75,11 +76,32 @@ StateType = Literal[
     "STATE_9_OOD",
 ]
 
-if set(INTENT_TYPE_VALUES) != set(Intent.__members__.keys()):
-    raise RuntimeError("IntentType literals are out of sync with Intent enum")
+def _literal_sync_mismatches() -> list[str]:
+    """Returns contract mismatch messages for Literal aliases vs runtime enums."""
+    mismatches: list[str] = []
 
-if set(STATE_TYPE_VALUES) != set(State.__members__.keys()):
-    raise RuntimeError("StateType literals are out of sync with State enum")
+    if set(INTENT_TYPE_VALUES) != set(Intent.__members__.keys()):
+        mismatches.append("IntentType literals are out of sync with Intent enum")
+
+    if set(STATE_TYPE_VALUES) != set(State.__members__.keys()):
+        mismatches.append("StateType literals are out of sync with State enum")
+
+    return mismatches
+
+
+def assert_core_model_literals_sync() -> None:
+    """Hard contract check for tests/CI gates."""
+    mismatches = _literal_sync_mismatches()
+    if mismatches:
+        raise AssertionError("; ".join(mismatches))
+
+
+for _mismatch in _literal_sync_mismatches():
+    warnings.warn(
+        f"[core.models] {_mismatch}. Run contract gates in CI.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
 
 EventType = Literal[
     "simple_answer",
