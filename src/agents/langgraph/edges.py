@@ -16,7 +16,7 @@ from src.agents.langgraph.routers.post_process import (
     route_after_moderation, get_moderation_routes,
     route_after_agent, get_agent_routes,
     route_after_validation, get_validation_routes,
-    route_after_vision,
+    route_after_vision, get_vision_routes,
     route_after_offer # Restored
 )
 
@@ -51,6 +51,6 @@ __all__ = [
     "route_after_moderation", "get_moderation_routes",
     "route_after_agent", "get_agent_routes",
     "route_after_validation", "get_validation_routes",
-    "route_after_vision",
+    "route_after_vision", "get_vision_routes",
     "route_after_offer"
 ]

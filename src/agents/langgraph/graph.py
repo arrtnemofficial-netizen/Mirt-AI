@@ -32,6 +32,7 @@ from .edges import (
     get_master_routes,
     get_moderation_routes,
     get_validation_routes,
+    get_vision_routes,
     master_router,
     route_after_agent,
     route_after_intent,
@@ -226,11 +227,11 @@ def build_production_graph(
     # SIMPLE EDGES
     # =========================================================================
 
-    # Vision -> end (return multi-bubble response to user after product identification)
+    # Vision -> conditional post-vision matrix (offer|validation|end)
     graph.add_conditional_edges(
         "vision",
         route_after_vision,
-        {"offer": "offer", "agent": "agent", "validation": "validation", "end": "end"},
+        get_vision_routes(),
     )
 
     # Agent -> memory_update is routed via route_after_agent("post_agent_memory").

@@ -301,7 +301,7 @@ class TestRoutingConsistency:
 
     def test_route_after_vision_returns_valid_route(self):
         """route_after_vision must return valid route."""
-        valid_routes = {"offer", "agent", "validation", "end"}
+        valid_routes = {"offer", "validation", "end"}
 
         # With products
         route = route_after_vision({"selected_products": [{"name": "Test"}]})
