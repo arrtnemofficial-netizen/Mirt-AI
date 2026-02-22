@@ -122,9 +122,20 @@ def run_command_check(name: str, command: list[str], *, required: bool = True) -
     )
 
 
-def build_ai_layer_checks() -> list[CheckResult]:
+def build_ai_layer_checks(*, ai_smell_base: str, ai_smell_head: str, ai_smell_merge_base: bool) -> list[CheckResult]:
+    ai_smell_command = [
+        "python",
+        "scripts/check_ai_smell_comments.py",
+        "--base",
+        ai_smell_base,
+        "--head",
+        ai_smell_head,
+    ]
+    if ai_smell_merge_base:
+        ai_smell_command.append("--merge-base")
+
     checks = [
-        run_command_check("ai-smell-comments", ["python", "scripts/check_ai_smell_comments.py"], required=True),
+        run_command_check("ai-smell-comments", ai_smell_command, required=True),
         run_command_check(
             "pydantic-ai-import-smoke",
             ["python", "-c", "from src.agents.pydantic.shared.model_factory import build_pydantic_model; print('ok')"],
@@ -180,14 +191,25 @@ def main() -> int:
     parser.add_argument("--quick", action="store_true", help="Skip heavy non-AI checks")
     parser.add_argument("--strict-python", action="store_true", help="Fail when Python < 3.11")
     parser.add_argument("--ai-layer-only", action="store_true", help="Run only AI-layer quality gates")
+    parser.add_argument("--ai-smell-base", default="HEAD~1", help="Base revision for AI-smell diff")
+    parser.add_argument("--ai-smell-head", default="HEAD", help="Head revision for AI-smell diff")
+    parser.add_argument("--ai-smell-merge-base", action="store_true", help="Use merge-base diff mode for AI-smell check")
     args = parser.parse_args()
 
     results: list[CheckResult] = [check_python_version(strict=args.strict_python), check_manifest_alignment()]
 
     if args.ai_layer_only:
-        results.extend(build_ai_layer_checks())
+        results.extend(build_ai_layer_checks(
+            ai_smell_base=args.ai_smell_base,
+            ai_smell_head=args.ai_smell_head,
+            ai_smell_merge_base=args.ai_smell_merge_base,
+        ))
     else:
-        results.extend(build_ai_layer_checks())
+        results.extend(build_ai_layer_checks(
+            ai_smell_base=args.ai_smell_base,
+            ai_smell_head=args.ai_smell_head,
+            ai_smell_merge_base=args.ai_smell_merge_base,
+        ))
         results.extend(build_general_checks(quick=args.quick))
 
     if args.json:
