@@ -32,6 +32,9 @@ def route_after_intent(
 ) -> Literal["vision", "agent", "offer", "payment", "escalation", "end"]:
     """
     Decide where to go based on detected intent and current state.
+
+    Contract: mixed-intent business priority is resolved in intent policy layer.
+    Router consumes a single `detected_intent` and applies flow/state guards only.
     """
     intent = state.detected_intent
     current_state = state.state_enum
@@ -51,17 +54,12 @@ def route_after_intent(
     if intent in ("GREETING_ONLY", "THANKYOU_SMALLTALK"):
         return Route.AGENT
 
-    # 2.5 PHOTO_IDENT is a hard signal for vision even if has_image flag
-    # was dropped in a synthetic/test payload.
-    if intent == "PHOTO_IDENT":
-        return Route.VISION
-
     # 3. Vision Flow (Image present)
-    # Priority: If image is present, usually go to vision, UNLESS in payment flow
+    # Priority: image presence routes to vision for non-payment turns.
     if has_image:
         if current_state == State.STATE_5_PAYMENT_DELIVERY:
             # Check context: is it payment proof?
-            # Intent logic should have handled this, but we double check
+            # Intent policy chooses primary_intent; router applies only flow/state guards
             if intent == "PAYMENT_DELIVERY":
                 return Route.PAYMENT
 

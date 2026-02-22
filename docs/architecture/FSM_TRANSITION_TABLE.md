@@ -35,6 +35,26 @@
 
 ---
 
+## Canonical Mixed-Intent Priority Policy (SSOT)
+
+`src/agents/langgraph/intent/policy.py` is the **single source of truth** for mixed-intent resolution.
+`route_after_intent()` must consume only `primary_intent` and MUST NOT duplicate mixed-intent business rules.
+
+Priority buckets (from highest to lowest):
+1. `safety/escalation`
+2. `payment-critical`
+3. `complaint`
+4. `vision`
+5. `offer`
+6. `discovery`
+7. `smalltalk`
+8. `other`
+
+Target behavior for `PHOTO_IDENT` in mixed-intent:
+- `PHOTO_IDENT + PAYMENT_DELIVERY` → `PAYMENT_DELIVERY` wins (payment-critical dominates vision)
+- `PHOTO_IDENT + COMPLAINT` → `COMPLAINT` wins (complaint dominates vision)
+- `PHOTO_IDENT + OFFER` (`PRODUCT_CATEGORY` / `REQUEST_PHOTO` / `SIZE_HELP` / `COLOR_HELP` / `CONFIRMATION`) → `PHOTO_IDENT` wins (vision dominates offer)
+
 ## 🔥 MASTER TRANSITION TABLE
 
 ### Rows = Current State, Columns = Detected Intent
@@ -65,9 +85,12 @@
 
 ### `route_after_intent()`
 ```
-IF should_escalate → "escalation"
-IF intent == PHOTO_IDENT → "vision"
-IF intent == COMPLAINT → "escalation"
+IF should_escalate OR intent == COMPLAINT → "escalation"
+IF intent is ambiguous OR low-confidence → "agent" (disambiguation)
+IF intent in [GREETING_ONLY, THANKYOU_SMALLTALK] → "agent"
+IF has_image:
+    IF current_state == PAYMENT AND intent == PAYMENT_DELIVERY → "payment"
+    ELSE → "vision"
 IF intent == PAYMENT_DELIVERY:
     IF current_state in [OFFER, PAYMENT] → "payment"
     IF has_products → "offer"

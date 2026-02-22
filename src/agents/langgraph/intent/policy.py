@@ -1,4 +1,9 @@
-"""Intent policy: priority resolution for mixed-intent user messages."""
+"""Intent policy: priority resolution for mixed-intent user messages.
+
+Canonical source of truth for mixed-intent priority is
+docs/architecture/FSM_TRANSITION_TABLE.md.
+Router layer must consume `primary_intent` and avoid duplicating this policy.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +13,11 @@ PRIORITY_TABLE: dict[str, int] = {
     "safety/escalation": 0,
     "payment-critical": 1,
     "complaint": 2,
-    "offer": 3,
-    "discovery": 4,
-    "smalltalk": 5,
-    "other": 6,
+    "vision": 3,
+    "offer": 4,
+    "discovery": 5,
+    "smalltalk": 6,
+    "other": 7,
 }
 
 INTENT_TO_BUCKET: dict[str, str] = {
@@ -24,7 +30,7 @@ INTENT_TO_BUCKET: dict[str, str] = {
     "COLOR_HELP": "offer",
     "REQUEST_PHOTO": "offer",
     "PRODUCT_CATEGORY": "offer",
-    "PHOTO_IDENT": "discovery",
+    "PHOTO_IDENT": "vision",
     "DISCOVERY_OR_QUESTION": "discovery",
     "GREETING_ONLY": "smalltalk",
     "THANKYOU_SMALLTALK": "smalltalk",
