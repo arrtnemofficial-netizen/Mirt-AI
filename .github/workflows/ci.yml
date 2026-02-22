@@ -132,6 +132,11 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest -q tests/contract/test_checkpoint_payload_contract.py
 
+      - name: Run core model literal sync contract gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/contract/test_core_model_literals_sync.py
+
       - name: Run route vs FSM regression gate
         env:
           PYTHONPATH: ${{ github.workspace }}

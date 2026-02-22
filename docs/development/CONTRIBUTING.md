@@ -39,3 +39,9 @@ If you change how the bot handles "Returns", you MUST add a "Return Policy" scen
 - Якщо додаєш Env Vars → Оновлюй `README.md` і `.env.example`.
 - Якщо змінюєш FSM логіку → **СПОЧАТКУ** оновлюй `docs/architecture/FSM_TRANSITION_TABLE.md`, потім код.
 - Якщо змінюєш промпти → Читай `docs/development/PROMPT_ENGINEERING.md`.
+
+## 5. Import-time Invariant Policy
+
+- Імпорт модулів **не повинен завершувати процес** через контрольні інваріанти, які можна перевірити у тестах/CI.
+- Для таких інваріантів використовуй безпечний механізм (наприклад, warning при імпорті + явний `assert_*` helper для контрактних тестів).
+- Hard-fail (`AssertionError`/test fail) має відбуватись у dedicated gate-тестах, а не під час `import`.
