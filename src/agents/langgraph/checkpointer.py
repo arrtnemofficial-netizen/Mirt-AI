@@ -127,12 +127,14 @@ def _checkpoint_stats(obj: Any) -> tuple[int | None, int | None]:
     return json_bytes, messages_count
 
 
-def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_base64: bool) -> Any:
-    if not isinstance(payload, dict):
-        return payload
+def _compact_state_dict(state_dict: dict[str, Any], *, max_messages: int, max_chars: int, drop_base64: bool) -> dict[str, Any]:
+    """Compact a single state-like dict.
 
-    compact = payload
-    messages = payload.get("messages")
+    Supports both top-level state payloads and nested state blobs used by LangGraph
+    checkpointers (`channel_values` / `values` / `state`).
+    """
+    compact = state_dict
+    messages = state_dict.get("messages")
     if isinstance(messages, list):
         if max_messages > 0 and len(messages) > max_messages:
             messages = messages[-max_messages:]
@@ -154,6 +156,40 @@ def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_ba
         if isinstance(image_url, str) and len(image_url) > 2000:
             if image_url.startswith("data:") or "base64" in image_url:
                 compact = {**compact, "image_url": "<base64_stripped>"}
+
+        metadata = compact.get("metadata")
+        if isinstance(metadata, dict):
+            metadata_image_url = metadata.get("image_url")
+            if isinstance(metadata_image_url, str) and len(metadata_image_url) > 2000:
+                if metadata_image_url.startswith("data:") or "base64" in metadata_image_url:
+                    compact = {**compact, "metadata": {**metadata, "image_url": "<base64_stripped>"}}
+
+    return compact
+
+
+def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_base64: bool) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    compact = _compact_state_dict(
+        payload,
+        max_messages=max_messages,
+        max_chars=max_chars,
+        drop_base64=drop_base64,
+    )
+
+    for nested_key in ("channel_values", "values", "state"):
+        nested = compact.get(nested_key)
+        if isinstance(nested, dict):
+            compact = {
+                **compact,
+                nested_key: _compact_state_dict(
+                    nested,
+                    max_messages=max_messages,
+                    max_chars=max_chars,
+                    drop_base64=drop_base64,
+                ),
+            }
 
     return compact
 
@@ -327,8 +363,22 @@ class SerializableMemorySaver(MemorySaver):
     ) -> dict[str, Any]:
         """Override put to serialize Message objects before storage."""
         try:
+            max_messages = int(os.getenv("CHECKPOINTER_MAX_MESSAGES", "200") or 0)
+            max_chars = int(os.getenv("CHECKPOINTER_MAX_MESSAGE_CHARS", "4000") or 0)
+            drop_base64 = os.getenv("CHECKPOINTER_DROP_BASE64", "true").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            compact_checkpoint = _compact_payload(
+                checkpoint,
+                max_messages=max_messages,
+                max_chars=max_chars,
+                drop_base64=drop_base64,
+            )
             # Serialize checkpoint data to handle Message objects
-            serialized_checkpoint = self._serialize_value(checkpoint)
+            serialized_checkpoint = self._serialize_value(compact_checkpoint)
             serialized_metadata = self._serialize_value(metadata)
             return super().put(config, serialized_checkpoint, serialized_metadata, new_versions)
         except Exception as e:
@@ -624,21 +674,39 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             def put(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    if len(args) > 1:
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
+                        args = (args[0], payload, *args[2:])
                     return super().put(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
+                    payload = args[1] if len(args) > 1 else None
                     _log_if_slow(
-                        "put", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                        "put", _t0, config, payload=payload, slow_threshold_s=slow_threshold_s
                     )
 
             def put_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    if len(args) > 1:
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
+                        args = (args[0], payload, *args[2:])
                     return super().put_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
+                    payload = args[1] if len(args) > 1 else None
                     _log_if_slow(
-                        "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                        "put_writes", _t0, config, payload=payload, slow_threshold_s=slow_threshold_s
                     )
 
         # Store pool reference for graceful shutdown
