@@ -125,14 +125,28 @@ def route_after_validation(state: StateSchema) -> Literal["agent", "offer", "end
 
 # --- Vision ---
 
+def get_vision_routes() -> Dict[str, str]:
+    return {
+        "offer": "offer",
+        "validation": "validation",
+        "end": "end",
+    }
+
 @safe_router
-def route_after_vision(state: StateSchema) -> Literal["offer", "agent", "validation", "end"]:
+def route_after_vision(state: StateSchema) -> Literal["offer", "validation", "end"]:
     """
     After vision analysis.
     """
-    # Error -> validate
-    if state.last_error:
+    # 1) Any error signal after vision should go through validation/self-correction.
+    if state.last_error or state.validation_errors:
         return "validation"
 
-    # Always end after vision to deliver vision-built messages to the user.
+    # 2) If vision already prepared a ready-to-offer state with products,
+    # move to offer node in the same turn.
+    has_products = bool(state.selected_products or state.offered_products)
+    offer_ready_phases = {"SIZE_COLOR_DONE", "OFFER_MADE"}
+    if has_products and (state.dialog_phase in offer_ready_phases or state.state_enum == State.STATE_4_OFFER):
+        return "offer"
+
+    # 3) Default: end turn and deliver vision response to user.
     return "end"
