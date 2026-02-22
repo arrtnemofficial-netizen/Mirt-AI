@@ -21,11 +21,8 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any
-
-from src.agents.langgraph.checkpoint_contract import ensure_checkpoint_schema_version
 
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -98,131 +95,6 @@ def _extract_thread_id(config: Any | None) -> str:
     return "?"
 
 
-def _iso_to_utc(ts: Any) -> datetime | None:
-    if not isinstance(ts, str) or not ts:
-        return None
-    try:
-        normalized = ts.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(normalized)
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-
-
-def _is_milestone_checkpoint(
-    payload: Any,
-    *,
-    metadata: dict[str, Any] | None = None,
-    milestone_every_steps: int,
-    milestone_states: set[str],
-) -> bool:
-    if not isinstance(payload, dict):
-        return False
-
-    step_number: int | None = None
-    current_state: str | None = None
-
-    for container_key in ("channel_values", "values", "state"):
-        container = payload.get(container_key)
-        if isinstance(container, dict):
-            if step_number is None and isinstance(container.get("step_number"), int):
-                step_number = int(container.get("step_number"))
-            if current_state is None and isinstance(container.get("current_state"), str):
-                current_state = container.get("current_state")
-
-    if step_number is None and isinstance(payload.get("step_number"), int):
-        step_number = int(payload.get("step_number"))
-    if current_state is None and isinstance(payload.get("current_state"), str):
-        current_state = payload.get("current_state")
-
-    if step_number is None and isinstance(metadata, dict):
-        m_step = metadata.get("step_number")
-        if isinstance(m_step, int):
-            step_number = int(m_step)
-
-    if current_state is None and isinstance(metadata, dict):
-        m_state = metadata.get("current_state")
-        if isinstance(m_state, str):
-            current_state = m_state
-
-    if current_state and current_state in milestone_states:
-        return True
-
-    return bool(
-        milestone_every_steps > 0
-        and isinstance(step_number, int)
-        and step_number > 0
-        and step_number % milestone_every_steps == 0
-    )
-
-
-def _select_compaction_removals(
-    snapshots: list[Any],
-    *,
-    max_per_session: int,
-    ttl_seconds: int,
-    milestone_every_steps: int,
-    milestone_states: set[str],
-    now: datetime | None = None,
-) -> set[str]:
-    if not snapshots:
-        return set()
-
-    now_dt = now or datetime.now(timezone.utc)
-    scored: list[tuple[int, str, bool, datetime | None]] = []
-
-    for idx, snap in enumerate(snapshots):
-        if not hasattr(snap, "config"):
-            continue
-        cfg = getattr(snap, "config", None)
-        if not isinstance(cfg, dict):
-            continue
-        cfg_cfg = cfg.get("configurable") if isinstance(cfg.get("configurable"), dict) else {}
-        checkpoint_id = cfg_cfg.get("checkpoint_id")
-        if not checkpoint_id:
-            continue
-
-        metadata = getattr(snap, "metadata", None)
-        metadata_dict = metadata if isinstance(metadata, dict) else {}
-        payload = getattr(snap, "checkpoint", None)
-        ts = _iso_to_utc(cfg_cfg.get("checkpoint_ns"))
-        if ts is None:
-            ts = _iso_to_utc(metadata_dict.get("ts"))
-
-        is_milestone = _is_milestone_checkpoint(
-            payload,
-            metadata=metadata_dict,
-            milestone_every_steps=milestone_every_steps,
-            milestone_states=milestone_states,
-        )
-        scored.append((idx, str(checkpoint_id), is_milestone, ts))
-
-    if not scored:
-        return set()
-
-    last_idx = max(idx for idx, *_ in scored)
-    removable: set[str] = set()
-
-    if ttl_seconds > 0:
-        ttl_cutoff = now_dt.timestamp() - ttl_seconds
-        for idx, checkpoint_id, is_milestone, ts in scored:
-            if idx == last_idx or is_milestone or ts is None:
-                continue
-            if ts.timestamp() < ttl_cutoff:
-                removable.add(checkpoint_id)
-
-    if max_per_session > 0:
-        protected = {cp_id for idx, cp_id, is_ms, _ts in scored if idx == last_idx or is_ms}
-        unprotected = [item for item in scored if item[1] not in protected and item[1] not in removable]
-        excess = max(0, len(scored) - len(protected) - len(removable) - max_per_session)
-        for _idx, checkpoint_id, _is_ms, _ts in sorted(unprotected, key=lambda x: x[0])[:excess]:
-            removable.add(checkpoint_id)
-
-    return removable
-
-
 def _checkpoint_stats(obj: Any) -> tuple[int | None, int | None]:
     """Return (json_bytes, messages_count) best-effort."""
     json_bytes: int | None = None
@@ -255,44 +127,17 @@ def _checkpoint_stats(obj: Any) -> tuple[int | None, int | None]:
     return json_bytes, messages_count
 
 
-def _compact_payload(
-    payload: Any,
-    *,
-    max_messages: int,
-    max_chars: int,
-    drop_base64: bool,
-    rolling_summary_enabled: bool,
-    rolling_summary_last_messages: int,
-    rolling_summary_max_chars: int,
-) -> Any:
-    if not isinstance(payload, dict):
-        return payload
+def _compact_state_dict(state_dict: dict[str, Any], *, max_messages: int, max_chars: int, drop_base64: bool) -> dict[str, Any]:
+    """Compact a single state-like dict.
 
-    compact = ensure_checkpoint_schema_version(payload)
-    messages = payload.get("messages")
+    Supports both top-level state payloads and nested state blobs used by LangGraph
+    checkpointers (`channel_values` / `values` / `state`).
+    """
+    compact = state_dict
+    messages = state_dict.get("messages")
     if isinstance(messages, list):
         if max_messages > 0 and len(messages) > max_messages:
             messages = messages[-max_messages:]
-
-        if rolling_summary_enabled and rolling_summary_last_messages >= 0 and len(messages) > rolling_summary_last_messages:
-            head = messages[: len(messages) - rolling_summary_last_messages]
-            tail = messages[-rolling_summary_last_messages:]
-            summary_parts: list[str] = []
-            for m in head:
-                if not isinstance(m, dict):
-                    continue
-                role = str(m.get("role") or m.get("type") or "msg")
-                content = m.get("content")
-                if isinstance(content, str) and content.strip():
-                    summary_parts.append(f"[{role}] {content.strip()}")
-            if summary_parts:
-                summary_text = "\n".join(summary_parts)
-                if rolling_summary_max_chars > 0 and len(summary_text) > rolling_summary_max_chars:
-                    summary_text = summary_text[-rolling_summary_max_chars:]
-                summary_msg = {"role": "system", "content": f"Rolling summary of older dialogue:\n{summary_text}"}
-                messages = [summary_msg, *tail]
-            else:
-                messages = tail
 
         if max_chars > 0:
             trimmed: list[Any] = []
@@ -311,6 +156,40 @@ def _compact_payload(
         if isinstance(image_url, str) and len(image_url) > 2000:
             if image_url.startswith("data:") or "base64" in image_url:
                 compact = {**compact, "image_url": "<base64_stripped>"}
+
+        metadata = compact.get("metadata")
+        if isinstance(metadata, dict):
+            metadata_image_url = metadata.get("image_url")
+            if isinstance(metadata_image_url, str) and len(metadata_image_url) > 2000:
+                if metadata_image_url.startswith("data:") or "base64" in metadata_image_url:
+                    compact = {**compact, "metadata": {**metadata, "image_url": "<base64_stripped>"}}
+
+    return compact
+
+
+def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_base64: bool) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    compact = _compact_state_dict(
+        payload,
+        max_messages=max_messages,
+        max_chars=max_chars,
+        drop_base64=drop_base64,
+    )
+
+    for nested_key in ("channel_values", "values", "state"):
+        nested = compact.get(nested_key)
+        if isinstance(nested, dict):
+            compact = {
+                **compact,
+                nested_key: _compact_state_dict(
+                    nested,
+                    max_messages=max_messages,
+                    max_chars=max_chars,
+                    drop_base64=drop_base64,
+                ),
+            }
 
     return compact
 
@@ -349,15 +228,6 @@ def _log_if_slow(
         except Exception:
             logger.debug("checkpointer fallback metric emission failed (secondary path)")
 
-    if payload is not None:
-        size_b, msg_n = _checkpoint_stats(payload)
-        if size_b is not None:
-            try:
-                from src.services.observability import track_metric
-
-                track_metric("checkpoint_payload_bytes", float(size_b), {"operation": op})
-            except Exception:
-                logger.debug("checkpoint_payload_bytes metric failed")
     if elapsed < slow_threshold_s:
         return
     thread_id = _extract_thread_id(config)
@@ -493,8 +363,22 @@ class SerializableMemorySaver(MemorySaver):
     ) -> dict[str, Any]:
         """Override put to serialize Message objects before storage."""
         try:
+            max_messages = int(os.getenv("CHECKPOINTER_MAX_MESSAGES", "200") or 0)
+            max_chars = int(os.getenv("CHECKPOINTER_MAX_MESSAGE_CHARS", "4000") or 0)
+            drop_base64 = os.getenv("CHECKPOINTER_DROP_BASE64", "true").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            compact_checkpoint = _compact_payload(
+                checkpoint,
+                max_messages=max_messages,
+                max_chars=max_chars,
+                drop_base64=drop_base64,
+            )
             # Serialize checkpoint data to handle Message objects
-            serialized_checkpoint = self._serialize_value(checkpoint)
+            serialized_checkpoint = self._serialize_value(compact_checkpoint)
             serialized_metadata = self._serialize_value(metadata)
             return super().put(config, serialized_checkpoint, serialized_metadata, new_versions)
         except Exception as e:
@@ -673,26 +557,6 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
         max_messages = _setting_int(settings, "CHECKPOINTER_MAX_MESSAGES", 200)
         max_chars = _setting_int(settings, "CHECKPOINTER_MAX_MESSAGE_CHARS", 4000)
         drop_base64 = _setting_bool(settings, "CHECKPOINTER_DROP_BASE64", True)
-        retention_max_per_session = _setting_int(settings, "CHECKPOINTER_RETENTION_MAX_PER_SESSION", 200)
-        retention_ttl_seconds = _setting_int(settings, "CHECKPOINTER_RETENTION_TTL_SECONDS", 604800)
-        milestone_every_steps = _setting_int(settings, "CHECKPOINTER_MILESTONE_EVERY_STEPS", 10)
-        milestone_states_raw = getattr(settings, "CHECKPOINTER_MILESTONE_STATES", "")
-        milestone_states = {
-            part.strip()
-            for part in str(milestone_states_raw).split(",")
-            if part.strip()
-        }
-        rolling_summary_enabled = _setting_bool(settings, "LLM_ROLLING_SUMMARY_ENABLED", True)
-        rolling_summary_last_messages = _setting_int(settings, "LLM_ROLLING_SUMMARY_LAST_MESSAGES", 12)
-        rolling_summary_max_chars = _setting_int(settings, "LLM_ROLLING_SUMMARY_MAX_CHARS", 2000)
-
-        logger.info(
-            "[CHECKPOINTER] retention config: max_per_session=%s ttl_seconds=%s milestone_every_steps=%s milestone_states=%s",
-            retention_max_per_session,
-            retention_ttl_seconds,
-            milestone_every_steps,
-            ",".join(sorted(milestone_states)) or "<none>",
-        )
 
         class InstrumentedAsyncPostgresSaver(AsyncPostgresSaver):
             def __init__(self, pool, serde=None):
@@ -758,27 +622,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 try:
                     await self._ensure_pool_open()
                     if len(args) > 1:
-                        before_bytes, _ = _checkpoint_stats(args[1])
                         payload = _compact_payload(
                             args[1],
                             max_messages=max_messages,
                             max_chars=max_chars,
                             drop_base64=drop_base64,
-                            rolling_summary_enabled=rolling_summary_enabled,
-                            rolling_summary_last_messages=rolling_summary_last_messages,
-                            rolling_summary_max_chars=rolling_summary_max_chars,
                         )
-                        after_bytes, _ = _checkpoint_stats(payload)
-                        if before_bytes and after_bytes is not None and before_bytes > 0:
-                            try:
-                                from src.services.observability import track_metric
-
-                                track_metric(
-                                    "checkpoint_compaction_ratio",
-                                    max(0.0, min(1.0, 1.0 - (after_bytes / before_bytes))),
-                                )
-                            except Exception:
-                                logger.debug("checkpoint_compaction_ratio metric failed")
                         args = (args[0], payload, *args[2:])
                     return await super().aput(*args, **kwargs)
                 finally:
@@ -793,27 +642,12 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
                 try:
                     await self._ensure_pool_open()
                     if len(args) > 1:
-                        before_bytes, _ = _checkpoint_stats(args[1])
                         payload = _compact_payload(
                             args[1],
                             max_messages=max_messages,
                             max_chars=max_chars,
                             drop_base64=drop_base64,
-                            rolling_summary_enabled=rolling_summary_enabled,
-                            rolling_summary_last_messages=rolling_summary_last_messages,
-                            rolling_summary_max_chars=rolling_summary_max_chars,
                         )
-                        after_bytes, _ = _checkpoint_stats(payload)
-                        if before_bytes and after_bytes is not None and before_bytes > 0:
-                            try:
-                                from src.services.observability import track_metric
-
-                                track_metric(
-                                    "checkpoint_compaction_ratio",
-                                    max(0.0, min(1.0, 1.0 - (after_bytes / before_bytes))),
-                                )
-                            except Exception:
-                                logger.debug("checkpoint_compaction_ratio metric failed")
                         args = (args[0], payload, *args[2:])
                     return await super().aput_writes(*args, **kwargs)
                 finally:
@@ -840,21 +674,39 @@ def get_postgres_checkpointer() -> BaseCheckpointSaver:
             def put(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    if len(args) > 1:
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
+                        args = (args[0], payload, *args[2:])
                     return super().put(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
+                    payload = args[1] if len(args) > 1 else None
                     _log_if_slow(
-                        "put", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                        "put", _t0, config, payload=payload, slow_threshold_s=slow_threshold_s
                     )
 
             def put_writes(self, *args: Any, **kwargs: Any):
                 _t0 = time.perf_counter()
                 try:
+                    if len(args) > 1:
+                        payload = _compact_payload(
+                            args[1],
+                            max_messages=max_messages,
+                            max_chars=max_chars,
+                            drop_base64=drop_base64,
+                        )
+                        args = (args[0], payload, *args[2:])
                     return super().put_writes(*args, **kwargs)
                 finally:
                     config = args[0] if args else None
+                    payload = args[1] if len(args) > 1 else None
                     _log_if_slow(
-                        "put_writes", _t0, config, payload=None, slow_threshold_s=slow_threshold_s
+                        "put_writes", _t0, config, payload=payload, slow_threshold_s=slow_threshold_s
                     )
 
         # Store pool reference for graceful shutdown
