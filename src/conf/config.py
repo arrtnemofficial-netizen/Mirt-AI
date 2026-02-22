@@ -401,6 +401,19 @@ class Settings(BaseSettings):
             "Enable strict exception handling policy with observable fallbacks in critical nodes."
         ),
     )
+    INTENT_SERVICE_V1_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable new IntentDetectionService as the source of detected_intent. "
+            "When False, service runs in shadow mode only."
+        ),
+    )
+    INTENT_SERVICE_V1_SHADOW: bool = Field(
+        default=True,
+        description=(
+            "Record legacy vs service intent comparison in metadata.intent_shadow for staged rollout."
+        ),
+    )
     DELIBERATION_MIN_CONFIDENCE: float = Field(
         default=0.6,
         description="Minimum confidence for offer. Below this → fallback message",
