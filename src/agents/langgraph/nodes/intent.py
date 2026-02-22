@@ -12,6 +12,7 @@ from typing import Any
 
 from src.agents.langgraph.intent.models import IntentDecision
 from src.agents.langgraph.intent.policy import select_intents
+from src.agents.langgraph.memory_gateway import MemoryGateway, upsert_facts_from_text
 from src.conf.config import settings
 from src.core.input_validator import validate_input_metadata
 
@@ -392,6 +393,18 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     This runs BEFORE LLM to enable conditional edges.
     Fast and lightweight - no API calls.
     """
+    session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
+    user_id = state.get("metadata", {}).get("user_id", "")
+
+    memory_context = await MemoryGateway.fetch_context(session_id, user_id=user_id)
+    if memory_context.get("storage_available"):
+        state = {
+            **state,
+            "memory_profile": memory_context.get("profile"),
+            "memory_facts": memory_context.get("facts", []),
+            "memory_context_prompt": memory_context.get("prompt"),
+        }
+
     # Check for image FIRST - but respect dialog_phase for phase-aware routing
     metadata = state.get("metadata", {})
     has_image_early = state.get("has_image", False) or metadata.get("has_image", False)
@@ -531,6 +544,8 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
         has_image,
         metadata.current_state.value,
     )
+
+    await upsert_facts_from_text(session_id=session_id, user_id=user_id, text=str(user_content or ""))
 
     return {
         "detected_intent": detected_intent,

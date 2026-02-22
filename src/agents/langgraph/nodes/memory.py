@@ -23,6 +23,7 @@ import logging
 import time
 from typing import Any
 
+from src.agents.langgraph.memory_gateway import MemoryGateway
 from src.agents.langgraph.routers.base import to_schema
 from src.agents.pydantic.memory_agent import analyze_for_memory, extract_quick_facts
 from src.core.state_machine import State
@@ -77,25 +78,22 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
         return {"step_number": schema_state.step_number + 1}
 
     try:
-        memory_service = MemoryService()
-
-        if not memory_service.enabled:
-            logger.debug("[SESSION %s] Memory service disabled", session_id)
+        memory_context = await MemoryGateway.fetch_context(session_id, user_id=user_id)
+        if not memory_context.get("storage_available"):
+            logger.debug("[SESSION %s] Memory storage unavailable, continue without enrichment", session_id)
             return {"step_number": schema_state.step_number + 1}
 
-        # Load memory context
-        context = await memory_service.load_memory_context(user_id)
-
-        # Generate prompt block
-        memory_prompt = context.to_prompt_block() if not context.is_empty() else None
+        context_profile = memory_context.get("profile")
+        context_facts = memory_context.get("facts", [])
+        memory_prompt = memory_context.get("prompt")
 
         elapsed = (time.perf_counter() - start_time) * 1000
 
         logger.info(
             "📚 [SESSION %s] Memory context loaded: profile=%s, facts=%d, %.1fms",
             session_id,
-            "yes" if context.profile else "no",
-            len(context.facts),
+            "yes" if context_profile else "no",
+            len(context_facts),
             elapsed,
         )
 
@@ -108,8 +106,8 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
             event="memory_context.complete",
             extra={
                 "trace_id": trace_id,
-                "has_profile": context.profile is not None,
-                "facts_count": len(context.facts),
+                "has_profile": context_profile is not None,
+                "facts_count": len(context_facts),
                 "elapsed_ms": elapsed,
             },
         )
@@ -145,8 +143,8 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
         # Return state update with memory context
         return {
             "step_number": step_number + 1,
-            "memory_profile": context.profile,
-            "memory_facts": context.facts,
+            "memory_profile": context_profile,
+            "memory_facts": context_facts,
             "memory_context_prompt": memory_prompt,
             "sitniks_chat_id": sitniks_result.get("chat_id") if sitniks_result else None,
             "sitniks_first_touch_done": sitniks_result.get("success") if sitniks_result else False,

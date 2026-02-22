@@ -23,6 +23,7 @@ from src.agents.langgraph.nodes.handlers.dispatch_handler import execute_agent_d
 from src.agents.langgraph.nodes.handlers.snippet_handler import check_snippet_policy
 from src.agents.langgraph.nodes.handlers.transition_handler import finalize_transition
 from src.agents.langgraph.nodes.helpers.intent_instructions import get_instructions_for_intent
+from src.agents.langgraph.memory_gateway import MemoryGateway, upsert_facts_from_text
 from src.agents.langgraph.nodes.helpers.size_parsing import (
     extract_size_from_response,
     height_to_size,
@@ -62,6 +63,18 @@ async def agent_node(
     schema_state = to_schema(state)
     session_id = schema_state.session_id or schema_state.metadata.get("session_id", "")
     current_state_str = schema_state.current_state
+    user_id = schema_state.metadata.get("user_id", "")
+
+    # Memory enrichment guard: storage failure must NOT break FSM logic
+    memory_context = await MemoryGateway.fetch_context(session_id, user_id=user_id)
+    if memory_context.get("storage_available"):
+        state = {
+            **state,
+            "memory_profile": memory_context.get("profile"),
+            "memory_facts": memory_context.get("facts", []),
+            "memory_context_prompt": memory_context.get("prompt"),
+        }
+    schema_state = to_schema(state)
 
     # 1. Extract User Message
     from .utils import extract_user_message
@@ -204,6 +217,12 @@ async def agent_node(
         metadata_update["current_state"] = new_state_str
         metadata_update["intent"] = final_intent
         metadata_update["has_deferred_intents"] = transition_metadata.get("has_deferred_intents", False)
+
+        await upsert_facts_from_text(
+            session_id=session_id,
+            user_id=user_id,
+            text=user_text,
+        )
 
         return {
             "current_state": new_state_str,
