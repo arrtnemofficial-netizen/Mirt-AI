@@ -137,6 +137,16 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest -q tests/contract/test_core_model_literals_sync.py
 
+      - name: Run memory gateway contract gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/contract/test_memory_gateway_contract.py
+
+      - name: Run bootstrap script idempotency contract gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/contract/test_bootstrap_script_idempotency.py
+
       - name: Run route vs FSM regression gate
         env:
           PYTHONPATH: ${{ github.workspace }}

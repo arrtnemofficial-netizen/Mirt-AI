@@ -30,6 +30,22 @@ pytest -q tests/contract/test_core_model_literals_sync.py
 
 Fail, якщо `src/core/models.py` Literals (`IntentType`, `StateType`) розсинхронені з enum у `src/core/state_machine.py`.
 
+## Contract gate (memory gateway)
+
+```bash
+pytest -q tests/contract/test_memory_gateway_contract.py
+```
+
+Fail, якщо порушено інтерфейс MemoryService gateway, обов'язкові поля memory-запису або інваріанти метрик `importance/surprise` в діапазоні `[0..1]`.
+
+## Contract gate (bootstrap idempotency)
+
+```bash
+pytest -q tests/contract/test_bootstrap_script_idempotency.py
+```
+
+Fail, якщо повторний запуск bootstrap/sync кроку створює дублікати продуктів або schema-крок падає при повторі.
+
 ## Regression gate (route vs FSM)
 
 ```bash
