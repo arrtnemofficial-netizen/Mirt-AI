@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+UTC = timezone.utc
 
 from src.services.storage import InMemoryMessageStore, StoredMessage
 from src.services.summarization import run_retention

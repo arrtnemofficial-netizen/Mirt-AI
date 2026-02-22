@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+UTC = timezone.utc
 
 
 logger = logging.getLogger(__name__)

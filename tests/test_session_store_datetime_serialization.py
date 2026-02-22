@@ -1,7 +1,8 @@
 """Test that session store correctly serializes datetime objects from Pydantic models."""
 
 import pytest
-from datetime import UTC, datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
+UTC = timezone.utc
 from decimal import Decimal
 from uuid import uuid4
 
@@ -187,7 +188,8 @@ async def test_postgres_store_save_with_datetime_in_state():
     from src.services.storage.postgres_store import PostgresSessionStore
     from src.agents.langgraph.state import create_initial_state
     from src.services.memory.models import UserProfile
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
+    UTC = timezone.utc
     
     # Create state with memory_profile containing datetime
     now = datetime.now(UTC)

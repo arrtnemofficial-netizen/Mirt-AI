@@ -7,7 +7,8 @@ or other order management systems.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator

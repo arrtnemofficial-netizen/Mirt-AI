@@ -43,7 +43,8 @@ def dispatch_summarization(session_id: str, user_id: int | None = None) -> dict:
         return {"queued": True, "task_id": task.id}
     else:
         # Sync execution
-        from datetime import UTC, datetime
+        from datetime import datetime, timezone
+        UTC = timezone.utc
 
         from src.services.storage import create_message_store
         from src.services.summarization import run_retention
@@ -81,7 +82,8 @@ def dispatch_followup(
         return {"queued": True, "task_id": task.id}
     else:
         # Sync execution
-        from datetime import UTC, datetime
+        from datetime import datetime, timezone
+        UTC = timezone.utc
 
         from src.services.conversation import run_followups
         from src.services.storage import create_message_store

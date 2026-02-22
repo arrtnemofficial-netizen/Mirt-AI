@@ -7,7 +7,8 @@ Webhooks should dispatch to this task for async processing.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from typing import Any
 
 from celery import shared_task

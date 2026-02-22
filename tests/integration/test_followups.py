@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+UTC = timezone.utc
 
 from src.core.constants import MessageTag
 from src.services.conversation import next_followup_due_at, run_followups

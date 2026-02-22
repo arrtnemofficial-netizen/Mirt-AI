@@ -1,7 +1,8 @@
 """Test that memory facts TTL is enforced on read (expires_at filter)."""
 
 import pytest
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+UTC = timezone.utc
 from unittest.mock import AsyncMock, patch
 
 from src.services.memory.facts import FactsMixin
