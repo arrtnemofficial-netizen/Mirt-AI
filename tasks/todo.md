@@ -72,17 +72,18 @@
 - [ ] Додати статичний тест "no duplicated transition rules".
 - [ ] Додати контрактний тест checkpoint schema + allowed keys.
 - [ ] Додати gate на budget розміру checkpoint payload.
+- [x] Додати static gate на merge-конфлікт маркери та AI-disclosure коментарі.
 - [ ] Включити нові перевірки в обов'язковий тестовий набір.
 
 #### Verification plan
 - [ ] `pytest tests/static/test_state_access_rules.py`
 - [ ] `pytest tests/contract/test_model_rules_integrity.py`
-- [ ] Запуск нового anti-conflict тесту.
+- [x] Запуск нового anti-conflict тесту.
 
 #### Review (post-implementation)
-- Що зроблено:
-- Що перевірено:
-- Які обмеження лишились:
+- Що зроблено: додано `tests/static/test_no_ai_or_merge_markers.py` і розширено `scripts/check_ai_smell_comments.py` для детекції merge-marker/AI-disclosure патернів.
+- Що перевірено: `pytest tests/static/test_no_ai_or_merge_markers.py`, `python scripts/check_ai_smell_comments.py`.
+- Які обмеження лишились: gate покриває Python-файли (`.py/.pyi`) в `src/tests/scripts`.
 
 ---
 
