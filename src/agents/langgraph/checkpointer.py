@@ -24,6 +24,8 @@ import time
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from src.agents.langgraph.checkpoint_contract import ensure_checkpoint_schema_version
+
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -131,7 +133,7 @@ def _compact_payload(payload: Any, *, max_messages: int, max_chars: int, drop_ba
     if not isinstance(payload, dict):
         return payload
 
-    compact = payload
+    compact = ensure_checkpoint_schema_version(payload)
     messages = payload.get("messages")
     if isinstance(messages, list):
         if max_messages > 0 and len(messages) > max_messages:
