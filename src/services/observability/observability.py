@@ -30,7 +30,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.conf.config import settings
@@ -66,7 +66,7 @@ class MetricsCollector:
         point = MetricPoint(
             name=name,
             value=value,
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
             tags=tags or {},
         )
         self.points.append(point)
@@ -344,7 +344,7 @@ class AsyncTracingService:
                 "cost_usd": cost_usd,
                 "cost_uah": cost_uah,
                 "model_name": model_name,
-                "created_at": datetime.now(UTC).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
 
             # Remove None values to let DB defaults work or avoid null issues

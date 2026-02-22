@@ -1,7 +1,7 @@
 from .conversation import ConversationHandler, create_conversation_handler
 from .debouncer import BufferedMessage, MessageDebouncer
 from .followups import next_followup_due_at, run_followups
-from .history_trimmer import trim_message_history
+from .history_trimmer import build_rolling_summary_history, trim_message_history
 
 
 __all__ = [
@@ -12,4 +12,5 @@ __all__ = [
     "next_followup_due_at",
     "run_followups",
     "trim_message_history",
+    "build_rolling_summary_history",
 ]

@@ -37,7 +37,7 @@ from src.agents.pydantic.deps import create_deps_from_state
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 from src.core.state_machine import State
-from src.services.conversation import trim_message_history
+from src.services.conversation import build_rolling_summary_history
 
 # Services
 from src.services.observability import track_metric
@@ -102,7 +102,7 @@ async def agent_node(
         )
 
     # Context Trimming
-    trimmed_messages = trim_message_history(schema_state.messages)
+    trimmed_messages = build_rolling_summary_history(schema_state.messages)
     state_for_llm = {**schema_state.to_dict(), "messages": trimmed_messages}
 
     # Dependency Injection

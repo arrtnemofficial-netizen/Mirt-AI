@@ -157,3 +157,43 @@ def should_trim(
         return True
 
     return estimate_token_count(messages) > max_tokens
+
+
+def build_rolling_summary_history(
+    messages: list[dict[str, Any]],
+    *,
+    last_messages: int | None = None,
+    max_summary_chars: int | None = None,
+) -> list[dict[str, Any]]:
+    """Build history as [system rolling summary] + last N messages."""
+    if not settings.LLM_ROLLING_SUMMARY_ENABLED:
+        return trim_message_history(messages)
+
+    keep_n = settings.LLM_ROLLING_SUMMARY_LAST_MESSAGES if last_messages is None else last_messages
+    summary_chars = settings.LLM_ROLLING_SUMMARY_MAX_CHARS if max_summary_chars is None else max_summary_chars
+
+    if keep_n <= 0 or len(messages) <= keep_n:
+        return trim_message_history(messages, max_messages=max(keep_n, 0))
+
+    head = messages[: len(messages) - keep_n]
+    tail = messages[-keep_n:]
+
+    summary_lines: list[str] = []
+    for msg in head:
+        role = _get_message_role(msg)
+        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+        if isinstance(content, str) and content.strip():
+            summary_lines.append(f"[{role}] {content.strip()}")
+
+    if not summary_lines:
+        return tail
+
+    summary_text = "\n".join(summary_lines)
+    if summary_chars > 0 and len(summary_text) > summary_chars:
+        summary_text = summary_text[-summary_chars:]
+
+    summary_message = {
+        "role": "system",
+        "content": f"Короткий підсумок попереднього діалогу:\n{summary_text}",
+    }
+    return [summary_message, *tail]
