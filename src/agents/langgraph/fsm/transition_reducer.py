@@ -75,6 +75,9 @@ class TransitionDecision:
     # Причина перехода (для логирования)
     reason: str
 
+    # Есть ли deferred intents для следующего шага
+    has_deferred_intents: bool = False
+
 
 @dataclass
 class ResponsePolicy:
@@ -98,6 +101,7 @@ def compute_transition(
     intent: str,
     has_image: bool = False,
     user_message: str | None = None,
+    deferred_intents: list[str] | None = None,
 ) -> TransitionDecision:
     """
     Вычислить переход состояния на основе текущего состояния и события.
@@ -218,6 +222,8 @@ def compute_transition(
         session_id=session_id,
     )
     
+    has_deferred_intents = bool(deferred_intents)
+
     # Формируем reason для логирования
     reason = _format_transition_reason(
         from_state=current_state_str,
@@ -295,6 +301,7 @@ def compute_transition(
         dialog_phase=dialog_phase,
         response_policy=response_policy,
         reason=reason,
+        has_deferred_intents=has_deferred_intents,
     )
 
 
