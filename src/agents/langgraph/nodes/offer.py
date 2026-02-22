@@ -19,6 +19,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from src.agents.langgraph.memory_gateway import MemoryGateway, upsert_facts_from_text
 from src.agents.pydantic.deps import create_deps_from_state
 from src.agents.pydantic.support_agent import run_support
 from src.conf.config import settings
@@ -72,6 +73,16 @@ async def offer_node(
     start_time = time.perf_counter()
     session_id = state.get("session_id", state.get("metadata", {}).get("session_id", ""))
     trace_id = state.get("trace_id", "")
+    user_id = state.get("metadata", {}).get("user_id", "")
+
+    memory_context = await MemoryGateway.fetch_context(session_id, user_id=user_id)
+    if memory_context.get("storage_available"):
+        state = {
+            **state,
+            "memory_profile": memory_context.get("profile"),
+            "memory_facts": memory_context.get("facts", []),
+            "memory_context_prompt": memory_context.get("prompt"),
+        }
 
     # Get user message (handles both dict and LangChain Message objects)
     from .utils import extract_user_message
@@ -208,6 +219,7 @@ async def offer_node(
             assistant_messages = [{"role": "assistant", "content": fallback_text}]
 
             # Stay in SIZE_COLOR to re-try with correct data
+            await upsert_facts_from_text(session_id=session_id, user_id=user_id, text=str(user_message))
             return {
                 "current_state": State.STATE_3_SIZE_COLOR.value,  # Go back!
                 "messages": assistant_messages,
@@ -272,6 +284,7 @@ async def offer_node(
                 response_preview=preview_text,
             )
 
+        await upsert_facts_from_text(session_id=session_id, user_id=user_id, text=str(user_message))
         return {
             "current_state": new_state,
             "messages": assistant_messages,

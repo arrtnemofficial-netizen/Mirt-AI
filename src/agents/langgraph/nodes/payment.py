@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from langgraph.types import Command
 
+from src.agents.langgraph.memory_gateway import MemoryGateway, upsert_facts_from_text
 from src.conf.config import settings
 from src.core.debug_logger import debug_log
 
@@ -70,6 +71,16 @@ async def payment_node(
     trace_id = state.get("trace_id", "")
     dialog_phase = state.get("dialog_phase", "")
     approval_type = state.get("approval_type", "")
+    user_id = state.get("metadata", {}).get("user_id", "")
+
+    memory_context = await MemoryGateway.fetch_context(session_id, user_id=user_id)
+    if memory_context.get("storage_available"):
+        state = {
+            **state,
+            "memory_profile": memory_context.get("profile"),
+            "memory_facts": memory_context.get("facts", []),
+            "memory_context_prompt": memory_context.get("prompt"),
+        }
 
     if settings.DEBUG_TRACE_LOGS:
         debug_log.node_entry(
@@ -88,6 +99,7 @@ async def payment_node(
     from src.agents.langgraph.nodes.utils import extract_user_message
     
     user_message = extract_user_message(state.get("messages", []))
+    await upsert_facts_from_text(session_id=session_id, user_id=user_id, text=str(user_message or ""))
     detected_intent = state.get("detected_intent") or "PAYMENT_DELIVERY"
     has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
     
