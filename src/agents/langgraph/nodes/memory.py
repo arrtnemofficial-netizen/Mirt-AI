@@ -29,6 +29,7 @@ from src.core.state_machine import State
 from src.integrations.crm.sitniks_chat_service import get_sitniks_chat_service
 from src.services.memory import MemoryService
 from src.services.memory.models import NewFact
+from src.services.memory_gateway import get_memory_gateway
 from src.services.observability import log_agent_step, track_metric
 
 
@@ -77,14 +78,16 @@ async def memory_context_node(state: dict[str, Any]) -> dict[str, Any]:
         return {"step_number": schema_state.step_number + 1}
 
     try:
-        memory_service = MemoryService()
+        memory_gateway = get_memory_gateway()
+        context = await memory_gateway.fetch_context(
+            session_id=user_id,
+            limit=10,
+            min_importance=0.3,
+        )
 
-        if not memory_service.enabled:
-            logger.debug("[SESSION %s] Memory service disabled", session_id)
+        if context is None:
+            logger.warning("[SESSION %s] Memory context unavailable, using graceful fallback", session_id)
             return {"step_number": schema_state.step_number + 1}
-
-        # Load memory context
-        context = await memory_service.load_memory_context(user_id)
 
         # Generate prompt block
         memory_prompt = context.to_prompt_block() if not context.is_empty() else None
@@ -249,6 +252,7 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
         return {"step_number": schema_state.step_number + 1}
 
     try:
+        memory_gateway = get_memory_gateway()
         memory_service = MemoryService()
 
         if not memory_service.enabled:
@@ -293,10 +297,14 @@ async def memory_update_node(state: dict[str, Any]) -> dict[str, Any]:
                 surprise=0.7,  # Medium-high surprise
                 ttl_days=None,  # No expiry
             )
-            result = await memory_service.store_fact(
-                user_id, new_fact, session_id, bypass_gating=True
+            result = await memory_gateway.upsert_fact(
+                session_id=user_id,
+                fact=new_fact,
+                importance=0.9,
+                confidence=0.8,
+                source=session_id,
             )
-            if result:
+            if result.ok:
                 quick_stored += 1
 
                 # Also update profile if applicable
