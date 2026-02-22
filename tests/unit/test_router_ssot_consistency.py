@@ -17,7 +17,7 @@ def _state(state: State, message: str, *, dialog_phase: str = "WAITING_FOR_DELIV
         "session_id": "state5_consistency",
         "current_state": state.value,
         "dialog_phase": dialog_phase,
-        "detected_intent": detect_intent_from_text(message, has_image=False, current_state=state.value),
+        "detected_intent": detect_intent_from_text(message, has_image=False, current_state=state.value).primary_intent,
         "messages": [{"role": "user", "content": message}],
         "selected_products": [{"name": "Тест", "price": 100, "size": "122-128"}],
         "metadata": {"session_id": "state5_consistency"},

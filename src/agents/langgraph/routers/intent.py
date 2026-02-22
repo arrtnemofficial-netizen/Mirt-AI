@@ -9,6 +9,7 @@ import logging
 from src.core.state_machine import State
 from src.agents.langgraph.routers.base import safe_router, StateSchema
 from src.agents.langgraph.routers.enums import Route
+from src.conf.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,15 @@ def route_after_intent(
     intent = state.detected_intent
     current_state = state.state_enum
     has_image = state.has_image
+    intent_confidence = float(state.metadata.get("intent_confidence", 1.0) or 0.0)
+    intent_ambiguous = bool(state.metadata.get("intent_ambiguous", False))
 
     # 1. Escalation / Complaint
     if state.should_escalate or intent == "ESCALATION" or intent == "COMPLAINT":
         return Route.ESCALATION
 
-    # 1.5 Ambiguous intent -> clarification/disambiguation node (agent)
-    if intent == "AMBIGUOUS":
+    # 1.5 Ambiguous or low-confidence intent -> clarification/disambiguation node (agent)
+    if intent == "AMBIGUOUS" or intent_ambiguous or intent_confidence < settings.INTENT_LOW_CONFIDENCE_THRESHOLD:
         return Route.DISAMBIGUATION
 
     # 2. Greeting / Smalltalk -> Agent

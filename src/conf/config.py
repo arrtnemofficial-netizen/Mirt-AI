@@ -414,6 +414,25 @@ class Settings(BaseSettings):
             "Record legacy vs service intent comparison in metadata.intent_shadow for staged rollout."
         ),
     )
+    INTENT_LOW_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.55,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence for direct intent routing. Below this value intent is ambiguous.",
+    )
+    INTENT_AMBIGUOUS_MARGIN: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "If top-2 intent scores are within this margin, treat request as mixed/ambiguous and route"
+            " to disambiguation."
+        ),
+    )
+    INTENT_SHADOW_LOGGING: bool = Field(
+        default=True,
+        description="Enable shadow logs for intent confidence calibration without impacting routing.",
+    )
     DELIBERATION_MIN_CONFIDENCE: float = Field(
         default=0.6,
         description="Minimum confidence for offer. Below this → fallback message",

@@ -9,7 +9,8 @@ def test_mixed_payment_and_category_message_is_ambiguous() -> None:
     )
 
     assert result.primary_intent == "AMBIGUOUS"
-    assert result.ambiguity_reason == "conflicting_patterns"
+    assert result.reason == "mixed_intent"
+    assert result.ambiguous_flag is True
     assert "PAYMENT_DELIVERY" in result.secondary_intents
     assert "PRODUCT_CATEGORY" in result.secondary_intents
 
@@ -22,7 +23,8 @@ def test_low_confidence_message_is_ambiguous() -> None:
     )
 
     assert result.primary_intent == "AMBIGUOUS"
-    assert result.ambiguity_reason == "low_confidence"
+    assert result.reason == "low_confidence"
+    assert result.ambiguous_flag is True
     assert result.confidence < 0.55
 
 
@@ -35,4 +37,5 @@ def test_structured_result_for_clear_intent() -> None:
 
     assert result.primary_intent == "SIZE_HELP"
     assert result.confidence > 0.55
-    assert result.ambiguity_reason is None
+    assert result.reason == "clear_match"
+    assert result.ambiguous_flag is False

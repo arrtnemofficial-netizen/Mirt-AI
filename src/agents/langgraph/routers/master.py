@@ -102,7 +102,8 @@ def master_router(state: StateSchema) -> Literal["moderation", "agent", "offer",
         user_msg = extract_user_message(state.messages)
         if user_msg:
              # Fast intent check
-             intent = detect_intent_from_text(user_msg, has_image, current_state.value)
+             intent_decision = detect_intent_from_text(user_msg, has_image, current_state.value)
+             intent = intent_decision.primary_intent
 
              if intent == "PAYMENT_DELIVERY":
                  _route_debug(session_id, current_state.value, "payment", "Intent: PAYMENT_DELIVERY")
@@ -155,7 +156,7 @@ def master_router(state: StateSchema) -> Literal["moderation", "agent", "offer",
         # Restart logic
         user_msg = extract_user_message(state.messages)
         if user_msg:
-             intent = detect_intent_from_text(user_msg, has_image, current_state.value)
+             intent = detect_intent_from_text(user_msg, has_image, current_state.value).primary_intent
              if intent == "THANKYOU_SMALLTALK":
                  return Route.END
              _route_debug(session_id, current_state.value, "moderation", "Restart (New Query)")
