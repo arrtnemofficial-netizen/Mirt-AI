@@ -44,15 +44,15 @@
 
 #### План (checkable)
 - [x] Додати нормалізатор `normalize_checkpoint_state(...)` перед записом.
-- [ ] Ввести allowlist ключів для persistence + schema version.
+- [x] Ввести allowlist ключів для persistence + schema version.
 - [x] Обмежити history/messages (останні N + summary marker).
-- [ ] Заборонити збереження derived/transient полів (наприклад, дубльованих фаз).
+- [x] Заборонити збереження derived/transient полів (наприклад, дубльованих фаз).
 - [x] Додати тест на максимальний розмір payload.
 
 #### Verification plan
 - [ ] `pytest tests/unit/test_checkpointer_resilience.py`
 - [ ] `pytest tests/unit/test_state_schema_get.py`
-- [ ] Новий тест: payload не містить transient/derived ключів.
+- [x] Новий тест: payload не містить transient/derived ключів.
 
 #### Review (post-implementation)
 - Що зроблено:

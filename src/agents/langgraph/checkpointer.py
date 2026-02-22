@@ -127,14 +127,37 @@ def _checkpoint_stats(obj: Any) -> tuple[int | None, int | None]:
     return json_bytes, messages_count
 
 
+# Derived/transient fields that should not be persisted in checkpoints.
+_TRANSIENT_STATE_KEYS = {
+    "dialog_phase",
+    "route_decision_reason",
+    "routing_debug",
+    "debug_trace",
+}
+
+# Minimal metadata allowlist to avoid checkpoint bloat from arbitrary blobs.
+_ALLOWED_METADATA_KEYS = {
+    "session_id",
+    "current_state",
+    "has_image",
+    "image_url",
+    "payment_sub_phase",
+    "explicit_new_product_trigger",
+    "product_addition_context",
+}
+
+
+
 def _compact_state_dict(state_dict: dict[str, Any], *, max_messages: int, max_chars: int, drop_base64: bool) -> dict[str, Any]:
-    """Compact a single state-like dict.
+    """Compact and sanitize a single state-like dict.
 
     Supports both top-level state payloads and nested state blobs used by LangGraph
     checkpointers (`channel_values` / `values` / `state`).
     """
-    compact = state_dict
-    messages = state_dict.get("messages")
+    compact = {k: v for k, v in state_dict.items() if k not in _TRANSIENT_STATE_KEYS}
+    compact["checkpoint_schema_version"] = 1
+
+    messages = compact.get("messages")
     if isinstance(messages, list):
         if max_messages > 0 and len(messages) > max_messages:
             messages = messages[-max_messages:]
@@ -150,6 +173,11 @@ def _compact_state_dict(state_dict: dict[str, Any], *, max_messages: int, max_ch
             messages = trimmed
 
         compact = {**compact, "messages": messages}
+
+    metadata = compact.get("metadata")
+    if isinstance(metadata, dict):
+        metadata = {k: v for k, v in metadata.items() if k in _ALLOWED_METADATA_KEYS}
+        compact = {**compact, "metadata": metadata}
 
     if drop_base64:
         image_url = compact.get("image_url")

@@ -8,7 +8,10 @@ from __future__ import annotations
 import logging
 import os
 from functools import lru_cache
-from typing import Self
+try:
+    from typing import Self
+except ImportError:  # Python < 3.11
+    from typing_extensions import Self
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict

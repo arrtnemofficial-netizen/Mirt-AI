@@ -49,3 +49,35 @@ def test_compact_payload_strips_base64_from_top_level_and_metadata() -> None:
 
     assert compact["image_url"] == "<base64_stripped>"
     assert compact["metadata"]["image_url"] == "<base64_stripped>"
+
+
+def test_compact_payload_drops_transient_fields_and_sets_schema_version() -> None:
+    payload = {
+        "dialog_phase": "PAYMENT",
+        "route_decision_reason": "debug",
+        "debug_trace": {"step": 1},
+        "current_state": "STATE_5_PAYMENT_DELIVERY",
+    }
+
+    compact = _compact_payload(payload, max_messages=0, max_chars=0, drop_base64=False)
+
+    assert "dialog_phase" not in compact
+    assert "route_decision_reason" not in compact
+    assert "debug_trace" not in compact
+    assert compact["checkpoint_schema_version"] == 1
+
+
+def test_compact_payload_filters_metadata_by_allowlist() -> None:
+    payload = {
+        "metadata": {
+            "session_id": "s-1",
+            "current_state": "STATE_1_DISCOVERY",
+            "unsafe_big_blob": "remove-me",
+        }
+    }
+
+    compact = _compact_payload(payload, max_messages=0, max_chars=0, drop_base64=False)
+
+    assert compact["metadata"]["session_id"] == "s-1"
+    assert compact["metadata"]["current_state"] == "STATE_1_DISCOVERY"
+    assert "unsafe_big_blob" not in compact["metadata"]

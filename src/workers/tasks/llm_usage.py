@@ -18,7 +18,8 @@ Integrates with Supabase llm_usage table:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from decimal import Decimal
 from typing import Any
 
