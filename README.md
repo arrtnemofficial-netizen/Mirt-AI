@@ -12,6 +12,23 @@ AI-стиліст для бренду дитячого одягу **MIRT**.
 - **[DOCUMENTATION.md](DOCUMENTATION.md)** - Повна документація
 - **[PRD.md](PRD.md)** - Вимоги та Roadmap
 
+## ⚡ Quick-start: bootstrap каталогу в PostgreSQL
+
+1. Bootstrap-синхронізація каталогу з SSOT (`data/vision/products_master.yaml`) у `public.products`:
+
+```bash
+DATABASE_URL="postgresql://USER:PASS@HOST:PORT/DB" python scripts/sync_products_master_to_db.py --insert-missing
+```
+
+2. Перевірка кількості й активності продуктів:
+
+```sql
+SELECT COUNT(*) AS total_products,
+       COUNT(*) FILTER (WHERE COALESCE(array_length(sizes, 1), 0) > 0
+                        AND COALESCE(array_length(colors, 1), 0) > 0) AS active_products
+FROM public.products;
+```
+
 ## 🏗 Архітектура v4.0 (Agentic System)
 
 Система перейшла на **File-Based Prompting** та **Strict Testing**.
