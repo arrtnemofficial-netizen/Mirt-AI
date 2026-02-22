@@ -84,15 +84,18 @@ def finalize_transition(
             "transition_source": transition_source,
             "payment_sub_phase": None,
             "dialog_phase": state.get("dialog_phase"),
+            "has_deferred_intents": bool(state.get("metadata", {}).get("deferred_intents", [])),
         }
 
     # 3. Compute SSOT Transition
     has_image = state.get("has_image", False) or state.get("metadata", {}).get("has_image", False)
+    deferred_intents = state.get("metadata", {}).get("deferred_intents", [])
     transition = compute_transition(
         state=state,
         intent=intent or "DISCOVERY_OR_QUESTION",
         has_image=has_image,
         user_message=user_message,
+        deferred_intents=deferred_intents,
     )
 
     # 4. Apply Overrides
@@ -107,6 +110,7 @@ def finalize_transition(
             "transition_source": "override",
             "payment_sub_phase": transition.payment_sub_phase,
             "dialog_phase": transition.dialog_phase,
+            "has_deferred_intents": transition.has_deferred_intents,
         }
     
     # 5. Apply SSOT Decision
@@ -129,4 +133,5 @@ def finalize_transition(
         "transition_source": transition_source,
         "payment_sub_phase": transition.payment_sub_phase,
         "dialog_phase": transition.dialog_phase,
+        "has_deferred_intents": transition.has_deferred_intents,
     }

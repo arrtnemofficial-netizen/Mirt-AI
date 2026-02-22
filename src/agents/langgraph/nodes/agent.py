@@ -159,7 +159,7 @@ async def agent_node(
         # HANDLER 4: TRANSITION (SSOT)
         # =====================================================================
         # Updates response.metadata.current_state and intent based on SSOT reducer
-        new_state_str, final_intent = finalize_transition(schema_state.to_dict(), response, user_text)
+        new_state_str, final_intent, transition_metadata = finalize_transition(schema_state.to_dict(), response, user_text)
 
         # Apply updates to response object for consistency
         response.metadata.current_state = new_state_str
@@ -203,6 +203,7 @@ async def agent_node(
 
         metadata_update["current_state"] = new_state_str
         metadata_update["intent"] = final_intent
+        metadata_update["has_deferred_intents"] = transition_metadata.get("has_deferred_intents", False)
 
         return {
             "current_state": new_state_str,

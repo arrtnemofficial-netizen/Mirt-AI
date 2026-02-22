@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.agents.langgraph.intent.policy import select_intents
 from src.core.input_validator import validate_input_metadata
 
 
@@ -250,24 +251,44 @@ def detect_intent_from_text(
     has_image: bool,
     current_state: str,
 ) -> str:
-    """
-    Quick intent detection based on keywords and context.
+    """Backward-compatible wrapper: returns only primary intent."""
+    selection = detect_intent_candidates_from_text(
+        text=text,
+        has_image=has_image,
+        current_state=current_state,
+    )
+    return selection["primary_intent"]
 
-    Priority:
-    1. Payment context in payment state (no matter what)
-    2. Photo present -> PHOTO_IDENT
-    3. Keyword matching
-    4. Default to DISCOVERY_OR_QUESTION
-    """
+
+def detect_intent_candidates_from_text(
+    text: str,
+    has_image: bool,
+    current_state: str,
+    top_k: int = 3,
+) -> dict[str, Any]:
+    """Detect intent candidates and resolve primary/deferred intents by policy."""
     text_lower = text.lower().strip()
+    min_top_k = max(top_k, 3)
 
     # Special cases first
     special = _check_special_cases(text_lower, has_image, current_state)
     if special:
-        return special
+        candidates = [special, "DISCOVERY_OR_QUESTION", "THANKYOU_SMALLTALK"]
+        selection = select_intents(candidates)
+        return {
+            "primary_intent": selection.primary_intent,
+            "deferred_intents": selection.deferred_intents,
+            "intent_candidates": candidates[:min_top_k],
+        }
 
-    # Keyword matching in priority order
-    return _match_keywords(text_lower, len(text))
+    candidates = _collect_keyword_candidates(text_lower, len(text), min_top_k)
+    selection = select_intents(candidates)
+
+    return {
+        "primary_intent": selection.primary_intent,
+        "deferred_intents": selection.deferred_intents,
+        "intent_candidates": candidates,
+    }
 
 
 def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -> str | None:
@@ -346,38 +367,40 @@ def _check_special_cases(text_lower: str, has_image: bool, current_state: str) -
     return None
 
 
-def _match_keywords(text_lower: str, text_len: int) -> str:
-    """Match keywords in priority order."""
-    # Priority order for keyword matching
-    priority_intents = [
+def _collect_keyword_candidates(text_lower: str, text_len: int, top_k: int) -> list[str]:
+    """Collect top-k intent candidates using keyword hit counts."""
+    scored: list[tuple[str, int]] = []
+
+    candidate_intents = [
         "PAYMENT_DELIVERY",
         "COMPLAINT",
         "SIZE_HELP",
         "COLOR_HELP",
-        "REQUEST_PHOTO",  # User asking for product photos
-        "PRODUCT_CATEGORY",  # User looking for clothing type
+        "REQUEST_PHOTO",
+        "PRODUCT_CATEGORY",
+        "DISCOVERY_OR_QUESTION",
     ]
 
-    for intent in priority_intents:
-        for keyword in INTENT_PATTERNS[intent]:
-            if keyword in text_lower:
-                return intent
-
-    # Greeting and Smalltalk (only if short message)
     if text_len < 50:
-        for keyword in INTENT_PATTERNS["GREETING_ONLY"]:
-            if keyword in text_lower:
-                return "GREETING_ONLY"
-        for keyword in INTENT_PATTERNS["THANKYOU_SMALLTALK"]:
-            if keyword in text_lower:
-                return "THANKYOU_SMALLTALK"
+        candidate_intents.extend(["GREETING_ONLY", "THANKYOU_SMALLTALK"])
 
-    # Discovery/questions
-    for keyword in INTENT_PATTERNS["DISCOVERY_OR_QUESTION"]:
-        if keyword in text_lower:
-            return "DISCOVERY_OR_QUESTION"
+    for intent in candidate_intents:
+        keywords = INTENT_PATTERNS.get(intent, [])
+        score = sum(1 for keyword in keywords if keyword in text_lower)
+        if score > 0:
+            scored.append((intent, score))
 
-    return "DISCOVERY_OR_QUESTION"
+    scored.sort(key=lambda item: item[1], reverse=True)
+    candidates = [intent for intent, _score in scored]
+
+    if "DISCOVERY_OR_QUESTION" not in candidates:
+        candidates.append("DISCOVERY_OR_QUESTION")
+    if "THANKYOU_SMALLTALK" not in candidates:
+        candidates.append("THANKYOU_SMALLTALK")
+    if "GREETING_ONLY" not in candidates:
+        candidates.append("GREETING_ONLY")
+
+    return candidates[:top_k]
 
 
 async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -428,6 +451,10 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
                     **metadata,
                     "has_image": True,
                     "image_context": image_context,
+                    "primary_intent": intent,
+                    "deferred_intents": ["DISCOVERY_OR_QUESTION", "THANKYOU_SMALLTALK"],
+                    "has_deferred_intents": True,
+                    "intent_candidates": [intent, "DISCOVERY_OR_QUESTION", "THANKYOU_SMALLTALK"],
                 },
                 "step_number": state.get("step_number", 0) + 1,
             }
@@ -445,6 +472,10 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
                     **metadata,
                     "has_image": True,
                     "image_context": "payment",
+                    "primary_intent": "PAYMENT_DELIVERY",
+                    "deferred_intents": ["DISCOVERY_OR_QUESTION", "THANKYOU_SMALLTALK"],
+                    "has_deferred_intents": True,
+                    "intent_candidates": ["PAYMENT_DELIVERY", "DISCOVERY_OR_QUESTION", "THANKYOU_SMALLTALK"],
                 },
                 "step_number": state.get("step_number", 0) + 1,
             }
@@ -462,6 +493,10 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
                     **metadata,
                     "has_image": True,
                     "image_context": "ongoing_conversation",
+                    "primary_intent": "DISCOVERY_OR_QUESTION",
+                    "deferred_intents": ["THANKYOU_SMALLTALK", "GREETING_ONLY"],
+                    "has_deferred_intents": True,
+                    "intent_candidates": ["DISCOVERY_OR_QUESTION", "THANKYOU_SMALLTALK", "GREETING_ONLY"],
                 },
                 "step_number": state.get("step_number", 0) + 1,
             }
@@ -470,6 +505,13 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     if state.get("should_escalate"):
         return {
             "detected_intent": "ESCALATION",
+            "metadata": {
+                **state.get("metadata", {}),
+                "primary_intent": "ESCALATION",
+                "deferred_intents": [],
+                "has_deferred_intents": False,
+                "intent_candidates": ["ESCALATION", "COMPLAINT", "PAYMENT_DELIVERY"],
+            },
             "step_number": state.get("step_number", 0) + 1,
         }
 
@@ -485,16 +527,21 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
     has_image = metadata.has_image or bool(metadata.image_url)
     image_url = metadata.image_url
 
-    # Detect intent
-    detected_intent = detect_intent_from_text(
+    # Detect intent candidates + policy-selected primary/deferred intents
+    selection = detect_intent_candidates_from_text(
         text=user_content,
         has_image=has_image,
         current_state=metadata.current_state.value,
     )
+    detected_intent = selection["primary_intent"]
+    deferred_intents = selection["deferred_intents"]
+    intent_candidates = selection["intent_candidates"]
 
     logger.debug(
-        "Intent detected: %s (text=%s, has_image=%s, state=%s)",
+        "Intent detected: %s, deferred=%s, candidates=%s (text=%s, has_image=%s, state=%s)",
         detected_intent,
+        deferred_intents,
+        intent_candidates,
         user_content[:50] if user_content else "",
         has_image,
         metadata.current_state.value,
@@ -508,6 +555,10 @@ async def intent_detection_node(state: dict[str, Any]) -> dict[str, Any]:
             **state.get("metadata", {}),
             "has_image": has_image,
             "image_url": image_url,
+            "primary_intent": detected_intent,
+            "deferred_intents": deferred_intents,
+            "has_deferred_intents": bool(deferred_intents),
+            "intent_candidates": intent_candidates,
         },
         "step_number": state.get("step_number", 0) + 1,
     }
