@@ -118,6 +118,21 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest -q tests/scenario/test_state5_scenarios.py
 
+      - name: Run SSOT static smoke gate (router vs intent-node)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/smoke/test_router_intent_ssot_guard.py
+
+      - name: Run checkpoint payload contract gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/contract/test_checkpoint_payload_contract.py
+
+      - name: Run route vs FSM regression gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q tests/regression/test_route_vs_fsm_alignment.py
+
       - name: Run intent chaos routing gate
         env:
           PYTHONPATH: ${{ github.workspace }}
