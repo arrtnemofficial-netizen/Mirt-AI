@@ -118,6 +118,18 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest -q tests/scenario/test_state5_scenarios.py
 
+      - name: Run intent chaos routing gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python tests/eval/run_eval.py intent_chaos_v1.json \
+            --mode intent-chaos \
+            --ci-gate \
+            --min-intent-accuracy 0.85 \
+            --max-ambiguity-rate 0.45 \
+            --max-wrong-payment-routing-rate 0.00 \
+            --max-escalation-miss-rate 0.00
+
   # ---------------------------------------------------------------------------
   # Unit Tests
   # ---------------------------------------------------------------------------
