@@ -492,6 +492,40 @@ class Settings(BaseSettings):
         default=True,
         description="Strip base64 image payloads from checkpoint state.",
     )
+    CHECKPOINTER_RETENTION_MAX_PER_SESSION: int = Field(
+        default=200,
+        ge=0,
+        description="Max checkpoint snapshots to retain per session/thread (0 disables cap).",
+    )
+    CHECKPOINTER_RETENTION_TTL_SECONDS: int = Field(
+        default=604800,
+        ge=0,
+        description="TTL for checkpoint snapshots in seconds (0 disables TTL pruning).",
+    )
+    CHECKPOINTER_MILESTONE_EVERY_STEPS: int = Field(
+        default=10,
+        ge=1,
+        description="Persist milestone snapshot marker every N steps during safe-compaction.",
+    )
+    CHECKPOINTER_MILESTONE_STATES: str = Field(
+        default="STATE_0_INIT,STATE_3_SIZE_COLOR,STATE_5_PAYMENT_DELIVERY",
+        description="Comma-separated states that must be preserved as compaction milestones.",
+    )
+
+    LLM_ROLLING_SUMMARY_ENABLED: bool = Field(
+        default=True,
+        description="Build rolling summary + recent N turns instead of passing full message history.",
+    )
+    LLM_ROLLING_SUMMARY_LAST_MESSAGES: int = Field(
+        default=12,
+        ge=0,
+        description="How many latest messages are kept verbatim when rolling summary is enabled.",
+    )
+    LLM_ROLLING_SUMMARY_MAX_CHARS: int = Field(
+        default=2000,
+        ge=0,
+        description="Max chars kept in generated rolling summary text.",
+    )
 
     # =========================================================================
     # INTEGRATION FEATURE FLAGS
