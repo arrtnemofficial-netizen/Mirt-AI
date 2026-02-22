@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
-UTC = timezone.utc
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from psycopg.rows import dict_row
 
 from src.services.memory.base import MemoryBase
-from src.services.memory.constants import (
-    DEFAULT_FACTS_LIMIT,
-    MAX_FACTS_LIMIT,
-    MIN_IMPORTANCE_TO_STORE,
-    MIN_SURPRISE_TO_STORE,
-    TABLE_MEMORIES,
+from src.services.memory.constants import DEFAULT_FACTS_LIMIT, MAX_FACTS_LIMIT, TABLE_MEMORIES
+from src.services.memory.memory_rules import (
+    DEFAULT_MEMORY_RULES,
+    FactRejectReason,
+    is_fact_expired,
+    resolve_ttl_days,
 )
-
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -36,18 +34,17 @@ class FactsMixin(MemoryBase):
         bypass_gating: bool = False,
     ):
         if not bypass_gating:
-            if fact.importance < MIN_IMPORTANCE_TO_STORE:
-                logger.debug(
-                    "Fact rejected by gating: importance=%.2f < %.2f",
-                    fact.importance,
-                    MIN_IMPORTANCE_TO_STORE,
-                )
+            if not getattr(fact, "content", "").strip():
+                self._inc_fact_counter("rejected")
+                logger.info("Fact rejected: reason=%s", FactRejectReason.INVALID_FACT)
                 return None
-            if fact.surprise < MIN_SURPRISE_TO_STORE:
-                logger.debug(
-                    "Fact rejected by gating: surprise=%.2f < %.2f",
-                    fact.surprise,
-                    MIN_SURPRISE_TO_STORE,
+            if fact.importance < DEFAULT_MEMORY_RULES.min_importance_to_store:
+                self._inc_fact_counter("rejected")
+                logger.info(
+                    "Fact rejected: reason=%s importance=%.2f threshold=%.2f",
+                    FactRejectReason.LOW_IMPORTANCE,
+                    fact.importance,
+                    DEFAULT_MEMORY_RULES.min_importance_to_store,
                 )
                 return None
 
@@ -55,9 +52,10 @@ class FactsMixin(MemoryBase):
             return None
 
         now = datetime.now(UTC)
+        ttl_days = resolve_ttl_days(fact.fact_type, fact.ttl_days)
         expires_at = None
-        if fact.ttl_days:
-            expires_at = (now + timedelta(days=fact.ttl_days)).isoformat()
+        if ttl_days:
+            expires_at = (now + timedelta(days=ttl_days)).isoformat()
 
         data = {
             "user_id": user_id,
@@ -68,7 +66,7 @@ class FactsMixin(MemoryBase):
             "importance": fact.importance,
             "surprise": fact.surprise,
             "confidence": 0.8,
-            "ttl_days": fact.ttl_days,
+            "ttl_days": ttl_days,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
             "last_accessed_at": now.isoformat(),
@@ -143,6 +141,7 @@ class FactsMixin(MemoryBase):
         try:
             row = await self._run_db(_query)
             if row:
+                self._inc_fact_counter("accepted")
                 logger.info(
                     "Stored fact for user %s: importance=%.2f, surprise=%.2f",
                     user_id,
@@ -152,6 +151,7 @@ class FactsMixin(MemoryBase):
                 return self._row_to_fact(row)
             return None
         except Exception as e:
+            self._inc_fact_counter("rejected")
             logger.error("Failed to store fact for user %s: %s", user_id, e)
             return None
 
@@ -210,17 +210,23 @@ class FactsMixin(MemoryBase):
         if not self._enabled:
             return []
 
-        params: list[Any] = [user_id, min_importance]
-        # TTL enforcement: filter out expired facts even if cleanup hasn't run
+        params: list[Any] = [
+            user_id,
+            min_importance,
+            DEFAULT_MEMORY_RULES.min_confidence_to_use,
+        ]
         sql = (
             f"SELECT * FROM {TABLE_MEMORIES} "
-            "WHERE user_id = %s AND is_active = TRUE AND importance >= %s "
+            "WHERE user_id = %s AND is_active = TRUE AND importance >= %s AND confidence >= %s "
             "AND (expires_at IS NULL OR expires_at > NOW())"
         )
         if categories:
             sql += " AND category = ANY(%s)"
             params.append(categories)
-        sql += " ORDER BY importance DESC LIMIT %s"
+        sql += (
+            " ORDER BY importance DESC, confidence DESC, "
+            "COALESCE(last_accessed_at, created_at) DESC LIMIT %s"
+        )
         params.append(min(limit, MAX_FACTS_LIMIT))
 
         def _query():
@@ -271,6 +277,14 @@ class FactsMixin(MemoryBase):
             if rows:
                 results = []
                 for row in rows:
+                    reason = self._get_rejection_reason_for_context(row)
+                    if reason:
+                        logger.debug(
+                            "Fact skipped during context read: reason=%s fact_id=%s",
+                            reason,
+                            row.get("id"),
+                        )
+                        continue
                     fact = self.models["Fact"](
                         id=row["id"],
                         user_id=user_id,
@@ -279,10 +293,16 @@ class FactsMixin(MemoryBase):
                         category=row["category"],
                         importance=row["importance"],
                         surprise=row["surprise"],
+                        confidence=row.get("confidence", 0.8),
                     )
                     similarity = row.get("similarity", 0.0)
-                    results.append((fact, similarity))
-                return results
+                    recency = row.get("last_accessed_at") or row.get("created_at")
+                    results.append((fact, similarity, recency))
+                results.sort(
+                    key=lambda item: (item[1], item[0].importance, item[0].confidence, item[2]),
+                    reverse=True,
+                )
+                return [(fact, similarity) for fact, similarity, _ in results]
             return []
         except Exception as e:
             logger.error("Failed to search facts for user %s: %s", user_id, e)
@@ -336,6 +356,17 @@ class FactsMixin(MemoryBase):
             await self._run_db(_query)
         except Exception as e:
             logger.warning("Failed to touch facts: %s", e)
+
+    def _get_rejection_reason_for_context(self, row: dict[str, Any]) -> FactRejectReason | None:
+        if not row.get("is_active", True):
+            return FactRejectReason.INACTIVE
+        if is_fact_expired(row.get("expires_at")):
+            return FactRejectReason.EXPIRED
+        if row.get("confidence", 0.0) < DEFAULT_MEMORY_RULES.min_confidence_to_use:
+            return FactRejectReason.LOW_CONFIDENCE
+        if not row.get("content"):
+            return FactRejectReason.INVALID_FACT
+        return None
 
     def _row_to_fact(self, row: dict):
         return self.models["Fact"](
