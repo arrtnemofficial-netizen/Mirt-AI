@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from src.core.state_machine import State
+from src.core.state_machine import State, Intent, resolve_next_state
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def compute_transition(
     Вычислить переход состояния на основе текущего состояния и события.
     
     SSOT АРХИТЕКТУРА:
-    - next_state ВСЕГДА берётся из core.state_machine.get_next_state() (единственный SSOT)
+    - next_state ВСЕГДА берётся из core.state_machine.resolve_next_state() (единственный SSOT)
     - payment_sub_phase вычисляется здесь (для STATE_5)
     - dialog_phase ВСЕГДА вычисляется (derived, не хранится)
     - response_policy определяется здесь (snippets + idempotency)
@@ -121,7 +121,6 @@ def compute_transition(
     Returns:
         TransitionDecision с next_state, payment_sub_phase, dialog_phase, response_policy
     """
-    from src.core.state_machine import Intent, get_next_state
     from src.agents.langgraph.fsm.facts import compute_facts
     from src.conf.config import settings
     
@@ -165,7 +164,7 @@ def compute_transition(
     else:
         intent_enum = Intent.from_string(intent)
     
-    next_state = get_next_state(current_state, intent_enum)
+    next_state = resolve_next_state(current_state, intent_enum)
     next_state_str = next_state.value
     
     logger.debug(
@@ -425,7 +424,7 @@ def derive_dialog_phase(
 
 
 # УДАЛЕНО: _detect_user_confirmation перенесена в fsm/facts.py
-# УДАЛЕНО: _determine_next_state удалена - используем core.state_machine.get_next_state() как SSOT
+# УДАЛЕНО: _determine_next_state удалена - используем core.state_machine.resolve_next_state() как SSOT
 # УДАЛЕНО: _determine_response_policy перенесена в fsm/policy.py (использует manifest.json)
 
 
